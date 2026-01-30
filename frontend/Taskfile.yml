@@ -1,0 +1,59 @@
+version: '3'
+
+tasks:
+  install:
+    desc: Install frontend dependencies
+    dir: frontend
+    sources:
+      - package.json
+      - pnpm-lock.yaml
+    cmds:
+      - pnpm install
+
+  build:
+    desc: Build frontend for production
+    dir: frontend
+    deps: [install]
+    sources:
+      - "src/**/*.{ts,tsx,css}"
+      - vite.config.ts
+      - vitest.config.ts
+      - index.html
+    generates:
+      - dist/**/*
+    cmds:
+      - pnpm build
+
+  dev:
+    desc: Start frontend dev server
+    dir: frontend
+    deps: [install]
+    cmds:
+      - pnpm dev
+
+  test:
+    desc: Run frontend tests
+    dir: frontend
+    deps: [install]
+    cmds:
+      - pnpm test
+
+  test:ui:
+    desc: Run frontend tests with UI
+    dir: frontend
+    deps: [install]
+    cmds:
+      - pnpm test:ui
+
+  lint:
+    desc: Lint frontend code
+    dir: frontend
+    deps: [install]
+    cmds:
+      - pnpm lint
+
+  fmt:
+    desc: Format frontend code (with prettier if configured)
+    dir: frontend
+    cmds:
+      - pnpm format

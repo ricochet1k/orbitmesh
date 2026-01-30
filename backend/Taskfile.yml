@@ -1,0 +1,62 @@
+version: '3'
+
+tasks:
+  build:
+    desc: Build backend binaries
+    dir: backend
+    sources:
+      - "**/*.go"
+      - go.mod
+      - go.sum
+    generates:
+      - tmp/orbitmesh
+    cmds:
+      - mkdir -p tmp dist
+      - go build -o tmp/orbitmesh ./cmd/orbitmesh
+      - go build -o tmp/orbitmesh-mcp ./cmd/orbitmesh-mcp
+      - cp tmp/orbitmesh dist/orbitmesh
+      - cp tmp/orbitmesh-mcp dist/orbitmesh-mcp
+
+  test:
+    desc: Run backend tests
+    dir: backend
+    cmds:
+      - go test -v -race -coverprofile=coverage.out ./...
+      - go tool cover -func=coverage.out | tail -1
+
+  test:short:
+    desc: Run backend unit tests only (fast)
+    dir: backend
+    cmds:
+      - go test -short -v ./...
+
+  lint:
+    desc: Lint backend code
+    dir: backend
+    cmds:
+      - go fmt ./...
+      - go vet ./...
+
+  dev:
+    desc: Run backend with hot reload
+    dir: ..
+    cmds:
+      - air
+
+  fmt:
+    desc: Format backend code
+    dir: backend
+    cmds:
+      - go fmt ./...
+
+  mod:download:
+    desc: Download Go modules
+    dir: backend
+    cmds:
+      - go mod download
+
+  mod:tidy:
+    desc: Tidy Go modules
+    dir: backend
+    cmds:
+      - go mod tidy

@@ -1,0 +1,39 @@
+# Go
+/backend/dist/
+/backend/tmp/
+*.go.out
+coverage.out
+go.work
+go.work.sum
+
+# Node / Frontend
+/frontend/node_modules/
+/frontend/dist/
+/frontend/build/
+/frontend/.env.local
+/frontend/.env.*.local
+pnpm-lock.yaml
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Task / Build
+.task/
+.air.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# User home directory
+~/.orbitmesh
+node_modules

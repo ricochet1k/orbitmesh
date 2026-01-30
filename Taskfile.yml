@@ -1,0 +1,77 @@
+version: '3'
+
+includes:
+  backend: ./backend/Taskfile.yml
+  frontend: ./frontend/Taskfile.yml
+
+vars:
+  GREETING: "OrbitMesh Development Environment"
+
+tasks:
+  default:
+    desc: Show available commands
+    cmds:
+      - task --list
+
+  setup:
+    desc: Initialize development environment from scratch
+    cmds:
+      - |
+        echo "OrbitMesh Development Setup"
+        echo "============================"
+        echo ""
+
+        # Check prerequisites
+        command -v go >/dev/null 2>&1 || { echo "Error: Go is required"; exit 1; }
+        command -v node >/dev/null 2>&1 || { echo "Error: Node.js is required"; exit 1; }
+
+        # Enable PNPM
+        echo "Enabling PNPM via Corepack..."
+        corepack enable
+
+        # Initialize Go workspace
+        echo "Initializing Go workspace..."
+        cd backend
+        go mod download
+        cd ..
+
+        # Install frontend dependencies
+        echo "Installing frontend dependencies..."
+        cd frontend
+        pnpm install
+        cd ..
+
+        echo ""
+        echo "Setup complete! Run 'task dev' to start development"
+
+  dev:
+    desc: Start full development environment (backend + frontend)
+    deps: [backend:dev, frontend:dev]
+
+  build:
+    desc: Build all components for production
+    deps: [backend:build, frontend:build]
+
+  test:
+    desc: Run all tests (backend and frontend)
+    deps: [backend:test, frontend:test]
+
+  lint:
+    desc: Lint all code
+    deps: [backend:lint, frontend:lint]
+
+  clean:
+    desc: Clean all build artifacts
+    cmds:
+      - rm -rf backend/tmp
+      - rm -rf backend/dist
+      - rm -rf frontend/dist
+      - rm -rf .task
+      - echo "Clean complete"
+
+  ci:
+    desc: Run full CI pipeline (lint, test, build)
+    cmds:
+      - task lint
+      - task test
+      - task build
