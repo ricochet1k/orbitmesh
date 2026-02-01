@@ -43,7 +43,7 @@ error → stopping
 **Usage:**
 
 ```go
-import "github.com/orbitmesh/orbitmesh/internal/domain"
+import "github.com/ricochet1k/orbitmesh/internal/domain"
 
 // Create a new session
 session := domain.NewSession("session-123", "claude-code", "/path/to/project")
@@ -77,7 +77,7 @@ Events provide real-time updates about session activity. All events include a ti
 **Factory Functions:**
 
 ```go
-import "github.com/orbitmesh/orbitmesh/internal/domain"
+import "github.com/ricochet1k/orbitmesh/internal/domain"
 
 // Create events with factory functions
 event := domain.NewStatusChangeEvent(sessionID, "created", "starting", "user request")
@@ -147,7 +147,7 @@ The ADK (Agent Development Kit) provider uses Google's official ADK for Go to ru
 **Usage:**
 
 ```go
-import "github.com/orbitmesh/orbitmesh/internal/provider/native"
+import "github.com/ricochet1k/orbitmesh/internal/provider/native"
 
 p := native.NewADKProvider("session-123", native.ADKConfig{
     APIKey: os.Getenv("GOOGLE_API_KEY"),
@@ -202,7 +202,7 @@ type Storage interface {
 **Usage:**
 
 ```go
-import "github.com/orbitmesh/orbitmesh/internal/storage"
+import "github.com/ricochet1k/orbitmesh/internal/storage"
 
 // Create storage with default location (~/.orbitmesh)
 store, err := storage.NewJSONFileStorage(storage.DefaultBaseDir())

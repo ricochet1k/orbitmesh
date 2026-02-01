@@ -19,8 +19,8 @@ import (
 	"google.golang.org/adk/tool/mcptoolset"
 	"google.golang.org/genai"
 
-	"github.com/orbitmesh/orbitmesh/internal/domain"
-	"github.com/orbitmesh/orbitmesh/internal/provider"
+	"github.com/ricochet1k/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/provider"
 )
 
 var (

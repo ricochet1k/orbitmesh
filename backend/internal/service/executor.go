@@ -7,18 +7,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/orbitmesh/orbitmesh/internal/domain"
-	"github.com/orbitmesh/orbitmesh/internal/provider"
-	"github.com/orbitmesh/orbitmesh/internal/storage"
+	"github.com/ricochet1k/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/provider"
+	"github.com/ricochet1k/orbitmesh/internal/storage"
 )
 
 var (
-	ErrSessionNotFound   = errors.New("session not found")
-	ErrSessionExists     = errors.New("session already exists")
-	ErrProviderNotFound  = errors.New("provider type not found")
-	ErrInvalidState      = errors.New("invalid session state for operation")
-	ErrOperationTimeout  = errors.New("operation timed out")
-	ErrExecutorShutdown  = errors.New("executor is shutting down")
+	ErrSessionNotFound  = errors.New("session not found")
+	ErrSessionExists    = errors.New("session already exists")
+	ErrProviderNotFound = errors.New("provider type not found")
+	ErrInvalidState     = errors.New("invalid session state for operation")
+	ErrOperationTimeout = errors.New("operation timed out")
+	ErrExecutorShutdown = errors.New("executor is shutting down")
 )
 
 const (
@@ -29,11 +29,11 @@ const (
 type ProviderFactory func(providerType string) (provider.Provider, error)
 
 type sessionContext struct {
-	session     *domain.Session
-	provider    provider.Provider
-	cancel      context.CancelFunc
-	eventsDone  chan struct{}
-	healthDone  chan struct{}
+	session    *domain.Session
+	provider   provider.Provider
+	cancel     context.CancelFunc
+	eventsDone chan struct{}
+	healthDone chan struct{}
 }
 
 type AgentExecutor struct {
@@ -51,10 +51,10 @@ type AgentExecutor struct {
 }
 
 type ExecutorConfig struct {
-	Storage         storage.Storage
-	Broadcaster     *EventBroadcaster
-	ProviderFactory ProviderFactory
-	HealthInterval  time.Duration
+	Storage          storage.Storage
+	Broadcaster      *EventBroadcaster
+	ProviderFactory  ProviderFactory
+	HealthInterval   time.Duration
 	OperationTimeout time.Duration
 }
 

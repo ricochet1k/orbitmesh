@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orbitmesh/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/domain"
 )
 
 func TestNewJSONFileStorage(t *testing.T) {

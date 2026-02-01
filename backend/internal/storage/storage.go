@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/orbitmesh/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/domain"
 )
 
 var (
@@ -25,16 +25,16 @@ type Storage interface {
 }
 
 type sessionData struct {
-	ID           string                    `json:"id"`
-	ProviderType string                    `json:"provider_type"`
-	State        string                    `json:"state"`
-	WorkingDir   string                    `json:"working_dir"`
-	CreatedAt    time.Time                 `json:"created_at"`
-	UpdatedAt    time.Time                 `json:"updated_at"`
-	CurrentTask  string                    `json:"current_task,omitempty"`
-	Output       string                    `json:"output,omitempty"`
-	ErrorMessage string                    `json:"error_message,omitempty"`
-	Transitions  []transitionData          `json:"transitions"`
+	ID           string           `json:"id"`
+	ProviderType string           `json:"provider_type"`
+	State        string           `json:"state"`
+	WorkingDir   string           `json:"working_dir"`
+	CreatedAt    time.Time        `json:"created_at"`
+	UpdatedAt    time.Time        `json:"updated_at"`
+	CurrentTask  string           `json:"current_task,omitempty"`
+	Output       string           `json:"output,omitempty"`
+	ErrorMessage string           `json:"error_message,omitempty"`
+	Transitions  []transitionData `json:"transitions"`
 }
 
 type transitionData struct {

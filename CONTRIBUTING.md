@@ -201,7 +201,7 @@ task build
 
 ## Questions?
 
-- Check existing [issues](https://github.com/orbitmesh/orbitmesh/issues)
+- Check existing [issues](https://github.com/ricochet1k/orbitmesh/issues)
 - Review [CLAUDE.md](CLAUDE.md) for architecture details
 - See [design-docs/](design-docs/) for design decisions
 

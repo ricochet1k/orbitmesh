@@ -3,7 +3,7 @@ package service
 import (
 	"sync"
 
-	"github.com/orbitmesh/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/domain"
 )
 
 type Subscriber struct {

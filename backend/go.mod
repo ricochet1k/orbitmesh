@@ -1,4 +1,4 @@
-module github.com/orbitmesh/orbitmesh
+module github.com/ricochet1k/orbitmesh
 
 go 1.24.4
 

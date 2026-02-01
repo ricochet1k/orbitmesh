@@ -7,20 +7,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orbitmesh/orbitmesh/internal/domain"
-	"github.com/orbitmesh/orbitmesh/internal/provider"
+	"github.com/ricochet1k/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/provider"
 )
 
 type mockProvider struct {
-	mu           sync.Mutex
-	state        provider.State
-	startErr     error
-	stopErr      error
-	pauseErr     error
-	resumeErr    error
-	killErr      error
-	events       chan domain.Event
-	startDelay   time.Duration
+	mu         sync.Mutex
+	state      provider.State
+	startErr   error
+	stopErr    error
+	pauseErr   error
+	resumeErr  error
+	killErr    error
+	events     chan domain.Event
+	startDelay time.Duration
 }
 
 func newMockProvider() *mockProvider {

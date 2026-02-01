@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orbitmesh/orbitmesh/internal/domain"
-	"github.com/orbitmesh/orbitmesh/internal/provider"
+	"github.com/ricochet1k/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/provider"
 )
 
 func TestEventAdapter_EmitEvents(t *testing.T) {

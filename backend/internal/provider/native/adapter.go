@@ -4,8 +4,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/orbitmesh/orbitmesh/internal/domain"
-	"github.com/orbitmesh/orbitmesh/internal/provider"
+	"github.com/ricochet1k/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/provider"
 )
 
 type EventAdapter struct {
@@ -72,12 +72,12 @@ func (a *EventAdapter) Close() {
 }
 
 type ProviderState struct {
-	mu       sync.RWMutex
-	state    provider.State
-	task     string
-	output   string
-	err      error
-	metrics  provider.Metrics
+	mu      sync.RWMutex
+	state   provider.State
+	task    string
+	output  string
+	err     error
+	metrics provider.Metrics
 }
 
 func NewProviderState() *ProviderState {
@@ -138,5 +138,3 @@ func (s *ProviderState) Status() provider.Status {
 		Metrics:     s.metrics,
 	}
 }
-
-

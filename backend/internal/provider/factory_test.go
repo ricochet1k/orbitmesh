@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/orbitmesh/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/domain"
 )
 
 type mockProvider struct{}
