@@ -205,12 +205,8 @@ orbitmesh/
 
 (To be filled in as project develops)
 
----
 
 ## Strand Agent Instructions
-
-```
-# Memmd Agent Instructions
 
 ## What is strand
 strand is a cli task management tool intended for helping to direct AI agents to follow a specific workflow.
@@ -223,10 +219,9 @@ These instructions define how agents should use strand to manage tasks.
 - Use `strand next` to select work; respect role opt-in or ignore behavior.
 - When asked to work on the next thing, run `strand next`, follow the returned instructions, and report a brief task summary.
 - Treat the role description returned by `strand next` as canonical for how to execute the task.
-- When a task is done (including planning-only), run `strand complete <task-id>`.
+- When a task is done (including planning-only), run `strand complete <task-id> --todo <todo_number>`.
 - If blocked, record blockers with `strand block`.
 - Use `strand add` for new tasks or issues; avoid ad-hoc task creation outside strand.
 - Get the list of roles and task templates from `strand roles` and `strand templates`, add them to AGENTS.md and keep that part up to date as needed.
 - If bugs or usability or missing features are discovered in attempting to use `strand`, file issues
   directly on the "strand" project with a command like `strand add issue --project strand "Issue title" <<EOF\n # Detailed markdown description \nEOF`
-```
