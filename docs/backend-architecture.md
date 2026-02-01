@@ -109,9 +109,9 @@ type Provider interface {
 
 ```go
 config := provider.Config{
-    ProviderType: "claude-code",
+    ProviderType: "gemini",
     WorkingDir:   "/path/to/project",
-    Environment:  map[string]string{"API_KEY": "..."},
+    Environment:  map[string]string{"GOOGLE_API_KEY": "..."},
     SystemPrompt: "You are a helpful assistant...",
     MCPServers: []provider.MCPServerConfig{
         {
@@ -121,7 +121,7 @@ config := provider.Config{
         },
     },
     Custom: map[string]any{
-        "model": "claude-3.5-sonnet",
+        "model": "gemini-2.5-flash",
     },
 }
 ```
@@ -133,6 +133,46 @@ status := provider.Status()
 fmt.Printf("State: %s\n", status.State)
 fmt.Printf("Current task: %s\n", status.CurrentTask)
 fmt.Printf("Tokens used: %d in, %d out\n", status.Metrics.TokensIn, status.Metrics.TokensOut)
+```
+
+### ADK Provider (Native)
+
+The ADK (Agent Development Kit) provider uses Google's official ADK for Go to run agents. It supports:
+
+- **Gemini models** via `google.golang.org/adk/model/gemini`
+- **MCP tools** via `google.golang.org/adk/tool/mcptoolset`
+- **Streaming responses** with real-time token metrics
+- **Pause/Resume** with conditional variable blocking
+
+**Usage:**
+
+```go
+import "github.com/orbitmesh/orbitmesh/internal/provider/native"
+
+p := native.NewADKProvider("session-123", native.ADKConfig{
+    APIKey: os.Getenv("GOOGLE_API_KEY"),
+    Model:  "gemini-2.5-flash",
+})
+
+err := p.Start(ctx, provider.Config{
+    WorkingDir:   "/path/to/project",
+    SystemPrompt: "You are a helpful assistant.",
+    MCPServers: []provider.MCPServerConfig{
+        {Name: "strandyard", Command: "strand", Args: []string{"mcp-serve"}},
+    },
+})
+
+// Run a prompt
+err = p.RunPrompt(ctx, "What files are in this directory?")
+
+// Pause execution
+err = p.Pause(ctx)
+
+// Resume execution
+err = p.Resume(ctx)
+
+// Stop the provider
+err = p.Stop(ctx)
 ```
 
 ### Storage
