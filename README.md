@@ -73,6 +73,7 @@ orbitmesh/
 │   └── vite.config.ts      # Vite configuration
 │
 ├── docs/                   # Documentation
+│   └── backend-architecture.md  # Core backend components
 ├── scripts/                # Build and utility scripts
 ├── Taskfile.yml            # Root task orchestration
 ├── .editorconfig           # Editor configuration
@@ -199,7 +200,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed development guidelines.
 - **Storage**: File-based JSON with no external database dependencies
 - **CI/CD**: GitHub Actions for automated testing and deployment
 
-See [design-docs/](design-docs/) for detailed architecture documentation.
+See [design-docs/](design-docs/) for detailed architecture documentation and [docs/backend-architecture.md](docs/backend-architecture.md) for core backend components.
 
 ## License
 
