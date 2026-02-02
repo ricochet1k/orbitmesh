@@ -98,3 +98,27 @@ func TestDefaultFactory_SupportedTypes(t *testing.T) {
 		t.Errorf("expected 3 types, got %d", len(types))
 	}
 }
+
+func TestState_String(t *testing.T) {
+	tests := []struct {
+		state    State
+		expected string
+	}{
+		{StateCreated, "created"},
+		{StateStarting, "starting"},
+		{StateRunning, "running"},
+		{StatePaused, "paused"},
+		{StateStopping, "stopping"},
+		{StateStopped, "stopped"},
+		{StateError, "error"},
+		{State(99), "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			if got := tt.state.String(); got != tt.expected {
+				t.Errorf("State(%d).String() = %q, want %q", tt.state, got, tt.expected)
+			}
+		})
+	}
+}

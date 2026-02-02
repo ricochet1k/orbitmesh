@@ -233,3 +233,302 @@ func TestProviderState_ConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestEventAdapter_DefaultBufferSize(t *testing.T) {
+	adapter := NewEventAdapter("test-session", 0)
+	defer adapter.Close()
+
+	for i := 0; i < 100; i++ {
+		adapter.EmitOutput("test")
+	}
+
+	count := 0
+	timeout := time.After(50 * time.Millisecond)
+	for {
+		select {
+		case <-adapter.Events():
+			count++
+		case <-timeout:
+			if count != 100 {
+				t.Errorf("expected 100 events with default buffer, got %d", count)
+			}
+			return
+		}
+	}
+}
+
+func TestEventAdapter_NegativeBufferSize(t *testing.T) {
+	adapter := NewEventAdapter("test-session", -5)
+	defer adapter.Close()
+
+	adapter.EmitOutput("test")
+
+	select {
+	case <-adapter.Events():
+	case <-time.After(50 * time.Millisecond):
+		t.Error("should receive event with default buffer")
+	}
+}
+
+func TestEventAdapter_CloseMultipleTimes(t *testing.T) {
+	adapter := NewEventAdapter("test-session", 10)
+
+	adapter.Close()
+	adapter.Close()
+	adapter.Close()
+}
+
+func TestEventAdapter_EmitAfterDoneChannelClosed(t *testing.T) {
+	adapter := NewEventAdapter("test-session", 10)
+
+	adapter.Close()
+
+	adapter.EmitStatusChange("old", "new", "reason")
+	adapter.EmitOutput("output")
+	adapter.EmitMetric(1, 1, 1)
+	adapter.EmitError("error", "CODE")
+	adapter.EmitMetadata("key", "value")
+}
+
+func TestProviderState_StatusSnapshot(t *testing.T) {
+	state := NewProviderState()
+
+	state.SetState(provider.StateRunning)
+	state.SetOutput("output text")
+	state.SetCurrentTask("task-123")
+	state.AddTokens(100, 50)
+
+	status := state.Status()
+
+	if status.State != provider.StateRunning {
+		t.Errorf("expected state Running, got %v", status.State)
+	}
+	if status.Output != "output text" {
+		t.Errorf("expected output 'output text', got %s", status.Output)
+	}
+	if status.CurrentTask != "task-123" {
+		t.Errorf("expected task 'task-123', got %s", status.CurrentTask)
+	}
+	if status.Metrics.TokensIn != 100 {
+		t.Errorf("expected 100 tokens in, got %d", status.Metrics.TokensIn)
+	}
+}
+
+func TestProviderState_ErrorClearsOnStateChange(t *testing.T) {
+	state := NewProviderState()
+
+	state.SetError(ErrAPIKey)
+
+	if state.GetState() != provider.StateError {
+		t.Errorf("expected state Error, got %v", state.GetState())
+	}
+
+	state.SetState(provider.StateRunning)
+
+	if state.GetState() != provider.StateRunning {
+		t.Errorf("expected state Running after manual set, got %v", state.GetState())
+	}
+}
+
+func TestProviderState_LastActivityUpdated(t *testing.T) {
+	state := NewProviderState()
+
+	before := time.Now()
+	state.AddTokens(1, 1)
+	after := time.Now()
+
+	status := state.Status()
+
+	if status.Metrics.LastActivityAt.Before(before) {
+		t.Error("LastActivityAt should be after start")
+	}
+	if status.Metrics.LastActivityAt.After(after) {
+		t.Error("LastActivityAt should be before end")
+	}
+}
+
+func TestProviderState_OutputUpdatesActivity(t *testing.T) {
+	state := NewProviderState()
+
+	before := time.Now()
+	state.SetOutput("test output")
+	after := time.Now()
+
+	status := state.Status()
+
+	if status.Metrics.LastActivityAt.Before(before) {
+		t.Error("LastActivityAt should be after start")
+	}
+	if status.Metrics.LastActivityAt.After(after) {
+		t.Error("LastActivityAt should be before end")
+	}
+}
+
+func TestEventAdapter_EventContent(t *testing.T) {
+	adapter := NewEventAdapter("sess-123", 10)
+	defer adapter.Close()
+
+	adapter.EmitStatusChange("created", "running", "test reason")
+
+	event := <-adapter.Events()
+
+	if event.SessionID != "sess-123" {
+		t.Errorf("expected session ID 'sess-123', got %s", event.SessionID)
+	}
+	if event.Type != domain.EventTypeStatusChange {
+		t.Errorf("expected EventTypeStatusChange, got %v", event.Type)
+	}
+
+	data, ok := event.Data.(domain.StatusChangeData)
+	if !ok {
+		t.Fatal("expected StatusChangeData")
+	}
+	if data.OldState != "created" {
+		t.Errorf("expected old state 'created', got %s", data.OldState)
+	}
+	if data.NewState != "running" {
+		t.Errorf("expected new state 'running', got %s", data.NewState)
+	}
+	if data.Reason != "test reason" {
+		t.Errorf("expected reason 'test reason', got %s", data.Reason)
+	}
+}
+
+func TestEventAdapter_MetricEventContent(t *testing.T) {
+	adapter := NewEventAdapter("sess-123", 10)
+	defer adapter.Close()
+
+	adapter.EmitMetric(100, 50, 3)
+
+	event := <-adapter.Events()
+
+	if event.Type != domain.EventTypeMetric {
+		t.Errorf("expected EventTypeMetric, got %v", event.Type)
+	}
+
+	data, ok := event.Data.(domain.MetricData)
+	if !ok {
+		t.Fatal("expected MetricData")
+	}
+	if data.TokensIn != 100 {
+		t.Errorf("expected 100 tokens in, got %d", data.TokensIn)
+	}
+	if data.TokensOut != 50 {
+		t.Errorf("expected 50 tokens out, got %d", data.TokensOut)
+	}
+	if data.RequestCount != 3 {
+		t.Errorf("expected 3 requests, got %d", data.RequestCount)
+	}
+}
+
+func TestEventAdapter_ErrorEventContent(t *testing.T) {
+	adapter := NewEventAdapter("sess-123", 10)
+	defer adapter.Close()
+
+	adapter.EmitError("something failed", "ERR_FAILED")
+
+	event := <-adapter.Events()
+
+	if event.Type != domain.EventTypeError {
+		t.Errorf("expected EventTypeError, got %v", event.Type)
+	}
+
+	data, ok := event.Data.(domain.ErrorData)
+	if !ok {
+		t.Fatal("expected ErrorData")
+	}
+	if data.Message != "something failed" {
+		t.Errorf("expected message 'something failed', got %s", data.Message)
+	}
+	if data.Code != "ERR_FAILED" {
+		t.Errorf("expected code 'ERR_FAILED', got %s", data.Code)
+	}
+}
+
+func TestEventAdapter_MetadataEventContent(t *testing.T) {
+	adapter := NewEventAdapter("sess-123", 10)
+	defer adapter.Close()
+
+	adapter.EmitMetadata("model", "gemini-2.5-flash")
+
+	event := <-adapter.Events()
+
+	if event.Type != domain.EventTypeMetadata {
+		t.Errorf("expected EventTypeMetadata, got %v", event.Type)
+	}
+
+	data, ok := event.Data.(domain.MetadataData)
+	if !ok {
+		t.Fatal("expected MetadataData")
+	}
+	if data.Key != "model" {
+		t.Errorf("expected key 'model', got %s", data.Key)
+	}
+	if data.Value != "gemini-2.5-flash" {
+		t.Errorf("expected value 'gemini-2.5-flash', got %v", data.Value)
+	}
+}
+
+func TestEventAdapter_OutputEventContent(t *testing.T) {
+	adapter := NewEventAdapter("sess-123", 10)
+	defer adapter.Close()
+
+	adapter.EmitOutput("Hello, world!")
+
+	event := <-adapter.Events()
+
+	if event.Type != domain.EventTypeOutput {
+		t.Errorf("expected EventTypeOutput, got %v", event.Type)
+	}
+
+	data, ok := event.Data.(domain.OutputData)
+	if !ok {
+		t.Fatal("expected OutputData")
+	}
+	if data.Content != "Hello, world!" {
+		t.Errorf("expected content 'Hello, world!', got %s", data.Content)
+	}
+}
+
+func TestEventAdapter_EmitRaceWithClose(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		adapter := NewEventAdapter("test-session", 1)
+
+		go func() {
+			for j := 0; j < 10; j++ {
+				adapter.EmitOutput("test")
+			}
+		}()
+
+		go func() {
+			time.Sleep(time.Microsecond)
+			adapter.Close()
+		}()
+
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestEventAdapter_FullBufferDropsEvents(t *testing.T) {
+	adapter := NewEventAdapter("test-session", 1)
+	defer adapter.Close()
+
+	adapter.EmitOutput("first")
+	adapter.EmitOutput("second - should be dropped")
+
+	select {
+	case event := <-adapter.Events():
+		data := event.Data.(domain.OutputData)
+		if data.Content != "first" {
+			t.Errorf("expected 'first', got %s", data.Content)
+		}
+	case <-time.After(50 * time.Millisecond):
+		t.Error("timeout waiting for first event")
+	}
+
+	select {
+	case <-adapter.Events():
+		t.Error("should not receive second event when buffer was full")
+	case <-time.After(50 * time.Millisecond):
+	}
+}
