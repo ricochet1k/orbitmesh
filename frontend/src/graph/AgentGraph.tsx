@@ -35,7 +35,7 @@ export default function AgentGraph() {
     ];
 
     const simulation = d3.forceSimulation<Node>(nodes)
-      .force("link", d3.forceLink<Node, Link>(links).id(d).id)
+      .force("link", d3.forceLink<Node, Link>(links).id(d => d.id))
       .force("charge", d3.forceManyBody().strength(-200))
       .force("center", d3.forceCenter(width / 2, height / 2))
       .force("collision", d3.forceCollide().radius(40));
