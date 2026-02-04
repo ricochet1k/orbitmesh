@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -28,6 +29,7 @@ type mockProvider struct {
 	state    provider.State
 	events   chan domain.Event
 	startErr error
+	pauseErr error
 }
 
 func newMockProvider() *mockProvider {
@@ -57,6 +59,9 @@ func (m *mockProvider) Stop(_ context.Context) error {
 func (m *mockProvider) Pause(_ context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.pauseErr != nil {
+		return m.pauseErr
+	}
 	m.state = provider.StatePaused
 	return nil
 }
@@ -350,6 +355,34 @@ func TestCreateSession_WithMCPServers(t *testing.T) {
 	}
 }
 
+func TestCreateSession_ExecutorShutdown(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	// Shut down the executor so StartSession rejects new work.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_ = env.executor.Shutdown(ctx)
+
+	body, _ := json.Marshal(apiTypes.SessionRequest{
+		ProviderType: "mock",
+		WorkingDir:   "/tmp",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", w.Code, w.Body.String())
+	}
+	var errResp apiTypes.ErrorResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &errResp)
+	if errResp.Error != "failed to start session" {
+		t.Errorf("Error = %q, want 'failed to start session'", errResp.Error)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/sessions/{id}
 // ---------------------------------------------------------------------------
@@ -525,6 +558,32 @@ func TestPauseSession_InvalidState(t *testing.T) {
 
 	if w.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPauseSession_ProviderError(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	created := createSession(t, r, "mock", "/tmp/test")
+	waitForRunning(t, env.executor, created.ID)
+
+	// Inject a provider-level error before the pause request.
+	env.lastMock.mu.Lock()
+	env.lastMock.pauseErr = fmt.Errorf("provider busy")
+	env.lastMock.mu.Unlock()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/pause", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", w.Code, w.Body.String())
+	}
+	var errResp apiTypes.ErrorResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &errResp)
+	if !strings.Contains(errResp.Error, "provider busy") {
+		t.Errorf("Error = %q, want to contain 'provider busy'", errResp.Error)
 	}
 }
 

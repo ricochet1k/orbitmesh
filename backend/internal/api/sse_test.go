@@ -411,6 +411,21 @@ func TestConvertEventData_AllTypes(t *testing.T) {
 	}
 }
 
+func TestConvertEventData_UnknownType(t *testing.T) {
+	ev := domain.Event{
+		Type:      domain.EventType(999),
+		SessionID: "s1",
+		Data:      "raw string payload",
+	}
+	apiEvt := domainEventToAPIEvent(ev)
+	if apiEvt.Type != "unknown" {
+		t.Errorf("Type = %q, want 'unknown'", apiEvt.Type)
+	}
+	if apiEvt.Data != "raw string payload" {
+		t.Errorf("Data = %v, want 'raw string payload'", apiEvt.Data)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // end-to-end lifecycle: create -> pause -> resume -> stop with SSE
 // ---------------------------------------------------------------------------
