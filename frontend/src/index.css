@@ -23,6 +23,77 @@ body {
   height: 100vh;
 }
 
-.container {
-  padding: 2rem;
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.dashboard {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+header {
+  padding: 1rem 2rem;
+  background: #1e1e1e;
+  color: white;
+  border-bottom: 1px solid #333;
+}
+
+main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 400px 1fr;
+  gap: 1rem;
+  padding: 1rem;
+  overflow: hidden;
+}
+
+section {
+  background: #f5f5f5;
+  border-radius: 8px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+}
+
+h2 {
+  margin-bottom: 1rem;
+  font-size: 1.2rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.5rem;
+  border-bottom: 1px solid #ddd;
+}
+
+.state-badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: bold;
+}
+
+.running { background: #e6ffed; color: #22863a; }
+.starting { background: #fff5b1; color: #735c0f; }
+.paused { background: #fffdef; color: #735c0f; }
+.error { background: #ffeef0; color: #cb2431; }
+.stopped { background: #f6f8fa; color: #6a737d; }
+
+#graph-container {
+  flex: 1;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
