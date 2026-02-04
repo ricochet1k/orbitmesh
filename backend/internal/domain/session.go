@@ -148,6 +148,36 @@ func (s *Session) SetError(message string) {
 	s.UpdatedAt = time.Now()
 }
 
+// SessionSnapshot is a point-in-time, lock-free copy of a Session's fields.
+type SessionSnapshot struct {
+	ID           string
+	ProviderType string
+	State        SessionState
+	WorkingDir   string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	CurrentTask  string
+	Output       string
+	ErrorMessage string
+}
+
+// Snapshot returns an atomic copy of the session under its read lock.
+func (s *Session) Snapshot() SessionSnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return SessionSnapshot{
+		ID:           s.ID,
+		ProviderType: s.ProviderType,
+		State:        s.State,
+		WorkingDir:   s.WorkingDir,
+		CreatedAt:    s.CreatedAt,
+		UpdatedAt:    s.UpdatedAt,
+		CurrentTask:  s.CurrentTask,
+		Output:       s.Output,
+		ErrorMessage: s.ErrorMessage,
+	}
+}
+
 func (s *Session) IsTerminal() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
