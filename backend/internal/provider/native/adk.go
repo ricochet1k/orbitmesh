@@ -31,6 +31,7 @@ var (
 	ErrProviderStopped = errors.New("provider is stopped")
 	ErrAPIKey          = errors.New("API key not configured")
 	ErrModelCreate     = errors.New("failed to create model")
+	ErrMCPValidation   = errors.New("MCP server validation failed")
 )
 
 const (
@@ -46,6 +47,7 @@ type ADKConfig struct {
 	ProjectID   string
 	Location    string
 	UseVertexAI bool
+	MCPRegistry *provider.MCPRegistry
 }
 
 type ADKProvider struct {
@@ -206,7 +208,16 @@ func (p *ADKProvider) createModel(apiKey string) (model.LLM, error) {
 func (p *ADKProvider) setupMCPToolsets(config provider.Config) ([]tool.Toolset, error) {
 	var toolsets []tool.Toolset
 
+	registry := p.config.MCPRegistry
+	if registry == nil {
+		registry = provider.GlobalMCPRegistry()
+	}
+
 	for _, mcpCfg := range config.MCPServers {
+		if err := registry.Validate(mcpCfg); err != nil {
+			return nil, fmt.Errorf("%w: %s: %v", ErrMCPValidation, mcpCfg.Name, err)
+		}
+
 		ts, handle, err := p.createMCPToolset(mcpCfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create MCP toolset %s: %w", mcpCfg.Name, err)

@@ -544,6 +544,23 @@ When load exceeds <10 concurrent agents, migrate to Event-Driven Architecture (A
 - StrandYard handles task metadata via MCP
 - No Postgres, Redis, or other services
 
+### MCP Server Configuration
+
+MCP servers are configured via `MCPServerConfig` and validated by `MCPRegistry` before execution.
+
+**Trust Model**: MCP configs are trusted. Users run OrbitMesh on their own hardware and provide their own MCP servers. The registry exists for basic validation, not security sandboxing.
+
+**Validation** (enabled by default with `allowAll=true`):
+- Command must be an absolute path (catches misconfigurations)
+- Arguments cannot contain NUL bytes (prevents OS-level issues)
+- Argument count/length limits (prevents resource exhaustion)
+
+**Not Blocked**: Shell interpreters (bash, python, node, etc.) are allowed. MCP servers are commonly implemented as Python/Node scripts. Non-MCP processes will fail the protocol handshake anyway.
+
+**Registry Modes**:
+- `allowAll=true` (default): Any absolute path allowed, basic validation only
+- `allowAll=false`: Requires explicit registration of allowed servers (for stricter environments)
+
 ## Success Criteria
 
 - ✅ 4-5 week development timeline (all phases)

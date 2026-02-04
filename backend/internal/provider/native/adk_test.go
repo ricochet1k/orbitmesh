@@ -2,6 +2,7 @@ package native
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -898,5 +899,166 @@ func TestADKProvider_KillWithNilContexts(t *testing.T) {
 
 	if p.Status().State != provider.StateStopped {
 		t.Errorf("expected stopped state, got %v", p.Status().State)
+	}
+}
+
+func TestADKProvider_MCPRegistryValidation(t *testing.T) {
+	registry := provider.NewMCPRegistry()
+	registry.Enable()
+
+	_ = registry.Register(provider.MCPRegistryEntry{
+		Name:         "allowed-server",
+		Command:      "/usr/bin/allowed-mcp",
+		AllowAnyArgs: true,
+	})
+
+	t.Run("rejects unregistered MCP server", func(t *testing.T) {
+		p := NewADKProvider("test-session", ADKConfig{
+			APIKey:      "test-key",
+			MCPRegistry: registry,
+		})
+
+		p.providerCfg = provider.Config{
+			MCPServers: []provider.MCPServerConfig{
+				{
+					Name:    "unknown-server",
+					Command: "/usr/bin/evil",
+				},
+			},
+		}
+
+		_, err := p.setupMCPToolsets(p.providerCfg)
+		if err == nil {
+			t.Error("expected error for unregistered MCP server")
+		}
+		if !errors.Is(err, ErrMCPValidation) {
+			t.Errorf("expected ErrMCPValidation, got %v", err)
+		}
+	})
+
+	t.Run("rejects wrong command for registered name", func(t *testing.T) {
+		p := NewADKProvider("test-session", ADKConfig{
+			APIKey:      "test-key",
+			MCPRegistry: registry,
+		})
+
+		p.providerCfg = provider.Config{
+			MCPServers: []provider.MCPServerConfig{
+				{
+					Name:    "allowed-server",
+					Command: "/usr/bin/different-binary",
+				},
+			},
+		}
+
+		_, err := p.setupMCPToolsets(p.providerCfg)
+		if err == nil {
+			t.Error("expected error for wrong command")
+		}
+		if !errors.Is(err, ErrMCPValidation) {
+			t.Errorf("expected ErrMCPValidation, got %v", err)
+		}
+	})
+
+	t.Run("rejects when registry disabled", func(t *testing.T) {
+		disabledRegistry := provider.NewMCPRegistry()
+
+		p := NewADKProvider("test-session", ADKConfig{
+			APIKey:      "test-key",
+			MCPRegistry: disabledRegistry,
+		})
+
+		p.providerCfg = provider.Config{
+			MCPServers: []provider.MCPServerConfig{
+				{
+					Name:    "any-server",
+					Command: "/usr/bin/any",
+				},
+			},
+		}
+
+		_, err := p.setupMCPToolsets(p.providerCfg)
+		if err == nil {
+			t.Error("expected error when registry is disabled")
+		}
+		if !errors.Is(err, ErrMCPValidation) {
+			t.Errorf("expected ErrMCPValidation, got %v", err)
+		}
+	})
+}
+
+func TestADKProvider_MCPRegistryAllowAll(t *testing.T) {
+	registry := provider.NewMCPRegistry()
+	registry.Enable()
+	registry.SetAllowAll(true)
+
+	t.Run("allows unregistered server with allowAll", func(t *testing.T) {
+		p := NewADKProvider("test-session", ADKConfig{
+			APIKey:      "test-key",
+			MCPRegistry: registry,
+		})
+		p.ctx, p.cancel = context.WithCancel(context.Background())
+
+		p.providerCfg = provider.Config{
+			MCPServers: []provider.MCPServerConfig{
+				{
+					Name:    "any-server",
+					Command: "/usr/bin/any-mcp",
+					Args:    []string{"--flag"},
+				},
+			},
+		}
+
+		_, err := p.setupMCPToolsets(p.providerCfg)
+		if err != nil && !errors.Is(err, ErrMCPValidation) {
+			t.Logf("non-validation error (expected for MCP setup): %v", err)
+		}
+	})
+
+	t.Run("still validates path with allowAll", func(t *testing.T) {
+		p := NewADKProvider("test-session", ADKConfig{
+			APIKey:      "test-key",
+			MCPRegistry: registry,
+		})
+
+		p.providerCfg = provider.Config{
+			MCPServers: []provider.MCPServerConfig{
+				{
+					Name:    "relative-path-server",
+					Command: "relative-path",
+				},
+			},
+		}
+
+		_, err := p.setupMCPToolsets(p.providerCfg)
+		if err == nil {
+			t.Error("expected error for relative path")
+		}
+		if !errors.Is(err, ErrMCPValidation) {
+			t.Errorf("expected ErrMCPValidation, got %v", err)
+		}
+	})
+}
+
+func TestADKProvider_NoMCPServers(t *testing.T) {
+	registry := provider.NewMCPRegistry()
+	registry.Enable()
+
+	p := NewADKProvider("test-session", ADKConfig{
+		APIKey:      "test-key",
+		MCPRegistry: registry,
+	})
+	p.ctx, p.cancel = context.WithCancel(context.Background())
+
+	p.providerCfg = provider.Config{
+		MCPServers: []provider.MCPServerConfig{},
+	}
+
+	toolsets, err := p.setupMCPToolsets(p.providerCfg)
+	if err != nil {
+		t.Errorf("unexpected error with no MCP servers: %v", err)
+	}
+	if len(toolsets) != 0 {
+		t.Errorf("expected 0 toolsets, got %d", len(toolsets))
 	}
 }

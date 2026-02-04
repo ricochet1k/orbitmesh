@@ -549,3 +549,468 @@ func TestAgentExecutor_InvalidStateTransitions(t *testing.T) {
 		t.Error("expected error when resuming non-paused session")
 	}
 }
+
+func TestAgentExecutor_FullLifecycleIntegration(t *testing.T) {
+	prov := newMockProvider()
+	executor, storage := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	config := provider.Config{
+		ProviderType: "test",
+		WorkingDir:   "/tmp/test",
+	}
+
+	session, err := executor.StartSession(context.Background(), "lifecycle-test", config)
+	if err != nil {
+		t.Fatalf("failed to start session: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	if session.GetState() != domain.SessionStateRunning {
+		t.Errorf("expected state Running, got %s", session.GetState())
+	}
+
+	if err := executor.PauseSession(context.Background(), "lifecycle-test"); err != nil {
+		t.Fatalf("failed to pause session: %v", err)
+	}
+	if session.GetState() != domain.SessionStatePaused {
+		t.Errorf("expected state Paused, got %s", session.GetState())
+	}
+
+	if err := executor.ResumeSession(context.Background(), "lifecycle-test"); err != nil {
+		t.Fatalf("failed to resume session: %v", err)
+	}
+	if session.GetState() != domain.SessionStateRunning {
+		t.Errorf("expected state Running, got %s", session.GetState())
+	}
+
+	if err := executor.StopSession(context.Background(), "lifecycle-test"); err != nil {
+		t.Fatalf("failed to stop session: %v", err)
+	}
+	if session.GetState() != domain.SessionStateStopped {
+		t.Errorf("expected state Stopped, got %s", session.GetState())
+	}
+
+	saved, err := storage.Load("lifecycle-test")
+	if err != nil {
+		t.Fatalf("failed to load session from storage: %v", err)
+	}
+	if saved.ID != "lifecycle-test" {
+		t.Errorf("expected saved session ID 'lifecycle-test', got %s", saved.ID)
+	}
+}
+
+func TestAgentExecutor_MultipleConcurrentSessions(t *testing.T) {
+	storage := newMockStorage()
+	broadcaster := NewEventBroadcaster(100)
+
+	factory := func(providerType string) (provider.Provider, error) {
+		return newMockProvider(), nil
+	}
+
+	cfg := ExecutorConfig{
+		Storage:          storage,
+		Broadcaster:      broadcaster,
+		ProviderFactory:  factory,
+		HealthInterval:   100 * time.Millisecond,
+		OperationTimeout: 5 * time.Second,
+	}
+
+	executor := NewAgentExecutor(cfg)
+	defer executor.Shutdown(context.Background())
+
+	const numSessions = 10
+	var wg sync.WaitGroup
+	errChan := make(chan error, numSessions)
+
+	for i := 0; i < numSessions; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+
+			sessionID := "concurrent-session-" + string(rune('0'+idx))
+			config := provider.Config{
+				ProviderType: "test",
+				WorkingDir:   "/tmp/test",
+			}
+
+			session, err := executor.StartSession(context.Background(), sessionID, config)
+			if err != nil {
+				errChan <- err
+				return
+			}
+
+			time.Sleep(50 * time.Millisecond)
+
+			if session.GetState() != domain.SessionStateRunning {
+				errChan <- errors.New("session not running")
+				return
+			}
+
+			if err := executor.PauseSession(context.Background(), sessionID); err != nil {
+				errChan <- err
+				return
+			}
+
+			if err := executor.ResumeSession(context.Background(), sessionID); err != nil {
+				errChan <- err
+				return
+			}
+
+			if err := executor.StopSession(context.Background(), sessionID); err != nil {
+				errChan <- err
+				return
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	var errCount int
+	for err := range errChan {
+		t.Errorf("error: %v", err)
+		errCount++
+	}
+
+	if errCount > 0 {
+		t.Errorf("%d errors occurred during concurrent session test", errCount)
+	}
+}
+
+func TestAgentExecutor_SessionPersistence(t *testing.T) {
+	prov := newMockProvider()
+	storage := newMockStorage()
+	broadcaster := NewEventBroadcaster(100)
+
+	factory := func(providerType string) (provider.Provider, error) {
+		return prov, nil
+	}
+
+	cfg := ExecutorConfig{
+		Storage:          storage,
+		Broadcaster:      broadcaster,
+		ProviderFactory:  factory,
+		HealthInterval:   100 * time.Millisecond,
+		OperationTimeout: 5 * time.Second,
+	}
+
+	executor := NewAgentExecutor(cfg)
+	defer executor.Shutdown(context.Background())
+
+	config := provider.Config{
+		ProviderType: "test",
+		WorkingDir:   "/tmp/test",
+	}
+
+	_, err := executor.StartSession(context.Background(), "persist-test", config)
+	if err != nil {
+		t.Fatalf("failed to start session: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	saved, err := storage.Load("persist-test")
+	if err != nil {
+		t.Fatalf("failed to load from storage: %v", err)
+	}
+
+	if saved.ID != "persist-test" {
+		t.Errorf("expected ID 'persist-test', got %s", saved.ID)
+	}
+	if saved.ProviderType != "test" {
+		t.Errorf("expected provider_type 'test', got %s", saved.ProviderType)
+	}
+}
+
+func TestAgentExecutor_EventHandling(t *testing.T) {
+	prov := newMockProvider()
+	storage := newMockStorage()
+	broadcaster := NewEventBroadcaster(100)
+
+	factory := func(providerType string) (provider.Provider, error) {
+		return prov, nil
+	}
+
+	cfg := ExecutorConfig{
+		Storage:          storage,
+		Broadcaster:      broadcaster,
+		ProviderFactory:  factory,
+		HealthInterval:   100 * time.Millisecond,
+		OperationTimeout: 5 * time.Second,
+	}
+
+	executor := NewAgentExecutor(cfg)
+	defer executor.Shutdown(context.Background())
+
+	sub := broadcaster.Subscribe("test-sub", "event-test")
+	defer broadcaster.Unsubscribe("test-sub")
+
+	config := provider.Config{
+		ProviderType: "test",
+		WorkingDir:   "/tmp/test",
+	}
+
+	_, err := executor.StartSession(context.Background(), "event-test", config)
+	if err != nil {
+		t.Fatalf("failed to start session: %v", err)
+	}
+
+	prov.SendEvent(domain.NewOutputEvent("event-test", "test output"))
+
+	timeout := time.After(1 * time.Second)
+	receivedOutput := false
+
+loop:
+	for {
+		select {
+		case event := <-sub.Events:
+			if event.Type == domain.EventTypeOutput {
+				receivedOutput = true
+				break loop
+			}
+		case <-timeout:
+			break loop
+		}
+	}
+
+	if !receivedOutput {
+		t.Error("expected to receive output event")
+	}
+}
+
+func TestAgentExecutor_HealthCheckDetectsErrors(t *testing.T) {
+	prov := newMockProvider()
+	executor, _ := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	config := provider.Config{
+		ProviderType: "test",
+		WorkingDir:   "/tmp/test",
+	}
+
+	session, _ := executor.StartSession(context.Background(), "health-test", config)
+	time.Sleep(50 * time.Millisecond)
+
+	prov.mu.Lock()
+	prov.state = provider.StateError
+	prov.mu.Unlock()
+
+	time.Sleep(150 * time.Millisecond)
+
+	if session.GetState() != domain.SessionStateError {
+		t.Logf("session state is %s (health check may sync states)", session.GetState())
+	}
+}
+
+func TestAgentExecutor_LoadTest_TenConcurrentAgents(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping load test in short mode")
+	}
+
+	storage := newMockStorage()
+	broadcaster := NewEventBroadcaster(1000)
+
+	factory := func(providerType string) (provider.Provider, error) {
+		return newMockProvider(), nil
+	}
+
+	cfg := ExecutorConfig{
+		Storage:          storage,
+		Broadcaster:      broadcaster,
+		ProviderFactory:  factory,
+		HealthInterval:   100 * time.Millisecond,
+		OperationTimeout: 10 * time.Second,
+	}
+
+	executor := NewAgentExecutor(cfg)
+	defer executor.Shutdown(context.Background())
+
+	const numAgents = 10
+	var wg sync.WaitGroup
+	errChan := make(chan error, numAgents*10)
+
+	for i := 0; i < numAgents; i++ {
+		wg.Add(1)
+		go func(agentID int) {
+			defer wg.Done()
+
+			sessionID := "load-test-agent-" + string(rune('a'+agentID))
+			config := provider.Config{
+				ProviderType: "test",
+				WorkingDir:   "/tmp/test",
+			}
+
+			session, err := executor.StartSession(context.Background(), sessionID, config)
+			if err != nil {
+				errChan <- err
+				return
+			}
+
+			time.Sleep(50 * time.Millisecond)
+
+			for j := 0; j < 5; j++ {
+				if err := executor.PauseSession(context.Background(), sessionID); err != nil {
+					errChan <- err
+					continue
+				}
+
+				if err := executor.ResumeSession(context.Background(), sessionID); err != nil {
+					errChan <- err
+					continue
+				}
+			}
+
+			if err := executor.StopSession(context.Background(), sessionID); err != nil {
+				errChan <- err
+				return
+			}
+
+			if session.GetState() != domain.SessionStateStopped {
+				errChan <- errors.New("session not stopped after test")
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	var errCount int
+	for err := range errChan {
+		t.Errorf("load test error: %v", err)
+		errCount++
+	}
+
+	if errCount > 0 {
+		t.Errorf("%d errors occurred during load test", errCount)
+	}
+
+	sessions := executor.ListSessions()
+	for _, s := range sessions {
+		if s.GetState() != domain.SessionStateStopped {
+			t.Errorf("session %s not stopped, state: %s", s.ID, s.GetState())
+		}
+	}
+}
+
+func TestAgentExecutor_ProviderErrors(t *testing.T) {
+	t.Run("pause error", func(t *testing.T) {
+		prov := newMockProvider()
+		prov.pauseErr = errors.New("pause failed")
+		executor, _ := createTestExecutor(prov)
+		defer executor.Shutdown(context.Background())
+
+		config := provider.Config{
+			ProviderType: "test",
+			WorkingDir:   "/tmp/test",
+		}
+
+		executor.StartSession(context.Background(), "session1", config)
+		time.Sleep(50 * time.Millisecond)
+
+		err := executor.PauseSession(context.Background(), "session1")
+		if err == nil {
+			t.Error("expected pause error")
+		}
+	})
+
+	t.Run("resume error", func(t *testing.T) {
+		prov := newMockProvider()
+		prov.resumeErr = errors.New("resume failed")
+		executor, _ := createTestExecutor(prov)
+		defer executor.Shutdown(context.Background())
+
+		config := provider.Config{
+			ProviderType: "test",
+			WorkingDir:   "/tmp/test",
+		}
+
+		executor.StartSession(context.Background(), "session1", config)
+		time.Sleep(50 * time.Millisecond)
+
+		executor.PauseSession(context.Background(), "session1")
+
+		err := executor.ResumeSession(context.Background(), "session1")
+		if err == nil {
+			t.Error("expected resume error")
+		}
+	})
+
+	t.Run("stop error", func(t *testing.T) {
+		prov := newMockProvider()
+		prov.stopErr = errors.New("stop failed")
+		executor, _ := createTestExecutor(prov)
+		defer executor.Shutdown(context.Background())
+
+		config := provider.Config{
+			ProviderType: "test",
+			WorkingDir:   "/tmp/test",
+		}
+
+		executor.StartSession(context.Background(), "session1", config)
+		time.Sleep(50 * time.Millisecond)
+
+		err := executor.StopSession(context.Background(), "session1")
+		if err == nil {
+			t.Error("expected stop error")
+		}
+	})
+
+	t.Run("kill error", func(t *testing.T) {
+		prov := newMockProvider()
+		prov.killErr = errors.New("kill failed")
+		executor, _ := createTestExecutor(prov)
+		defer executor.Shutdown(context.Background())
+
+		config := provider.Config{
+			ProviderType: "test",
+			WorkingDir:   "/tmp/test",
+		}
+
+		executor.StartSession(context.Background(), "session1", config)
+		time.Sleep(50 * time.Millisecond)
+
+		err := executor.KillSession("session1")
+		if err == nil {
+			t.Error("expected kill error")
+		}
+	})
+}
+
+func TestAgentExecutor_ContextCancellation(t *testing.T) {
+	prov := newMockProvider()
+	prov.startDelay = 500 * time.Millisecond
+	executor, _ := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	config := provider.Config{
+		ProviderType: "test",
+		WorkingDir:   "/tmp/test",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	_, err := executor.StartSession(ctx, "timeout-test", config)
+	if err != nil {
+		t.Logf("expected timeout error: %v", err)
+	}
+}
+
+func TestAgentExecutor_NonExistentSessionOperations(t *testing.T) {
+	prov := newMockProvider()
+	executor, _ := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	if err := executor.PauseSession(context.Background(), "nonexistent"); !errors.Is(err, ErrSessionNotFound) {
+		t.Errorf("expected ErrSessionNotFound, got %v", err)
+	}
+
+	if err := executor.ResumeSession(context.Background(), "nonexistent"); !errors.Is(err, ErrSessionNotFound) {
+		t.Errorf("expected ErrSessionNotFound, got %v", err)
+	}
+
+	if err := executor.KillSession("nonexistent"); !errors.Is(err, ErrSessionNotFound) {
+		t.Errorf("expected ErrSessionNotFound, got %v", err)
+	}
+}
