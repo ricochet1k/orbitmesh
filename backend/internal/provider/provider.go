@@ -72,11 +72,29 @@ type Status struct {
 }
 
 type Provider interface {
+	// Start initializes the provider and begins agent execution.
 	Start(ctx context.Context, config Config) error
+
+	// Stop requests a graceful shutdown of the provider.
+	// It should be idempotent.
 	Stop(ctx context.Context) error
+
+	// Pause temporarily suspends agent execution.
 	Pause(ctx context.Context) error
+
+	// Resume continues previously paused agent execution.
 	Resume(ctx context.Context) error
+
+	// Kill immediately terminates the provider and all child processes.
+	// It should be idempotent and must not block.
 	Kill() error
+
+	// Status returns the current status of the provider.
+	// It must be thread-safe.
 	Status() Status
+
+	// Events returns a channel that streams real-time events from the provider.
+	// The provider is responsible for closing this channel when it terminates.
+	// Successive calls to Events() must return the same channel.
 	Events() <-chan domain.Event
 }

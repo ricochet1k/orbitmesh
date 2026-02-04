@@ -63,8 +63,6 @@ func TestMCPRegistry_RegisterRelativePath(t *testing.T) {
 	}
 }
 
-
-
 func TestMCPRegistry_Unregister(t *testing.T) {
 	r := NewMCPRegistry()
 
@@ -167,8 +165,8 @@ func TestMCPRegistry_ValidateAllowedArgs(t *testing.T) {
 	r.Enable()
 
 	_ = r.Register(MCPRegistryEntry{
-		Name:       "test-server",
-		Command:    "/usr/bin/test-mcp",
+		Name:        "test-server",
+		Command:     "/usr/bin/test-mcp",
 		AllowedArgs: []string{"--safe", "--approved"},
 	})
 
@@ -335,8 +333,6 @@ func TestMCPRegistry_ConcurrentAccess(t *testing.T) {
 
 	<-done
 }
-
-
 
 func TestMCPRegistry_ValidateEmptyArgs(t *testing.T) {
 	r := NewMCPRegistry()

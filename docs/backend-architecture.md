@@ -175,6 +175,78 @@ err = p.Resume(ctx)
 err = p.Stop(ctx)
 ```
 
+### PTY Provider
+
+The PTY provider runs CLI-based AI agents (like `claude-code`) within a pseudo-terminal. This allows OrbitMesh to monitor and control tools that expect a real terminal environment.
+
+**Key Features:**
+- **Terminal Emulation**: Uses `creack/pty` to start processes with a linked TTY.
+- **Status Extraction**: Implements `StatusExtractor` to parse terminal output and identify the agent's current task using regex or fixed-position matching.
+- **Signal Control**: Implements `Pause` and `Resume` by sending `SIGTSTP` and `SIGCONT` signals to the child process.
+- **Circuit Breaker**: Automatically enters a cooldown period after repeated process failures.
+
+**Usage:**
+```go
+import "github.com/ricochet1k/orbitmesh/internal/provider/pty"
+
+// Create a Claude-specific PTY provider
+p := pty.NewClaudePTYProvider("session-123")
+
+// Start the provider with a CLI command
+err := p.Start(ctx, provider.Config{
+    SystemPrompt: "claude-code",
+    WorkingDir:   "/path/to/project",
+})
+```
+
+### Service Layer
+
+The service layer coordinates session lifecycle management and event broadcasting across multiple sessions.
+
+#### AgentExecutor
+
+`AgentExecutor` is the central orchestrator for all agent sessions. It manages the registry of active sessions and handles high-level operations.
+
+**Responsibilities:**
+- Starting and stopping agent sessions.
+- Managing session persistence via the storage layer.
+- Running background monitor goroutines for each session.
+- Handling graceful shutdown of all active agents.
+
+**Usage:**
+```go
+import "github.com/ricochet1k/orbitmesh/internal/service"
+
+// Create the executor
+executor := service.NewAgentExecutor(providerFactory, storage, broadcaster)
+
+// Start a new session
+session, err := executor.StartSession(ctx, "session-123", config)
+
+// Stop a session
+err = executor.StopSession(ctx, "session-123")
+```
+
+#### EventBroadcaster
+
+`EventBroadcaster` manages the fan-out of events from agent providers to multiple SSE clients.
+
+**Responsibilities:**
+- Subscribing multiple listeners to a single session's event stream.
+- Thread-safe management of subscriber channels.
+- Buffering events to prevent slow consumers from blocking the provider.
+
+**Usage:**
+```go
+// Subscribe to events for a specific session
+sub := broadcaster.Subscribe("session-123")
+defer broadcaster.Unsubscribe("session-123", sub)
+
+for event := range sub {
+    // Process event
+}
+```
+
 ### Storage
 
 Sessions are persisted to disk as JSON files with atomic writes to prevent corruption.
@@ -223,15 +295,69 @@ sessions, err := store.List()
 err = store.Delete("session-123")
 ```
 
-**Atomic Writes:**
+**Atomic & Durable Writes:**
 
-The storage layer uses atomic writes to prevent file corruption:
+The storage layer ensures data integrity and durability through several mechanisms:
 
-1. Write to a temporary file (`session.json.tmp`)
-2. Rename temporary file to target path
-3. Clean up on failure
+1. **Snapshots**: Before saving, a `Session.Snapshot()` is taken to ensure a consistent, point-in-time view of the session without holding long-lived locks.
+2. **Atomic Rename**: Data is written to a unique temporary file (`session.id.*.tmp`) and then renamed to the target path.
+3. **Durability**: Each write includes an `f.Sync()` call to flush data to physical storage before the rename, and the parent directory is synced after the rename to ensure it is durable.
+4. **Error Resilience**: The `List()` method surfaces aggregated errors if some session files are corrupted, while still returning all successfully loaded sessions.
 
-This ensures sessions are never left in a partial/corrupted state.
+**Security Hardening:**
+
+Several security measures are in place to protect session data and the host system:
+
+- **Session ID Validation**: All session IDs are validated against a strict regex (`[A-Za-z0-9_-]{1,64}`) to prevent path traversal and injection attacks.
+- **Secure Permissions**: The sessions directory is created with `0700` permissions, and session files are saved with `0600` permissions, restricting access to the owner only.
+- **Symlink Protection**: The storage layer explicitly refuses to operate on symlinked files to prevent out-of-bounds access.
+- **Resource Limits**: A maximum file size limit (10MB) is enforced during loading to prevent memory-based Denial of Service (DoS) attacks.
+
+## API
+
+The backend provides a RESTful API for session management and real-time event streaming.
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/sessions` | List all sessions |
+| `POST` | `/api/v1/sessions` | Create a new session |
+| `GET` | `/api/v1/sessions/{id}` | Get session details |
+| `DELETE` | `/api/v1/sessions/{id}` | Stop and remove a session |
+| `POST` | `/api/v1/sessions/{id}/pause` | Pause a running session |
+| `POST` | `/api/v1/sessions/{id}/resume` | Resume a paused session |
+| `GET` | `/api/v1/sessions/{id}/events` | Stream real-time events (SSE) |
+
+### Session Creation
+
+**Request:**
+```json
+{
+  "provider_type": "adk",
+  "working_dir": "/path/to/project",
+  "system_prompt": "You are a helpful assistant.",
+  "mcp_servers": [
+    { "name": "strandyard", "command": "strand", "args": ["mcp-serve"] }
+  ],
+  "custom": {
+    "model": "gemini-2.0-flash"
+  }
+}
+```
+
+### Event Streaming (SSE)
+
+Real-time updates are streamed using Server-Sent Events. Clients should listen on `/api/v1/sessions/{id}/events`.
+
+**Event Format:**
+```
+event: status_change
+data: {"old_state": "running", "new_state": "paused", "reason": "user requested pause"}
+
+event: output
+data: {"content": "Processing data..."}
+```
 
 ## Data Flow
 

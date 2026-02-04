@@ -1,0 +1,253 @@
+package pty
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/creack/pty"
+	"github.com/ricochet1k/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/provider"
+	"github.com/ricochet1k/orbitmesh/internal/provider/native"
+)
+
+var (
+	ErrNotStarted     = errors.New("pty provider not started")
+	ErrAlreadyStarted = errors.New("pty provider already started")
+	ErrNotPaused      = errors.New("pty provider not paused")
+	ErrAlreadyPaused  = errors.New("pty provider already paused")
+)
+
+type PTYProvider struct {
+	mu        sync.RWMutex
+	sessionID string
+	state     *native.ProviderState
+	events    *native.EventAdapter
+	config    provider.Config
+
+	cmd       *exec.Cmd
+	f         *os.File
+	extractor StatusExtractor
+
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
+	failureCount  int
+	cooldownUntil time.Time
+}
+
+func NewPTYProvider(sessionID string, extractor StatusExtractor) *PTYProvider {
+	return &PTYProvider{
+		sessionID: sessionID,
+		state:     native.NewProviderState(),
+		events:    native.NewEventAdapter(sessionID, 100),
+		extractor: extractor,
+	}
+}
+
+func (p *PTYProvider) Start(ctx context.Context, config provider.Config) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.state.GetState() != provider.StateCreated {
+		return ErrAlreadyStarted
+	}
+
+	p.config = config
+	p.ctx, p.cancel = context.WithCancel(context.Background())
+
+	// Simple circuit breaker check
+	if time.Now().Before(p.cooldownUntil) {
+		return fmt.Errorf("provider in cooldown until %v", p.cooldownUntil)
+	}
+
+	p.state.SetState(provider.StateStarting)
+	p.events.EmitStatusChange("created", "starting", "starting pty provider")
+
+	cmdParts := []string{"sh", "-c", config.SystemPrompt} // For now, use prompt as command
+	if len(config.MCPServers) > 0 {
+		// PTY provider might not support MCP servers directly in this phase
+	}
+
+	cmd := exec.Command(cmdParts[0], cmdParts[1:]...)
+	if config.WorkingDir != "" {
+		cmd.Dir = config.WorkingDir
+	}
+	cmd.Env = os.Environ()
+	for k, v := range config.Environment {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+
+	f, err := pty.Start(cmd)
+	if err != nil {
+		p.handleFailure(err)
+		return err
+	}
+
+	p.cmd = cmd
+	p.f = f
+	p.state.SetState(provider.StateRunning)
+	p.events.EmitStatusChange("starting", "running", "pty provider running")
+
+	p.wg.Add(2)
+	go p.readOutput()
+	go p.monitorStatus()
+
+	return nil
+}
+
+func (p *PTYProvider) readOutput() {
+	defer p.wg.Done()
+	buf := make([]byte, 1024)
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		default:
+			n, err := p.f.Read(buf)
+			if n > 0 {
+				output := string(buf[:n])
+				p.state.SetOutput(output)
+				p.events.EmitOutput(output)
+			}
+			if err != nil {
+				if err != io.EOF {
+					p.handleFailure(err)
+				}
+				return
+			}
+		}
+	}
+}
+
+func (p *PTYProvider) monitorStatus() {
+	defer p.wg.Done()
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		case <-ticker.C:
+			p.mu.RLock()
+			output := p.state.Status().Output
+			p.mu.RUnlock()
+
+			if p.extractor != nil && output != "" {
+				task, err := p.extractor.Extract(output)
+				if err == nil && task != "" {
+					p.state.SetCurrentTask(task)
+					p.events.EmitMetadata("current_task", task)
+				}
+			}
+		}
+	}
+}
+
+func (p *PTYProvider) Stop(ctx context.Context) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.state.GetState() == provider.StateStopped {
+		return nil
+	}
+
+	p.state.SetState(provider.StateStopping)
+	p.cancel()
+
+	if p.cmd != nil && p.cmd.Process != nil {
+		_ = p.cmd.Process.Signal(syscall.SIGTERM)
+	}
+
+	if p.f != nil {
+		_ = p.f.Close()
+	}
+
+	p.state.SetState(provider.StateStopped)
+	p.events.EmitStatusChange("stopping", "stopped", "pty provider stopped")
+	p.events.Close()
+
+	return nil
+}
+
+func (p *PTYProvider) Pause(ctx context.Context) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.state.GetState() != provider.StateRunning {
+		return ErrNotStarted
+	}
+
+	if p.cmd != nil && p.cmd.Process != nil {
+		if err := p.cmd.Process.Signal(syscall.SIGTSTP); err != nil {
+			return err
+		}
+	}
+
+	p.state.SetState(provider.StatePaused)
+	p.events.EmitStatusChange("running", "paused", "pty provider paused")
+	return nil
+}
+
+func (p *PTYProvider) Resume(ctx context.Context) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.state.GetState() != provider.StatePaused {
+		return ErrNotPaused
+	}
+
+	if p.cmd != nil && p.cmd.Process != nil {
+		if err := p.cmd.Process.Signal(syscall.SIGCONT); err != nil {
+			return err
+		}
+	}
+
+	p.state.SetState(provider.StateRunning)
+	p.events.EmitStatusChange("paused", "running", "pty provider resumed")
+	return nil
+}
+
+func (p *PTYProvider) Kill() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.cancel()
+	if p.cmd != nil && p.cmd.Process != nil {
+		_ = p.cmd.Process.Kill()
+	}
+	if p.f != nil {
+		_ = p.f.Close()
+	}
+
+	p.state.SetState(provider.StateStopped)
+	p.events.EmitStatusChange("", "stopped", "pty provider killed")
+	p.events.Close()
+	return nil
+}
+
+func (p *PTYProvider) Status() provider.Status {
+	return p.state.Status()
+}
+
+func (p *PTYProvider) Events() <-chan domain.Event {
+	return p.events.Events()
+}
+
+func (p *PTYProvider) handleFailure(err error) {
+	p.failureCount++
+	if p.failureCount >= 3 {
+		p.cooldownUntil = time.Now().Add(30 * time.Second)
+		p.failureCount = 0
+	}
+	p.state.SetError(err)
+	p.events.EmitError(err.Error(), "PTY_FAILURE")
+}

@@ -157,7 +157,7 @@ func createTestExecutor(prov *mockProvider) (*AgentExecutor, *mockStorage) {
 	storage := newMockStorage()
 	broadcaster := NewEventBroadcaster(100)
 
-	factory := func(providerType string) (provider.Provider, error) {
+	factory := func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
 		if providerType == "unknown" {
 			return nil, errors.New("unknown provider")
 		}
@@ -165,6 +165,7 @@ func createTestExecutor(prov *mockProvider) (*AgentExecutor, *mockStorage) {
 	}
 
 	cfg := ExecutorConfig{
+
 		Storage:          storage,
 		Broadcaster:      broadcaster,
 		ProviderFactory:  factory,
@@ -435,7 +436,7 @@ func TestAgentExecutor_EventBroadcasting(t *testing.T) {
 	storage := newMockStorage()
 	broadcaster := NewEventBroadcaster(100)
 
-	factory := func(providerType string) (provider.Provider, error) {
+	factory := func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
 		return prov, nil
 	}
 
@@ -604,7 +605,7 @@ func TestAgentExecutor_MultipleConcurrentSessions(t *testing.T) {
 	storage := newMockStorage()
 	broadcaster := NewEventBroadcaster(100)
 
-	factory := func(providerType string) (provider.Provider, error) {
+	factory := func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
 		return newMockProvider(), nil
 	}
 
@@ -683,7 +684,7 @@ func TestAgentExecutor_SessionPersistence(t *testing.T) {
 	storage := newMockStorage()
 	broadcaster := NewEventBroadcaster(100)
 
-	factory := func(providerType string) (provider.Provider, error) {
+	factory := func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
 		return prov, nil
 	}
 
@@ -728,7 +729,7 @@ func TestAgentExecutor_EventHandling(t *testing.T) {
 	storage := newMockStorage()
 	broadcaster := NewEventBroadcaster(100)
 
-	factory := func(providerType string) (provider.Provider, error) {
+	factory := func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
 		return prov, nil
 	}
 
@@ -811,7 +812,7 @@ func TestAgentExecutor_LoadTest_TenConcurrentAgents(t *testing.T) {
 	storage := newMockStorage()
 	broadcaster := NewEventBroadcaster(1000)
 
-	factory := func(providerType string) (provider.Provider, error) {
+	factory := func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
 		return newMockProvider(), nil
 	}
 

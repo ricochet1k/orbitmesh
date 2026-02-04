@@ -364,9 +364,9 @@ func TestSSE_SessionIsolation(t *testing.T) {
 
 func TestConvertEventData_AllTypes(t *testing.T) {
 	tests := []struct {
-		name   string
-		event  domain.Event
-		want   apiTypes.EventType
+		name  string
+		event domain.Event
+		want  apiTypes.EventType
 	}{
 		{
 			name:  "status_change",

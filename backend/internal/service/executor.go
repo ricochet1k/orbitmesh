@@ -26,7 +26,7 @@ const (
 	DefaultHealthInterval   = 30 * time.Second
 )
 
-type ProviderFactory func(providerType string) (provider.Provider, error)
+type ProviderFactory func(providerType, sessionID string, config provider.Config) (provider.Provider, error)
 
 type sessionContext struct {
 	session    *domain.Session
@@ -97,7 +97,7 @@ func (e *AgentExecutor) StartSession(ctx context.Context, id string, config prov
 		return nil, ErrSessionExists
 	}
 
-	prov, err := e.providerFactory(config.ProviderType)
+	prov, err := e.providerFactory(config.ProviderType, id, config)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrProviderNotFound, config.ProviderType)
 	}

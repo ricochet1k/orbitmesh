@@ -200,7 +200,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed development guidelines.
 - **Storage**: File-based JSON with no external database dependencies
 - **CI/CD**: GitHub Actions for automated testing and deployment
 
-See [design-docs/](design-docs/) for detailed architecture documentation and [docs/backend-architecture.md](docs/backend-architecture.md) for core backend components.
+See [design-docs/](design-docs/) for detailed architecture documentation including [Frontend Architecture](design-docs/03-frontend-architecture.md), and [docs/backend-architecture.md](docs/backend-architecture.md) for core backend components.
 
 ## License
 
@@ -208,4 +208,4 @@ See [LICENSE](LICENSE) file for details.
 
 ## Status
 
-This project is in early development (Phase 1). See [CLAUDE.md](CLAUDE.md) for the project roadmap.
+This project is in development (Phase 3: PTY Provider). See [CLAUDE.md](CLAUDE.md) for the project roadmap.

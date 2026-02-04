@@ -3,6 +3,7 @@ package native
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -362,7 +363,10 @@ func TestEnvMapToSlice(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := envMapToSlice(tt.input)
+			result := make([]string, 0, len(tt.input))
+			for k, v := range tt.input {
+				result = append(result, k+"="+v)
+			}
 			if len(result) != tt.expected {
 				t.Errorf("expected %d entries, got %d", tt.expected, len(result))
 			}
@@ -479,7 +483,10 @@ func TestEnvMapToSlice_Format(t *testing.T) {
 		"KEY": "value",
 	}
 
-	result := envMapToSlice(input)
+	result := make([]string, 0, len(input))
+	for k, v := range input {
+		result = append(result, k+"="+v)
+	}
 
 	if len(result) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(result))
@@ -1060,5 +1067,67 @@ func TestADKProvider_NoMCPServers(t *testing.T) {
 	}
 	if len(toolsets) != 0 {
 		t.Errorf("expected 0 toolsets, got %d", len(toolsets))
+	}
+}
+
+func TestADKProvider_SanitizeError(t *testing.T) {
+	p := NewADKProvider("test-session", ADKConfig{})
+	apiKey := "secret-api-key-123"
+
+	tests := []struct {
+		name     string
+		err      error
+		expected string
+	}{
+		{
+			name:     "contains api key",
+			err:      errors.New("failed with key: secret-api-key-123, try again"),
+			expected: "failed with key: [REDACTED], try again",
+		},
+		{
+			name:     "no api key",
+			err:      errors.New("standard error message"),
+			expected: "standard error message",
+		},
+		{
+			name:     "nil error",
+			err:      nil,
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := p.sanitizeError(tt.err, apiKey)
+			if tt.err == nil {
+				if res != nil {
+					t.Errorf("expected nil, got %v", res)
+				}
+				return
+			}
+			if res.Error() != tt.expected {
+				t.Errorf("expected %q, got %q", tt.expected, res.Error())
+			}
+		})
+	}
+}
+
+func TestADKProvider_HandleFailureRedaction(t *testing.T) {
+	apiKey := "secret-key-to-redact"
+	p := NewADKProvider("test-session", ADKConfig{
+		APIKey: apiKey,
+	})
+
+	p.handleFailure(errors.New("error containing secret-key-to-redact"))
+
+	status := p.Status()
+	if status.Error == nil {
+		t.Fatal("expected error in status")
+	}
+	if strings.Contains(status.Error.Error(), apiKey) {
+		t.Errorf("status error leaked api key: %v", status.Error)
+	}
+	if !strings.Contains(status.Error.Error(), "[REDACTED]") {
+		t.Errorf("status error missing [REDACTED]: %v", status.Error)
 	}
 }

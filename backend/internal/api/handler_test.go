@@ -157,7 +157,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	env.executor = service.NewAgentExecutor(service.ExecutorConfig{
 		Storage:     newInMemStore(),
 		Broadcaster: env.broadcaster,
-		ProviderFactory: func(providerType string) (provider.Provider, error) {
+		ProviderFactory: func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
 			if providerType != "mock" {
 				return nil, fmt.Errorf("unsupported provider: %s", providerType)
 			}
@@ -165,6 +165,7 @@ func newTestEnv(t *testing.T) *testEnv {
 			return env.lastMock, nil
 		},
 	})
+
 	env.handler = NewHandler(env.executor, env.broadcaster)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)

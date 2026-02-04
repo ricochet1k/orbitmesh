@@ -870,3 +870,40 @@ func TestCreateModelVertexAI(t *testing.T) {
 		t.Logf("createModel failed (expected): %v", err)
 	}
 }
+
+func TestMCPProcessCancellation(t *testing.T) {
+	p := NewADKProvider("test-session", ADKConfig{
+		APIKey: "test-key",
+	})
+	p.ctx, p.cancel = context.WithCancel(context.Background())
+	defer p.cancel()
+
+	// Use a command that will run for a while
+	cfg := provider.MCPServerConfig{
+		Name:    "test-server",
+		Command: "sleep",
+		Args:    []string{"10"},
+	}
+
+	_, handle, err := p.createMCPToolset(cfg)
+	if err != nil {
+		// If it fails because of validation or other things, skip
+		t.Skipf("Skipping because MCP toolset creation failed: %v", err)
+	}
+
+	if handle == nil || handle.cmd == nil {
+		t.Fatal("expected handle and cmd to be non-nil")
+	}
+
+	// Wait for process to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Cancel the context
+	handle.cancel()
+
+	// Check if process is terminated
+	err = handle.cmd.Wait()
+	if err == nil {
+		t.Error("expected error from Wait() after cancellation, got nil")
+	}
+}

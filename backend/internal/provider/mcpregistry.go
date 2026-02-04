@@ -45,12 +45,12 @@ const (
 )
 
 type MCPRegistryEntry struct {
-	Name           string
-	Command        string
-	AllowedArgs    []string
-	AllowAnyArgs   bool
-	MaxArgs        int
-	MaxArgLength   int
+	Name         string
+	Command      string
+	AllowedArgs  []string
+	AllowAnyArgs bool
+	MaxArgs      int
+	MaxArgLength int
 }
 
 type MCPRegistry struct {

@@ -159,12 +159,17 @@ type SessionSnapshot struct {
 	CurrentTask  string
 	Output       string
 	ErrorMessage string
+	Transitions  []StateTransition
 }
 
 // Snapshot returns an atomic copy of the session under its read lock.
 func (s *Session) Snapshot() SessionSnapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
+	transitions := make([]StateTransition, len(s.Transitions))
+	copy(transitions, s.Transitions)
+
 	return SessionSnapshot{
 		ID:           s.ID,
 		ProviderType: s.ProviderType,
@@ -175,6 +180,7 @@ func (s *Session) Snapshot() SessionSnapshot {
 		CurrentTask:  s.CurrentTask,
 		Output:       s.Output,
 		ErrorMessage: s.ErrorMessage,
+		Transitions:  transitions,
 	}
 }
 

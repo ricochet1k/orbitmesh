@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -75,6 +77,9 @@ type ADKProvider struct {
 	paused    bool
 	pauseCond *sync.Cond
 	wg        sync.WaitGroup
+
+	failureCount  int
+	cooldownUntil time.Time
 }
 
 type mcpClientHandle struct {
@@ -126,9 +131,10 @@ func (p *ADKProvider) Start(ctx context.Context, config provider.Config) error {
 
 	llm, err := p.createModel(apiKey)
 	if err != nil {
-		p.state.SetError(err)
-		p.events.EmitError(fmt.Sprintf("failed to create model: %v", err), "MODEL_INIT_ERROR")
-		return fmt.Errorf("%w: %v", ErrModelCreate, err)
+		sanitizedErr := p.sanitizeError(err, apiKey)
+		p.state.SetError(sanitizedErr)
+		p.events.EmitError(fmt.Sprintf("failed to create model: %v", sanitizedErr), "MODEL_INIT_ERROR")
+		return fmt.Errorf("%w: %v", ErrModelCreate, sanitizedErr)
 	}
 	p.model = llm
 
@@ -232,13 +238,16 @@ func (p *ADKProvider) setupMCPToolsets(config provider.Config) ([]tool.Toolset, 
 }
 
 func (p *ADKProvider) createMCPToolset(cfg provider.MCPServerConfig) (tool.Toolset, *mcpClientHandle, error) {
-	_, mcpCancel := context.WithCancel(p.ctx)
+	mcpCtx, mcpCancel := context.WithCancel(p.ctx)
 
-	cmd := exec.Command(cfg.Command, cfg.Args...)
+	cmd := exec.CommandContext(mcpCtx, cfg.Command, cfg.Args...)
 	if p.providerCfg.WorkingDir != "" {
 		cmd.Dir = p.providerCfg.WorkingDir
 	}
-	cmd.Env = envMapToSlice(cfg.Env)
+	cmd.Env = os.Environ()
+	for k, v := range cfg.Env {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
 
 	transport := &mcp.CommandTransport{
 		Command: cmd,
@@ -260,21 +269,19 @@ func (p *ADKProvider) createMCPToolset(cfg provider.MCPServerConfig) (tool.Tools
 	return ts, handle, nil
 }
 
-func envMapToSlice(envMap map[string]string) []string {
-	if envMap == nil {
-		return nil
-	}
-	result := make([]string, 0, len(envMap))
-	for k, v := range envMap {
-		result = append(result, k+"="+v)
-	}
-	return result
-}
-
 func (p *ADKProvider) afterModelCallback(ctx agent.CallbackContext, resp *model.LLMResponse, err error) (*model.LLMResponse, error) {
 	if err != nil {
-		p.events.EmitError(fmt.Sprintf("model error: %v", err), "MODEL_ERROR")
-		return resp, err
+		var apiKey string
+		p.mu.RLock()
+		apiKey = p.config.APIKey
+		if apiKey == "" {
+			apiKey = p.providerCfg.Environment["GOOGLE_API_KEY"]
+		}
+		p.mu.RUnlock()
+
+		sanitizedErr := p.sanitizeError(err, apiKey)
+		p.events.EmitError(fmt.Sprintf("model error: %v", sanitizedErr), "MODEL_ERROR")
+		return resp, sanitizedErr
 	}
 
 	if resp == nil {
@@ -491,6 +498,38 @@ func (p *ADKProvider) Status() provider.Status {
 
 func (p *ADKProvider) Events() <-chan domain.Event {
 	return p.events.Events()
+}
+
+func (p *ADKProvider) sanitizeError(err error, apiKey string) error {
+	if err == nil || apiKey == "" {
+		return err
+	}
+	msg := err.Error()
+	if strings.Contains(msg, apiKey) {
+		msg = strings.ReplaceAll(msg, apiKey, "[REDACTED]")
+		return errors.New(msg)
+	}
+	return err
+}
+
+func (p *ADKProvider) handleFailure(err error) {
+	p.failureCount++
+	if p.failureCount >= 3 {
+		p.cooldownUntil = time.Now().Add(30 * time.Second)
+		p.failureCount = 0
+	}
+	// Redact API key from any error message
+	var apiKey string
+	p.mu.RLock()
+	apiKey = p.config.APIKey
+	if apiKey == "" {
+		apiKey = p.providerCfg.Environment["GOOGLE_API_KEY"]
+	}
+	p.mu.RUnlock()
+
+	sanitizedErr := p.sanitizeError(err, apiKey)
+	p.state.SetError(sanitizedErr)
+	p.events.EmitError(sanitizedErr.Error(), "PTY_FAILURE")
 }
 
 var _ provider.Provider = (*ADKProvider)(nil)

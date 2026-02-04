@@ -15,6 +15,8 @@ import (
 
 	"github.com/ricochet1k/orbitmesh/internal/api"
 	"github.com/ricochet1k/orbitmesh/internal/provider"
+	"github.com/ricochet1k/orbitmesh/internal/provider/native"
+	"github.com/ricochet1k/orbitmesh/internal/provider/pty"
 	"github.com/ricochet1k/orbitmesh/internal/service"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
 )
@@ -31,16 +33,20 @@ func main() {
 	}
 
 	factory := provider.NewDefaultFactory()
-	// Register concrete providers here as they are implemented.
-	// Example: factory.Register("native", native.NewProvider)
+	factory.Register("adk", func(sessionID string, config provider.Config) (provider.Provider, error) {
+		return native.NewADKProvider(sessionID, native.ADKConfig{}), nil
+	})
+	factory.Register("pty", func(sessionID string, config provider.Config) (provider.Provider, error) {
+		return pty.NewClaudePTYProvider(sessionID), nil
+	})
 
 	broadcaster := service.NewEventBroadcaster(100)
 
 	executor := service.NewAgentExecutor(service.ExecutorConfig{
 		Storage:     store,
 		Broadcaster: broadcaster,
-		ProviderFactory: func(providerType string) (provider.Provider, error) {
-			return factory.Create(providerType, "", provider.Config{})
+		ProviderFactory: func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
+			return factory.Create(providerType, sessionID, config)
 		},
 	})
 
