@@ -403,7 +403,7 @@ func (e *AgentExecutor) transitionWithSave(sc *sessionContext, newState domain.S
 }
 
 func (e *AgentExecutor) broadcastStateChange(session *domain.Session, oldState, newState domain.SessionState, reason string) {
-	event := domain.NewStatusChangeEvent(session.ID, oldState.String(), newState.String(), reason)
+	event := domain.NewStatusChangeEvent(session.ID, oldState, newState, reason)
 	e.broadcaster.Broadcast(event)
 }
 

@@ -39,7 +39,14 @@ func (s SessionState) String() string {
 	}
 }
 
-var ErrInvalidTransition = errors.New("invalid state transition")
+var (
+	ErrInvalidTransition = errors.New("invalid state transition")
+	ErrNotSupported      = errors.New("operation not supported")
+)
+
+func NewInvalidTransitionError(from, to SessionState) error {
+	return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, from, to)
+}
 
 var validTransitions = map[SessionState][]SessionState{
 	SessionStateCreated:  {SessionStateStarting},
@@ -104,7 +111,7 @@ func (s *Session) TransitionTo(newState SessionState, reason string) error {
 	defer s.mu.Unlock()
 
 	if !CanTransition(s.State, newState) {
-		return ErrInvalidTransition
+		return NewInvalidTransitionError(s.State, newState)
 	}
 
 	transition := StateTransition{

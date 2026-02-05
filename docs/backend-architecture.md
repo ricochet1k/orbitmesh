@@ -64,6 +64,20 @@ if session.IsTerminal() {
 
 Events provide real-time updates about session activity. All events include a timestamp and session ID.
 
+**Event Accessors:**
+
+To reduce type assertion boilerplate, the `Event` type provides helper methods:
+
+```go
+if data, ok := event.StatusChange(); ok {
+    fmt.Printf("State changed to: %s\n", data.NewState)
+}
+
+if data, ok := event.Output(); ok {
+    fmt.Printf("Agent output: %s\n", data.Content)
+}
+```
+
 **Event Types:**
 
 | Type | Description | Data |

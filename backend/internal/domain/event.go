@@ -37,9 +37,47 @@ type Event struct {
 }
 
 type StatusChangeData struct {
-	OldState string
-	NewState string
+	OldState SessionState
+	NewState SessionState
 	Reason   string
+}
+
+func (e Event) StatusChange() (StatusChangeData, bool) {
+	d, ok := e.Data.(StatusChangeData)
+	return d, ok
+}
+
+func (e Event) Output() (OutputData, bool) {
+	d, ok := e.Data.(OutputData)
+	return d, ok
+}
+
+func (e Event) Metric() (MetricData, bool) {
+	d, ok := e.Data.(MetricData)
+	return d, ok
+}
+
+func (e Event) Error() (ErrorData, bool) {
+	d, ok := e.Data.(ErrorData)
+	return d, ok
+}
+
+func (e Event) Metadata() (MetadataData, bool) {
+	d, ok := e.Data.(MetadataData)
+	return d, ok
+}
+
+func NewStatusChangeEvent(sessionID string, oldState, newState SessionState, reason string) Event {
+	return Event{
+		Type:      EventTypeStatusChange,
+		Timestamp: time.Now(),
+		SessionID: sessionID,
+		Data: StatusChangeData{
+			OldState: oldState,
+			NewState: newState,
+			Reason:   reason,
+		},
+	}
 }
 
 type OutputData struct {
