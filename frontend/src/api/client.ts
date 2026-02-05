@@ -3,9 +3,31 @@ import {
   SessionResponse,
   SessionListResponse,
   SessionStatusResponse,
+  PermissionsResponse,
 } from "../types/api";
 
 const BASE_URL = "/api";
+const CSRF_COOKIE_NAME = "orbitmesh-csrf-token";
+const CSRF_HEADER_NAME = "X-CSRF-Token";
+
+function readCookie(name: string): string {
+  if (typeof document === "undefined") return "";
+  const cookieMap = document.cookie.split(";").map((segment) => segment.trim());
+  const match = cookieMap.find((segment) => segment.startsWith(`${name}=`));
+  if (!match) return "";
+  return decodeURIComponent(match.split("=")[1] || "");
+}
+
+function withCSRFHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const token = readCookie(CSRF_COOKIE_NAME);
+  if (!token) {
+    throw new Error("Missing CSRF token cookie");
+  }
+  return {
+    ...extra,
+    [CSRF_HEADER_NAME]: token,
+  };
+}
 
 export const apiClient = {
   async listSessions(): Promise<SessionListResponse> {
@@ -17,7 +39,7 @@ export const apiClient = {
   async createSession(req: SessionRequest): Promise<SessionResponse> {
     const resp = await fetch(`${BASE_URL}/sessions`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: withCSRFHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(req),
     });
     if (!resp.ok) throw new Error(await resp.text());
@@ -33,6 +55,7 @@ export const apiClient = {
   async stopSession(id: string): Promise<void> {
     const resp = await fetch(`${BASE_URL}/sessions/${id}`, {
       method: "DELETE",
+      headers: withCSRFHeaders(),
     });
     if (!resp.ok) throw new Error(await resp.text());
   },
@@ -40,6 +63,7 @@ export const apiClient = {
   async pauseSession(id: string): Promise<void> {
     const resp = await fetch(`${BASE_URL}/sessions/${id}/pause`, {
       method: "POST",
+      headers: withCSRFHeaders(),
     });
     if (!resp.ok) throw new Error(await resp.text());
   },
@@ -47,8 +71,15 @@ export const apiClient = {
   async resumeSession(id: string): Promise<void> {
     const resp = await fetch(`${BASE_URL}/sessions/${id}/resume`, {
       method: "POST",
+      headers: withCSRFHeaders(),
     });
     if (!resp.ok) throw new Error(await resp.text());
+  },
+
+  async getPermissions(): Promise<PermissionsResponse> {
+    const resp = await fetch(`${BASE_URL}/v1/me/permissions`);
+    if (!resp.ok) throw new Error(await resp.text());
+    return resp.json();
   },
 
   getEventsUrl(id: string): string {

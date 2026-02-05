@@ -1,9 +1,59 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { apiClient } from "./client";
 
+const guardrailsPayload = [
+  {
+    id: "session-inspection",
+    title: "Inspect sessions",
+    allowed: true,
+    detail: "Live telemetry stays read-only unless your guardrail allows inspection.",
+  },
+  {
+    id: "role-escalation",
+    title: "Role escalations",
+    allowed: false,
+    detail: "Role edits are hidden until an owner approves escalation.",
+  },
+  {
+    id: "template-authoring",
+    title: "Template authoring",
+    allowed: true,
+    detail: "Template workflows stay available for curated drafts.",
+  },
+  {
+    id: "bulk-operations",
+    title: "Bulk operations",
+    allowed: false,
+    detail: "Bulk commits require higher-level guardrails before they become active.",
+  },
+  {
+    id: "csrf-protection",
+    title: "CSRF validation",
+    allowed: true,
+    detail: "State-changing requests double-submit a SameSite cookie and header.",
+  },
+  {
+    id: "audit-integrity",
+    title: "Audit integrity",
+    allowed: true,
+    detail: "High-privilege changes generate immutable audit events and alerts.",
+  },
+];
+
+const permissionsPayload = {
+  role: "developer",
+  can_inspect_sessions: true,
+  can_manage_roles: false,
+  can_manage_templates: true,
+  can_initiate_bulk_actions: false,
+  requires_owner_approval_for_role_changes: true,
+  guardrails: guardrailsPayload,
+};
+
 describe("apiClient", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn());
+    document.cookie = "orbitmesh-csrf-token=test-token";
   });
 
   it("listSessions fetches sessions successfully", async () => {
@@ -23,7 +73,7 @@ describe("apiClient", () => {
     expect(result).toEqual(mockResponse);
   });
 
-  it("createSession sends POST request", async () => {
+  it("createSession sends POST request with CSRF token", async () => {
     const req = { provider_type: "native", working_dir: "/tmp" };
     const mockResponse = { id: "1", ...req, state: "created" };
 
@@ -35,6 +85,10 @@ describe("apiClient", () => {
     const result = await apiClient.createSession(req as any);
     expect(fetch).toHaveBeenCalledWith("/api/sessions", expect.objectContaining({
       method: "POST",
+      headers: expect.objectContaining({
+        "Content-Type": "application/json",
+        "X-CSRF-Token": "test-token"
+      }),
       body: JSON.stringify(req)
     }));
     expect(result).toEqual(mockResponse);
@@ -53,13 +107,27 @@ describe("apiClient", () => {
     expect(result).toEqual(mockResponse);
   });
 
-  it("stopSession sends DELETE request", async () => {
+  it("stopSession sends DELETE request with CSRF token", async () => {
     (fetch as any).mockResolvedValue({ ok: true });
 
     await apiClient.stopSession("1");
     expect(fetch).toHaveBeenCalledWith("/api/sessions/1", expect.objectContaining({
-      method: "DELETE"
+      method: "DELETE",
+      headers: expect.objectContaining({
+        "X-CSRF-Token": "test-token"
+      }),
     }));
+  });
+
+  it("getPermissions fetches guardrail details", async () => {
+    (fetch as any).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(permissionsPayload),
+    });
+
+    const result = await apiClient.getPermissions();
+    expect(fetch).toHaveBeenCalledWith("/api/v1/me/permissions");
+    expect(result).toEqual(permissionsPayload);
   });
 
   it("throws error when response is not ok", async () => {
