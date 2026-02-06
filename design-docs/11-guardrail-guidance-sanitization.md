@@ -14,10 +14,11 @@ Guardrail guidance strings are currently sanitized only in the frontend (`fronte
 - Build a global sanitization framework for all API strings (scope is guardrail guidance only).
 
 ## Decision
-Implement a server-side sanitizer in the backend API layer and apply it to guardrail guidance before encoding the permissions response. Keep the frontend sanitizer unchanged.
+Implement a server-side sanitizer in the backend API layer and apply it to guardrail guidance before encoding the permissions response. Decode HTML entities to a fixed point (with a small iteration cap) before stripping tags to prevent entity-encoded markup from being reintroduced by consumers. Keep the frontend sanitizer unchanged.
 
 ## Sanitization Rules
-Mirror the frontend logic:
+Mirror the frontend logic, with a bounded entity decode step:
+- Decode HTML entities to a fixed point before stripping tags (cap iterations, e.g., 2-3 passes).
 - Strip HTML tags.
 - Replace control characters with spaces and collapse whitespace.
 - Redact bearer tokens (`Bearer <token>` → `Bearer [redacted]`).
@@ -34,7 +35,8 @@ Mirror the frontend logic:
    - Option B: sanitize `defaultPermissions` in `mePermissions` just before encoding.
    - Prefer Option A to ensure any guardrail guidance constructed in the API layer is sanitized at source.
 3. **Tests**:
-   - Add Go unit tests covering HTML removal and redactions (bearer tokens, key/value secrets, AWS/GitHub tokens).
+    - Add Go unit tests covering HTML removal and redactions (bearer tokens, key/value secrets, AWS/GitHub tokens).
+    - Include a double-encoded entity test (e.g., `&amp;lt;script&amp;gt;` becomes stripped).
    - Mirror test cases from `frontend/src/utils/guardrailGuidance.test.ts` and `frontend/src/api/client.test.ts` to keep parity.
 4. **Documentation**:
    - Note server-side sanitization in this doc and reference it from any future guardrail guidance documentation.
@@ -56,6 +58,7 @@ Mirror the frontend logic:
 ## Risks and Trade-offs
 - **Rule drift** between frontend and backend: mitigate by mirroring tests and documenting the shared rules.
 - **False positives** from regex redaction: acceptable; safer to redact overly broadly than leak secrets.
+- **Multi-pass entity decode** could slightly alter benign text (e.g., literal `&amp;lt;` inputs), but this is preferable to allowing entity-encoded tags to survive; iteration cap limits worst-case cost.
 
 ## References
 - `frontend/src/utils/guardrailGuidance.ts`

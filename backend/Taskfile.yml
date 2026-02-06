@@ -39,9 +39,9 @@ tasks:
 
   dev:
     desc: Run backend with hot reload
-    dir: ..
+    dir: .
     cmds:
-      - air
+      - go tool air
 
   fmt:
     desc: Format backend code
