@@ -19,15 +19,20 @@ import (
 type Handler struct {
 	executor    *service.AgentExecutor
 	broadcaster *service.EventBroadcaster
+	gitDir      string
 }
 
 // NewHandler creates a Handler backed by the given executor and broadcaster.
 func NewHandler(executor *service.AgentExecutor, broadcaster *service.EventBroadcaster) *Handler {
-	return &Handler{executor: executor, broadcaster: broadcaster}
+	return &Handler{executor: executor, broadcaster: broadcaster, gitDir: resolveGitDir()}
 }
 
 // Mount registers all API routes on the provided router.
 func (h *Handler) Mount(r chi.Router) {
+	r.Get("/api/v1/me/permissions", h.mePermissions)
+	r.Get("/api/v1/tasks/tree", h.tasksTree)
+	r.Get("/api/v1/commits", h.listCommits)
+	r.Get("/api/v1/commits/{sha}", h.getCommit)
 	r.Post("/api/sessions", h.createSession)
 	r.Get("/api/sessions/{id}", h.getSession)
 	r.Delete("/api/sessions/{id}", h.stopSession)

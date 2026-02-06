@@ -27,7 +27,7 @@ func TestEventTypeString(t *testing.T) {
 
 func TestNewStatusChangeEvent(t *testing.T) {
 	before := time.Now()
-	e := NewStatusChangeEvent("session-123", "running", "paused", "user request")
+	e := NewStatusChangeEvent("session-123", SessionStateRunning, SessionStatePaused, "user request")
 	after := time.Now()
 
 	if e.Type != EventTypeStatusChange {
@@ -44,11 +44,11 @@ func TestNewStatusChangeEvent(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected StatusChangeData, got %T", e.Data)
 	}
-	if data.OldState != "running" {
-		t.Errorf("expected OldState 'running', got %q", data.OldState)
+	if data.OldState != SessionStateRunning {
+		t.Errorf("expected OldState %v, got %v", SessionStateRunning, data.OldState)
 	}
-	if data.NewState != "paused" {
-		t.Errorf("expected NewState 'paused', got %q", data.NewState)
+	if data.NewState != SessionStatePaused {
+		t.Errorf("expected NewState %v, got %v", SessionStatePaused, data.NewState)
 	}
 	if data.Reason != "user request" {
 		t.Errorf("expected Reason 'user request', got %q", data.Reason)

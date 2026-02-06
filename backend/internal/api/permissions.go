@@ -52,37 +52,37 @@ func guardrailStatuses(perms apiTypes.PermissionsResponse) []apiTypes.GuardrailS
 			ID:      "session-inspection",
 			Title:   "Inspect sessions",
 			Allowed: perms.CanInspectSessions,
-			Detail:  sessionDetail,
+			Detail:  sanitizeGuardrailGuidance(sessionDetail),
 		},
 		{
 			ID:      "role-escalation",
 			Title:   "Role escalations",
 			Allowed: perms.CanManageRoles,
-			Detail:  roleDetail,
+			Detail:  sanitizeGuardrailGuidance(roleDetail),
 		},
 		{
 			ID:      "template-authoring",
 			Title:   "Template authoring",
 			Allowed: perms.CanManageTemplates,
-			Detail:  templateDetail,
+			Detail:  sanitizeGuardrailGuidance(templateDetail),
 		},
 		{
 			ID:      "bulk-operations",
 			Title:   "Bulk operations",
 			Allowed: perms.CanInitiateBulkActions,
-			Detail:  bulkDetail,
+			Detail:  sanitizeGuardrailGuidance(bulkDetail),
 		},
 		{
 			ID:      "csrf-protection",
 			Title:   "CSRF validation",
 			Allowed: true,
-			Detail:  "State-changing requests double-submit a SameSite cookie and header.",
+			Detail:  sanitizeGuardrailGuidance("State-changing requests double-submit a SameSite cookie and header."),
 		},
 		{
 			ID:      "audit-integrity",
 			Title:   "Audit integrity",
 			Allowed: true,
-			Detail:  "High-privilege changes generate immutable audit events and alerts.",
+			Detail:  sanitizeGuardrailGuidance("High-privilege changes generate immutable audit events and alerts."),
 		},
 	}
 }

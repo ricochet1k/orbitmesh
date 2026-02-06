@@ -11,8 +11,9 @@
     "lint": "eslint src --ext .ts,.tsx"
   },
   "dependencies": {
+    "d3": "^7.9.0",
     "solid-js": "^1.8.20",
-    "d3": "^7.9.0"
+    "xterm": "^5.3.0"
   },
   "devDependencies": {
     "@solid-primitives/utils": "^6.1.0",

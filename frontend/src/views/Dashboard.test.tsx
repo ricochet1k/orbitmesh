@@ -1,4 +1,4 @@
-import { render, screen } from "@solidjs/testing-library";
+import { render, screen, fireEvent } from "@solidjs/testing-library";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import Dashboard from "./Dashboard";
 import { apiClient } from "../api/client";
@@ -56,6 +56,9 @@ vi.mock("../api/client", () => ({
   apiClient: {
     listSessions: vi.fn(),
     getPermissions: vi.fn(),
+    pauseSession: vi.fn(),
+    resumeSession: vi.fn(),
+    stopSession: vi.fn(),
   }
 }));
 
@@ -88,6 +91,48 @@ describe("Dashboard", () => {
     expect(screen.getByText("T1")).toBeDefined();
     expect(await screen.findByText("Management guardrails")).toBeDefined();
     expect(await screen.findByText("Role escalations")).toBeDefined();
+    expect(await screen.findByText("Bulk actions locked")).toBeDefined();
+  });
+
+  it("shows request access helpers when actions are locked", async () => {
+    const lockedPermissions = {
+      ...defaultPermissions,
+      can_inspect_sessions: false,
+      can_initiate_bulk_actions: false,
+      guardrails: [
+        {
+          id: "session-inspection",
+          title: "Inspect sessions",
+          allowed: false,
+          detail: "Inspection is limited to on-call operators.",
+        },
+        {
+          id: "bulk-operations",
+          title: "Bulk operations",
+          allowed: false,
+          detail: "Bulk actions require approval for your role.",
+        },
+      ],
+    };
+    (apiClient.listSessions as any).mockResolvedValue({
+      sessions: [
+        { id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" },
+      ],
+    });
+    (apiClient.getPermissions as any).mockResolvedValue(lockedPermissions);
+    const onNavigate = vi.fn();
+
+    render(() => <Dashboard onNavigate={onNavigate} />);
+
+    expect(await screen.findByText("Inspect locked")).toBeDefined();
+    expect(screen.getAllByText("Inspection is limited to on-call operators.").length).toBe(2);
+    expect(screen.getByText("Bulk actions locked")).toBeDefined();
+    expect(screen.getAllByText("Bulk actions require approval for your role.").length).toBe(2);
+
+    const links = screen.getAllByText("Request access");
+    expect(links.length).toBe(2);
+    fireEvent.click(links[0]);
+    expect(onNavigate).toHaveBeenCalledWith("/");
   });
 
   it("renders empty list when no sessions", async () => {
@@ -107,5 +152,89 @@ describe("Dashboard", () => {
     render(() => <Dashboard />);
 
     expect(await screen.findByText("Guardrail policy unavailable.")).toBeDefined();
+  });
+
+  it("shows bulk action buttons when guardrail allows", async () => {
+    const permissiveGuardrails = defaultGuardrails.map((guardrail) =>
+      guardrail.id === "bulk-operations"
+        ? { ...guardrail, allowed: true }
+        : guardrail,
+    );
+    const permissivePermissions = {
+      ...defaultPermissions,
+      can_initiate_bulk_actions: true,
+      guardrails: permissiveGuardrails,
+    };
+
+    (apiClient.listSessions as any).mockResolvedValue({
+      sessions: [
+        { id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" },
+      ],
+    });
+    (apiClient.getPermissions as any).mockResolvedValue(permissivePermissions);
+
+    render(() => <Dashboard />);
+
+    expect(await screen.findByText("Pause")).toBeDefined();
+    expect(screen.getByText("Resume")).toBeDefined();
+    expect(screen.getByText("Stop")).toBeDefined();
+    expect(screen.queryByText("Bulk actions locked")).toBeNull();
+  });
+
+  it("skips bulk actions when confirmation is declined", async () => {
+    const permissiveGuardrails = defaultGuardrails.map((guardrail) =>
+      guardrail.id === "bulk-operations"
+        ? { ...guardrail, allowed: true }
+        : guardrail,
+    );
+    (apiClient.getPermissions as any).mockResolvedValue({
+      ...defaultPermissions,
+      can_initiate_bulk_actions: true,
+      guardrails: permissiveGuardrails,
+    });
+    (apiClient.listSessions as any).mockResolvedValue({
+      sessions: [
+        { id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" },
+      ],
+    });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(() => <Dashboard />);
+
+    const pauseButton = await screen.findByText("Pause");
+    fireEvent.click(pauseButton);
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(apiClient.pauseSession).not.toHaveBeenCalled();
+
+    confirmSpy.mockRestore();
+  });
+
+  it("shows CSRF error notice when bulk action is blocked", async () => {
+    const permissiveGuardrails = defaultGuardrails.map((guardrail) =>
+      guardrail.id === "bulk-operations"
+        ? { ...guardrail, allowed: true }
+        : guardrail,
+    );
+    (apiClient.getPermissions as any).mockResolvedValue({
+      ...defaultPermissions,
+      can_initiate_bulk_actions: true,
+      guardrails: permissiveGuardrails,
+    });
+    (apiClient.listSessions as any).mockResolvedValue({
+      sessions: [
+        { id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" },
+      ],
+    });
+    (apiClient.pauseSession as any).mockRejectedValue(new Error("csrf token mismatch"));
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(() => <Dashboard />);
+
+    const pauseButton = await screen.findByText("Pause");
+    fireEvent.click(pauseButton);
+
+    expect(await screen.findByText("Action blocked by CSRF protection. Refresh to re-establish the token.")).toBeDefined();
+    confirmSpy.mockRestore();
   });
 });

@@ -107,3 +107,48 @@ export interface ErrorResponse {
   code?: string;
   details?: any;
 }
+
+export type TaskStatus = "pending" | "in_progress" | "completed";
+
+export interface TaskNode {
+  id: string;
+  title: string;
+  role: string;
+  status: TaskStatus;
+  updated_at: string;
+  children?: TaskNode[];
+}
+
+export interface TaskTreeResponse {
+  tasks: TaskNode[];
+}
+
+export interface CommitSummary {
+  sha: string;
+  message: string;
+  author: string;
+  email: string;
+  timestamp: string;
+  agent?: string;
+  session_id?: string;
+}
+
+export interface CommitListResponse {
+  commits: CommitSummary[];
+}
+
+export interface CommitDetail {
+  sha: string;
+  message: string;
+  author: string;
+  email: string;
+  timestamp: string;
+  diff: string;
+  files?: string[];
+  agent?: string;
+  session_id?: string;
+}
+
+export interface CommitDetailResponse {
+  commit: CommitDetail;
+}

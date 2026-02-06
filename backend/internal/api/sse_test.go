@@ -207,7 +207,7 @@ func TestSSE_StatusChangeEvent(t *testing.T) {
 
 	events := readSSEEvents(resp)
 
-	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionID, "created", "running", "started"))
+	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionID, domain.SessionStateCreated, domain.SessionStateRunning, "started"))
 
 	select {
 	case ev := <-events:
@@ -370,7 +370,7 @@ func TestConvertEventData_AllTypes(t *testing.T) {
 	}{
 		{
 			name:  "status_change",
-			event: domain.NewStatusChangeEvent("s1", "created", "running", "go"),
+			event: domain.NewStatusChangeEvent("s1", domain.SessionStateCreated, domain.SessionStateRunning, "go"),
 			want:  apiTypes.EventTypeStatusChange,
 		},
 		{

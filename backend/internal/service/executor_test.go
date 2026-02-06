@@ -469,7 +469,7 @@ loop:
 		case event := <-sub.Events:
 			if event.Type == domain.EventTypeStatusChange {
 				data, ok := event.Data.(domain.StatusChangeData)
-				if ok && data.NewState == "starting" {
+				if ok && data.NewState == domain.SessionStateStarting {
 					receivedStarting = true
 					break loop
 				}

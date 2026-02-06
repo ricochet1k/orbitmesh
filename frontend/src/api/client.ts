@@ -4,7 +4,11 @@ import {
   SessionListResponse,
   SessionStatusResponse,
   PermissionsResponse,
+  TaskTreeResponse,
+  CommitListResponse,
+  CommitDetailResponse,
 } from "../types/api";
+import { sanitizePermissionsResponse } from "../utils/guardrailGuidance";
 
 const BASE_URL = "/api";
 const CSRF_COOKIE_NAME = "orbitmesh-csrf-token";
@@ -78,6 +82,26 @@ export const apiClient = {
 
   async getPermissions(): Promise<PermissionsResponse> {
     const resp = await fetch(`${BASE_URL}/v1/me/permissions`);
+    if (!resp.ok) throw new Error(await resp.text());
+    const payload = await resp.json();
+    return sanitizePermissionsResponse(payload);
+  },
+
+  async getTaskTree(): Promise<TaskTreeResponse> {
+    const resp = await fetch(`${BASE_URL}/v1/tasks/tree`);
+    if (!resp.ok) throw new Error(await resp.text());
+    return resp.json();
+  },
+
+  async listCommits(limit = 25): Promise<CommitListResponse> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    const resp = await fetch(`${BASE_URL}/v1/commits?${params.toString()}`);
+    if (!resp.ok) throw new Error(await resp.text());
+    return resp.json();
+  },
+
+  async getCommit(sha: string): Promise<CommitDetailResponse> {
+    const resp = await fetch(`${BASE_URL}/v1/commits/${sha}`);
     if (!resp.ok) throw new Error(await resp.text());
     return resp.json();
   },

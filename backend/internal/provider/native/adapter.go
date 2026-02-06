@@ -30,7 +30,7 @@ func (a *EventAdapter) Events() <-chan domain.Event {
 	return a.events
 }
 
-func (a *EventAdapter) EmitStatusChange(oldState, newState, reason string) {
+func (a *EventAdapter) EmitStatusChange(oldState, newState domain.SessionState, reason string) {
 	a.emit(domain.NewStatusChangeEvent(a.sessionID, oldState, newState, reason))
 }
 

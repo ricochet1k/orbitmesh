@@ -43,6 +43,25 @@ task dev
 # Frontend runs on http://localhost:3000
 ```
 
+## Interface Views
+
+- Task Tree: `http://localhost:3000/tasks/tree` for hierarchical task status and filtering.
+- Commit History: `http://localhost:3000/history/commits` for commit list and diff viewer.
+- System Graph: selecting nodes highlights the corresponding task or commit.
+
+## API Examples
+
+```bash
+# Fetch the full task tree
+curl -s http://localhost:8080/api/v1/tasks/tree | jq
+
+# List recent commits (default limit 25, max 200)
+curl -s "http://localhost:8080/api/v1/commits?limit=50" | jq
+
+# Fetch a specific commit diff
+curl -s http://localhost:8080/api/v1/commits/<sha> | jq
+```
+
 ## Project Structure
 
 ```

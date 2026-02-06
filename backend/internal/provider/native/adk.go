@@ -470,12 +470,17 @@ func (p *ADKProvider) Kill() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.cancel()
-	if p.cmd != nil && p.cmd.Process != nil {
-		_ = p.cmd.Process.Kill()
+	if p.cancel != nil {
+		p.cancel()
 	}
-	if p.f != nil {
-		_ = p.f.Close()
+	for _, handle := range p.mcpClients {
+		if handle == nil {
+			continue
+		}
+		handle.cancel()
+		if handle.cmd != nil && handle.cmd.Process != nil {
+			_ = handle.cmd.Process.Kill()
+		}
 	}
 
 	p.pauseMu.Lock()

@@ -90,7 +90,11 @@ func domainEventToAPIEvent(e domain.Event) apiTypes.Event {
 func convertEventData(e domain.Event) any {
 	switch d := e.Data.(type) {
 	case domain.StatusChangeData:
-		return apiTypes.StatusChangeData{OldState: d.OldState, NewState: d.NewState, Reason: d.Reason}
+		return apiTypes.StatusChangeData{
+			OldState: d.OldState.String(),
+			NewState: d.NewState.String(),
+			Reason:   d.Reason,
+		}
 	case domain.OutputData:
 		return apiTypes.OutputData{Content: d.Content}
 	case domain.MetricData:

@@ -100,19 +100,6 @@ type MetadataData struct {
 	Value any
 }
 
-func NewStatusChangeEvent(sessionID, oldState, newState, reason string) Event {
-	return Event{
-		Type:      EventTypeStatusChange,
-		Timestamp: time.Now(),
-		SessionID: sessionID,
-		Data: StatusChangeData{
-			OldState: oldState,
-			NewState: newState,
-			Reason:   reason,
-		},
-	}
-}
-
 func NewOutputEvent(sessionID, content string) Event {
 	return Event{
 		Type:      EventTypeOutput,

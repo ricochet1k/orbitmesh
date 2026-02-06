@@ -21,7 +21,7 @@ func TestEventAdapter_EmitEvents(t *testing.T) {
 		{
 			name: "StatusChange",
 			emit: func() {
-				adapter.EmitStatusChange("created", "running", "test reason")
+				adapter.EmitStatusChange(domain.SessionStateCreated, domain.SessionStateRunning, "test reason")
 			},
 			expected: domain.EventTypeStatusChange,
 		},
@@ -283,7 +283,7 @@ func TestEventAdapter_EmitAfterDoneChannelClosed(t *testing.T) {
 
 	adapter.Close()
 
-	adapter.EmitStatusChange("old", "new", "reason")
+	adapter.EmitStatusChange(domain.SessionStatePaused, domain.SessionStateRunning, "reason")
 	adapter.EmitOutput("output")
 	adapter.EmitMetric(1, 1, 1)
 	adapter.EmitError("error", "CODE")
@@ -368,7 +368,7 @@ func TestEventAdapter_EventContent(t *testing.T) {
 	adapter := NewEventAdapter("sess-123", 10)
 	defer adapter.Close()
 
-	adapter.EmitStatusChange("created", "running", "test reason")
+	adapter.EmitStatusChange(domain.SessionStateCreated, domain.SessionStateRunning, "test reason")
 
 	event := <-adapter.Events()
 
@@ -383,11 +383,11 @@ func TestEventAdapter_EventContent(t *testing.T) {
 	if !ok {
 		t.Fatal("expected StatusChangeData")
 	}
-	if data.OldState != "created" {
-		t.Errorf("expected old state 'created', got %s", data.OldState)
+	if data.OldState != domain.SessionStateCreated {
+		t.Errorf("expected old state %v, got %v", domain.SessionStateCreated, data.OldState)
 	}
-	if data.NewState != "running" {
-		t.Errorf("expected new state 'running', got %s", data.NewState)
+	if data.NewState != domain.SessionStateRunning {
+		t.Errorf("expected new state %v, got %v", domain.SessionStateRunning, data.NewState)
 	}
 	if data.Reason != "test reason" {
 		t.Errorf("expected reason 'test reason', got %s", data.Reason)

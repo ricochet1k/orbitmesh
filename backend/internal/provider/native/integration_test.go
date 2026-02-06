@@ -438,7 +438,7 @@ func TestFullEventFlow(t *testing.T) {
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.runCtx, p.runCancel = context.WithCancel(p.ctx)
 
-	p.events.EmitStatusChange("created", "running", "test started")
+	p.events.EmitStatusChange(domain.SessionStateCreated, domain.SessionStateRunning, "test started")
 	p.events.EmitOutput("Hello")
 	p.events.EmitMetric(100, 50, 1)
 	p.events.EmitMetadata("model", "gemini-2.5-flash")

@@ -1,117 +1,356 @@
-import { createResource, For, Show } from "solid-js";
+import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 import { apiClient } from "../api/client";
 import AgentGraph from "../graph/AgentGraph";
+import { buildUnifiedGraph } from "../graph/graphData";
+import type { CommitSummary, TaskNode } from "../types/api";
+import type { GraphNode } from "../graph/types";
 
-export default function Dashboard() {
+interface DashboardProps {
+  taskTree?: TaskNode[];
+  commits?: CommitSummary[];
+  onNavigate?: (path: string) => void;
+}
+
+export default function Dashboard(props: DashboardProps) {
   const [sessions] = createResource(apiClient.listSessions);
   const [permissions] = createResource(apiClient.getPermissions);
+  const [actionNotice, setActionNotice] = createSignal<{ tone: "error" | "success"; message: string } | null>(
+    null,
+  );
+  const [pendingAction, setPendingAction] = createSignal<{ id: string; action: string } | null>(null);
 
+  const sessionList = () => sessions()?.sessions ?? [];
+  const activeCount = () => sessionList().length;
+  const countByState = (state: string) => sessionList().filter((item) => item.state === state).length;
   const guardrails = () => permissions()?.guardrails ?? [];
+  const allowedGuardrails = () => guardrails().filter((item) => item.allowed).length;
+  const restrictedGuardrails = () => guardrails().filter((item) => !item.allowed).length;
+  const guardrailDetail = (id: string) => guardrails().find((item) => item.id === id)?.detail ?? "";
+
+  const isActionPending = (id: string, action: string) => {
+    const pending = pendingAction();
+    return pending?.id === id && pending?.action === action;
+  };
+
+  const formatActionError = (error: unknown) => {
+    if (error instanceof Error) {
+      const message = error.message || "Action failed.";
+      if (message.toLowerCase().includes("csrf")) {
+        return "Action blocked by CSRF protection. Refresh to re-establish the token.";
+      }
+      return message;
+    }
+    return "Action failed.";
+  };
+
+  const runBulkAction = async (sessionId: string, action: "pause" | "resume" | "stop") => {
+    const label = action === "stop" ? "stop" : action;
+    const confirmText =
+      action === "stop"
+        ? "Stop this session immediately? This ends the session and cannot be undone."
+        : `Confirm ${label} for this session?`;
+    if (!window.confirm(confirmText)) return;
+
+    setPendingAction({ id: sessionId, action });
+    setActionNotice(null);
+    try {
+      if (action === "pause") await apiClient.pauseSession(sessionId);
+      if (action === "resume") await apiClient.resumeSession(sessionId);
+      if (action === "stop") await apiClient.stopSession(sessionId);
+      setActionNotice({
+        tone: "success",
+        message: `Request sent to ${label} ${sessionId.substring(0, 8)}...`,
+      });
+    } catch (error) {
+      setActionNotice({ tone: "error", message: formatActionError(error) });
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
+  const graphData = createMemo(() => {
+    const tasks = props.taskTree ?? [];
+    const commits = props.commits ?? [];
+    if (tasks.length === 0 && commits.length === 0) return null;
+    return buildUnifiedGraph(tasks, commits);
+  });
+
+  const handleGraphSelect = (node: GraphNode) => {
+    if (!props.onNavigate) return;
+    if (node.type === "task") {
+      props.onNavigate(`/tasks/tree?task=${node.id}`);
+      return;
+    }
+    if (node.type === "commit") {
+      props.onNavigate(`/history/commits?commit=${node.id}`);
+      return;
+    }
+    if (node.id === "task-root") {
+      props.onNavigate("/tasks/tree");
+      return;
+    }
+    if (node.id === "commit-root") {
+      props.onNavigate("/history/commits");
+    }
+  };
+
+  const handleInspect = (sessionId: string) => {
+    if (!props.onNavigate) return;
+    props.onNavigate(`/sessions/${sessionId}`);
+  };
+
+  const handleRequestAccess = (event: MouseEvent) => {
+    if (!props.onNavigate) return;
+    event.preventDefault();
+    props.onNavigate("/");
+  };
 
   return (
     <div class="dashboard">
-      <header>
-        <h1>OrbitMesh Dashboard</h1>
-        <p class="dashboard-subtitle">Guarded management, visible operations</p>
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">OrbitMesh Control Plane</p>
+          <h1>Operational Continuity</h1>
+          <p class="dashboard-subtitle">
+            A full-picture view of sessions, guardrails, and system state in one place.
+          </p>
+        </div>
+        <div class="header-meta">
+          <div class="meta-card">
+            <p>Active role</p>
+            <Show when={!permissions.loading} fallback={<span>Loading...</span>}>
+              <strong>{permissions()?.role}</strong>
+            </Show>
+          </div>
+          <div class="meta-card">
+            <p>Active sessions</p>
+            <Show when={!sessions.loading} fallback={<span>Loading...</span>}>
+              <strong>{activeCount()}</strong>
+            </Show>
+          </div>
+          <div class="meta-card">
+            <p>Guardrail posture</p>
+            <Show when={!permissions.loading} fallback={<span>Loading...</span>}>
+              <strong>{allowedGuardrails()} allowed</strong>
+              <span class="meta-sub">{restrictedGuardrails()} restricted</span>
+            </Show>
+          </div>
+        </div>
       </header>
       
-      <main>
-        <div class="primary-column">
-          <section class="guardrails-panel">
-            <div class="guardrails-header">
-              <div>
-                <p class="guardrails-label">Management guardrails</p>
-                <h2>Permission health</h2>
-              </div>
-              <span class="guardrail-pill">Protected</span>
+      <main class="dashboard-layout">
+        <section class="overview-panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">Operational overview</p>
+              <h2>System pulse</h2>
             </div>
-
-            <Show
-              when={!permissions.loading}
-              fallback={<p class="guardrails-loading">Loading guardrail policy...</p>}
-            >
-              <p class="guardrails-role">
-                Role: <strong>{permissions()?.role}</strong>
-              </p>
-              <Show
-                when={guardrails().length > 0}
-                fallback={<p class="guardrails-loading">Guardrail policy unavailable.</p>}
-              >
-                <div class="guardrail-grid">
-                  <For each={guardrails()}>
-                    {(item) => (
-                      <article class="guardrail-card" classList={{ active: item.allowed }}>
-                        <header>
-                          <h3>{item.title}</h3>
-                          <span>{item.allowed ? "Allowed" : "Restricted"}</span>
-                        </header>
-                        <p>{item.detail}</p>
-                      </article>
-                    )}
-                  </For>
-                </div>
+            <span class="panel-pill">Live</span>
+          </div>
+          <div class="overview-grid">
+            <div class="overview-card">
+              <p>Sessions in motion</p>
+              <Show when={!sessions.loading} fallback={<span>Calculating...</span>}>
+                <strong>{activeCount()}</strong>
+                <span>{countByState("running")} running</span>
               </Show>
-              <p class="guardrails-note">
-                {permissions()?.requires_owner_approval_for_role_changes
-                  ? "Role escalations now require explicit owner confirmation before they can be saved."
-                  : "Role changes follow an automatic review process."}
-              </p>
-            </Show>
-          </section>
+            </div>
+            <div class="overview-card">
+              <p>Paused or starting</p>
+              <Show when={!sessions.loading} fallback={<span>Calculating...</span>}>
+                <strong>{countByState("paused") + countByState("starting")}</strong>
+                <span>{countByState("starting")} starting</span>
+              </Show>
+            </div>
+            <div class="overview-card">
+              <p>Attention needed</p>
+              <Show when={!sessions.loading} fallback={<span>Calculating...</span>}>
+                <strong>{countByState("error")}</strong>
+                <span>{countByState("stopped")} stopped</span>
+              </Show>
+            </div>
+            <div class="overview-card">
+              <p>Guardrails active</p>
+              <Show when={!permissions.loading} fallback={<span>Calculating...</span>}>
+                <strong>{allowedGuardrails()}</strong>
+                <span>{restrictedGuardrails()} restricted</span>
+              </Show>
+            </div>
+          </div>
+        </section>
 
         <section class="sessions-list">
-          <h2>Active Sessions</h2>
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">Session operations</p>
+              <h2>Active Sessions</h2>
+            </div>
+            <span class="panel-pill neutral">Operators ready</span>
+          </div>
+          <Show when={actionNotice()}>
+            {(notice) => <p class={`guardrail-banner ${notice().tone}`}>{notice().message}</p>}
+          </Show>
           <Show when={!sessions.loading} fallback={<p>Loading sessions...</p>}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Provider</th>
-                    <th>State</th>
-                    <th>Task</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <For each={sessions()?.sessions}>
-                    {(session) => (
-                      <tr>
-                        <td>{session.id.substring(0, 8)}...</td>
-                        <td>{session.provider_type}</td>
-                        <td>
-                          <span class={`state-badge ${session.state}`}>
-                            {session.state}
-                          </span>
-                        </td>
-                        <td>{session.current_task || "None"}</td>
-                        <td>
-                          <Show
-                            when={!permissions.loading}
-                            fallback={<span class="muted-action">Guardrail pending</span>}
-                          >
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Provider</th>
+                  <th>State</th>
+                  <th>Task</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <For each={sessions()?.sessions}>
+                  {(session) => (
+                    <tr>
+                      <td>{session.id.substring(0, 8)}...</td>
+                      <td>{session.provider_type}</td>
+                      <td>
+                        <span class={`state-badge ${session.state}`}>
+                          {session.state}
+                        </span>
+                      </td>
+                      <td>{session.current_task || "None"}</td>
+                      <td>
+                        <Show
+                          when={!permissions.loading}
+                          fallback={<span class="muted-action">Guardrail pending</span>}
+                        >
+                          <div class="action-stack">
                             <Show
                               when={permissions()?.can_inspect_sessions}
-                              fallback={<span class="muted-action">Inspect locked</span>}
+                              fallback={
+                                <div class="guardrail-helper" role="note">
+                                  <span class="muted-action">Inspect locked</span>
+                                  <p class="guardrail-helper-text">
+                                    {guardrailDetail("session-inspection") ||
+                                      "Session inspection is restricted by current guardrails."}
+                                  </p>
+                                  <a class="guardrail-helper-link" href="/" onClick={handleRequestAccess}>
+                                    Request access
+                                  </a>
+                                </div>
+                              }
                             >
-                              <button onClick={() => alert("Inspect " + session.id)}>
+                              <button type="button" onClick={() => handleInspect(session.id)}>
                                 Inspect
                               </button>
                             </Show>
-                          </Show>
-                        </td>
-                      </tr>
-                    )}
-                  </For>
-                </tbody>
-              </table>
+
+                            <Show
+                              when={permissions()?.can_initiate_bulk_actions}
+                              fallback={
+                                <div class="guardrail-helper" role="note">
+                                  <span class="muted-action">Bulk actions locked</span>
+                                  <p class="guardrail-helper-text">
+                                    {guardrailDetail("bulk-operations") ||
+                                      "Bulk operations are restricted by current guardrails."}
+                                  </p>
+                                  <a class="guardrail-helper-link" href="/" onClick={handleRequestAccess}>
+                                    Request access
+                                  </a>
+                                </div>
+                              }
+                            >
+                              <div class="bulk-actions">
+                                <button
+                                  type="button"
+                                  disabled={
+                                    session.state !== "running" || isActionPending(session.id, "pause")
+                                  }
+                                  onClick={() => runBulkAction(session.id, "pause")}
+                                >
+                                  Pause
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={
+                                    session.state !== "paused" || isActionPending(session.id, "resume")
+                                  }
+                                  onClick={() => runBulkAction(session.id, "resume")}
+                                >
+                                  Resume
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={
+                                    session.state === "stopped" || isActionPending(session.id, "stop")
+                                  }
+                                  onClick={() => runBulkAction(session.id, "stop")}
+                                >
+                                  Stop
+                                </button>
+                              </div>
+                            </Show>
+                          </div>
+                        </Show>
+                      </td>
+                    </tr>
+                  )}
+                </For>
+              </tbody>
+            </table>
+          </Show>
+        </section>
+
+        <section class="guardrails-panel">
+          <div class="panel-header">
+            <div>
+              <p class="guardrails-label">Management guardrails</p>
+              <h2>Permission health</h2>
+            </div>
+            <span class="panel-pill">Protected</span>
+          </div>
+
+          <Show
+            when={!permissions.loading}
+            fallback={<p class="guardrails-loading">Loading guardrail policy...</p>}
+          >
+            <p class="guardrails-role">
+              Role: <strong>{permissions()?.role}</strong>
+            </p>
+            <Show
+              when={guardrails().length > 0}
+              fallback={<p class="guardrails-loading">Guardrail policy unavailable.</p>}
+            >
+              <div class="guardrail-grid">
+                <For each={guardrails()}>
+                  {(item) => (
+                    <article class="guardrail-card" classList={{ active: item.allowed }}>
+                      <header>
+                        <h3>{item.title}</h3>
+                        <span>{item.allowed ? "Allowed" : "Restricted"}</span>
+                      </header>
+                      <p>{item.detail}</p>
+                    </article>
+                  )}
+                </For>
+              </div>
             </Show>
-          </section>
-        </div>
+            <p class="guardrails-note">
+              {permissions()?.requires_owner_approval_for_role_changes
+                ? "Role escalations now require explicit owner confirmation before they can be saved."
+                : "Role changes follow an automatic review process."}
+            </p>
+          </Show>
+        </section>
 
         <section class="graph-view">
-          <h2>System Graph</h2>
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">System topology</p>
+              <h2>System Graph</h2>
+            </div>
+            <span class="panel-pill neutral">Monitoring</span>
+          </div>
           <div id="graph-container">
-            <AgentGraph />
+            <AgentGraph
+              nodes={graphData()?.nodes}
+              links={graphData()?.links}
+              onSelect={handleGraphSelect}
+            />
           </div>
         </section>
       </main>

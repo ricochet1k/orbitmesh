@@ -123,3 +123,54 @@ type GuardrailStatus struct {
 	Allowed bool   `json:"allowed"`
 	Detail  string `json:"detail"`
 }
+
+type TaskStatus string
+
+const (
+	TaskStatusPending    TaskStatus = "pending"
+	TaskStatusInProgress TaskStatus = "in_progress"
+	TaskStatusCompleted  TaskStatus = "completed"
+)
+
+type TaskNode struct {
+	ID        string     `json:"id"`
+	Title     string     `json:"title"`
+	Role      string     `json:"role"`
+	Status    TaskStatus `json:"status"`
+	UpdatedAt time.Time  `json:"updated_at"`
+	Children  []TaskNode `json:"children,omitempty"`
+}
+
+type TaskTreeResponse struct {
+	Tasks []TaskNode `json:"tasks"`
+}
+
+type CommitSummary struct {
+	Sha       string    `json:"sha"`
+	Message   string    `json:"message"`
+	Author    string    `json:"author"`
+	Email     string    `json:"email"`
+	Timestamp time.Time `json:"timestamp"`
+	Agent     string    `json:"agent,omitempty"`
+	SessionID string    `json:"session_id,omitempty"`
+}
+
+type CommitListResponse struct {
+	Commits []CommitSummary `json:"commits"`
+}
+
+type CommitDetail struct {
+	Sha       string    `json:"sha"`
+	Message   string    `json:"message"`
+	Author    string    `json:"author"`
+	Email     string    `json:"email"`
+	Timestamp time.Time `json:"timestamp"`
+	Diff      string    `json:"diff"`
+	Files     []string  `json:"files,omitempty"`
+	Agent     string    `json:"agent,omitempty"`
+	SessionID string    `json:"session_id,omitempty"`
+}
+
+type CommitDetailResponse struct {
+	Commit CommitDetail `json:"commit"`
+}

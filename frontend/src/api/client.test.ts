@@ -130,6 +130,37 @@ describe("apiClient", () => {
     expect(result).toEqual(permissionsPayload);
   });
 
+  it("sanitizes guardrail guidance content", async () => {
+    const dirtyGuardrails = guardrailsPayload.map((guardrail) =>
+      guardrail.id === "bulk-operations"
+        ? { ...guardrail, detail: "Use <em>token</em>: abc123 and Bearer abc.def" }
+        : guardrail,
+    );
+    const dirtyPermissions = { ...permissionsPayload, guardrails: dirtyGuardrails };
+
+    (fetch as any).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(dirtyPermissions),
+    });
+
+    const result = await apiClient.getPermissions();
+    const sanitizedDetail = result.guardrails.find((item) => item.id === "bulk-operations")?.detail;
+    expect(sanitizedDetail).toBe("Use token: [redacted] and Bearer [redacted]");
+  });
+
+  it("defaults missing guardrails to an empty array", async () => {
+    const payloadWithoutGuardrails = { ...permissionsPayload } as any;
+    delete payloadWithoutGuardrails.guardrails;
+
+    (fetch as any).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(payloadWithoutGuardrails),
+    });
+
+    const result = await apiClient.getPermissions();
+    expect(result.guardrails).toEqual([]);
+  });
+
   it("throws error when response is not ok", async () => {
     (fetch as any).mockResolvedValue({
       ok: false,

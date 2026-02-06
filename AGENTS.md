@@ -36,3 +36,15 @@ Agents should use the `strand` CLI to interact with these tasks:
 - `strand complete <id> --todo <num> "report"`: Complete a specific todo.
 - `strand complete <id> "report"`: Complete the entire task.
 - `strand add <template> "title"`: Create a new task of a specific type.
+
+## Execution Guidelines
+
+1. **Iterative Execution**: Agents must complete ONE significant task at a time. After finishing a task, STOP and return control to the user or orchestrator. Do not chain multiple distinct tasks in a single session unless explicitly instructed.
+2. **Phase Handoffs**: When completing a major phase (e.g., "Backend Core"), use the `session` tool with `mode="new"` to start a fresh session for the next phase. This prevents context pollution and keeps history clean.
+3. **Task Handoffs**: After wrapping up each task—whether completed or blocked—exit by launching a fresh session via `session` with `mode="new"` and enter the exact prompt `do the next task, you can commit at the end` before returning control.
+4. **Session Titles**: After receiving a new task, update the session title to `<role>: <task_title>` so the agenda stays clear.
+5. **Async Sessions**: When launching a new session, always set `async: true` so the workflow stays responsive.
+
+## Live Documentation
+
+- Keep `AGENTS.md` current: add clarifications or corrections anytime instructions evolve or additional guidance is needed for future agents.

@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -113,7 +114,7 @@ func TestSessionTransitionTo_Invalid(t *testing.T) {
 	s := NewSession("test-id", "claude-code", "/work")
 
 	err := s.TransitionTo(SessionStateRunning, "invalid")
-	if err != ErrInvalidTransition {
+	if !errors.Is(err, ErrInvalidTransition) {
 		t.Errorf("expected ErrInvalidTransition, got %v", err)
 	}
 	if s.State != SessionStateCreated {
