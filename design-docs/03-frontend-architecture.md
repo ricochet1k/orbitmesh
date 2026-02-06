@@ -36,3 +36,4 @@ The dashboard is designed for high-density information display:
 - **Left Panel**: Detailed session list with status badges and action buttons.
 - **Right Panel**: Large-scale system graph for high-level monitoring.
 - **Interactivity**: Nodes can be dragged to explore the graph; clicking a node provides more details.
+- **Guardrails**: Locked actions include inline helper text and a Request access link (no tooltip-only guidance).

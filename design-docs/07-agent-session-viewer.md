@@ -29,6 +29,7 @@ This document outlines the design for the Agent Session Viewer and Controller, p
   - `Pause/Resume`: Direct control over the agent lifecycle.
   - `Kill`: Immediate termination of the session.
   - `Interactive Mode`: Allow users to send prompts directly to the agent.
+  - Locked controls surface helper text with a Request access link for touch/keyboard accessibility.
 
 ## Interaction Protocol
 - **Input**: User messages are sent via `POST /api/v1/sessions/{id}/input`.
