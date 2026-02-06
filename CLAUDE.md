@@ -225,3 +225,7 @@ These instructions define how agents should use strand to manage tasks.
 - Get the list of roles and task templates from `strand roles` and `strand templates`, add them to AGENTS.md and keep that part up to date as needed.
 - If bugs or usability or missing features are discovered in attempting to use `strand`, file issues
   directly on the "strand" project with a command like `strand add issue --project strand "Issue title" <<EOF\n # Detailed markdown description \nEOF`
+
+## Automation Skills
+
+- **playwright-cli** (see `.claude/skills/playwright/SKILL.md`): browser automation skill available for frontend exploration, form filling, screenshot capture, or other UI interactions. Use it when a real browser session helps verify UI behavior, reproduce issues, or test flows that require clicking, typing, or capturing visual evidence.

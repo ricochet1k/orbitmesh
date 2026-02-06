@@ -48,3 +48,7 @@ Agents should use the `strand` CLI to interact with these tasks:
 ## Live Documentation
 
 - Keep `AGENTS.md` current: add clarifications or corrections anytime instructions evolve or additional guidance is needed for future agents.
+
+## Tooling Addendum
+
+- **playwright-cli** (see `.claude/skills/playwright/SKILL.md`): browser automation skill that can record snapshots, manipulate elements, mock network traffic, and capture media. Use whenever frontend testing, form filling, screenshot capture, or interactive exploration via a real browser session helps clarify or verify UI behavior.
