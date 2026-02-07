@@ -1,0 +1,16 @@
+[     843ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:3000/api/v1/tasks/tree:0
+[     846ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:3000/api/v1/commits?limit=30:0
+[     846ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:3000/api/v1/me/permissions:0
+[     846ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:3000/api/sessions:0
+[     859ms] Error: Request failed.
+    at getTaskTree (http://127.0.0.1:3000/src/api/client.ts:93:25)
+[     859ms] Error: Request failed.
+    at getPermissions (http://127.0.0.1:3000/src/api/client.ts:87:25)
+[     859ms] Error: Request failed.
+    at listSessions (http://127.0.0.1:3000/src/api/client.ts:38:25)
+[   12200ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:3000/api/v1/tasks/tree:0
+[   12202ms] Error: Request failed.
+    at getTaskTree (http://127.0.0.1:3000/src/api/client.ts:93:25)
+[   25844ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:3000/api/sessions:0
+[   25845ms] Error: Request failed.
+    at listSessions (http://127.0.0.1:3000/src/api/client.ts:38:25)

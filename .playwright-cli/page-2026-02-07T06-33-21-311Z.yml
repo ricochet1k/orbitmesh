@@ -1,0 +1,88 @@
+- generic [ref=e3]:
+  - link "Skip to content" [ref=e4] [cursor=pointer]:
+    - /url: "#main-content"
+  - complementary "Primary Navigation" [ref=e5]:
+    - generic [ref=e6]: OrbitMesh
+    - navigation [ref=e7]:
+      - link "Dashboard" [ref=e117] [cursor=pointer]:
+        - /url: /
+        - img [ref=e119]
+        - generic [ref=e202]: Dashboard
+      - link "Tasks" [ref=e124] [cursor=pointer]:
+        - /url: /tasks
+        - img [ref=e126]
+        - generic [ref=e203]: Tasks
+      - link "Sessions" [ref=e128] [cursor=pointer]:
+        - /url: /sessions
+        - img [ref=e130]
+        - generic [ref=e204]: Sessions
+      - link "Settings" [ref=e133] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e135]
+        - generic [ref=e205]: Settings
+  - generic [ref=e36]:
+    - banner [ref=e37]:
+      - navigation "Breadcrumb" [ref=e38]:
+        - list [ref=e39]:
+          - listitem [ref=e141]:
+            - link "OrbitMesh" [ref=e142] [cursor=pointer]:
+              - /url: /
+          - listitem [ref=e143]: /Tasks
+      - generic [ref=e41]:
+        - generic [ref=e42]:
+          - paragraph [ref=e43]: Tasks
+          - heading "Task Tree" [level=2] [ref=e144]
+        - paragraph [ref=e45]: Tree + details
+    - main [ref=e46]:
+      - generic [ref=e145]:
+        - generic [ref=e146]:
+          - generic [ref=e147]:
+            - paragraph [ref=e148]: Task operations
+            - heading "Task Tree" [level=1] [ref=e149]
+            - paragraph [ref=e150]: Explore hierarchical task progress, filter by role or status, and sync selections with the system graph.
+          - generic [ref=e151]:
+            - generic [ref=e152]:
+              - paragraph [ref=e153]: Tasks tracked
+              - strong [ref=e154]: "0"
+            - generic [ref=e155]:
+              - paragraph [ref=e156]: In progress
+              - strong [ref=e157]: "0"
+            - generic [ref=e158]:
+              - paragraph [ref=e159]: Completed
+              - strong [ref=e160]: "0"
+        - main [ref=e161]:
+          - generic [ref=e162]:
+            - generic [ref=e163]:
+              - generic [ref=e164]:
+                - paragraph [ref=e165]: Hierarchy
+                - heading "Task Tree Viewer" [level=2] [ref=e166]
+              - generic [ref=e167]: Live
+            - generic [ref=e168]:
+              - searchbox "Search tasks" [ref=e169]
+              - combobox [ref=e170] [cursor=pointer]:
+                - option "All roles" [selected]
+              - combobox [ref=e171] [cursor=pointer]:
+                - option "All status" [selected]
+                - option "Pending"
+                - option "In Progress"
+                - option "Completed"
+            - paragraph [ref=e173]: No tasks match the active filters.
+          - generic [ref=e174]:
+            - generic [ref=e175]:
+              - generic [ref=e176]:
+                - paragraph [ref=e177]: Task control
+                - heading "Agent Launchpad" [level=2] [ref=e178]
+              - generic [ref=e179]: Ready
+            - paragraph [ref=e180]: Loading task focus...
+            - paragraph [ref=e181]: Unable to load tasks. Check the API connection.
+          - generic [ref=e182]:
+            - generic [ref=e183]:
+              - generic [ref=e184]:
+                - paragraph [ref=e185]: Task topology
+                - heading "Graph Sync" [level=2] [ref=e186]
+              - generic [ref=e187]: Linked
+            - img [ref=e189]:
+              - generic [ref=e192]:
+                - generic [ref=e195]: Agent 1
+                - generic [ref=e198]: Initial Setup
+                - generic [ref=e201]: API Layer

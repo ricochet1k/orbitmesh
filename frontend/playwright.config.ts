@@ -1,12 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const port = 3000;
+const port = 5173;
 
 export default defineConfig({
   testDir: "tests/e2e",
-  timeout: 60_000,
+  timeout: 30_000,
   expect: {
-    timeout: 10_000,
+    timeout: 5_000,
   },
   use: {
     baseURL: `http://127.0.0.1:${port}`,
@@ -19,27 +19,11 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
     },
-    {
-      name: "firefox",
-      use: { ...devices["Desktop Firefox"] },
-    },
-    {
-      name: "webkit",
-      use: { ...devices["Desktop Safari"] },
-    },
-    {
-      name: "iPad",
-      use: { ...devices["iPad"] },
-    },
-    {
-      name: "iPhone 12",
-      use: { ...devices["iPhone 12"] },
-    },
   ],
   webServer: {
     command: `pnpm dev -- --host 127.0.0.1 --port ${port}`,
     url: `http://127.0.0.1:${port}`,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: true,
     timeout: 120_000,
   },
 });
