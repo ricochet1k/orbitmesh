@@ -101,6 +101,10 @@ func (m *mockProvider) Events() <-chan domain.Event {
 	return m.events
 }
 
+func (m *mockProvider) SendInput(ctx context.Context, input string) error {
+	return nil
+}
+
 func (m *mockProvider) SendEvent(e domain.Event) {
 	m.events <- e
 }

@@ -72,7 +72,7 @@ export default function App() {
               </Show>
             }
           >
-            <TaskTreeView />
+            <TaskTreeView onNavigate={navigate} />
           </Show>
         }
       >

@@ -94,6 +94,8 @@ func (m *mockProvider) Status() provider.Status {
 
 func (m *mockProvider) Events() <-chan domain.Event { return m.events }
 
+func (m *mockProvider) SendInput(ctx context.Context, input string) error { return nil }
+
 // inMemStore is an in-memory Storage for tests.
 type inMemStore struct {
 	mu       sync.RWMutex
@@ -302,13 +304,39 @@ func TestCreateSession_MissingWorkingDir(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", w.Code)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
-	var errResp apiTypes.ErrorResponse
-	_ = json.Unmarshal(w.Body.Bytes(), &errResp)
-	if errResp.Error != "working_dir is required" {
-		t.Errorf("Error = %q", errResp.Error)
+	var resp apiTypes.SessionResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.WorkingDir == "" {
+		t.Error("WorkingDir should default to a non-empty value")
+	}
+}
+
+func TestCreateSession_TaskMetadata(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	body, _ := json.Marshal(apiTypes.SessionRequest{
+		ProviderType: "mock",
+		WorkingDir:   "/tmp/test",
+		TaskID:       "task-42",
+		TaskTitle:    "Ship session controls",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp apiTypes.SessionResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.CurrentTask != "task-42 - Ship session controls" {
+		t.Errorf("CurrentTask = %q, want %q", resp.CurrentTask, "task-42 - Ship session controls")
 	}
 }
 

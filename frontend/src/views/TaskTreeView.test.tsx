@@ -6,6 +6,7 @@ import { apiClient } from "../api/client";
 vi.mock("../api/client", () => ({
   apiClient: {
     getTaskTree: vi.fn(),
+    createTaskSession: vi.fn(),
   }
 }));
 
@@ -45,6 +46,15 @@ describe("TaskTreeView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (apiClient.getTaskTree as any).mockResolvedValue(taskTreePayload);
+    (apiClient.createTaskSession as any).mockResolvedValue({
+      id: "session-1",
+      provider_type: "adk",
+      state: "created",
+      working_dir: "/tmp",
+      created_at: "2026-02-05T12:30:00Z",
+      updated_at: "2026-02-05T12:30:00Z",
+      current_task: "task-1 - Parent Task",
+    });
     window.history.replaceState({}, "", "/");
     (window.HTMLElement.prototype as any).scrollIntoView = vi.fn();
   });
@@ -82,6 +92,22 @@ describe("TaskTreeView", () => {
     expect(screen.getByText("Parent Task")).toBeDefined();
     expect(screen.getByText("Telemetry review")).toBeDefined();
     expect(screen.queryByText("Docs handoff")).toBeNull();
+  });
+
+  it("starts a task session from the detail panel", async () => {
+    render(() => <TaskTreeView />);
+    await screen.findByText("Parent Task");
+
+    fireEvent.click(screen.getByText("Parent Task"));
+    fireEvent.click(screen.getByText("Start agent"));
+
+    expect(apiClient.createTaskSession).toHaveBeenCalledWith({
+      taskId: "task-1",
+      taskTitle: "Parent Task",
+      providerType: "adk",
+    });
+
+    expect(await screen.findByText("Open Session Viewer")).toBeDefined();
   });
 
 });

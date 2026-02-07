@@ -16,11 +16,13 @@ export interface MCPServerConfig {
 
 export interface SessionRequest {
   provider_type: string;
-  working_dir: string;
+  working_dir?: string;
   environment?: Record<string, string>;
   system_prompt?: string;
   mcp_servers?: MCPServerConfig[];
   custom?: Record<string, any>;
+  task_id?: string;
+  task_title?: string;
 }
 
 export interface SessionResponse {

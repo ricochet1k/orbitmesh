@@ -243,6 +243,16 @@ func (p *PTYProvider) Events() <-chan domain.Event {
 	return p.events.Events()
 }
 
+func (p *PTYProvider) SendInput(ctx context.Context, input string) error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.f == nil {
+		return ErrNotStarted
+	}
+	_, err := p.f.WriteString(input)
+	return err
+}
+
 func (p *PTYProvider) handleFailure(err error) {
 	p.failureCount++
 	if p.failureCount >= 3 {

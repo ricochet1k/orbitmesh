@@ -52,7 +52,11 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "provider_type is required", "")
 		return
 	}
-	if req.WorkingDir == "" {
+	workingDir := req.WorkingDir
+	if workingDir == "" {
+		workingDir = h.gitDir
+	}
+	if workingDir == "" {
 		writeError(w, http.StatusBadRequest, "working_dir is required", "")
 		return
 	}
@@ -61,10 +65,12 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 
 	config := provider.Config{
 		ProviderType: req.ProviderType,
-		WorkingDir:   req.WorkingDir,
+		WorkingDir:   workingDir,
 		Environment:  req.Environment,
 		SystemPrompt: req.SystemPrompt,
 		Custom:       req.Custom,
+		TaskID:       req.TaskID,
+		TaskTitle:    req.TaskTitle,
 	}
 	if len(req.MCPServers) > 0 {
 		config.MCPServers = make([]provider.MCPServerConfig, len(req.MCPServers))

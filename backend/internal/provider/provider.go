@@ -54,6 +54,8 @@ type Config struct {
 	SystemPrompt string
 	MCPServers   []MCPServerConfig
 	Custom       map[string]any
+	TaskID       string
+	TaskTitle    string
 }
 
 type Metrics struct {
@@ -97,4 +99,7 @@ type Provider interface {
 	// The provider is responsible for closing this channel when it terminates.
 	// Successive calls to Events() must return the same channel.
 	Events() <-chan domain.Event
+
+	// SendInput sends user input to the agent.
+	SendInput(ctx context.Context, input string) error
 }

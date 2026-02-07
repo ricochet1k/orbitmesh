@@ -16,11 +16,17 @@ const (
 
 type SessionRequest struct {
 	ProviderType string            `json:"provider_type"`
-	WorkingDir   string            `json:"working_dir"`
+	WorkingDir   string            `json:"working_dir,omitempty"`
 	Environment  map[string]string `json:"environment,omitempty"`
 	SystemPrompt string            `json:"system_prompt,omitempty"`
 	MCPServers   []MCPServerConfig `json:"mcp_servers,omitempty"`
 	Custom       map[string]any    `json:"custom,omitempty"`
+	TaskID       string            `json:"task_id,omitempty"`
+	TaskTitle    string            `json:"task_title,omitempty"`
+}
+
+type SessionInputRequest struct {
+	Input string `json:"input"`
 }
 
 type MCPServerConfig struct {

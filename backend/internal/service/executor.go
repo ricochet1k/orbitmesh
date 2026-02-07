@@ -103,6 +103,9 @@ func (e *AgentExecutor) StartSession(ctx context.Context, id string, config prov
 	}
 
 	session := domain.NewSession(id, config.ProviderType, config.WorkingDir)
+	if taskRef := formatTaskReference(config.TaskID, config.TaskTitle); taskRef != "" {
+		session.SetCurrentTask(taskRef)
+	}
 
 	if err := session.TransitionTo(domain.SessionStateStarting, "starting session"); err != nil {
 		return nil, fmt.Errorf("failed to transition to starting: %w", err)
@@ -357,6 +360,18 @@ func (e *AgentExecutor) ListSessions() []*domain.Session {
 	return sessions
 }
 
+func (e *AgentExecutor) SendInput(ctx context.Context, id string, input string) error {
+	e.mu.RLock()
+	sc, exists := e.sessions[id]
+	e.mu.RUnlock()
+
+	if !exists {
+		return ErrSessionNotFound
+	}
+
+	return sc.provider.SendInput(ctx, input)
+}
+
 func (e *AgentExecutor) Shutdown(ctx context.Context) error {
 	e.cancel()
 
@@ -438,4 +453,14 @@ func (e *AgentExecutor) handlePanic(sc *sessionContext, r any) {
 
 	event := domain.NewErrorEvent(sc.session.ID, errMsg, "PANIC")
 	e.broadcaster.Broadcast(event)
+}
+
+func formatTaskReference(id, title string) string {
+	if id == "" {
+		return title
+	}
+	if title == "" {
+		return id
+	}
+	return fmt.Sprintf("%s - %s", id, title)
 }

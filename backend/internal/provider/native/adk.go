@@ -503,6 +503,10 @@ func (p *ADKProvider) Events() <-chan domain.Event {
 	return p.events.Events()
 }
 
+func (p *ADKProvider) SendInput(ctx context.Context, input string) error {
+	return p.RunPrompt(ctx, input)
+}
+
 func (p *ADKProvider) sanitizeError(err error, apiKey string) error {
 	if err == nil || apiKey == "" {
 		return err

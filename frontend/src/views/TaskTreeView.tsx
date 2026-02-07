@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createResource, createSignal, For, Show, onCleanup } from "solid-js";
 import { apiClient } from "../api/client";
-import type { TaskNode, TaskStatus } from "../types/api";
+import type { SessionResponse, TaskNode, TaskStatus } from "../types/api";
 import AgentGraph from "../graph/AgentGraph";
 import { buildTaskGraph } from "../graph/graphData";
 
@@ -16,7 +16,16 @@ const statusLabels: Record<TaskStatus, string> = {
   completed: "Completed",
 };
 
-export default function TaskTreeView() {
+interface TaskTreeViewProps {
+  onNavigate?: (path: string) => void;
+}
+
+const providerOptions = [
+  { value: "adk", label: "Local ADK" },
+  { value: "pty", label: "PTY (Claude)" },
+];
+
+export default function TaskTreeView(props: TaskTreeViewProps) {
   const [treeResponse] = createResource(apiClient.getTaskTree);
   const [treeData, setTreeData] = createSignal<TaskNode[]>([]);
   const [search, setSearch] = createSignal("");
@@ -25,6 +34,10 @@ export default function TaskTreeView() {
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set());
   const [menu, setMenu] = createSignal<ContextMenuState | null>(null);
   const [selectedId, setSelectedId] = createSignal(getInitialTaskId());
+  const [providerType, setProviderType] = createSignal(providerOptions[0]?.value ?? "adk");
+  const [startState, setStartState] = createSignal<"idle" | "starting" | "success" | "error">("idle");
+  const [startError, setStartError] = createSignal<string | null>(null);
+  const [sessionInfo, setSessionInfo] = createSignal<{ taskId: string; session: SessionResponse } | null>(null);
 
   const nodeRefs = new Map<string, HTMLDivElement>();
 
@@ -47,8 +60,16 @@ export default function TaskTreeView() {
     const path = findPath(treeData(), id);
     if (path.length > 0) {
       const next = new Set(expanded());
-      path.forEach((nodeId) => next.add(nodeId));
-      setExpanded(next);
+      let changed = false;
+      path.forEach((nodeId) => {
+        if (!next.has(nodeId)) {
+          next.add(nodeId);
+          changed = true;
+        }
+      });
+      if (changed) {
+        setExpanded(next);
+      }
     }
     const node = nodeRefs.get(id);
     if (node) {
@@ -56,6 +77,16 @@ export default function TaskTreeView() {
         node.scrollIntoView({ block: "center", behavior: "smooth" });
       });
     }
+  });
+
+  createEffect(() => {
+    const id = selectedId();
+    if (!id) return;
+    if (sessionInfo()?.taskId && sessionInfo()?.taskId !== id) {
+      setSessionInfo(null);
+    }
+    setStartError(null);
+    setStartState("idle");
   });
 
   createEffect(() => {
@@ -102,6 +133,7 @@ export default function TaskTreeView() {
   });
 
   const graphData = createMemo(() => buildTaskGraph(treeData()));
+  const selectedTask = createMemo(() => findTaskById(treeData(), selectedId()));
 
   const toggleExpanded = (id: string) => {
     const next = new Set(expanded());
@@ -152,6 +184,34 @@ export default function TaskTreeView() {
     next.add(id);
     setExpanded(next);
     setMenu(null);
+  };
+
+  const startAgent = async () => {
+    const task = selectedTask();
+    if (!task) return;
+    setStartState("starting");
+    setStartError(null);
+    try {
+      const session = await apiClient.createTaskSession({
+        taskId: task.id,
+        taskTitle: task.title,
+        providerType: providerType(),
+      });
+      setSessionInfo({ taskId: task.id, session });
+      setStartState("success");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to start session.";
+      setStartError(message);
+      setStartState("error");
+    }
+  };
+
+  const openSessionViewer = (id: string) => {
+    if (props.onNavigate) {
+      props.onNavigate(`/sessions/${id}`);
+      return;
+    }
+    window.location.assign(`/sessions/${id}`);
   };
 
   return (
@@ -229,6 +289,83 @@ export default function TaskTreeView() {
                 <p class="muted">No tasks match the active filters.</p>
               </Show>
             </div>
+          </Show>
+        </section>
+
+        <section class="task-detail-panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">Task control</p>
+              <h2>Agent Launchpad</h2>
+            </div>
+            <span class="panel-pill neutral">Ready</span>
+          </div>
+          <Show when={!treeResponse.loading && !treeResponse.error} fallback={<p class="muted">Loading task focus...</p>}>
+            <Show when={selectedTask()} fallback={<p class="empty-state">Select a task to start an agent session.</p>}>
+              {(task) => (
+                <div class="task-detail">
+                  <div class="task-detail-card">
+                    <div>
+                      <span>Task</span>
+                      <strong>{task().title}</strong>
+                    </div>
+                    <div>
+                      <span>Task ID</span>
+                      <strong>{task().id}</strong>
+                    </div>
+                    <div>
+                      <span>Role</span>
+                      <strong>{task().role}</strong>
+                    </div>
+                    <div>
+                      <span>Status</span>
+                      <strong class={`task-status ${task().status}`}>{statusLabels[task().status]}</strong>
+                    </div>
+                    <div>
+                      <span>Updated</span>
+                      <strong>{new Date(task().updated_at).toLocaleString()}</strong>
+                    </div>
+                  </div>
+                  <div class="task-start-controls">
+                    <label>
+                      Agent profile
+                      <select value={providerType()} onChange={(event) => setProviderType(event.currentTarget.value)}>
+                        <For each={providerOptions}>
+                          {(option) => <option value={option.value}>{option.label}</option>}
+                        </For>
+                      </select>
+                    </label>
+                    <button type="button" onClick={startAgent} disabled={startState() === "starting"}>
+                      {startState() === "starting" ? "Starting..." : "Start agent"}
+                    </button>
+                  </div>
+                  <Show when={startError()}>
+                    {(message) => <p class="guardrail-banner error">{message()}</p>}
+                  </Show>
+                  <Show
+                    when={sessionInfo() && sessionInfo()?.taskId === task().id ? sessionInfo() : null}
+                  >
+                    {(info) => (
+                      <div class="session-launch-card">
+                        <div>
+                          <p class="muted">Session ready</p>
+                          <strong>{info().session.id}</strong>
+                        </div>
+                        <div class="session-launch-meta">
+                          <span class={`state-badge ${info().session.state}`}>{info().session.state.replace("_", " ")}</span>
+                          <button type="button" onClick={() => openSessionViewer(info().session.id)}>
+                            Open Session Viewer
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </Show>
+                </div>
+              )}
+            </Show>
+          </Show>
+          <Show when={treeResponse.error}>
+            <p class="guardrail-banner error">Unable to load tasks. Check the API connection.</p>
           </Show>
         </section>
 
@@ -349,6 +486,15 @@ function findPath(nodes: TaskNode[], id: string, trail: string[] = []): string[]
     if (childPath.length > 0) return childPath;
   }
   return [];
+}
+
+function findTaskById(nodes: TaskNode[], id: string): TaskNode | null {
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    const childMatch = findTaskById(node.children ?? [], id);
+    if (childMatch) return childMatch;
+  }
+  return null;
 }
 
 function updateNode(nodes: TaskNode[], id: string, updater: (node: TaskNode) => TaskNode): TaskNode[] {

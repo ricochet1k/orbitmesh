@@ -94,6 +94,35 @@ describe("apiClient", () => {
     expect(result).toEqual(mockResponse);
   });
 
+  it("createTaskSession sends task metadata", async () => {
+    const mockResponse = { id: "99", provider_type: "adk", state: "created" };
+
+    (fetch as any).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockResponse)
+    });
+
+    const result = await apiClient.createTaskSession({
+      taskId: "task-9",
+      taskTitle: "Start agent flow",
+      providerType: "adk",
+    });
+
+    expect(fetch).toHaveBeenCalledWith("/api/sessions", expect.objectContaining({
+      method: "POST",
+      headers: expect.objectContaining({
+        "Content-Type": "application/json",
+        "X-CSRF-Token": "test-token"
+      }),
+      body: JSON.stringify({
+        provider_type: "adk",
+        task_id: "task-9",
+        task_title: "Start agent flow"
+      })
+    }));
+    expect(result).toEqual(mockResponse);
+  });
+
   it("getSession fetches single session", async () => {
     const mockResponse = { id: "1", state: "running", metrics: { tokens_in: 0, tokens_out: 0, request_count: 0 } };
 
@@ -168,5 +197,16 @@ describe("apiClient", () => {
     });
 
     await expect(apiClient.listSessions()).rejects.toThrow("Error message");
+  });
+
+  it("prefers JSON error payloads when available", async () => {
+    (fetch as any).mockResolvedValue({
+      ok: false,
+      text: () => Promise.resolve(JSON.stringify({ error: "Unknown provider type" }))
+    });
+
+    await expect(apiClient.createSession({ provider_type: "mystery" } as any)).rejects.toThrow(
+      "Unknown provider type"
+    );
   });
 });

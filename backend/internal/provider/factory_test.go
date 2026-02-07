@@ -10,13 +10,14 @@ import (
 
 type mockProvider struct{}
 
-func (m *mockProvider) Start(ctx context.Context, config Config) error { return nil }
-func (m *mockProvider) Stop(ctx context.Context) error                 { return nil }
-func (m *mockProvider) Pause(ctx context.Context) error                { return nil }
-func (m *mockProvider) Resume(ctx context.Context) error               { return nil }
-func (m *mockProvider) Kill() error                                    { return nil }
-func (m *mockProvider) Status() Status                                 { return Status{} }
-func (m *mockProvider) Events() <-chan domain.Event                    { return nil }
+func (m *mockProvider) Start(ctx context.Context, config Config) error    { return nil }
+func (m *mockProvider) Stop(ctx context.Context) error                    { return nil }
+func (m *mockProvider) Pause(ctx context.Context) error                   { return nil }
+func (m *mockProvider) Resume(ctx context.Context) error                  { return nil }
+func (m *mockProvider) Kill() error                                       { return nil }
+func (m *mockProvider) Status() Status                                    { return Status{} }
+func (m *mockProvider) Events() <-chan domain.Event                       { return nil }
+func (m *mockProvider) SendInput(ctx context.Context, input string) error { return nil }
 
 func TestDefaultFactory_Register(t *testing.T) {
 	factory := NewDefaultFactory()
