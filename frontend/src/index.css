@@ -135,7 +135,7 @@ textarea:focus-visible {
   background: var(--surface-2);
   color: var(--ink-1);
   padding: 0.4rem 0.8rem;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border-strong);
   z-index: 20;
 }
@@ -1224,6 +1224,11 @@ tbody tr:hover {
   transition: all var(--motion-fast) var(--easing-standard);
 }
 
+.session-actions button:hover {
+  border-color: rgba(37, 99, 235, 0.3);
+  color: var(--ink-1);
+}
+
 .session-actions button:disabled {
   opacity: 0.4;
   cursor: default;
@@ -1267,49 +1272,49 @@ tbody tr:hover {
 .settings-layout {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 1.6rem;
-  padding: 2rem 2.75rem 3.5rem;
+  gap: 1.2rem;
+  padding: 1.5rem 1.75rem 2.5rem;
   align-items: start;
 }
 
 .session-list-panel,
 .session-detail-panel,
 .placeholder-panel {
-  border-radius: 20px;
-  padding: 1.6rem;
+  border-radius: var(--radius-5);
+  padding: 1.2rem;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  box-shadow: var(--shadow);
-  animation: rise 520ms ease;
+  box-shadow: var(--shadow-2);
+  animation: rise var(--motion-slow) var(--easing-standard);
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .session-list {
   display: grid;
-  gap: 0.9rem;
+  gap: 0.65rem;
 }
 
 .session-card {
-  border-radius: 16px;
+  border-radius: var(--radius-3);
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.95);
   display: grid;
-  gap: 0.6rem;
-  padding: 0.9rem;
+  gap: 0.45rem;
+  padding: 0.75rem;
 }
 
 .session-card.active {
-  border-color: rgba(15, 118, 110, 0.35);
-  background: rgba(15, 118, 110, 0.08);
+  border-color: rgba(37, 99, 235, 0.35);
+  background: rgba(37, 99, 235, 0.08);
 }
 
 .session-card-main {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 0.8rem;
+  gap: 0.6rem;
   background: transparent;
   border: none;
   text-align: left;
@@ -1325,7 +1330,7 @@ tbody tr:hover {
 .session-card-meta {
   display: grid;
   justify-items: end;
-  gap: 0.3rem;
+  gap: 0.2rem;
 }
 
 .session-card-actions {
@@ -1334,29 +1339,43 @@ tbody tr:hover {
 }
 
 .session-card-actions button {
-  border: 1px solid rgba(15, 118, 110, 0.35);
-  background: rgba(15, 118, 110, 0.12);
-  color: #0f766e;
-  padding: 0.35rem 0.8rem;
-  border-radius: 999px;
-  font-size: 0.8rem;
+  border: 1px solid rgba(37, 99, 235, 0.35);
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
   cursor: pointer;
+}
+
+.session-card-actions button:hover {
+  border-color: rgba(37, 99, 235, 0.5);
+  color: var(--ink-1);
 }
 
 .session-preview {
   display: grid;
-  gap: 0.8rem;
+  gap: 0.6rem;
 }
 
 .session-preview button {
   border: none;
-  background: linear-gradient(135deg, #0f766e, #1e3a8a);
+  background: linear-gradient(135deg, #2563eb, #0ea5e9);
   color: white;
-  padding: 0.5rem 0.9rem;
-  border-radius: 999px;
+  padding: 0.4rem 0.8rem;
+  border-radius: var(--radius-pill);
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
   width: fit-content;
+}
+
+.session-preview button:hover {
+  box-shadow: var(--shadow-2);
+  transform: translateY(-1px);
 }
 
 .session-panel {
@@ -1397,6 +1416,11 @@ tbody tr:hover {
   cursor: pointer;
   text-transform: uppercase;
   letter-spacing: 0.1em;
+}
+
+.panel-tools button:hover {
+  border-color: rgba(37, 99, 235, 0.3);
+  color: var(--ink-1);
 }
 
 .transcript {
@@ -1509,7 +1533,7 @@ tbody tr:hover {
 .terminal-dot {
   width: 10px;
   height: 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: #38bdf8;
 }
 
