@@ -1,5 +1,0 @@
-[     194ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:3000/api/v1/commits?limit=30:0
-[     195ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:3000/api/v1/tasks/tree:0
-[     195ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:3000/api/v1/tasks/tree:0
-[     204ms] Error: Request failed.
-    at getTaskTree (http://127.0.0.1:3000/src/api/client.ts:93:25)

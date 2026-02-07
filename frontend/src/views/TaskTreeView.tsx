@@ -206,13 +206,19 @@ export default function TaskTreeView(props: TaskTreeViewProps) {
     }
   };
 
-  const openSessionViewer = (id: string) => {
-    if (props.onNavigate) {
-      props.onNavigate(`/sessions/${id}`);
-      return;
-    }
-    window.location.assign(`/sessions/${id}`);
-  };
+   const openSessionViewer = (id: string) => {
+     if (props.onNavigate) {
+       props.onNavigate(`/sessions/${id}`);
+       return;
+     }
+     window.location.assign(`/sessions/${id}`);
+   };
+
+   const dismissSessionInfo = () => {
+     setSessionInfo(null);
+     setStartState("idle");
+     setStartError(null);
+   };
 
   return (
     <div class="task-tree-view">
@@ -342,24 +348,27 @@ export default function TaskTreeView(props: TaskTreeViewProps) {
                   <Show when={startError()}>
                     {(message) => <p class="guardrail-banner error">{message()}</p>}
                   </Show>
-                  <Show
-                    when={sessionInfo() && sessionInfo()?.taskId === task().id ? sessionInfo() : null}
-                  >
-                    {(info) => (
-                      <div class="session-launch-card">
-                        <div>
-                          <p class="muted">Session ready</p>
-                          <strong>{info().session.id}</strong>
-                        </div>
-                        <div class="session-launch-meta">
-                          <span class={`state-badge ${info().session.state}`}>{info().session.state.replace("_", " ")}</span>
-                          <button type="button" onClick={() => openSessionViewer(info().session.id)}>
-                            Open Session Viewer
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </Show>
+                   <Show
+                     when={sessionInfo() && sessionInfo()?.taskId === task().id ? sessionInfo() : null}
+                   >
+                     {(info) => (
+                       <div class="session-launch-card">
+                         <div>
+                           <p class="muted">Session ready</p>
+                           <strong>{info().session.id}</strong>
+                         </div>
+                         <div class="session-launch-meta">
+                           <span class={`state-badge ${info().session.state}`}>{info().session.state.replace("_", " ")}</span>
+                           <button type="button" onClick={() => openSessionViewer(info().session.id)}>
+                             Open Session Viewer
+                           </button>
+                           <button type="button" class="neutral" onClick={dismissSessionInfo} title="Dismiss">
+                             ✕
+                           </button>
+                         </div>
+                       </div>
+                     )}
+                   </Show>
                 </div>
               )}
             </Show>

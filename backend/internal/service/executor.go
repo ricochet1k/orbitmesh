@@ -149,7 +149,9 @@ func (e *AgentExecutor) runSessionLoop(ctx context.Context, sc *sessionContext, 
 	startCancel()
 
 	if err != nil {
-		e.transitionWithSave(sc, domain.SessionStateError, fmt.Sprintf("start failed: %v", err))
+		errMsg := fmt.Sprintf("start failed: %v", err)
+		sc.session.SetError(errMsg)
+		e.transitionWithSave(sc, domain.SessionStateError, errMsg)
 		return
 	}
 

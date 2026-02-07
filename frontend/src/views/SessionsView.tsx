@@ -112,31 +112,39 @@ export default function SessionsView(props: SessionsViewProps) {
             </div>
             <span class="panel-pill neutral">Preview</span>
           </div>
-          <Show when={selectedSession()} fallback={<p class="empty-state">Select a session to preview.</p>}>
-            {(session) => (
-              <div class="session-preview">
-                <div>
-                  <p class="muted">Session ID</p>
-                  <strong>{session().id}</strong>
-                </div>
-                <div>
-                  <p class="muted">State</p>
-                  <strong>{session().state.replace("_", " ")}</strong>
-                </div>
-                <div>
-                  <p class="muted">Provider</p>
-                  <strong>{session().provider_type}</strong>
-                </div>
-                <div>
-                  <p class="muted">Task</p>
-                  <strong>{session().current_task || "None"}</strong>
-                </div>
-                <button type="button" onClick={() => handleInspect(session().id)}>
-                  Open full viewer
-                </button>
-              </div>
-            )}
-          </Show>
+           <Show when={selectedSession()} fallback={<p class="empty-state">Select a session to preview.</p>}>
+             {(session) => (
+               <div class="session-preview">
+                 <div>
+                   <p class="muted">Session ID</p>
+                   <strong>{session().id}</strong>
+                 </div>
+                 <div>
+                   <p class="muted">State</p>
+                   <strong>{session().state.replace("_", " ")}</strong>
+                 </div>
+                 <div>
+                   <p class="muted">Provider</p>
+                   <strong>{session().provider_type}</strong>
+                 </div>
+                 <div>
+                   <p class="muted">Task</p>
+                   <strong>{session().current_task || "None"}</strong>
+                 </div>
+                 <Show when={session().error_message}>
+                   {(errorMsg) => (
+                     <div class="session-error">
+                       <p class="muted">Error</p>
+                       <strong style="color: var(--color-error, red)">{errorMsg()}</strong>
+                     </div>
+                   )}
+                 </Show>
+                 <button type="button" onClick={() => handleInspect(session().id)}>
+                   Open full viewer
+                 </button>
+               </div>
+             )}
+           </Show>
         </section>
       </main>
     </div>

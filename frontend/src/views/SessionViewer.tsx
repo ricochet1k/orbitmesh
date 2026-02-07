@@ -407,11 +407,14 @@ export default function SessionViewer(props: SessionViewerProps) {
           </a>
         </p>
       </Show>
-      <Show when={actionNotice()}>
-        {(notice) => <p class={`guardrail-banner ${notice().tone}`}>{notice().message}</p>}
-      </Show>
+       <Show when={actionNotice()}>
+         {(notice) => <p class={`guardrail-banner ${notice().tone}`}>{notice().message}</p>}
+       </Show>
+       <Show when={session()?.error_message}>
+         {(errorMsg) => <p class="guardrail-banner error">Session error: {errorMsg()}</p>}
+       </Show>
 
-      <main class="session-layout">
+       <main class="session-layout">
         <section class="session-panel">
           <div class="panel-header">
             <div>

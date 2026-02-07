@@ -1,7 +1,0 @@
-[     651ms] [ERROR] Failed to load resource: the server responded with a status of 405 (Method Not Allowed) @ http://127.0.0.1:3003/api/sessions:0
-[     666ms] Error: Request failed.
-    at listSessions (http://127.0.0.1:3003/src/api/client.ts:38:25)
-[     683ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:3003/favicon.ico:0
-[   71544ms] [ERROR] Failed to load resource: the server responded with a status of 405 (Method Not Allowed) @ http://127.0.0.1:3003/api/sessions:0
-[   71545ms] Error: Request failed.
-    at listSessions (http://127.0.0.1:3003/src/api/client.ts:38:25)
