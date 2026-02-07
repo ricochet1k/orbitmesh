@@ -33,6 +33,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/v1/tasks/tree", h.tasksTree)
 	r.Get("/api/v1/commits", h.listCommits)
 	r.Get("/api/v1/commits/{sha}", h.getCommit)
+	r.Get("/api/sessions", h.listSessions)
 	r.Post("/api/sessions", h.createSession)
 	r.Get("/api/sessions/{id}", h.getSession)
 	r.Delete("/api/sessions/{id}", h.stopSession)
@@ -126,6 +127,21 @@ func (h *Handler) getSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = json.NewEncoder(w).Encode(sessionToStatusResponse(snap, status))
+}
+
+func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
+	sessions := h.executor.ListSessions()
+
+	responses := make([]apiTypes.SessionResponse, len(sessions))
+	for i, session := range sessions {
+		responses[i] = sessionToResponse(session.Snapshot())
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(apiTypes.SessionListResponse{
+		Sessions: responses,
+	})
 }
 
 func (h *Handler) stopSession(w http.ResponseWriter, r *http.Request) {
