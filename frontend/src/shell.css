@@ -4,10 +4,19 @@
   grid-template-columns: minmax(220px, 260px) 1fr;
 }
 
+.app-layout {
+  display: flex;
+  flex-direction: row;
+  min-height: 100vh;
+  min-width: 0;
+}
+
 .app-main {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-height: 100vh;
+  min-width: 0;
 }
 
 .app-content {
@@ -300,11 +309,26 @@
   width: fit-content;
 }
 
+/* Tablet layout - dock below main content */
+@media (max-width: 1199px) and (min-width: 800px) {
+  .app-layout {
+    flex-direction: column;
+  }
+
+  .app-main {
+    flex: 1;
+  }
+}
+
 /* Mobile responsive - Stack sidebar above content */
 @media (max-width: 1024px) {
   .app-shell {
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr;
+  }
+
+  .app-layout {
+    flex-direction: column;
   }
 
   .sidebar {

@@ -14,6 +14,7 @@ import TerminalView from "../components/TerminalView";
 interface SessionViewerProps {
   sessionId: string;
   onNavigate?: (path: string) => void;
+  onDockSession?: (sessionId: string) => void;
 }
 
 interface TranscriptMessage {
@@ -42,6 +43,13 @@ export default function SessionViewer(props: SessionViewerProps) {
   );
   const [pendingAction, setPendingAction] = createSignal<"pause" | "resume" | "stop" | null>(null);
   let transcriptRef: HTMLDivElement | undefined;
+
+  // Notify parent when session changes
+  createEffect(() => {
+    if (props.onDockSession && props.sessionId) {
+      props.onDockSession(props.sessionId);
+    }
+  });
 
   const sessionState = () => session()?.state ?? "created";
   const providerType = () => session()?.provider_type ?? "";

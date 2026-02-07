@@ -11,6 +11,7 @@
 @import "./styles/components/button.css";
 @import "./styles/components/input.css";
 @import "./styles/components/card.css";
+@import "./styles/components/agent-dock.css";
 
 /* Animation & motion primitives */
 @import "./styles/animations.css";

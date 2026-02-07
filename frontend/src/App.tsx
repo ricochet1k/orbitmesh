@@ -6,12 +6,14 @@ import SessionViewer from "./views/SessionViewer";
 import SessionsView from "./views/SessionsView";
 import SettingsView from "./views/SettingsView";
 import Sidebar from "./components/Sidebar";
+import AgentDock from "./components/AgentDock";
 import { apiClient } from "./api/client";
 
 export default function App() {
   const [path, setPath] = createSignal(getInitialPath());
   const [taskTree] = createResource(apiClient.getTaskTree);
   const [commitList] = createResource(() => apiClient.listCommits(30));
+  const [dockSessionId, setDockSessionId] = createSignal<string>("");
 
   createEffect(() => {
     const onPopState = () => setPath(window.location.pathname);
@@ -151,71 +153,75 @@ export default function App() {
       <a class="skip-link" href="#main-content">Skip to content</a>
       <Sidebar currentPath={path()} onNavigate={navigate} navItems={navItems} />
 
-      <div class="app-main">
-        <header class="top-bar">
-          <nav class="breadcrumbs" aria-label="Breadcrumb">
-            <ol>
-              <For each={breadcrumbs()}>
-                {(crumb, index) => (
-                  <li>
-                    <Show
-                      when={index() < breadcrumbs().length - 1}
-                      fallback={<span aria-current="page">{crumb.label}</span>}
-                    >
-                      <a href={crumb.href} onClick={(event) => handleNavClick(event, crumb.href)}>
-                        {crumb.label}
-                      </a>
-                    </Show>
-                  </li>
-                )}
-              </For>
-            </ol>
-          </nav>
-          <div class="top-bar-meta">
-            <div>
-              <p class="top-bar-kicker">{routeMeta().section}</p>
-              <h2>{routeMeta().title}</h2>
-            </div>
-            <p class="top-bar-subtitle">{routeMeta().subtitle}</p>
-          </div>
-        </header>
-
-        <main id="main-content" class="app-content">
-          <Show
-            when={path().startsWith("/sessions/") && sessionId()}
-            fallback={
-              <Show
-                when={path().startsWith("/sessions")}
-                fallback={
-                  <Show
-                    when={path().startsWith("/tasks")}
-                    fallback={
+      <div class="app-layout">
+        <div class="app-main">
+          <header class="top-bar">
+            <nav class="breadcrumbs" aria-label="Breadcrumb">
+              <ol>
+                <For each={breadcrumbs()}>
+                  {(crumb, index) => (
+                    <li>
                       <Show
-                        when={path().startsWith("/settings")}
-                        fallback={
-                          <Show
-                            when={path().startsWith("/history/commits")}
-                            fallback={<Dashboard taskTree={tasks()} commits={commits()} onNavigate={navigate} />}
-                          >
-                            <CommitHistoryView />
-                          </Show>
-                        }
+                        when={index() < breadcrumbs().length - 1}
+                        fallback={<span aria-current="page">{crumb.label}</span>}
                       >
-                        <SettingsView />
+                        <a href={crumb.href} onClick={(event) => handleNavClick(event, crumb.href)}>
+                          {crumb.label}
+                        </a>
                       </Show>
-                    }
-                  >
-                    <TaskTreeView onNavigate={navigate} />
-                  </Show>
-                }
-              >
-                <SessionsView onNavigate={navigate} />
-              </Show>
-            }
-          >
-            <SessionViewer sessionId={sessionId()} onNavigate={navigate} />
-          </Show>
-        </main>
+                    </li>
+                  )}
+                </For>
+              </ol>
+            </nav>
+            <div class="top-bar-meta">
+              <div>
+                <p class="top-bar-kicker">{routeMeta().section}</p>
+                <h2>{routeMeta().title}</h2>
+              </div>
+              <p class="top-bar-subtitle">{routeMeta().subtitle}</p>
+            </div>
+          </header>
+
+          <main id="main-content" class="app-content">
+            <Show
+              when={path().startsWith("/sessions/") && sessionId()}
+              fallback={
+                <Show
+                  when={path().startsWith("/sessions")}
+                  fallback={
+                    <Show
+                      when={path().startsWith("/tasks")}
+                      fallback={
+                        <Show
+                          when={path().startsWith("/settings")}
+                          fallback={
+                            <Show
+                              when={path().startsWith("/history/commits")}
+                              fallback={<Dashboard taskTree={tasks()} commits={commits()} onNavigate={navigate} />}
+                            >
+                              <CommitHistoryView />
+                            </Show>
+                          }
+                        >
+                          <SettingsView />
+                        </Show>
+                      }
+                    >
+                      <TaskTreeView onNavigate={navigate} />
+                    </Show>
+                  }
+                >
+                  <SessionsView onNavigate={navigate} />
+                </Show>
+              }
+            >
+              <SessionViewer sessionId={sessionId()} onNavigate={navigate} onDockSession={setDockSessionId} />
+            </Show>
+          </main>
+        </div>
+
+        <AgentDock sessionId={dockSessionId()} onNavigate={navigate} />
       </div>
     </div>
   );
