@@ -1,4 +1,4 @@
-import { defineConfig } from "@playwright/test";
+import { defineConfig, devices } from "@playwright/test";
 
 const port = 3000;
 
@@ -14,6 +14,28 @@ export default defineConfig({
     screenshot: "only-on-failure",
     video: "retain-on-failure",
   },
+  projects: [
+    {
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "firefox",
+      use: { ...devices["Desktop Firefox"] },
+    },
+    {
+      name: "webkit",
+      use: { ...devices["Desktop Safari"] },
+    },
+    {
+      name: "iPad",
+      use: { ...devices["iPad"] },
+    },
+    {
+      name: "iPhone 12",
+      use: { ...devices["iPhone 12"] },
+    },
+  ],
   webServer: {
     command: `pnpm dev -- --host 127.0.0.1 --port ${port}`,
     url: `http://127.0.0.1:${port}`,
