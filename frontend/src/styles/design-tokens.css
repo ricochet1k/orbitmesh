@@ -1,0 +1,513 @@
+/**
+ * Design Tokens - Visual Language System
+ * 
+ * This file defines the comprehensive design token system for the OrbitMesh UI.
+ * Organized by category for maintainability and scalability.
+ * 
+ * Categories:
+ * - Color Palette (neutrals, status colors, semantic colors)
+ * - Typography Scale (font families, sizes, weights, line heights)
+ * - Spacing Scale (consistent spacing increments)
+ * - Border Radii (component shape tokens)
+ * - Shadows (elevation levels)
+ * - Motion (transitions and animations)
+ * - Component-specific tokens
+ */
+
+:root {
+  /* ========================================
+     COLOR PALETTE
+     ======================================== */
+  
+  /* Neutral Colors - Text and UI Elements */
+  --color-neutral-50: #f9fafb;
+  --color-neutral-100: #f3f4f6;
+  --color-neutral-200: #e5e7eb;
+  --color-neutral-300: #d1d5db;
+  --color-neutral-400: #9ca3af;
+  --color-neutral-500: #6b7280;
+  --color-neutral-600: #4b5563;
+  --color-neutral-700: #374151;
+  --color-neutral-800: #1f2937;
+  --color-neutral-900: #111827;
+  --color-neutral-950: #0b1220;
+
+  /* Primary Accent - Blueprint/Blue */
+  --color-primary: #2563eb;
+  --color-primary-light: #3b82f6;
+  --color-primary-lighter: #60a5fa;
+  --color-primary-dark: #1d4ed8;
+  --color-primary-darker: #1e40af;
+  
+  /* Secondary Accent - Cyan/Sky */
+  --color-secondary: #0ea5e9;
+  --color-secondary-light: #06b6d4;
+  --color-secondary-lighter: #22d3ee;
+  --color-secondary-dark: #0284c7;
+  
+  /* Status Colors */
+  --color-success: #0f766e;
+  --color-success-light: #14b8a6;
+  --color-warning: #b45309;
+  --color-warning-light: #d97706;
+  --color-error: #b91c1c;
+  --color-error-light: #dc2626;
+  --color-info: #0284c7;
+  --color-info-light: #0ea5e9;
+
+  /* Surface Colors - Backgrounds */
+  --color-surface-0: #ffffff;
+  --color-surface-1: #f9fafb;
+  --color-surface-2: #f4f6f9;
+  --color-surface-3: #e9eef5;
+  --color-surface-4: #111827;
+
+  /* Text/Ink Colors */
+  --color-text-primary: #0b1220;
+  --color-text-secondary: #1f2937;
+  --color-text-tertiary: #556070;
+  --color-text-disabled: #9ca3af;
+  --color-text-inverse: #f9fafb;
+
+  /* Border Colors */
+  --color-border: #d6dbe3;
+  --color-border-strong: #b9c1cd;
+  --color-border-subtle: #e5e7eb;
+
+  /* ========================================
+     SEMANTIC COLOR TOKENS
+     ======================================== */
+  
+  --color-background: var(--color-surface-2);
+  --color-background-alt: var(--color-surface-1);
+  --color-foreground: var(--color-text-primary);
+  --color-foreground-secondary: var(--color-text-secondary);
+  --color-accent: var(--color-primary);
+  --color-accent-secondary: var(--color-secondary);
+  --color-interactive-hover: rgba(37, 99, 235, 0.08);
+  --color-interactive-active: rgba(37, 99, 235, 0.12);
+  --color-interactive-disabled: rgba(11, 18, 32, 0.4);
+
+  /* ========================================
+     TYPOGRAPHY SCALE
+     ======================================== */
+  
+  /* Font Families */
+  --font-family-sans: "IBM Plex Sans", "Segoe UI", "Helvetica Neue", sans-serif;
+  --font-family-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+  --font-family-display: "IBM Plex Sans", serif;
+
+  /* Font Sizes */
+  --font-size-xs: 0.75rem;     /* 12px */
+  --font-size-sm: 0.875rem;    /* 14px */
+  --font-size-base: 1rem;      /* 16px */
+  --font-size-lg: 1.125rem;    /* 18px */
+  --font-size-xl: 1.25rem;     /* 20px */
+  --font-size-2xl: 1.5rem;     /* 24px */
+  --font-size-3xl: 1.875rem;   /* 30px */
+  --font-size-4xl: 2.25rem;    /* 36px */
+  --font-size-5xl: 3rem;       /* 48px */
+
+  /* Font Weights */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Line Heights */
+  --line-height-tight: 1.25;
+  --line-height-snug: 1.375;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.625;
+  --line-height-loose: 2;
+
+  /* Heading Styles */
+  --heading-h1-size: var(--font-size-4xl);
+  --heading-h1-weight: var(--font-weight-bold);
+  --heading-h1-line-height: var(--line-height-tight);
+  
+  --heading-h2-size: var(--font-size-3xl);
+  --heading-h2-weight: var(--font-weight-semibold);
+  --heading-h2-line-height: var(--line-height-snug);
+  
+  --heading-h3-size: var(--font-size-2xl);
+  --heading-h3-weight: var(--font-weight-semibold);
+  --heading-h3-line-height: var(--line-height-snug);
+  
+  --heading-h4-size: var(--font-size-xl);
+  --heading-h4-weight: var(--font-weight-semibold);
+  --heading-h4-line-height: var(--line-height-normal);
+
+  /* Body Text */
+  --body-text-size: var(--font-size-sm);
+  --body-text-weight: var(--font-weight-normal);
+  --body-text-line-height: var(--line-height-relaxed);
+
+  /* Label Text */
+  --label-text-size: var(--font-size-xs);
+  --label-text-weight: var(--font-weight-medium);
+  --label-text-line-height: var(--line-height-tight);
+
+  /* Code/Monospace */
+  --code-text-size: var(--font-size-xs);
+  --code-text-weight: var(--font-weight-normal);
+  --code-text-line-height: var(--line-height-normal);
+
+  /* ========================================
+     SPACING SCALE (8px Base)
+     ======================================== */
+  
+  --space-0: 0;
+  --space-1: 0.25rem;   /* 4px */
+  --space-2: 0.5rem;    /* 8px */
+  --space-3: 0.75rem;   /* 12px */
+  --space-4: 1rem;      /* 16px */
+  --space-5: 1.25rem;   /* 20px */
+  --space-6: 1.5rem;    /* 24px */
+  --space-7: 2rem;      /* 32px */
+  --space-8: 2.5rem;    /* 40px */
+  --space-9: 3rem;      /* 48px */
+  --space-10: 3.5rem;   /* 56px */
+  --space-12: 4rem;     /* 64px */
+  --space-16: 5rem;     /* 80px */
+
+  /* Padding Helpers */
+  --padding-xs: var(--space-2);
+  --padding-sm: var(--space-3);
+  --padding-md: var(--space-4);
+  --padding-lg: var(--space-6);
+  --padding-xl: var(--space-8);
+
+  /* Gap Helpers */
+  --gap-xs: var(--space-2);
+  --gap-sm: var(--space-3);
+  --gap-md: var(--space-4);
+  --gap-lg: var(--space-6);
+  --gap-xl: var(--space-8);
+
+  /* ========================================
+     BORDER RADIUS
+     ======================================== */
+  
+  --radius-none: 0;
+  --radius-sm: 0.125rem;   /* 2px */
+  --radius-md: 0.25rem;    /* 4px */
+  --radius-lg: 0.5rem;     /* 8px */
+  --radius-xl: 0.75rem;    /* 12px */
+  --radius-2xl: 1rem;      /* 16px */
+  --radius-3xl: 1.5rem;    /* 24px */
+  --radius-pill: 9999px;
+
+  /* Component-specific Radii */
+  --border-radius-button: var(--radius-2xl);
+  --border-radius-card: var(--radius-2xl);
+  --border-radius-input: var(--radius-md);
+  --border-radius-small: var(--radius-sm);
+
+  /* ========================================
+     SHADOWS (Elevation Levels)
+     ======================================== */
+  
+  /* Base shadow - used for subtle elevation */
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08);
+  
+  /* Level 1 - Card/Panel default */
+  --shadow-1: 0 1px 2px rgba(15, 23, 42, 0.08);
+  
+  /* Level 2 - Medium elevation (hover states, modals) */
+  --shadow-2: 0 8px 18px rgba(15, 23, 42, 0.12);
+  
+  /* Level 3 - High elevation (dropdowns, overlays) */
+  --shadow-3: 0 22px 45px rgba(15, 23, 42, 0.18);
+  
+  /* Level 4 - Highest elevation (critical modals, popovers) */
+  --shadow-4: 0 32px 64px rgba(15, 23, 42, 0.24);
+
+  /* Color-based shadows for semantic emphasis */
+  --shadow-success: 0 4px 12px rgba(15, 118, 110, 0.15);
+  --shadow-warning: 0 4px 12px rgba(180, 83, 9, 0.15);
+  --shadow-error: 0 4px 12px rgba(185, 28, 28, 0.15);
+  --shadow-info: 0 4px 12px rgba(37, 99, 235, 0.15);
+
+  /* ========================================
+     FOCUS & INTERACTION STATES
+     ======================================== */
+  
+  --focus-outline-width: 2px;
+  --focus-outline-color: var(--color-primary);
+  --focus-outline-offset: 2px;
+  --focus-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+  
+  --focus-ring: rgba(37, 99, 235, 0.6);
+  --focus-shadow-rgb: 37, 99, 235;
+
+  /* ========================================
+     MOTION & ANIMATION
+     ======================================== */
+  
+  /* Duration */
+  --duration-instant: 0ms;
+  --duration-fast: 120ms;
+  --duration-normal: 200ms;
+  --duration-medium: 300ms;
+  --duration-slow: 360ms;
+  --duration-slower: 500ms;
+  --duration-slowest: 700ms;
+
+  /* Easing Functions */
+  --easing-linear: linear;
+  --easing-in: cubic-bezier(0.4, 0, 1, 1);
+  --easing-out: cubic-bezier(0, 0, 0.2, 1);
+  --easing-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --easing-emphasized: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --easing-decelerate: cubic-bezier(0, 0, 0.2, 1);
+  --easing-accelerate: cubic-bezier(0.4, 0, 1, 1);
+
+  /* Transition Presets */
+  --transition-fast: all var(--duration-fast) var(--easing-standard);
+  --transition-normal: all var(--duration-normal) var(--easing-standard);
+  --transition-slow: all var(--duration-slow) var(--easing-standard);
+
+  /* ========================================
+     COMPONENT-SPECIFIC TOKENS
+     ======================================== */
+
+  /* Button */
+  --button-padding-sm: var(--space-2) var(--space-3);
+  --button-padding-md: var(--space-3) var(--space-4);
+  --button-padding-lg: var(--space-4) var(--space-6);
+  --button-border-radius: var(--border-radius-button);
+  --button-font-weight: var(--font-weight-semibold);
+  --button-font-size: var(--font-size-sm);
+  --button-transition: var(--transition-fast);
+
+  /* Input */
+  --input-padding: var(--space-2) var(--space-3);
+  --input-border-radius: var(--border-radius-input);
+  --input-border-width: 1px;
+  --input-border-color: var(--color-border);
+  --input-font-size: var(--font-size-sm);
+  --input-transition: var(--transition-fast);
+
+  /* Card/Panel */
+  --card-padding: var(--space-6);
+  --card-border-radius: var(--border-radius-card);
+  --card-border-width: 1px;
+  --card-border-color: var(--color-border);
+  --card-background: var(--color-surface-0);
+  --card-shadow: var(--shadow-1);
+
+  /* Badge */
+  --badge-padding: var(--space-1) var(--space-3);
+  --badge-border-radius: var(--radius-pill);
+  --badge-font-size: var(--font-size-xs);
+  --badge-font-weight: var(--font-weight-semibold);
+
+  /* Overlay/Modal */
+  --overlay-background: rgba(11, 18, 32, 0.6);
+  --overlay-backdrop-filter: blur(4px);
+
+  /* ========================================
+     LEGACY/COMPATIBILITY TOKENS
+     ======================================== */
+
+  /* These maintain backward compatibility with existing CSS */
+  --ink-1: var(--color-text-primary);
+  --ink-2: var(--color-text-secondary);
+  --ink-3: var(--color-text-tertiary);
+  --surface-1: var(--color-surface-2);
+  --surface-2: var(--color-surface-0);
+  --surface-3: var(--color-surface-3);
+  --surface-4: var(--color-surface-4);
+  --border: var(--color-border);
+  --border-strong: var(--color-border-strong);
+  --accent-1: var(--color-primary);
+  --accent-2: var(--color-secondary);
+  --accent-3: var(--color-success);
+  --success: var(--color-success);
+  --warning: var(--color-warning);
+  --danger: var(--color-error);
+  --motion-fast: var(--duration-fast);
+  --motion-medium: var(--duration-normal);
+  --motion-slow: var(--duration-slow);
+  --font-sans: var(--font-family-sans);
+  --font-mono: var(--font-family-mono);
+
+  /* Graph tokens */
+  --graph-agent: var(--color-success);
+  --graph-task: var(--color-primary);
+  --graph-commit: var(--color-warning);
+  --graph-link: rgba(30, 41, 59, 0.35);
+  --graph-text: var(--color-text-secondary);
+  --graph-stroke: var(--color-neutral-50);
+  --graph-selected: var(--color-text-primary);
+}
+
+/* ========================================
+   DARK MODE SUPPORT (Optional)
+   ======================================== */
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-background: var(--color-neutral-900);
+    --color-background-alt: var(--color-neutral-950);
+    --color-foreground: var(--color-neutral-50);
+    --color-foreground-secondary: var(--color-neutral-200);
+    --color-surface-0: var(--color-neutral-900);
+    --color-surface-1: var(--color-neutral-950);
+    --color-text-primary: var(--color-neutral-50);
+    --color-text-secondary: var(--color-neutral-200);
+    --color-text-tertiary: var(--color-neutral-400);
+  }
+}
+
+/* ========================================
+   UTILITY CLASSES
+   ======================================== */
+
+/**
+ * Text Utilities - Typography
+ */
+.text-h1 {
+  font-size: var(--heading-h1-size);
+  font-weight: var(--heading-h1-weight);
+  line-height: var(--heading-h1-line-height);
+}
+
+.text-h2 {
+  font-size: var(--heading-h2-size);
+  font-weight: var(--heading-h2-weight);
+  line-height: var(--heading-h2-line-height);
+}
+
+.text-h3 {
+  font-size: var(--heading-h3-size);
+  font-weight: var(--heading-h3-weight);
+  line-height: var(--heading-h3-line-height);
+}
+
+.text-h4 {
+  font-size: var(--heading-h4-size);
+  font-weight: var(--heading-h4-weight);
+  line-height: var(--heading-h4-line-height);
+}
+
+.text-body {
+  font-size: var(--body-text-size);
+  font-weight: var(--body-text-weight);
+  line-height: var(--body-text-line-height);
+}
+
+.text-label {
+  font-size: var(--label-text-size);
+  font-weight: var(--label-text-weight);
+  line-height: var(--label-text-line-height);
+}
+
+.text-code {
+  font-family: var(--font-family-mono);
+  font-size: var(--code-text-size);
+  font-weight: var(--code-text-weight);
+  line-height: var(--code-text-line-height);
+}
+
+/**
+ * Color Utilities
+ */
+.text-primary {
+  color: var(--color-text-primary);
+}
+
+.text-secondary {
+  color: var(--color-text-secondary);
+}
+
+.text-tertiary {
+  color: var(--color-text-tertiary);
+}
+
+.text-accent {
+  color: var(--color-accent);
+}
+
+.text-success {
+  color: var(--color-success);
+}
+
+.text-warning {
+  color: var(--color-warning);
+}
+
+.text-error {
+  color: var(--color-error);
+}
+
+/**
+ * Background Utilities
+ */
+.bg-primary {
+  background-color: var(--color-primary);
+}
+
+.bg-surface {
+  background-color: var(--color-surface-0);
+}
+
+.bg-surface-alt {
+  background-color: var(--color-surface-1);
+}
+
+.bg-success {
+  background-color: var(--color-success);
+}
+
+.bg-warning {
+  background-color: var(--color-warning);
+}
+
+.bg-error {
+  background-color: var(--color-error);
+}
+
+/**
+ * Spacing Utilities
+ */
+.p-xs { padding: var(--padding-xs); }
+.p-sm { padding: var(--padding-sm); }
+.p-md { padding: var(--padding-md); }
+.p-lg { padding: var(--padding-lg); }
+.p-xl { padding: var(--padding-xl); }
+
+.gap-xs { gap: var(--gap-xs); }
+.gap-sm { gap: var(--gap-sm); }
+.gap-md { gap: var(--gap-md); }
+.gap-lg { gap: var(--gap-lg); }
+.gap-xl { gap: var(--gap-xl); }
+
+/**
+ * Border Radius Utilities
+ */
+.rounded-sm { border-radius: var(--radius-sm); }
+.rounded-md { border-radius: var(--radius-md); }
+.rounded-lg { border-radius: var(--radius-lg); }
+.rounded-xl { border-radius: var(--radius-xl); }
+.rounded-2xl { border-radius: var(--radius-2xl); }
+.rounded-pill { border-radius: var(--radius-pill); }
+
+/**
+ * Shadow Utilities
+ */
+.shadow-none { box-shadow: none; }
+.shadow-sm { box-shadow: var(--shadow-1); }
+.shadow-md { box-shadow: var(--shadow-2); }
+.shadow-lg { box-shadow: var(--shadow-3); }
+.shadow-xl { box-shadow: var(--shadow-4); }
+
+/**
+ * Transition Utilities
+ */
+.transition-fast { transition: var(--transition-fast); }
+.transition-normal { transition: var(--transition-normal); }
+.transition-slow { transition: var(--transition-slow); }

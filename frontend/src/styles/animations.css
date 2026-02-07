@@ -1,0 +1,549 @@
+/**
+ * Animation & Motion Primitives
+ * 
+ * A collection of reusable animation classes and keyframes
+ * following the design system's motion tokens.
+ */
+
+/* ========================================
+   FADE ANIMATIONS
+   ======================================== */
+
+/**
+ * Fade In - Subtle entrance animation
+ */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn var(--duration-normal) var(--easing-out);
+}
+
+/**
+ * Fade Out - Exit animation
+ */
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.animate-fade-out {
+  animation: fadeOut var(--duration-normal) var(--easing-in);
+}
+
+/* ========================================
+   SLIDE ANIMATIONS
+   ======================================== */
+
+/**
+ * Slide Up - Element slides in from bottom
+ */
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slideUp var(--duration-medium) var(--easing-out);
+}
+
+/**
+ * Slide Down - Element slides in from top
+ */
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-down {
+  animation: slideDown var(--duration-medium) var(--easing-out);
+}
+
+/**
+ * Slide Right - Element slides in from left
+ */
+@keyframes slideRight {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-right {
+  animation: slideRight var(--duration-medium) var(--easing-out);
+}
+
+/**
+ * Slide Left - Element slides in from right
+ */
+@keyframes slideLeft {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-left {
+  animation: slideLeft var(--duration-medium) var(--easing-out);
+}
+
+/* ========================================
+   SCALE ANIMATIONS
+   ======================================== */
+
+/**
+ * Scale In - Element grows from center
+ */
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-scale-in {
+  animation: scaleIn var(--duration-normal) var(--easing-out);
+}
+
+/**
+ * Scale Out - Element shrinks to center
+ */
+@keyframes scaleOut {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
+
+.animate-scale-out {
+  animation: scaleOut var(--duration-normal) var(--easing-in);
+}
+
+/* ========================================
+   BOUNCE & ELASTIC ANIMATIONS
+   ======================================== */
+
+/**
+ * Bounce In - Playful entrance with bounce
+ */
+@keyframes bounceIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+  70% {
+    transform: scale(0.9);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.animate-bounce-in {
+  animation: bounceIn var(--duration-slow) var(--easing-emphasized);
+}
+
+/**
+ * Pulse - Subtle pulsing effect for attention
+ */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-pulse {
+  animation: pulse var(--duration-slow) var(--easing-standard) infinite;
+}
+
+/* ========================================
+   ROTATION ANIMATIONS
+   ======================================== */
+
+/**
+ * Spin - Continuous rotation
+ */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin var(--duration-slow) linear infinite;
+}
+
+/**
+ * Rotate - Single rotation entrance
+ */
+@keyframes rotate {
+  from {
+    opacity: 0;
+    transform: rotate(-180deg);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(0deg);
+  }
+}
+
+.animate-rotate {
+  animation: rotate var(--duration-medium) var(--easing-out);
+}
+
+/* ========================================
+   STAGGER ANIMATIONS
+   ======================================== */
+
+/**
+ * Stagger children with fade-in
+ * Apply to parent, affects all children with [style*="--stagger"]
+ */
+@keyframes staggerFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-stagger > * {
+  animation: staggerFadeIn var(--duration-normal) var(--easing-out) both;
+}
+
+.animate-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.animate-stagger > *:nth-child(2) { animation-delay: 50ms; }
+.animate-stagger > *:nth-child(3) { animation-delay: 100ms; }
+.animate-stagger > *:nth-child(4) { animation-delay: 150ms; }
+.animate-stagger > *:nth-child(5) { animation-delay: 200ms; }
+
+/* ========================================
+   SHIMMER/LOADING ANIMATIONS
+   ======================================== */
+
+/**
+ * Shimmer - Loading skeleton animation
+ */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-1) 25%,
+    var(--color-surface-2) 50%,
+    var(--color-surface-1) 75%
+  );
+  background-size: 1000px 100%;
+  animation: shimmer var(--duration-slow) infinite;
+}
+
+/**
+ * Skeleton - Animated skeleton loader
+ */
+.skeleton {
+  background-color: var(--color-surface-2);
+  border-radius: var(--radius-md);
+}
+
+.skeleton.is-loading {
+  animation: shimmer var(--duration-slow) infinite;
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-1) 25%,
+    var(--color-surface-2) 50%,
+    var(--color-surface-1) 75%
+  );
+  background-size: 1000px 100%;
+}
+
+/* ========================================
+   TRANSITION UTILITIES
+   ======================================== */
+
+/**
+ * Quick transition for interactive elements
+ */
+.transition-quick {
+  transition: var(--transition-fast);
+}
+
+/**
+ * Normal transition for element changes
+ */
+.transition-normal {
+  transition: var(--transition-normal);
+}
+
+/**
+ * Smooth transition for significant changes
+ */
+.transition-smooth {
+  transition: var(--transition-slow);
+}
+
+/**
+ * Property-specific transitions
+ */
+.transition-colors {
+  transition: background-color var(--duration-normal) var(--easing-standard),
+              border-color var(--duration-normal) var(--easing-standard),
+              color var(--duration-normal) var(--easing-standard);
+}
+
+.transition-transform {
+  transition: transform var(--duration-normal) var(--easing-standard);
+}
+
+.transition-opacity {
+  transition: opacity var(--duration-normal) var(--easing-standard);
+}
+
+.transition-shadow {
+  transition: box-shadow var(--duration-normal) var(--easing-standard);
+}
+
+/* ========================================
+   HOVER EFFECTS
+   ======================================== */
+
+/**
+ * Lift - Raise element on hover
+ */
+.hover-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-2);
+  transition: transform var(--duration-normal) var(--easing-standard),
+              box-shadow var(--duration-normal) var(--easing-standard);
+}
+
+/**
+ * Glow - Add glow effect on hover
+ */
+.hover-glow:hover {
+  box-shadow: 0 0 20px rgba(37, 99, 235, 0.3);
+  transition: box-shadow var(--duration-normal) var(--easing-standard);
+}
+
+/**
+ * Shift - Slight movement on hover
+ */
+.hover-shift:hover {
+  transform: translateX(4px);
+  transition: transform var(--duration-normal) var(--easing-standard);
+}
+
+/**
+ * Darken - Darken background on hover
+ */
+.hover-darken:hover {
+  background-color: rgba(0, 0, 0, 0.1);
+  transition: background-color var(--duration-normal) var(--easing-standard);
+}
+
+/**
+ * Underline - Grow underline on hover
+ */
+.hover-underline {
+  position: relative;
+}
+
+.hover-underline::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  height: 2px;
+  background-color: var(--color-primary);
+  transition: width var(--duration-normal) var(--easing-standard);
+}
+
+.hover-underline:hover::after {
+  width: 100%;
+}
+
+/* ========================================
+   FOCUS ANIMATIONS
+   ======================================== */
+
+/**
+ * Focus pulse - Draw attention to focused element
+ */
+@keyframes focusPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(37, 99, 235, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+  }
+}
+
+.focus-pulse:focus {
+  animation: focusPulse var(--duration-slow) ease-out;
+}
+
+/* ========================================
+   TIMING VARIANTS
+   ======================================== */
+
+/**
+ * Fast animations for snappy interactions
+ */
+.animate-fast {
+  animation-duration: var(--duration-fast);
+}
+
+/**
+ * Slow animations for emphasis
+ */
+.animate-slow {
+  animation-duration: var(--duration-slow);
+}
+
+/**
+ * Slower animations for dramatic effects
+ */
+.animate-slower {
+  animation-duration: var(--duration-slower);
+}
+
+/* ========================================
+   DELAY VARIANTS
+   ======================================== */
+
+.animate-delay-100 { animation-delay: 100ms; }
+.animate-delay-150 { animation-delay: 150ms; }
+.animate-delay-200 { animation-delay: 200ms; }
+.animate-delay-300 { animation-delay: 300ms; }
+.animate-delay-500 { animation-delay: 500ms; }
+
+/* ========================================
+   PLAYBACK CONTROL
+   ======================================== */
+
+/**
+ * Pause animation on hover (useful for gifs, videos in CSS)
+ */
+.pause-on-hover:hover {
+  animation-play-state: paused;
+}
+
+/**
+ * Infinite loop variations
+ */
+.animate-infinite {
+  animation-iteration-count: infinite;
+}
+
+.animate-once {
+  animation-iteration-count: 1;
+}
+
+/* ========================================
+   REDUCED MOTION
+   ======================================== */
+
+/**
+ * Respect user's motion preferences
+ * Disables most animations for users who prefer reduced motion
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  /* Keep instant transitions for some important interactions */
+  input:focus-visible,
+  button:focus-visible {
+    outline: 2px solid var(--focus-outline-color);
+    outline-offset: var(--focus-outline-offset);
+  }
+}
+
+/* ========================================
+   ACCESSIBILITY-FRIENDLY ANIMATIONS
+   ======================================== */
+
+/**
+ * Disable animations for elements not directly interacted with
+ * Helps users with vestibular disorders
+ */
+.animate-safe {
+  /* Safe animations that don't cause motion sickness */
+  animation-duration: var(--duration-slow);
+  animation-timing-function: var(--easing-standard);
+}
+
+/**
+ * Reduced visibility animations for background elements
+ */
+.animate-subtle {
+  opacity: 0.7;
+  animation-duration: var(--duration-slow);
+  animation-iteration-count: infinite;
+}
