@@ -15,6 +15,7 @@ interface SessionViewerProps {
   sessionId: string;
   onNavigate?: (path: string) => void;
   onDockSession?: (sessionId: string) => void;
+  onClose?: () => void;
 }
 
 interface TranscriptMessage {
@@ -203,40 +204,61 @@ export default function SessionViewer(props: SessionViewerProps) {
     }
   });
 
-  createEffect(() => {
-    if (!props.sessionId) return;
-    if (permissions.loading) return;
-    if (!canInspect()) return;
-    const url = apiClient.getEventsUrl(props.sessionId);
-    setStreamStatus("connecting");
-    const source = new EventSource(url);
+   createEffect(() => {
+     if (!props.sessionId) return;
+     if (permissions.loading) return;
+     if (!canInspect()) return;
+     const url = apiClient.getEventsUrl(props.sessionId);
+     setStreamStatus("connecting");
+     const source = new EventSource(url);
 
-    const heartbeatTimeoutMs = 35000;
-    const heartbeatCheckIntervalMs = 5000;
-    const heartbeatInterval = window.setInterval(() => {
-      const lastHeartbeat = lastHeartbeatAt();
-      if (!lastHeartbeat) return;
-      if (Date.now() - lastHeartbeat > heartbeatTimeoutMs) {
-        setStreamStatus("disconnected");
-      }
-    }, heartbeatCheckIntervalMs);
+     // Set a timeout for the initial connection to prevent hanging
+     const connectionTimeoutMs = 10000;
+     const connectionTimeout = window.setTimeout(() => {
+       if (streamStatus() === "connecting") {
+         setStreamStatus("connection_timeout");
+         source.close();
+       }
+     }, connectionTimeoutMs);
 
-    const bind = (type: string) => source.addEventListener(type, handleEvent);
-    bind("output");
-    bind("status_change");
-    bind("metric");
-    bind("error");
-    bind("metadata");
-    source.addEventListener("heartbeat", handleHeartbeat);
+     const heartbeatTimeoutMs = 35000;
+     const heartbeatCheckIntervalMs = 5000;
+     const heartbeatInterval = window.setInterval(() => {
+       const lastHeartbeat = lastHeartbeatAt();
+       if (!lastHeartbeat) return;
+       if (Date.now() - lastHeartbeat > heartbeatTimeoutMs) {
+         setStreamStatus("disconnected");
+       }
+     }, heartbeatCheckIntervalMs);
 
-    source.onopen = () => markStreamActive();
-    source.onerror = () => setStreamStatus("reconnecting");
+     const bind = (type: string) => source.addEventListener(type, handleEvent);
+     bind("output");
+     bind("status_change");
+     bind("metric");
+     bind("error");
+     bind("metadata");
+     source.addEventListener("heartbeat", handleHeartbeat);
 
-    onCleanup(() => {
-      source.close();
-      window.clearInterval(heartbeatInterval);
-    });
-  });
+     source.onopen = () => {
+       window.clearTimeout(connectionTimeout);
+       markStreamActive();
+     };
+     
+     source.onerror = () => {
+       window.clearTimeout(connectionTimeout);
+       if (streamStatus() === "connecting") {
+         setStreamStatus("connection_failed");
+       } else {
+         setStreamStatus("disconnected");
+       }
+     };
+
+     onCleanup(() => {
+       source.close();
+       window.clearInterval(heartbeatInterval);
+       window.clearTimeout(connectionTimeout);
+     });
+   });
 
   createEffect(() => {
     messages();
@@ -336,52 +358,61 @@ export default function SessionViewer(props: SessionViewerProps) {
     downloadFile(`${props.sessionId}-transcript.md`, markdown);
   };
 
-  return (
-    <div class="session-viewer">
-      <header class="view-header">
-        <div>
-          <p class="eyebrow">Session Viewer</p>
-          <h1>Live Session Control</h1>
-          <p class="dashboard-subtitle">Track the real-time transcript, monitor PTY output, and intervene fast.</p>
-        </div>
-        <div class="session-meta">
-          <div>
-            <span class={`state-badge ${sessionState()}`}>{stateLabel(sessionState())}</span>
-            <span class={`stream-pill ${streamStatus()}`}>{streamStatus()}</span>
-          </div>
-          <div class="session-actions">
-            <button type="button" class="neutral" onClick={() => exportTranscript("json")}>
-              Export JSON
-            </button>
-            <button type="button" class="neutral" onClick={() => exportTranscript("markdown")}>
-              Export Markdown
-            </button>
-            <button
-              type="button"
-              onClick={handlePause}
-              disabled={!canManage() || sessionState() !== "running" || pendingAction() === "pause"}
-              title={!canManage() ? guardrailDetail("bulk-operations") : ""}
-            >
-              Pause
-            </button>
-            <button
-              type="button"
-              onClick={handleResume}
-              disabled={!canManage() || sessionState() !== "paused" || pendingAction() === "resume"}
-              title={!canManage() ? guardrailDetail("bulk-operations") : ""}
-            >
-              Resume
-            </button>
-            <button
-              type="button"
-              class="danger"
-              onClick={handleStop}
-              disabled={!canManage() || pendingAction() === "stop"}
-              title={!canManage() ? guardrailDetail("bulk-operations") : ""}
-            >
-              Kill
-            </button>
-          </div>
+   return (
+     <div class="session-viewer">
+       <header class="view-header">
+         <div>
+           <p class="eyebrow">Session Viewer</p>
+           <h1>Live Session Control</h1>
+           <p class="dashboard-subtitle">Track the real-time transcript, monitor PTY output, and intervene fast.</p>
+         </div>
+         <div class="session-meta">
+           <div>
+             <span class={`state-badge ${sessionState()}`}>{stateLabel(sessionState())}</span>
+             <span class={`stream-pill ${streamStatus()}`}>{getStreamStatusLabel(streamStatus())}</span>
+           </div>
+           <div class="session-actions">
+             <button type="button" class="neutral" onClick={() => exportTranscript("json")}>
+               Export JSON
+             </button>
+             <button type="button" class="neutral" onClick={() => exportTranscript("markdown")}>
+               Export Markdown
+             </button>
+             <button
+               type="button"
+               onClick={handlePause}
+               disabled={!canManage() || sessionState() !== "running" || pendingAction() === "pause"}
+               title={!canManage() ? guardrailDetail("bulk-operations") : ""}
+             >
+               Pause
+             </button>
+             <button
+               type="button"
+               onClick={handleResume}
+               disabled={!canManage() || sessionState() !== "paused" || pendingAction() === "resume"}
+               title={!canManage() ? guardrailDetail("bulk-operations") : ""}
+             >
+               Resume
+             </button>
+             <button
+               type="button"
+               class="danger"
+               onClick={handleStop}
+               disabled={!canManage() || pendingAction() === "stop"}
+               title={!canManage() ? guardrailDetail("bulk-operations") : ""}
+             >
+               Kill
+             </button>
+             <button
+               type="button"
+               class="neutral"
+               onClick={() => props.onClose?.()}
+               title="Close session viewer"
+               style="margin-left: auto"
+             >
+               ✕ Close
+             </button>
+           </div>
           <Show when={!permissions.loading && !canManage()}>
             <div class="guardrail-helper" role="note">
               <span class="muted-action">Bulk controls locked</span>
@@ -497,27 +528,43 @@ export default function SessionViewer(props: SessionViewerProps) {
             </div>
           </div>
 
-          <Show when={hasTerminal()}>
-            <TerminalView chunk={terminalChunk} title="PTY Stream" />
-          </Show>
-          <Show when={!hasTerminal()}>
-            <div class="empty-terminal">PTY stream not detected.</div>
-          </Show>
+           <Show when={hasTerminal()}>
+             <TerminalView chunk={terminalChunk} title="PTY Stream" />
+           </Show>
+           <Show when={!hasTerminal()}>
+             <div class="empty-terminal">
+               <Show when={streamStatus() === "connection_timeout"} fallback={<span>PTY stream not detected.</span>}>
+                 <span>PTY stream connection timeout. The process may have exited or the connection failed.</span>
+               </Show>
+             </div>
+           </Show>
         </section>
       </main>
     </div>
   );
 }
 
+function getStreamStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    connecting: "connecting...",
+    live: "live",
+    reconnecting: "reconnecting...",
+    disconnected: "disconnected",
+    connection_timeout: "timeout",
+    connection_failed: "failed",
+  };
+  return labels[status] || status;
+}
+
 function formatActionError(error: unknown) {
-  if (error instanceof Error) {
-    const message = error.message || "Action failed.";
-    if (message.toLowerCase().includes("csrf")) {
-      return "Action blocked by CSRF protection. Refresh to re-establish the token.";
-    }
-    return message;
-  }
-  return "Action failed.";
+   if (error instanceof Error) {
+     const message = error.message || "Action failed.";
+     if (message.toLowerCase().includes("csrf")) {
+       return "Action blocked by CSRF protection. Refresh to re-establish the token.";
+     }
+     return message;
+   }
+   return "Action failed.";
 }
 
 function splitIntoBlocks(content: string) {

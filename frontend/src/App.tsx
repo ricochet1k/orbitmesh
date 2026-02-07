@@ -21,11 +21,15 @@ export default function App() {
     onCleanup(() => window.removeEventListener("popstate", onPopState));
   });
 
-  const navigate = (to: string) => {
-    if (to === path()) return;
-    window.history.pushState({}, "", to);
-    setPath(to);
-  };
+   const navigate = (to: string) => {
+     if (to === path()) return;
+     window.history.pushState({}, "", to);
+     setPath(to);
+   };
+
+   const closeSessionViewer = () => {
+     navigate("/sessions");
+   };
 
   const tasks = () => taskTree()?.tasks ?? [];
   const commits = () => commitList()?.commits ?? [];
@@ -215,9 +219,9 @@ export default function App() {
                   <SessionsView onNavigate={navigate} />
                 </Show>
               }
-            >
-              <SessionViewer sessionId={sessionId()} onNavigate={navigate} onDockSession={setDockSessionId} />
-            </Show>
+             >
+               <SessionViewer sessionId={sessionId()} onNavigate={navigate} onDockSession={setDockSessionId} onClose={closeSessionViewer} />
+             </Show>
           </main>
         </div>
 
