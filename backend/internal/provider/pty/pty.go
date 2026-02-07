@@ -24,6 +24,10 @@ var (
 	ErrAlreadyPaused  = errors.New("pty provider already paused")
 )
 
+var allowedPTYCommands = map[string]struct{}{
+	"claude-code": {},
+}
+
 type PTYProvider struct {
 	mu        sync.RWMutex
 	sessionID string
@@ -71,12 +75,15 @@ func (p *PTYProvider) Start(ctx context.Context, config provider.Config) error {
 	p.state.SetState(provider.StateStarting)
 	p.events.EmitStatusChange(domain.SessionStateCreated, domain.SessionStateStarting, "starting pty provider")
 
-	cmdParts := []string{"sh", "-c", config.SystemPrompt} // For now, use prompt as command
+	command, args, err := resolvePTYCommand(config)
+	if err != nil {
+		return err
+	}
 	if len(config.MCPServers) > 0 {
 		// PTY provider might not support MCP servers directly in this phase
 	}
 
-	cmd := exec.Command(cmdParts[0], cmdParts[1:]...)
+	cmd := exec.Command(command, args...)
 	if config.WorkingDir != "" {
 		cmd.Dir = config.WorkingDir
 	}
@@ -101,6 +108,54 @@ func (p *PTYProvider) Start(ctx context.Context, config provider.Config) error {
 	go p.monitorStatus()
 
 	return nil
+}
+
+func resolvePTYCommand(config provider.Config) (string, []string, error) {
+	command := "claude-code"
+	var args []string
+	if config.Custom != nil {
+		if rawCommand, ok := config.Custom["command"]; ok {
+			commandString, ok := rawCommand.(string)
+			if !ok || commandString == "" {
+				return "", nil, fmt.Errorf("pty command must be a non-empty string")
+			}
+			command = commandString
+		}
+		if rawArgs, ok := config.Custom["args"]; ok {
+			parsedArgs, err := parsePTYArgs(rawArgs)
+			if err != nil {
+				return "", nil, err
+			}
+			args = parsedArgs
+		}
+	}
+
+	if _, ok := allowedPTYCommands[command]; !ok {
+		return "", nil, fmt.Errorf("pty command %q not allow-listed (ref: Tolku0s)", command)
+	}
+
+	return command, args, nil
+}
+
+func parsePTYArgs(rawArgs any) ([]string, error) {
+	switch v := rawArgs.(type) {
+	case nil:
+		return nil, nil
+	case []string:
+		return v, nil
+	case []any:
+		args := make([]string, 0, len(v))
+		for _, item := range v {
+			arg, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("pty args must be strings")
+			}
+			args = append(args, arg)
+		}
+		return args, nil
+	default:
+		return nil, fmt.Errorf("pty args must be a list of strings")
+	}
 }
 
 func (p *PTYProvider) readOutput() {

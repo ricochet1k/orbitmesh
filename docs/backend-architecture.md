@@ -208,8 +208,11 @@ p := pty.NewClaudePTYProvider("session-123")
 
 // Start the provider with a CLI command
 err := p.Start(ctx, provider.Config{
-    SystemPrompt: "claude-code",
-    WorkingDir:   "/path/to/project",
+	WorkingDir: "/path/to/project",
+	Custom: map[string]any{
+		"command": "claude-code",
+		"args":    []string{"--resume"},
+	},
 })
 ```
 

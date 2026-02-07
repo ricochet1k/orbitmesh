@@ -11,10 +11,21 @@ import (
 func TestPTYProvider_Lifecycle(t *testing.T) {
 	// Skip if running in environment where pty might not work easily
 	// or use a very simple command.
+	originalAllowed := allowedPTYCommands
+	allowedPTYCommands = map[string]struct{}{
+		"sleep": {},
+	}
+	t.Cleanup(func() {
+		allowedPTYCommands = originalAllowed
+	})
+
 	p := NewClaudePTYProvider("test-session")
 
 	config := provider.Config{
-		SystemPrompt: "echo 'Task: Initializing...'; sleep 1; echo 'Task: Done.'",
+		Custom: map[string]any{
+			"command": "sleep",
+			"args":    []string{"2"},
+		},
 	}
 
 	ctx := context.Background()
