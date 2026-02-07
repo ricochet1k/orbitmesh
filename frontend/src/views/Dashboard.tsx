@@ -78,7 +78,7 @@ export default function Dashboard(props: DashboardProps) {
   const handleGraphSelect = (node: GraphNode) => {
     if (!props.onNavigate) return;
     if (node.type === "task") {
-      props.onNavigate(`/tasks/tree?task=${node.id}`);
+      props.onNavigate(`/tasks?task=${node.id}`);
       return;
     }
     if (node.type === "commit") {
@@ -86,7 +86,7 @@ export default function Dashboard(props: DashboardProps) {
       return;
     }
     if (node.id === "task-root") {
-      props.onNavigate("/tasks/tree");
+      props.onNavigate("/tasks");
       return;
     }
     if (node.id === "commit-root") {

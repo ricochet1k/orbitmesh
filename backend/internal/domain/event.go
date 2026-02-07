@@ -30,6 +30,7 @@ func (t EventType) String() string {
 }
 
 type Event struct {
+	ID        int64
 	Type      EventType
 	Timestamp time.Time
 	SessionID string

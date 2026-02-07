@@ -39,26 +39,61 @@ func createSessionViaHTTP(t *testing.T, baseURL string) string {
 	return session.ID
 }
 
-// readSSEEvents launches a goroutine that parses SSE lines from resp.Body
-// and sends decoded events on the returned channel.  The channel is closed
+type sseMessage struct {
+	ID    string
+	Event string
+	Data  string
+}
+
+// readSSEMessages launches a goroutine that parses SSE lines from resp.Body
+// and sends decoded frames on the returned channel. The channel is closed
 // when the body is closed or EOF is reached.
-func readSSEEvents(resp *http.Response) <-chan apiTypes.Event {
-	ch := make(chan apiTypes.Event, 10)
+func readSSEMessages(resp *http.Response) <-chan sseMessage {
+	ch := make(chan sseMessage, 10)
 	go func() {
 		defer close(ch)
 		scanner := bufio.NewScanner(resp.Body)
 		var dataLine string
+		var eventType string
+		var idLine string
 		for scanner.Scan() {
 			line := scanner.Text()
 			switch {
+			case strings.HasPrefix(line, "id: "):
+				idLine = strings.TrimPrefix(line, "id: ")
+			case strings.HasPrefix(line, "event: "):
+				eventType = strings.TrimPrefix(line, "event: ")
 			case strings.HasPrefix(line, "data: "):
 				dataLine = strings.TrimPrefix(line, "data: ")
 			case line == "" && dataLine != "":
-				var ev apiTypes.Event
-				_ = json.Unmarshal([]byte(dataLine), &ev)
-				ch <- ev
+				ch <- sseMessage{ID: idLine, Event: eventType, Data: dataLine}
 				dataLine = ""
+				eventType = ""
+				idLine = ""
 			}
+		}
+	}()
+	return ch
+}
+
+// readSSEEvents launches a goroutine that parses SSE lines from resp.Body
+// and sends decoded events on the returned channel. The channel is closed
+// when the body is closed or EOF is reached.
+func readSSEEvents(resp *http.Response) <-chan apiTypes.Event {
+	ch := make(chan apiTypes.Event, 10)
+	frames := readSSEMessages(resp)
+	go func() {
+		defer close(ch)
+		for frame := range frames {
+			if frame.Event == "heartbeat" {
+				continue
+			}
+			var ev apiTypes.Event
+			_ = json.Unmarshal([]byte(frame.Data), &ev)
+			if ev.Type == "" {
+				continue
+			}
+			ch <- ev
 		}
 	}()
 	return ch
@@ -355,6 +390,68 @@ func TestSSE_SessionIsolation(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for session A event")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Last-Event-ID replay
+// ---------------------------------------------------------------------------
+
+func TestSSE_ReplayWithLastEventID(t *testing.T) {
+	env := newTestEnv(t)
+	srv := httptest.NewServer(env.router())
+	defer srv.Close()
+
+	sessionID := createSessionViaHTTP(t, srv.URL)
+
+	resp, err := http.Get(srv.URL + "/api/sessions/" + sessionID + "/events")
+	if err != nil {
+		t.Fatalf("SSE request: %v", err)
+	}
+
+	frames := readSSEMessages(resp)
+
+	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionID, "first"))
+
+	var firstFrame sseMessage
+	select {
+	case firstFrame = <-frames:
+		if firstFrame.ID == "" {
+			resp.Body.Close()
+			t.Fatal("expected SSE id for first event")
+		}
+	case <-time.After(2 * time.Second):
+		resp.Body.Close()
+		t.Fatal("timed out waiting for first SSE event")
+	}
+
+	resp.Body.Close()
+
+	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionID, "second"))
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/sessions/"+sessionID+"/events", nil)
+	req.Header.Set("Last-Event-ID", firstFrame.ID)
+	respReplay, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("replay request: %v", err)
+	}
+	defer respReplay.Body.Close()
+
+	replayFrames := readSSEMessages(respReplay)
+	select {
+	case frame := <-replayFrames:
+		var ev apiTypes.Event
+		_ = json.Unmarshal([]byte(frame.Data), &ev)
+		data, _ := ev.Data.(map[string]any)
+		content, _ := data["content"].(string)
+		if content != "second" {
+			t.Fatalf("expected replayed content 'second', got %q", content)
+		}
+		if frame.ID == firstFrame.ID {
+			t.Fatalf("expected replayed event id to differ from first event")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for replayed SSE event")
 	}
 }
 

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -12,6 +14,8 @@ import (
 	"github.com/ricochet1k/orbitmesh/internal/service"
 	apiTypes "github.com/ricochet1k/orbitmesh/pkg/api"
 )
+
+const sseHeartbeatInterval = 15 * time.Second
 
 // sseEvents streams domain events for a session as Server-Sent Events.
 // The subscription is registered before headers are flushed so that no
@@ -34,10 +38,12 @@ func (h *Handler) sseEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	lastEventID := parseLastEventID(r)
+
 	// Subscribe before writing headers — guarantees the subscription is
 	// active by the time the client receives the 200 response.
 	subID := generateID()
-	sub := h.broadcaster.Subscribe(subID, sessionID)
+	sub, replay := h.broadcaster.SubscribeWithReplay(subID, sessionID, lastEventID)
 	defer h.broadcaster.Unsubscribe(subID)
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -46,7 +52,16 @@ func (h *Handler) sseEvents(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
+	for _, event := range replay {
+		if err := writeSSEEvent(w, event); err != nil {
+			return
+		}
+		flusher.Flush()
+	}
+
 	ctx := r.Context()
+	heartbeat := time.NewTicker(sseHeartbeatInterval)
+	defer heartbeat.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -56,6 +71,11 @@ func (h *Handler) sseEvents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if err := writeSSEEvent(w, event); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-heartbeat.C:
+			if err := writeSSEHeartbeat(w, time.Now()); err != nil {
 				return
 			}
 			flusher.Flush()
@@ -74,7 +94,22 @@ func writeSSEEvent(w http.ResponseWriter, event domain.Event) error {
 	if err != nil {
 		return err
 	}
+	if event.ID > 0 {
+		_, err = fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", event.ID, apiEvent.Type, data)
+		return err
+	}
 	_, err = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", apiEvent.Type, data)
+	return err
+}
+
+func writeSSEHeartbeat(w http.ResponseWriter, timestamp time.Time) error {
+	data, err := json.Marshal(map[string]string{
+		"timestamp": timestamp.Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(w, "event: heartbeat\ndata: %s\n\n", data)
 	return err
 }
 
@@ -106,4 +141,18 @@ func convertEventData(e domain.Event) any {
 	default:
 		return d
 	}
+}
+
+func parseLastEventID(r *http.Request) int64 {
+	if header := r.Header.Get("Last-Event-ID"); header != "" {
+		if id, err := strconv.ParseInt(header, 10, 64); err == nil {
+			return id
+		}
+	}
+	if query := r.URL.Query().Get("last_event_id"); query != "" {
+		if id, err := strconv.ParseInt(query, 10, 64); err == nil {
+			return id
+		}
+	}
+	return 0
 }

@@ -36,6 +36,7 @@ export default function SessionViewer(props: SessionViewerProps) {
   const [streamStatus, setStreamStatus] = createSignal("connecting");
   const [hasTerminal, setHasTerminal] = createSignal(false);
   const [initialized, setInitialized] = createSignal(false);
+  const [lastHeartbeatAt, setLastHeartbeatAt] = createSignal<number | null>(null);
   const [actionNotice, setActionNotice] = createSignal<{ tone: "error" | "success"; message: string } | null>(
     null,
   );
@@ -61,7 +62,15 @@ export default function SessionViewer(props: SessionViewerProps) {
     setMessages((prev) => [...prev, message]);
   };
 
+  const markStreamActive = () => {
+    setLastHeartbeatAt(Date.now());
+    if (streamStatus() !== "live") {
+      setStreamStatus("live");
+    }
+  };
+
   const handleEvent = (event: MessageEvent) => {
+    markStreamActive();
     if (typeof event.data !== "string") return;
     let payload: Event | null = null;
     try {
@@ -151,6 +160,10 @@ export default function SessionViewer(props: SessionViewerProps) {
     }
   };
 
+  const handleHeartbeat = () => {
+    markStreamActive();
+  };
+
   const scrollToBottom = () => {
     if (!transcriptRef) return;
     transcriptRef.scrollTop = transcriptRef.scrollHeight;
@@ -187,7 +200,18 @@ export default function SessionViewer(props: SessionViewerProps) {
     if (permissions.loading) return;
     if (!canInspect()) return;
     const url = apiClient.getEventsUrl(props.sessionId);
+    setStreamStatus("connecting");
     const source = new EventSource(url);
+
+    const heartbeatTimeoutMs = 35000;
+    const heartbeatCheckIntervalMs = 5000;
+    const heartbeatInterval = window.setInterval(() => {
+      const lastHeartbeat = lastHeartbeatAt();
+      if (!lastHeartbeat) return;
+      if (Date.now() - lastHeartbeat > heartbeatTimeoutMs) {
+        setStreamStatus("disconnected");
+      }
+    }, heartbeatCheckIntervalMs);
 
     const bind = (type: string) => source.addEventListener(type, handleEvent);
     bind("output");
@@ -195,12 +219,14 @@ export default function SessionViewer(props: SessionViewerProps) {
     bind("metric");
     bind("error");
     bind("metadata");
+    source.addEventListener("heartbeat", handleHeartbeat);
 
-    source.onopen = () => setStreamStatus("live");
-    source.onerror = () => setStreamStatus("disconnected");
+    source.onopen = () => markStreamActive();
+    source.onerror = () => setStreamStatus("reconnecting");
 
     onCleanup(() => {
       source.close();
+      window.clearInterval(heartbeatInterval);
     });
   });
 

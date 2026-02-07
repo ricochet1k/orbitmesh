@@ -1,0 +1,301 @@
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(220px, 260px) 1fr;
+}
+
+.app-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.app-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 16px;
+  background: var(--surface-2);
+  color: var(--ink-1);
+  padding: 0.4rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  z-index: 20;
+}
+
+.skip-link:focus {
+  top: 16px;
+}
+
+.sidebar {
+  background: rgba(255, 255, 255, 0.92);
+  border-right: 1px solid var(--border);
+  padding: 2rem 1.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  backdrop-filter: blur(14px);
+}
+
+.sidebar-brand {
+  font-family: "Fraunces", "Sora", serif;
+  font-size: 1.3rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.sidebar-nav {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 0.9rem;
+  border-radius: 14px;
+  text-decoration: none;
+  color: var(--ink-2);
+  border: 1px solid transparent;
+  transition: border 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+.nav-item:hover {
+  background: rgba(15, 118, 110, 0.08);
+  border-color: rgba(15, 118, 110, 0.2);
+  color: var(--ink-1);
+}
+
+.nav-item.active {
+  background: linear-gradient(135deg, rgba(15, 118, 110, 0.18), rgba(30, 58, 138, 0.12));
+  border-color: rgba(15, 118, 110, 0.35);
+  color: var(--ink-1);
+}
+
+.nav-icon svg {
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.nav-label {
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.2rem 2.25rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(12px);
+  position: sticky;
+  top: 0;
+  z-index: 9;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.breadcrumbs ol {
+  list-style: none;
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  align-items: center;
+  color: var(--ink-3);
+  font-size: 0.85rem;
+}
+
+.breadcrumbs li + li:before {
+  content: "/";
+  margin: 0 0.4rem;
+  color: var(--ink-3);
+}
+
+.breadcrumbs a {
+  text-decoration: none;
+  color: var(--ink-2);
+}
+
+.breadcrumbs a:hover {
+  color: var(--ink-1);
+}
+
+.top-bar-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 1.2rem;
+  flex-wrap: wrap;
+}
+
+.top-bar-kicker {
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  font-size: 0.7rem;
+  color: var(--ink-3);
+}
+
+.top-bar-meta h2 {
+  font-size: 1.4rem;
+  font-family: "Fraunces", "Sora", serif;
+}
+
+.top-bar-subtitle {
+  color: var(--ink-2);
+  font-size: 0.9rem;
+}
+
+.sessions-view,
+.settings-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.sessions-layout {
+  display: grid;
+  grid-template-columns: minmax(420px, 1.2fr) minmax(320px, 0.8fr);
+  gap: 1.6rem;
+  padding: 2rem 2.75rem 3.5rem;
+  align-items: start;
+}
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1.6rem;
+  padding: 2rem 2.75rem 3.5rem;
+  align-items: start;
+}
+
+.session-list-panel,
+.session-detail-panel,
+.placeholder-panel {
+  border-radius: 20px;
+  padding: 1.6rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  animation: rise 520ms ease;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.session-list {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.session-card {
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.9);
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.9rem;
+}
+
+.session-card.active {
+  border-color: rgba(15, 118, 110, 0.35);
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.session-card-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+
+.session-card-id {
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.session-card-meta {
+  display: grid;
+  justify-items: end;
+  gap: 0.3rem;
+}
+
+.session-card-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.session-card-actions button {
+  border: 1px solid rgba(15, 118, 110, 0.35);
+  background: rgba(15, 118, 110, 0.12);
+  color: #0f766e;
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.session-preview {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.session-preview button {
+  border: none;
+  background: linear-gradient(135deg, #0f766e, #1e3a8a);
+  color: white;
+  padding: 0.5rem 0.9rem;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  width: fit-content;
+}
+
+@media (max-width: 1100px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: relative;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.5rem;
+    gap: 1rem;
+  }
+
+  .sidebar-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+}
+
+@media (max-width: 960px) {
+  .sessions-layout,
+  .settings-layout {
+    grid-template-columns: 1fr;
+    padding: 1.5rem;
+  }
+}
