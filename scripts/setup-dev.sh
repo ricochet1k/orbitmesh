@@ -40,7 +40,12 @@ echo ""
 echo "✅ Setup complete!"
 echo ""
 echo "Next steps:"
-echo "  1. Run 'task dev' to start the development environment"
+if command -v overmind &> /dev/null && command -v tmux &> /dev/null; then
+    echo "  1. Run 'task dev' to start the development environment"
+else
+    echo "  1. Install Overmind + tmux (macOS: 'brew install overmind tmux')"
+    echo "     - or run 'task dev:manual' for manual commands"
+fi
 echo "  2. Backend will be available at http://localhost:8080"
 echo "  3. Frontend will be available at http://localhost:3000"
 echo ""

@@ -37,6 +37,7 @@ tasks:
     deps: [install]
     cmds:
       - pnpm test
+      - pnpm test:e2e
 
   test:ui:
     desc: Run frontend tests with UI
@@ -44,6 +45,13 @@ tasks:
     deps: [install]
     cmds:
       - pnpm test:ui
+
+  test:e2e:
+    desc: Run frontend end-to-end tests
+    dir: frontend
+    deps: [install]
+    cmds:
+      - pnpm test:e2e
 
   lint:
     desc: Lint frontend code

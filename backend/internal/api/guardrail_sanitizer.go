@@ -18,12 +18,14 @@ var (
 	guardrailWhitespace   = regexp.MustCompile(`\s+`)
 )
 
+const guardrailEntityDecodePasses = 3
+
 func sanitizeGuardrailGuidance(input string) string {
 	if input == "" {
 		return ""
 	}
 
-	sanitized := html.UnescapeString(input)
+	sanitized := decodeGuardrailEntities(input)
 	sanitized = guardrailHTMLTags.ReplaceAllString(sanitized, "")
 	sanitized = guardrailControlChars.ReplaceAllString(sanitized, " ")
 	sanitized = guardrailBearerToken.ReplaceAllString(sanitized, "Bearer [redacted]")
@@ -32,6 +34,18 @@ func sanitizeGuardrailGuidance(input string) string {
 	sanitized = guardrailGitHubToken.ReplaceAllString(sanitized, "[redacted]")
 	sanitized = strings.TrimSpace(guardrailWhitespace.ReplaceAllString(sanitized, " "))
 	return sanitized
+}
+
+func decodeGuardrailEntities(input string) string {
+	decoded := input
+	for i := 0; i < guardrailEntityDecodePasses; i++ {
+		next := html.UnescapeString(decoded)
+		if next == decoded {
+			return decoded
+		}
+		decoded = next
+	}
+	return decoded
 }
 
 func sanitizeGuardrailStatus(guardrail apiTypes.GuardrailStatus) apiTypes.GuardrailStatus {

@@ -25,6 +25,13 @@ Mirror the frontend logic, with a bounded entity decode step:
 - Redact key/value secrets for labels like `api_key`, `token`, `secret`, `password`, `passphrase`, `access_key`.
 - Redact AWS access keys (`AKIA...`) and GitHub tokens (`ghp_...`, `gho_...`, `ghs_...`, `ghr_...`).
 
+## Authoring Guidance
+Guardrail guidance strings are sanitized after multi-pass entity decoding. This means any text that looks like HTML tags will be stripped even if it was entity-encoded (for example, `&lt;role&gt;` or `&amp;lt;role&amp;gt;`).
+- Avoid angle brackets or tag-like placeholders in guidance text.
+- Prefer safe placeholder formats such as `[role]`, `{role}`, or `ROLE_NAME`.
+- Use inline code formatting for placeholders or keywords when helpful.
+- Do not rely on HTML entity encoding as a workaround; multi-pass decoding will still strip tag-like content.
+
 ## Implementation Plan
 1. **Add sanitizer helpers** in a backend API helper file (e.g., `backend/internal/api/guardrail_sanitizer.go`) with:
    - `sanitizeGuardrailGuidance(input string) string`

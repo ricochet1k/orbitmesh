@@ -35,6 +35,14 @@ func TestSanitizeGuardrailGuidance(t *testing.T) {
 		}
 	})
 
+	t.Run("strips double-encoded HTML tags", func(t *testing.T) {
+		input := "Use &amp;lt;strong&amp;gt;token&amp;lt;/strong&amp;gt;: abc123"
+		expected := "Use token: [redacted]"
+		if got := sanitizeGuardrailGuidance(input); got != expected {
+			t.Fatalf("sanitizeGuardrailGuidance() = %q, want %q", got, expected)
+		}
+	})
+
 	t.Run("redacts GitHub tokens and collapses whitespace", func(t *testing.T) {
 		input := "Credentials:\n ghp_abcdefghijklmnopqrstuvwxyz123456"
 		expected := "Credentials: [redacted]"
@@ -225,6 +233,59 @@ func TestMePermissionsGuardrailsSanitizedEntities(t *testing.T) {
 	}
 
 	expectedDetail := "Use token: [redacted] and api_key: [redacted]"
+	guardrailID := mutated.Guardrails[0].ID
+	for _, guardrail := range resp.Guardrails {
+		if guardrail.ID == guardrailID {
+			if guardrail.Detail != expectedDetail {
+				t.Fatalf("guardrail %s detail = %q, want %q", guardrail.ID, guardrail.Detail, expectedDetail)
+			}
+			return
+		}
+	}
+
+	t.Fatalf("expected guardrail %s in response", guardrailID)
+}
+
+func TestMePermissionsGuardrailsSanitizedDoubleEncodedEntities(t *testing.T) {
+	guardrailsCopy := make([]apiTypes.GuardrailStatus, len(defaultPermissions.Guardrails))
+	copy(guardrailsCopy, defaultPermissions.Guardrails)
+	original := defaultPermissions
+	original.Guardrails = guardrailsCopy
+
+	t.Cleanup(func() {
+		defaultPermissions = original
+	})
+
+	mutated := original
+	mutated.Guardrails = make([]apiTypes.GuardrailStatus, len(original.Guardrails))
+	copy(mutated.Guardrails, original.Guardrails)
+	if len(mutated.Guardrails) == 0 {
+		t.Fatal("expected guardrails in default permissions")
+	}
+
+	mutated.Guardrails[0].Detail = "Use &amp;lt;em&amp;gt;token&amp;lt;/em&amp;gt;: abc123"
+	defaultPermissions = mutated
+
+	env := newTestEnv(t)
+	r := env.router()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me/permissions", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp apiTypes.PermissionsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal permissions response: %v", err)
+	}
+	if len(resp.Guardrails) == 0 {
+		t.Fatal("expected guardrails in permissions response")
+	}
+
+	expectedDetail := "Use token: [redacted]"
 	guardrailID := mutated.Guardrails[0].ID
 	for _, guardrail := range resp.Guardrails {
 		if guardrail.ID == guardrailID {

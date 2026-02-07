@@ -45,8 +45,24 @@ tasks:
         echo "Setup complete! Run 'task dev' to start development"
 
   dev:
-    desc: Start full development environment (backend + frontend)
-    deps: [backend:dev, frontend:dev]
+    desc: Start full development environment (Overmind)
+    cmds:
+      - |
+        if ! command -v overmind >/dev/null 2>&1; then
+          echo "Error: overmind is required to run 'task dev'"
+          echo "Install: https://github.com/DarthSim/overmind"
+          echo "On macOS: brew install overmind tmux"
+          exit 1
+        fi
+        overmind start
+
+  dev:manual:
+    desc: Print manual dev commands (two terminals)
+    cmds:
+      - |
+        echo "Run these in two separate terminals:"
+        echo "  1) task backend:dev"
+        echo "  2) task frontend:dev"
 
   build:
     desc: Build all components for production

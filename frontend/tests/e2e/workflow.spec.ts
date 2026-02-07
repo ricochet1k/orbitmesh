@@ -9,9 +9,8 @@ type SessionState =
   | "stopped"
   | "error";
 
-const baseURL = "http://127.0.0.1:3000";
-
-const now = "2026-02-06T12:00:00.000Z";
+const baseTimestamp = "2026-02-06T12:00:00.000Z";
+const sessionId = "session-new";
 
 const permissions = {
   role: "developer",
@@ -43,14 +42,14 @@ const taskTree = {
       title: "MVP Control Plane",
       role: "architect",
       status: "in_progress",
-      updated_at: now,
+      updated_at: baseTimestamp,
       children: [
         {
           id: "task-e2e",
           title: "Comprehensive Playwright workflow tests",
           role: "developer",
           status: "pending",
-          updated_at: now,
+          updated_at: baseTimestamp,
           children: [],
         },
       ],
@@ -65,7 +64,7 @@ const commitList = {
       message: "Seed commit history",
       author: "OrbitMesh",
       email: "orbitmesh@example.com",
-      timestamp: now,
+      timestamp: baseTimestamp,
     },
   ],
 };
@@ -76,67 +75,55 @@ const metrics = {
   request_count: 6,
 };
 
+let createdSessionPayload: Record<string, unknown> | null = null;
+
+const ptyData = Buffer.from("echo workflow test\n").toString("base64");
+const ssePayload = `event: output
+data: ${JSON.stringify({
+  type: "output",
+  timestamp: "2026-02-06T12:00:01.000Z",
+  session_id: sessionId,
+  data: { content: "Agent stream connected.\n" },
+})}
+
+event: status_change
+data: ${JSON.stringify({
+  type: "status_change",
+  timestamp: "2026-02-06T12:00:02.000Z",
+  session_id: sessionId,
+  data: { old_state: "running", new_state: "paused" },
+})}
+
+event: metadata
+data: ${JSON.stringify({
+  type: "metadata",
+  timestamp: "2026-02-06T12:00:03.000Z",
+  session_id: sessionId,
+  data: { key: "pty_data", value: ptyData },
+})}
+
+`;
+
 test.beforeEach(async ({ context, page }) => {
+  createdSessionPayload = null;
   await context.addCookies([
     {
       name: "orbitmesh-csrf-token",
       value: "test-token",
-      url: baseURL,
+      domain: "127.0.0.1",
+      path: "/",
     },
   ]);
 
-  await page.addInitScript(() => {
-    class MockEventSource {
-      url: string;
-      readyState = 0;
-      onopen: (() => void) | null = null;
-      onerror: (() => void) | null = null;
-      private listeners: Record<string, Array<(event: { data: string }) => void>> = {};
-
-      constructor(url: string) {
-        this.url = url;
-        window.__eventSources = window.__eventSources || [];
-        window.__eventSources.push(this);
-        setTimeout(() => {
-          this.readyState = 1;
-          if (this.onopen) this.onopen();
-        }, 0);
-      }
-
-      addEventListener(type: string, listener: (event: { data: string }) => void) {
-        if (!this.listeners[type]) this.listeners[type] = [];
-        this.listeners[type].push(listener);
-      }
-
-      close() {
-        this.readyState = 2;
-      }
-
-      emit(type: string, data: string) {
-        const event = { data };
-        (this.listeners[type] || []).forEach((listener) => listener(event));
-      }
-    }
-
-    window.EventSource = MockEventSource as unknown as typeof EventSource;
-    window.__emitEventSource = (type: string, data: string) => {
-      (window.__eventSources || []).forEach((source: MockEventSource) => source.emit(type, data));
-    };
-  });
-
-  const sessionStates = new Map<string, SessionState>([
-    ["session-inspect", "running"],
-    ["session-new", "running"],
-    ["session-paused", "paused"],
-  ]);
+  const sessionStates = new Map<string, SessionState>([[sessionId, "running"]]);
 
   const baseSession = (id: string, providerType = "adk") => ({
     id,
     provider_type: providerType,
     state: sessionStates.get(id) ?? "created",
     working_dir: "/Users/matt/mycode/orbitmesh",
-    created_at: now,
-    updated_at: now,
+    created_at: baseTimestamp,
+    updated_at: baseTimestamp,
     current_task: "T98zcmy",
     output: providerType === "pty" ? "Boot sequence ready.\n" : "",
   });
@@ -161,7 +148,7 @@ test.beforeEach(async ({ context, page }) => {
           message: "Seed commit history",
           author: "OrbitMesh",
           email: "orbitmesh@example.com",
-          timestamp: now,
+          timestamp: baseTimestamp,
           diff: "",
         },
       },
@@ -172,8 +159,9 @@ test.beforeEach(async ({ context, page }) => {
     const request = route.request();
     if (request.method() === "POST") {
       const payload = request.postDataJSON();
+      createdSessionPayload = payload;
       const providerType = payload.provider_type || "adk";
-      const newSession = baseSession("session-new", providerType);
+      const newSession = baseSession(sessionId, providerType);
       sessionStates.set(newSession.id, newSession.state);
       await route.fulfill({ json: newSession });
       return;
@@ -181,15 +169,12 @@ test.beforeEach(async ({ context, page }) => {
 
     await route.fulfill({
       json: {
-        sessions: [
-          baseSession("session-inspect", "adk"),
-          { ...baseSession("session-paused", "adk"), state: "paused" },
-        ],
+        sessions: [baseSession("session-inspect", "adk")],
       },
     });
   });
 
-  await page.route(/\/api\/sessions\/([^/]+)$/, async (route) => {
+  await page.route(/\/api\/sessions\/([^/]+)\/?$/, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const id = url.pathname.split("/").pop() ?? "";
@@ -198,12 +183,24 @@ test.beforeEach(async ({ context, page }) => {
       await route.fulfill({ status: 204, body: "" });
       return;
     }
-    const providerType = id === "session-new" ? "pty" : "adk";
+    const providerType = id === sessionId ? "pty" : "adk";
     await route.fulfill({
       json: {
         ...baseSession(id, providerType),
         metrics,
       },
+    });
+  });
+
+  await page.route(/\/api\/sessions\/([^/]+)\/events$/, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      headers: {
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+      },
+      body: ssePayload,
     });
   });
 
@@ -224,58 +221,39 @@ test("Dashboard -> Tasks -> Session workflow", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Operational Continuity" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Inspect" }).first().click();
-  await expect(page.getByRole("heading", { name: "Live Session Control" })).toBeVisible();
-
-  await page.goto("/tasks/tree");
+  await page.getByRole("link", { name: "Tasks" }).click();
   await expect(page.getByRole("heading", { name: "Task Tree" })).toBeVisible();
 
   await page
     .locator(".task-tree")
     .getByText("Comprehensive Playwright workflow tests")
     .click();
+  await expect(page.getByText("Task ID")).toBeVisible();
 
   await page.getByLabel("Agent profile").selectOption("pty");
   await page.getByRole("button", { name: "Start agent" }).click();
 
   const launchCard = page.locator(".session-launch-card");
   await expect(launchCard.getByText("Session ready")).toBeVisible();
+  await expect(launchCard.getByText(sessionId)).toBeVisible();
+
+  expect(createdSessionPayload).not.toBeNull();
+  expect(createdSessionPayload).toMatchObject({
+    provider_type: "pty",
+    task_id: "task-e2e",
+  });
 
   await launchCard.getByRole("button", { name: "Open Session Viewer" }).click();
   await expect(page.getByRole("heading", { name: "Live Session Control" })).toBeVisible();
-
   await expect(page.locator(".stream-pill.live")).toBeVisible();
-
-  await page.evaluate(() => {
-    const payload = {
-      type: "output",
-      timestamp: "2026-02-06T12:00:01.000Z",
-      session_id: "session-new",
-      data: { content: "Agent stream connected.\n" },
-    };
-    window.__emitEventSource("output", JSON.stringify(payload));
-
-    const statusPayload = {
-      type: "status_change",
-      timestamp: "2026-02-06T12:00:02.000Z",
-      session_id: "session-new",
-      data: { old_state: "running", new_state: "paused" },
-    };
-    window.__emitEventSource("status_change", JSON.stringify(statusPayload));
-
-    const ptyPayload = {
-      type: "metadata",
-      timestamp: "2026-02-06T12:00:03.000Z",
-      session_id: "session-new",
-      data: { key: "pty_data", value: btoa("echo workflow test\n") },
-    };
-    window.__emitEventSource("metadata", JSON.stringify(ptyPayload));
-  });
 
   await expect(page.getByText("Agent stream connected.")).toBeVisible();
   await expect(page.getByText("State changed: running -> paused")).toBeVisible();
   await expect(page.locator(".terminal-shell")).toBeVisible();
   await expect(page.locator(".terminal-body")).toContainText("echo workflow test");
+
+  await page.locator(".terminal-body").click();
+  await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
 
   await page.getByRole("button", { name: "Pause" }).click();
   await expect(page.getByText("Pause request sent.")).toBeVisible();
@@ -289,10 +267,3 @@ test("Dashboard -> Tasks -> Session workflow", async ({ page }) => {
   await page.getByRole("button", { name: "Kill" }).click();
   await expect(page.getByText("Kill request sent.")).toBeVisible();
 });
-
-declare global {
-  interface Window {
-    __eventSources?: Array<{ emit: (type: string, data: string) => void }>;
-    __emitEventSource?: (type: string, data: string) => void;
-  }
-}

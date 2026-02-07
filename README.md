@@ -9,6 +9,7 @@ An agent orchestration system for managing and monitoring AI agents across multi
 - Go 1.24 or later
 - Node.js 20 or later
 - Taskfile 3.x
+- Overmind + tmux (for `task dev`)
 
 ### Setup
 
@@ -43,10 +44,13 @@ task dev
 # Frontend runs on http://localhost:3000
 ```
 
+If you don't have Overmind installed, use `task dev:manual` for manual commands.
+
 ## Interface Views
 
 - Task Tree: `http://localhost:3000/tasks/tree` for hierarchical task status and filtering.
 - Commit History: `http://localhost:3000/history/commits` for commit list and diff viewer.
+- Session Viewer: `http://localhost:3000/sessions/<session-id>` for live transcript, PTY output, and session controls.
 - System Graph: selecting nodes highlights the corresponding task or commit.
 
 ## API Examples
@@ -60,6 +64,16 @@ curl -s "http://localhost:8080/api/v1/commits?limit=50" | jq
 
 # Fetch a specific commit diff
 curl -s http://localhost:8080/api/v1/commits/<sha> | jq
+
+# List active sessions
+curl -s http://localhost:8080/api/sessions | jq
+
+# Stream session events (SSE)
+curl -N http://localhost:8080/api/sessions/<session-id>/events
+
+# Pause or resume a session
+curl -X POST http://localhost:8080/api/sessions/<session-id>/pause
+curl -X POST http://localhost:8080/api/sessions/<session-id>/resume
 ```
 
 ## Project Structure
@@ -219,7 +233,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed development guidelines.
 - **Storage**: File-based JSON with no external database dependencies
 - **CI/CD**: GitHub Actions for automated testing and deployment
 
-See [design-docs/](design-docs/) for detailed architecture documentation including [Frontend Architecture](design-docs/03-frontend-architecture.md), and [docs/backend-architecture.md](docs/backend-architecture.md) for core backend components.
+See [design-docs/](design-docs/) for detailed architecture documentation including [Frontend Architecture](design-docs/03-frontend-architecture.md), [docs/backend-architecture.md](docs/backend-architecture.md) for core backend components, and [docs/guardrail-guidance.md](docs/guardrail-guidance.md) for guardrail guidance authoring rules.
 
 ## License
 

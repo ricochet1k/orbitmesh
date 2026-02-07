@@ -21,6 +21,12 @@ yarn-error.log*
 .task/
 .air.log
 
+# Overmind
+.overmind.sock
+.overmind.pid
+.overmind.env
+.overmind/
+
 # IDE
 .vscode/
 .idea/
