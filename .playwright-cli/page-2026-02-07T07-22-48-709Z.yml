@@ -1,0 +1,157 @@
+- generic [ref=e3]:
+  - link "Skip to content" [ref=e4] [cursor=pointer]:
+    - /url: "#main-content"
+  - complementary "Primary Navigation" [ref=e5]:
+    - generic [ref=e6]: OrbitMesh
+    - navigation [ref=e7]:
+      - link "Dashboard" [ref=e317] [cursor=pointer]:
+        - /url: /
+        - img [ref=e319]
+        - generic [ref=e324]: Dashboard
+      - link "Tasks" [ref=e325] [cursor=pointer]:
+        - /url: /tasks
+        - img [ref=e327]
+        - generic [ref=e329]: Tasks
+      - link "Sessions" [ref=e330] [cursor=pointer]:
+        - /url: /sessions
+        - img [ref=e332]
+        - generic [ref=e335]: Sessions
+      - link "Settings" [ref=e336] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e338]
+        - generic [ref=e344]: Settings
+  - generic [ref=e36]:
+    - generic [ref=e37]:
+      - banner [ref=e38]:
+        - navigation "Breadcrumb" [ref=e39]:
+          - list [ref=e40]:
+            - listitem [ref=e345]:
+              - link "OrbitMesh" [ref=e346] [cursor=pointer]:
+                - /url: /
+            - listitem [ref=e347]: /Tasks
+        - generic [ref=e42]:
+          - generic [ref=e43]:
+            - paragraph [ref=e44]: Tasks
+            - heading "Task Tree" [level=2] [ref=e348]
+          - paragraph [ref=e46]: Tree + details
+      - main [ref=e47]:
+        - generic [ref=e349]:
+          - generic [ref=e350]:
+            - generic [ref=e351]:
+              - paragraph [ref=e352]: Task operations
+              - heading "Task Tree" [level=1] [ref=e353]
+              - paragraph [ref=e354]: Explore hierarchical task progress, filter by role or status, and sync selections with the system graph.
+            - generic [ref=e355]:
+              - generic [ref=e356]:
+                - paragraph [ref=e357]: Tasks tracked
+                - strong [ref=e358]: "12"
+              - generic [ref=e359]:
+                - paragraph [ref=e360]: In progress
+                - strong [ref=e361]: "4"
+              - generic [ref=e362]:
+                - paragraph [ref=e363]: Completed
+                - strong [ref=e364]: "2"
+          - main [ref=e365]:
+            - generic [ref=e366]:
+              - generic [ref=e367]:
+                - generic [ref=e368]:
+                  - paragraph [ref=e369]: Hierarchy
+                  - heading "Task Tree Viewer" [level=2] [ref=e370]
+                - generic [ref=e371]: Live
+              - generic [ref=e372]:
+                - searchbox "Search tasks" [ref=e373]
+                - combobox [ref=e374] [cursor=pointer]:
+                  - option "All roles" [selected]
+                  - option "architect"
+                  - option "developer"
+                  - option "documentation"
+                  - option "reviewer-reliability"
+                - combobox [ref=e375] [cursor=pointer]:
+                  - option "All status" [selected]
+                  - option "Pending"
+                  - option "In Progress"
+                  - option "Completed"
+              - generic [ref=e376]:
+                - generic [ref=e377]:
+                  - generic [ref=e378] [cursor=pointer]:
+                    - button "-" [expanded] [ref=e379]
+                    - generic [ref=e380]:
+                      - paragraph [ref=e381]: Operations Readiness
+                      - generic [ref=e382]: architect
+                    - generic [ref=e383]: In Progress
+                  - generic [ref=e385] [cursor=pointer]:
+                    - button "+" [ref=e386]
+                    - generic [ref=e387]:
+                      - paragraph [ref=e388]: Guardrail baselines
+                      - generic [ref=e389]: developer
+                    - generic [ref=e390]: Completed
+                  - generic [ref=e392] [cursor=pointer]:
+                    - button "+" [ref=e393]
+                    - generic [ref=e394]:
+                      - paragraph [ref=e395]: Telemetry baselines
+                      - generic [ref=e396]: developer
+                    - generic [ref=e397]: In Progress
+                  - generic [ref=e399] [cursor=pointer]:
+                    - button [disabled] [ref=e400]
+                    - generic [ref=e401]:
+                      - paragraph [ref=e402]: Incident playbooks
+                      - generic [ref=e403]: documentation
+                    - generic [ref=e404]: Pending
+                - generic [ref=e405]:
+                  - generic [ref=e406] [cursor=pointer]:
+                    - button "-" [expanded] [ref=e407]
+                    - generic [ref=e408]:
+                      - paragraph [ref=e409]: Execution Fabric
+                      - generic [ref=e410]: architect
+                    - generic [ref=e411]: Pending
+                  - generic [ref=e413] [cursor=pointer]:
+                    - button "+" [ref=e414]
+                    - generic [ref=e415]:
+                      - paragraph [ref=e416]: Task tree viewer
+                      - generic [ref=e417]: developer
+                    - generic [ref=e418]: In Progress
+                  - generic [ref=e420] [cursor=pointer]:
+                    - button [disabled] [ref=e421]
+                    - generic [ref=e422]:
+                      - paragraph [ref=e423]: Git commit viewer
+                      - generic [ref=e424]: developer
+                    - generic [ref=e425]: Pending
+                  - generic [ref=e427] [cursor=pointer]:
+                    - button [disabled] [ref=e428]
+                    - generic [ref=e429]:
+                      - paragraph [ref=e430]: Graph synchronization
+                      - generic [ref=e431]: developer
+                    - generic [ref=e432]: Pending
+            - generic [ref=e433]:
+              - generic [ref=e434]:
+                - generic [ref=e435]:
+                  - paragraph [ref=e436]: Task control
+                  - heading "Agent Launchpad" [level=2] [ref=e437]
+                - generic [ref=e438]: Ready
+              - paragraph [ref=e439]: Select a task to start an agent session.
+            - generic [ref=e440]:
+              - generic [ref=e441]:
+                - generic [ref=e442]:
+                  - paragraph [ref=e443]: Task topology
+                  - heading "Graph Sync" [level=2] [ref=e444]
+                - generic [ref=e445]: Linked
+              - img [ref=e447]:
+                - generic [ref=e461]:
+                  - generic [ref=e464]: Task Tree
+                  - generic [ref=e467]: Operations Readiness
+                  - generic [ref=e470]: Guardrail baselines
+                  - generic [ref=e473]: Copy review for live rollout
+                  - generic [ref=e476]: Telemetry baselines
+                  - generic [ref=e479]: Alert routing
+                  - generic [ref=e482]: Incident playbooks
+                  - generic [ref=e485]: Execution Fabric
+                  - generic [ref=e488]: Task tree viewer
+                  - generic [ref=e491]: Search + filters
+                  - generic [ref=e494]: Context menu actions
+                  - generic [ref=e497]: Git commit viewer
+                  - generic [ref=e500]: Graph synchronization
+    - generic:
+      - generic:
+        - paragraph: ⊘
+        - paragraph: No session selected
+        - paragraph: Select a session to view agent activity

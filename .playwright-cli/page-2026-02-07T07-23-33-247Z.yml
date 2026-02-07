@@ -1,0 +1,177 @@
+- generic [ref=e3]:
+  - link "Skip to content" [ref=e4] [cursor=pointer]:
+    - /url: "#main-content"
+  - complementary "Primary Navigation" [ref=e5]:
+    - generic [ref=e6]: OrbitMesh
+    - navigation [ref=e7]:
+      - link "Dashboard" [ref=e564] [cursor=pointer]:
+        - /url: /
+        - img [ref=e566]
+        - generic [ref=e571]: Dashboard
+      - link "Tasks" [ref=e572] [cursor=pointer]:
+        - /url: /tasks
+        - img [ref=e574]
+        - generic [ref=e576]: Tasks
+      - link "Sessions" [ref=e577] [cursor=pointer]:
+        - /url: /sessions
+        - img [ref=e579]
+        - generic [ref=e582]: Sessions
+      - link "Settings" [ref=e583] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e585]
+        - generic [ref=e591]: Settings
+  - generic [ref=e36]:
+    - generic [ref=e37]:
+      - banner [ref=e38]:
+        - navigation "Breadcrumb" [ref=e39]:
+          - list [ref=e40]:
+            - listitem [ref=e592]: OrbitMesh
+        - generic [ref=e42]:
+          - generic [ref=e43]:
+            - paragraph [ref=e44]: Dashboard
+            - heading "Dashboard" [level=2] [ref=e593]
+          - paragraph [ref=e46]: System graph
+      - main [ref=e47]:
+        - generic [ref=e594]:
+          - generic [ref=e595]:
+            - generic [ref=e596]:
+              - paragraph [ref=e597]: OrbitMesh Control Plane
+              - heading "Operational Continuity" [level=1] [ref=e598]
+              - paragraph [ref=e599]: A full-picture view of sessions, guardrails, and system state in one place.
+            - generic [ref=e600]:
+              - generic [ref=e601]:
+                - paragraph [ref=e602]: Active role
+                - strong [ref=e603]: developer
+              - generic [ref=e604]:
+                - paragraph [ref=e605]: Active sessions
+                - generic [ref=e606]: Loading...
+              - generic [ref=e607]:
+                - paragraph [ref=e608]: Guardrail posture
+                - strong [ref=e609]: 4 allowed
+                - generic [ref=e610]: 2 restricted
+          - main [ref=e611]:
+            - generic [ref=e612]:
+              - generic [ref=e613]:
+                - generic [ref=e614]:
+                  - paragraph [ref=e615]: Operational overview
+                  - heading "System pulse" [level=2] [ref=e616]
+                - generic [ref=e617]: Live
+              - generic [ref=e618]:
+                - generic [ref=e619]:
+                  - paragraph [ref=e620]: Sessions in motion
+                  - generic [ref=e621]: Calculating...
+                - generic [ref=e622]:
+                  - paragraph [ref=e623]: Paused or starting
+                  - generic [ref=e624]: Calculating...
+                - generic [ref=e625]:
+                  - paragraph [ref=e626]: Attention needed
+                  - generic [ref=e627]: Calculating...
+                - generic [ref=e628]:
+                  - paragraph [ref=e629]: Guardrails active
+                  - strong [ref=e630]: "4"
+                  - generic [ref=e631]: 2 restricted
+            - generic [ref=e632]:
+              - generic [ref=e633]:
+                - generic [ref=e634]:
+                  - paragraph [ref=e635]: Session operations
+                  - heading "Active Sessions" [level=2] [ref=e636]
+                - generic [ref=e637]: Operators ready
+              - paragraph [ref=e638]: Loading sessions...
+            - generic [ref=e639]:
+              - generic [ref=e640]:
+                - generic [ref=e641]:
+                  - paragraph [ref=e642]: Management guardrails
+                  - heading "Permission health" [level=2] [ref=e643]
+                - generic [ref=e644]: Protected
+              - paragraph [ref=e645]:
+                - text: "Role:"
+                - strong [ref=e646]: developer
+              - generic [ref=e647]:
+                - article [ref=e648]:
+                  - generic [ref=e649]:
+                    - heading "Inspect sessions" [level=3] [ref=e650]
+                    - generic [ref=e651]: Allowed
+                  - paragraph [ref=e652]: Live telemetry stays read-only unless your guardrail allows inspection.
+                - article [ref=e653]:
+                  - generic [ref=e654]:
+                    - heading "Role escalations" [level=3] [ref=e655]
+                    - generic [ref=e656]: Restricted
+                  - paragraph [ref=e657]: Role edits are hidden until an owner approves escalation.
+                - article [ref=e658]:
+                  - generic [ref=e659]:
+                    - heading "Template authoring" [level=3] [ref=e660]
+                    - generic [ref=e661]: Allowed
+                  - paragraph [ref=e662]: Template workflows stay available for curated drafts.
+                - article [ref=e663]:
+                  - generic [ref=e664]:
+                    - heading "Bulk operations" [level=3] [ref=e665]
+                    - generic [ref=e666]: Restricted
+                  - paragraph [ref=e667]: Bulk commits require higher-level guardrails before they become active.
+                - article [ref=e668]:
+                  - generic [ref=e669]:
+                    - heading "CSRF validation" [level=3] [ref=e670]
+                    - generic [ref=e671]: Allowed
+                  - paragraph [ref=e672]: State-changing requests double-submit a SameSite cookie and header.
+                - article [ref=e673]:
+                  - generic [ref=e674]:
+                    - heading "Audit integrity" [level=3] [ref=e675]
+                    - generic [ref=e676]: Allowed
+                  - paragraph [ref=e677]: High-privilege changes generate immutable audit events and alerts.
+              - paragraph [ref=e678]: Role escalations now require explicit owner confirmation before they can be saved.
+            - generic [ref=e679]:
+              - generic [ref=e680]:
+                - generic [ref=e681]:
+                  - paragraph [ref=e682]: System topology
+                  - heading "System Graph" [level=2] [ref=e683]
+                - generic [ref=e684]: Monitoring
+              - img [ref=e686]:
+                - generic [ref=e730]:
+                  - generic [ref=e733]: Task Tree
+                  - generic [ref=e736]: Operations Readiness
+                  - generic [ref=e739]: Guardrail baselines
+                  - generic [ref=e742]: Copy review for live rollout
+                  - generic [ref=e745]: Telemetry baselines
+                  - generic [ref=e748]: Alert routing
+                  - generic [ref=e751]: Incident playbooks
+                  - generic [ref=e754]: Execution Fabric
+                  - generic [ref=e757]: Task tree viewer
+                  - generic [ref=e760]: Search + filters
+                  - generic [ref=e763]: Context menu actions
+                  - generic [ref=e766]: Git commit viewer
+                  - generic [ref=e769]: Graph synchronization
+                  - generic [ref=e772]: Commit History
+                  - generic [ref=e775]: "fix: Update Playwright config to use correct dev server port (5173) and reduce timeout settings"
+                  - generic [ref=e778]: Add comprehensive Playwright workflow tests for OrbitMesh MVP
+                  - generic [ref=e781]: "feat: implement agent dock with chat, composer, and quick actions"
+                  - generic [ref=e784]: Implement sidebar navigation and core route structure with responsive design
+                  - generic [ref=e787]: "complete: Ti3ingb - Visual language: compact admin/IDE styling"
+                  - generic [ref=e790]: Add design system implementation summary and documentation
+                  - generic [ref=e793]: Implement comprehensive design tokens and visual language layer
+                  - generic [ref=e796]: "feat: adopt compact admin design tokens"
+                  - generic [ref=e799]: "test: add Playwright workflow e2e coverage"
+                  - generic [ref=e802]: "feat: add IA shell for sidebar navigation"
+                  - generic [ref=e805]: "fix: allow-list PTY command execution (refs Tolku0s)"
+                  - generic [ref=e808]: "feat: launch sessions from tasks"
+                  - generic [ref=e811]: tell agents to use playwright-cli
+                  - generic [ref=e814]: playwright skill
+                  - generic [ref=e817]: "feat: add task tree, commit viewer, and guardrail-sanitized ops UI"
+                  - generic [ref=e820]: "docs: document guardrail guidance for locked actions"
+                  - generic [ref=e823]: "test: add regression coverage for task tree and git viewer flows"
+                  - generic [ref=e826]: "feat: power dashboard guardrails with permissions"
+                  - generic [ref=e829]: "feat: complete backend core, security hardening, and next-phase designs"
+                  - generic [ref=e832]: "feat: complete backend core with PTY provider, security hardening, and comprehensive documentation"
+                  - generic [ref=e835]: "feat(frontend): add unit and integration tests for dashboard and api client"
+                  - generic [ref=e838]: "feat(frontend): scaffold dashboard with D3 agent graph and API client (T8so0)"
+                  - generic [ref=e841]: "Tw2y5: add tests for provider errors, executor shutdown, and unknown event types"
+                  - generic [ref=e844]: backend api
+                  - generic [ref=e847]: Add comprehensive unit and integration tests for native provider
+                  - generic [ref=e850]: "Taz50: Verify native provider tests pass with race detection"
+                  - generic [ref=e853]: relocate module
+                  - generic [ref=e856]: "feat(provider): implement Google ADK native provider (Phase 5)"
+                  - generic [ref=e859]: more backend progress
+                  - generic [ref=e862]: progress on backend
+    - generic:
+      - generic:
+        - paragraph: ⊘
+        - paragraph: No session selected
+        - paragraph: Select a session to view agent activity
