@@ -46,6 +46,12 @@ func (h *Handler) sseEvents(w http.ResponseWriter, r *http.Request) {
 	sub, replay := h.broadcaster.SubscribeWithReplay(subID, sessionID, lastEventID)
 	defer h.broadcaster.Unsubscribe(subID)
 
+	// Only replay events if Last-Event-ID was explicitly provided (lastEventID > 0).
+	// This prevents flooding the client with historical events on first connection.
+	if lastEventID == 0 {
+		replay = nil
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")

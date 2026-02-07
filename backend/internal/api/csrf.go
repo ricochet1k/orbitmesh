@@ -56,3 +56,23 @@ func generateCSRFToken() string {
 	}
 	return base64.RawURLEncoding.EncodeToString(buf[:])
 }
+
+// CORSMiddleware adds CORS headers to enable cross-origin requests, especially
+// for Server-Sent Events streams from frontend applications.
+func CORSMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers to allow cross-origin requests from any origin
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token, Last-Event-ID")
+		w.Header().Set("Access-Control-Max-Age", "3600")
+
+		// Handle preflight requests
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}

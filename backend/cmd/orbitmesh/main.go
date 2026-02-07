@@ -53,6 +53,7 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(api.CORSMiddleware)
 	r.Use(api.CSRFMiddleware)
 
 	handler := api.NewHandler(executor, broadcaster)

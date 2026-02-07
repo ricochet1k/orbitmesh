@@ -1,0 +1,7 @@
+Total messages: 5 (Errors: 3, Warnings: 0)
+Returning 3 messages for level "info"
+
+[ERROR] Failed to load resource: the server responded with a status of 405 (Method Not Allowed) @ http://127.0.0.1:3003/api/sessions:0
+Error: Request failed.
+    at listSessions (http://127.0.0.1:3003/src/api/client.ts:38:25)
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:3003/favicon.ico:0
