@@ -5,6 +5,7 @@ import CommitHistoryView from "./views/CommitHistoryView";
 import SessionViewer from "./views/SessionViewer";
 import SessionsView from "./views/SessionsView";
 import SettingsView from "./views/SettingsView";
+import Sidebar from "./components/Sidebar";
 import { apiClient } from "./api/client";
 
 export default function App() {
@@ -32,11 +33,63 @@ export default function App() {
     return path().split("/sessions/")[1]?.split("/")[0] ?? "";
   };
 
+  // Navigation items with icon renderers
   const navItems = [
-    { label: "Dashboard", href: "/", match: (value: string) => value === "/" },
-    { label: "Tasks", href: "/tasks", match: (value: string) => value.startsWith("/tasks") },
-    { label: "Sessions", href: "/sessions", match: (value: string) => value.startsWith("/sessions") },
-    { label: "Settings", href: "/settings", match: (value: string) => value.startsWith("/settings") },
+    {
+      label: "Dashboard",
+      href: "/",
+      match: (value: string) => value === "/",
+      icon: () => (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="3" y="3" width="7" height="7" rx="2" />
+          <rect x="14" y="3" width="7" height="7" rx="2" />
+          <rect x="3" y="14" width="7" height="7" rx="2" />
+          <rect x="14" y="14" width="7" height="7" rx="2" />
+        </svg>
+      ),
+    },
+    {
+      label: "Tasks",
+      href: "/tasks",
+      match: (value: string) => value.startsWith("/tasks"),
+      icon: () => (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 6h16" />
+          <path d="M4 12h16" />
+          <path d="M4 18h10" />
+          <circle cx="19" cy="18" r="2" />
+        </svg>
+      ),
+    },
+    {
+      label: "Sessions",
+      href: "/sessions",
+      match: (value: string) => value.startsWith("/sessions"),
+      icon: () => (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="4" y="5" width="16" height="6" rx="2" />
+          <rect x="4" y="13" width="16" height="6" rx="2" />
+        </svg>
+      ),
+    },
+    {
+      label: "Settings",
+      href: "/settings",
+      match: (value: string) => value.startsWith("/settings"),
+      icon: () => (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3v3" />
+          <path d="M12 18v3" />
+          <path d="M4.6 6.6l2.1 2.1" />
+          <path d="M17.3 15.3l2.1 2.1" />
+          <path d="M3 12h3" />
+          <path d="M18 12h3" />
+          <path d="M4.6 17.4l2.1-2.1" />
+          <path d="M17.3 8.7l2.1-2.1" />
+          <circle cx="12" cy="12" r="3" />
+        </svg>
+      ),
+    },
   ];
 
   const routeMeta = createMemo(() => {
@@ -96,26 +149,7 @@ export default function App() {
   return (
     <div class="app-shell">
       <a class="skip-link" href="#main-content">Skip to content</a>
-      <aside class="sidebar" aria-label="Primary">
-        <div class="sidebar-brand">OrbitMesh</div>
-        <nav class="sidebar-nav">
-          <For each={navItems}>
-            {(item) => (
-              <a
-                href={item.href}
-                class={`nav-item ${item.match(path()) ? "active" : ""}`}
-                aria-current={item.match(path()) ? "page" : undefined}
-                onClick={(event) => handleNavClick(event, item.href)}
-              >
-                <span class="nav-icon" aria-hidden="true">
-                  <NavIcon name={item.label} />
-                </span>
-                <span class="nav-label">{item.label}</span>
-              </a>
-            )}
-          </For>
-        </nav>
-      </aside>
+      <Sidebar currentPath={path()} onNavigate={navigate} navItems={navItems} />
 
       <div class="app-main">
         <header class="top-bar">
@@ -190,50 +224,4 @@ export default function App() {
 function getInitialPath(): string {
   if (typeof window === "undefined") return "/";
   return window.location.pathname || "/";
-}
-
-function NavIcon(props: { name: string }) {
-  switch (props.name) {
-    case "Dashboard":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <rect x="3" y="3" width="7" height="7" rx="2" />
-          <rect x="14" y="3" width="7" height="7" rx="2" />
-          <rect x="3" y="14" width="7" height="7" rx="2" />
-          <rect x="14" y="14" width="7" height="7" rx="2" />
-        </svg>
-      );
-    case "Tasks":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M4 6h16" />
-          <path d="M4 12h16" />
-          <path d="M4 18h10" />
-          <circle cx="19" cy="18" r="2" />
-        </svg>
-      );
-    case "Sessions":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <rect x="4" y="5" width="16" height="6" rx="2" />
-          <rect x="4" y="13" width="16" height="6" rx="2" />
-        </svg>
-      );
-    case "Settings":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 3v3" />
-          <path d="M12 18v3" />
-          <path d="M4.6 6.6l2.1 2.1" />
-          <path d="M17.3 15.3l2.1 2.1" />
-          <path d="M3 12h3" />
-          <path d="M18 12h3" />
-          <path d="M4.6 17.4l2.1-2.1" />
-          <path d="M17.3 8.7l2.1-2.1" />
-          <circle cx="12" cy="12" r="3" />
-        </svg>
-      );
-    default:
-      return null;
-  }
 }
