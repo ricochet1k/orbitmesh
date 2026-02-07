@@ -21,14 +21,30 @@ const defaultLinks: GraphLink[] = [
 
 export default function AgentGraph(props: AgentGraphProps) {
   let svgRef: SVGSVGElement | undefined;
+  let resizeObserver: ResizeObserver | undefined;
 
-  createEffect(() => {
+  // Get container for size calculations
+  const getContainerSize = () => {
+    if (!svgRef || !svgRef.parentElement) return { width: 0, height: 0 };
+    const rect = svgRef.parentElement.getBoundingClientRect();
+    return { 
+      width: rect.width || 800, 
+      height: rect.height || 500 
+    };
+  };
+
+  const renderGraph = () => {
     if (!svgRef) return;
 
-    const width = svgRef.clientWidth;
-    const height = svgRef.clientHeight;
+    const { width, height } = getContainerSize();
+    
+    // Ensure minimum dimensions
+    if (width < 100 || height < 100) return;
 
     const svg = d3.select(svgRef);
+    
+    // Set SVG dimensions explicitly
+    svg.attr("width", width).attr("height", height);
     svg.selectAll("*").remove();
 
     const nodes: GraphNode[] = (props.nodes && props.nodes.length > 0)
@@ -40,13 +56,35 @@ export default function AgentGraph(props: AgentGraphProps) {
 
     if (nodes.length === 0) return;
 
-    const simulation = d3.forceSimulation<GraphNode>(nodes)
-      .force("link", d3.forceLink<GraphNode, GraphLink>(links).id(d => d.id))
-      .force("charge", d3.forceManyBody().strength(-200))
-      .force("center", d3.forceCenter(width / 2, height / 2))
-      .force("collision", d3.forceCollide().radius(42));
+    // Calculate dynamic parameters based on graph size
+    const nodeCount = nodes.length;
+    const linkCount = links.length;
+    
+    // Adjust charge based on node count (more repulsion for larger graphs)
+    const chargeStrength = -Math.max(200, nodeCount * 30);
+    
+    // Adjust link distance based on available space and node count
+    const linkDistance = Math.min(100, Math.max(50, width / (nodeCount + 1)));
+    
+    // Adjust collision radius based on node count
+    const collisionRadius = Math.max(20, Math.min(50, width / (nodeCount * 1.5)));
 
-    const link = svg.append("g")
+    const simulation = d3.forceSimulation<GraphNode>(nodes)
+      .force("link", 
+        d3.forceLink<GraphNode, GraphLink>(links)
+          .id(d => d.id)
+          .distance(linkDistance)
+          .strength(0.1)
+      )
+      .force("charge", d3.forceManyBody().strength(chargeStrength))
+      .force("center", d3.forceCenter(width / 2, height / 2))
+      .force("collision", d3.forceCollide().radius(collisionRadius))
+      .alphaDecay(0.02); // Slower cooling for more stable layouts
+
+    // Create a group for zoomable content
+    const g = svg.append("g");
+
+    const link = g.append("g")
       .attr("stroke", "var(--graph-link)")
       .attr("stroke-opacity", 0.7)
       .selectAll("line")
@@ -54,7 +92,7 @@ export default function AgentGraph(props: AgentGraphProps) {
       .join("line")
       .attr("stroke-width", 2);
 
-    const node = svg.append("g")
+    const node = g.append("g")
       .attr("stroke", "var(--graph-stroke)")
       .attr("stroke-width", 1.2)
       .selectAll("g")
@@ -82,6 +120,7 @@ export default function AgentGraph(props: AgentGraphProps) {
       .attr("stroke", "none")
       .attr("fill", "var(--graph-text)")
       .style("font-weight", d => d.id === props.selectedId ? "600" : "400")
+      .style("font-size", "0.8rem")
       .text(d => d.label);
 
     simulation.on("tick", () => {
@@ -93,6 +132,24 @@ export default function AgentGraph(props: AgentGraphProps) {
 
       node.attr("transform", d => `translate(${d.x},${d.y})`);
     });
+
+    // Add zoom behavior
+    const zoom = d3.zoom<SVGSVGElement, unknown>()
+      .on("zoom", (event) => {
+        g.attr("transform", event.transform);
+      });
+
+    svg.call(zoom);
+
+    // Add initial transform to center the view after a brief delay to ensure SVG is properly sized
+    if (width > 0 && height > 0) {
+      const initialScale = Math.min(width / 960, height / 600);
+      try {
+        svg.call(zoom.transform, d3.zoomIdentity.translate(width / 2, height / 2).scale(initialScale));
+      } catch (e) {
+        // Zoom initialization may fail in test environments, silently continue
+      }
+    }
 
     function dragstarted(event: any, d: any) {
       if (!event.active) simulation.alphaTarget(0.3).restart();
@@ -112,12 +169,43 @@ export default function AgentGraph(props: AgentGraphProps) {
     }
 
     onCleanup(() => simulation.stop());
+  };
+
+  // Initial render and setup resize observer
+  createEffect(() => {
+    if (!svgRef) return;
+
+    renderGraph();
+
+    // Watch for container size changes
+    const container = svgRef.parentElement;
+    if (container && window.ResizeObserver) {
+      resizeObserver = new ResizeObserver(() => {
+        renderGraph();
+      });
+      resizeObserver.observe(container);
+    }
+
+    onCleanup(() => {
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+        resizeObserver = undefined;
+      }
+    });
+  });
+
+  // Re-render when props change
+  createEffect(() => {
+    props.nodes;
+    props.links;
+    props.selectedId;
+    renderGraph();
   });
 
   return (
     <svg 
       ref={svgRef} 
-      style={{ width: "100%", height: "100%" }}
+      style={{ width: "100%", height: "100%", display: "block" }}
     />
   );
 }
