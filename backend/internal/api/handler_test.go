@@ -413,6 +413,162 @@ func TestCreateSession_ExecutorShutdown(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/sessions
+// ---------------------------------------------------------------------------
+
+func TestListSessions_Empty(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp apiTypes.SessionListResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if len(resp.Sessions) != 0 {
+		t.Errorf("expected empty sessions list, got %d sessions", len(resp.Sessions))
+	}
+}
+
+func TestListSessions_SingleSession(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	created := createSession(t, r, "mock", "/tmp/test")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp apiTypes.SessionListResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if len(resp.Sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(resp.Sessions))
+	}
+
+	session := resp.Sessions[0]
+	if session.ID != created.ID {
+		t.Errorf("Session ID = %q, want %q", session.ID, created.ID)
+	}
+	if session.ProviderType != "mock" {
+		t.Errorf("ProviderType = %q, want %q", session.ProviderType, "mock")
+	}
+	if session.WorkingDir != "/tmp/test" {
+		t.Errorf("WorkingDir = %q, want %q", session.WorkingDir, "/tmp/test")
+	}
+}
+
+func TestListSessions_MultipleSessions(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	// Create multiple sessions
+	session1 := createSession(t, r, "mock", "/tmp/test1")
+	session2 := createSession(t, r, "mock", "/tmp/test2")
+	session3 := createSession(t, r, "mock", "/tmp/test3")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp apiTypes.SessionListResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if len(resp.Sessions) != 3 {
+		t.Fatalf("expected 3 sessions, got %d", len(resp.Sessions))
+	}
+
+	// Verify all sessions are in the list
+	ids := make(map[string]bool)
+	for _, s := range resp.Sessions {
+		ids[s.ID] = true
+	}
+	if !ids[session1.ID] || !ids[session2.ID] || !ids[session3.ID] {
+		t.Error("not all created sessions are in the list")
+	}
+}
+
+func TestListSessions_SessionPersistenceAfterCreation(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	// Create a session with minimal fields
+	body, _ := json.Marshal(apiTypes.SessionRequest{
+		ProviderType: "mock",
+		WorkingDir:   "/tmp",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created apiTypes.SessionResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &created)
+
+	// Verify the session is in the list
+	req = httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	var resp apiTypes.SessionListResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+
+	found := false
+	for _, s := range resp.Sessions {
+		if s.ID == created.ID {
+			found = true
+			if s.ProviderType != "mock" {
+				t.Errorf("ProviderType = %q, want %q", s.ProviderType, "mock")
+			}
+			// Session should be in created, starting, or running state
+			validStates := map[apiTypes.SessionState]bool{
+				apiTypes.SessionStateCreated:  true,
+				apiTypes.SessionStateStarting: true,
+				apiTypes.SessionStateRunning:  true,
+			}
+			if !validStates[s.State] {
+				t.Errorf("State = %q, expected one of: created, starting, running", s.State)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("created session not found in list")
+	}
+}
+
+func TestListSessions_ContentType(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	createSession(t, r, "mock", "/tmp/test")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want 'application/json'", ct)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/sessions/{id}
 // ---------------------------------------------------------------------------
 
