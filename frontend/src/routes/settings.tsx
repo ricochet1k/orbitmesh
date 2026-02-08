@@ -1,4 +1,10 @@
-export default function SettingsView() {
+import { createFileRoute } from '@tanstack/solid-router'
+
+export const Route = createFileRoute('/settings')({
+  component: RouteComponent,
+})
+
+function RouteComponent() {
   return (
     <div class="settings-view">
       <header class="view-header">
@@ -60,5 +66,5 @@ export default function SettingsView() {
         </section>
       </main>
     </div>
-  );
+  )
 }

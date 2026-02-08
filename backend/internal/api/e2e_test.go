@@ -13,7 +13,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/ricochet1k/orbitmesh/internal/provider"
-	"github.com/ricochet1k/orbitmesh/internal/provider/bash"
 	"github.com/ricochet1k/orbitmesh/internal/service"
 	apiTypes "github.com/ricochet1k/orbitmesh/pkg/api"
 )

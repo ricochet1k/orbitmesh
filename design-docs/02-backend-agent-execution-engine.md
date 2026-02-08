@@ -21,9 +21,9 @@ Layered architecture for multi-provider agent orchestration with real-time monit
 ┌──────────────────────────────────────────────────────┐
 │                    API Layer                         │
 │  ┌────────────────────────────────────────────────┐  │
-│  │ HTTP Handlers: Sessions CRUD                  │  │
-│  │ SSE Handler: Real-time event streaming       │  │
-│  │ WebSocket Handler: Interactive control (opt) │  │
+│  │ HTTP Handlers: Sessions CRUD                   │  │
+│  │ SSE Handler: Real-time event streaming         │  │
+│  │ WebSocket Handler: Interactive control (opt)   │  │
 │  └────────────────────────────────────────────────┘  │
 └──────────────────────┬───────────────────────────────┘
                        │
@@ -31,20 +31,20 @@ Layered architecture for multi-provider agent orchestration with real-time monit
 ┌──────────────────────────────────────────────────────┐
 │                  Service Layer                       │
 │  ┌────────────────────────────────────────────────┐  │
-│  │ AgentExecutor                                 │  │
-│  │  - Session lifecycle management              │  │
-│  │  - Provider orchestration                    │  │
-│  │  - Health checks & fault tolerance           │  │
+│  │ AgentExecutor                                  │  │
+│  │  - Session lifecycle management                │  │
+│  │  - Provider orchestration                      │  │
+│  │  - Health checks & fault tolerance             │  │
 │  └────────────────────────────────────────────────┘  │
 │  ┌────────────────────────────────────────────────┐  │
-│  │ EventBroadcaster                              │  │
-│  │  - Collects events from providers            │  │
-│  │  - Fans out to multiple SSE clients          │  │
+│  │ EventBroadcaster                               │  │
+│  │  - Collects events from providers              │  │
+│  │  - Fans out to multiple SSE clients            │  │
 │  └────────────────────────────────────────────────┘  │
 │  ┌────────────────────────────────────────────────┐  │
-│  │ SessionManager                                │  │
-│  │  - Session registry (map[id]*Session)       │  │
-│  │  - State transitions with validation         │  │
+│  │ SessionManager                                 │  │
+│  │  - Session registry (map[id]*Session)          │  │
+│  │  - State transitions with validation           │  │
 │  └────────────────────────────────────────────────┘  │
 └──────────────────────┬───────────────────────────────┘
                        │
@@ -90,7 +90,7 @@ type Provider interface {
 
 // Configuration
 type ProviderConfig struct {
-    ProviderType string                 // "gemini", "claude-code", "codex"
+    ProviderType string                 // "gemini", "claude", "codex"
     WorkingDir   string
     Environment  map[string]string
     SystemPrompt string                 // Injected/augmented system prompt
@@ -223,7 +223,7 @@ func (eb *EventBroadcaster) Broadcast(event Event)
 ```
 backend/internal/
 ├── api/
-│   ├── handler.go        # REST API handlers
+│   ├── handler.go       # REST API handlers
 │   ├── sse.go           # Server-Sent Events
 │   └── types.go         # API request/response types
 ├── domain/
@@ -238,7 +238,7 @@ backend/internal/
 │   │   └── adapter.go   # Native provider utilities
 │   └── pty/
 │       ├── pty.go       # PTY provider base
-│       ├── claude.go    # claude-code specific
+│       ├── claude.go    # claude specific
 │       ├── codex.go     # codex specific
 │       ├── extractor.go # Status extraction
 │       └── amp.go       # amp specific
@@ -263,7 +263,7 @@ backend/internal/
 {
   "id": "session-abc123",
   "state": "running",
-  "provider_type": "claude-code",
+  "provider_type": "claude",
   "config": {
     "working_dir": "/path/to/project",
     "environment": {},
@@ -423,7 +423,7 @@ type PositionExtractor struct {
 }
 ```
 
-**Example**: claude-code shows status at row 0, col 50, width 30
+**Example**: claude shows status at row 0, col 50, width 30
 
 ### 2. Regex-Based Extraction
 

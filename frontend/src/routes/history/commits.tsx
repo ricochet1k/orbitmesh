@@ -1,39 +1,44 @@
-import { createEffect, createMemo, createResource, createSignal, For, Show } from "solid-js";
-import { apiClient } from "../api/client";
-import type { CommitDetail } from "../types/api";
-import AgentGraph from "../graph/AgentGraph";
-import { buildCommitGraph } from "../graph/graphData";
+import { createFileRoute } from '@tanstack/solid-router'
+import { createResource, createSignal, createEffect, createMemo, Show, For } from 'solid-js'
+import { apiClient } from '../../api/client'
+import AgentGraph from '../../graph/AgentGraph'
+import { buildCommitGraph } from '../../graph/graphData'
+import type { CommitDetail } from '../../types/api'
+
+export const Route = createFileRoute('/history/commits')({
+  component: CommitHistoryView,
+})
 
 interface DiffRow {
-  kind: "file" | "hunk" | "line";
-  left: string;
-  right: string;
-  className?: string;
+  kind: "file" | "hunk" | "line"
+  left: string
+  right: string
+  className?: string
 }
 
-export default function CommitHistoryView() {
-  const [commitList] = createResource(() => apiClient.listCommits(40));
-  const [selectedSha, setSelectedSha] = createSignal(getInitialCommitSha());
+function CommitHistoryView() {
+  const [commitList] = createResource(() => apiClient.listCommits(40))
+  const [selectedSha, setSelectedSha] = createSignal(getInitialCommitSha())
   const [commitDetail] = createResource(
     () => (selectedSha() ? selectedSha() : null),
     (sha) => apiClient.getCommit(sha)
-  );
+  )
 
-  const commits = () => commitList()?.commits ?? [];
+  const commits = () => commitList()?.commits ?? []
 
   createEffect(() => {
-    if (selectedSha()) return;
-    const first = commits()[0]?.sha;
-    if (first) setSelectedSha(first);
-  });
+    if (selectedSha()) return
+    const first = commits()[0]?.sha
+    if (first) setSelectedSha(first)
+  })
 
   const selectCommit = (sha: string) => {
-    setSelectedSha(sha);
-    updateCommitQuery(sha);
-  };
+    setSelectedSha(sha)
+    updateCommitQuery(sha)
+  }
 
-  const graphData = createMemo(() => buildCommitGraph(commits()));
-  const diffRows = createMemo(() => parseDiff(commitDetail()?.commit));
+  const graphData = createMemo(() => buildCommitGraph(commits()))
+  const diffRows = createMemo(() => parseDiff(commitDetail()?.commit))
 
   return (
     <div class="commit-history-view">
@@ -161,64 +166,65 @@ export default function CommitHistoryView() {
         </section>
       </main>
     </div>
-  );
+  )
 }
 
 function parseDiff(commit?: CommitDetail): DiffRow[] {
-  if (!commit?.diff) return [];
-  const rows: DiffRow[] = [];
-  const lines = commit.diff.split("\n");
+  if (!commit?.diff) return []
+  const rows: DiffRow[] = []
+  const lines = commit.diff.split("\n")
 
   lines.forEach((line) => {
     if (line.startsWith("diff --git ")) {
-      rows.push({ kind: "file", left: line.replace("diff --git ", ""), right: "" });
-      return;
+      rows.push({ kind: "file", left: line.replace("diff --git ", ""), right: "" })
+      return
     }
     if (line.startsWith("@@")) {
-      rows.push({ kind: "hunk", left: line, right: line, className: "diff-hunk" });
-      return;
+      rows.push({ kind: "hunk", left: line, right: line, className: "diff-hunk" })
+      return
     }
     if (line.startsWith("+")) {
       if (line.startsWith("+++")) {
-        rows.push({ kind: "file", left: line, right: "" });
+        rows.push({ kind: "file", left: line, right: "" })
       } else {
-        rows.push({ kind: "line", left: "", right: line.slice(1), className: "diff-add" });
+        rows.push({ kind: "line", left: "", right: line.slice(1), className: "diff-add" })
       }
-      return;
+      return
     }
     if (line.startsWith("-")) {
       if (line.startsWith("---")) {
-        rows.push({ kind: "file", left: line, right: "" });
+        rows.push({ kind: "file", left: line, right: "" })
       } else {
-        rows.push({ kind: "line", left: line.slice(1), right: "", className: "diff-remove" });
+        rows.push({ kind: "line", left: line.slice(1), right: "", className: "diff-remove" })
       }
-      return;
+      return
     }
     if (line.startsWith(" ")) {
-      rows.push({ kind: "line", left: line.slice(1), right: line.slice(1), className: "diff-context" });
-      return;
+      rows.push({ kind: "line", left: line.slice(1), right: line.slice(1), className: "diff-context" })
+      return
     }
 
-    rows.push({ kind: "line", left: line, right: line, className: "diff-meta" });
-  });
+    rows.push({ kind: "line", left: line, right: line, className: "diff-meta" })
+  })
 
-  return rows;
+  return rows
 }
 
 function updateCommitQuery(sha: string) {
-  const url = new URL(window.location.href);
-  url.searchParams.set("commit", sha);
-  history.replaceState({}, "", url);
+  const url = new URL(window.location.href)
+  url.searchParams.set("commit", sha)
+  history.replaceState({}, "", url)
 }
 
 function getInitialCommitSha(): string {
-  const params = new URLSearchParams(window.location.search);
-  return params.get("commit") ?? "";
+  const params = new URLSearchParams(window.location.search)
+  return params.get("commit") ?? ""
 }
 
 function formatTimestamp(raw: string): string {
-  if (!raw) return "";
-  const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) return raw;
-  return date.toLocaleString();
+  if (!raw) return ""
+  const date = new Date(raw)
+  if (Number.isNaN(date.getTime())) return raw
+  return date.toLocaleString()
 }
+

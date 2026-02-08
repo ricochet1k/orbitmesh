@@ -18,7 +18,7 @@ type StatusExtractor interface {
 Extracts status from fixed screen coordinates (row/col). Ideal for tools with a static status bar (e.g., `amp`).
 
 ### 2. Regex-Based
-Uses regular expressions with named capture groups (e.g., `(?m)^Task: (?P<task>.*)$`). Ideal for scrolling CLI tools (e.g., `claude-code`).
+Uses regular expressions with named capture groups (e.g., `(?m)^Task: (?P<task>.*)$`). Ideal for scrolling CLI tools (e.g., `claude`).
 
 ### 3. AI-Assisted (Advanced)
 A fallback strategy that uses a small LLM to interpret the screen buffer when rules fail.
@@ -29,7 +29,7 @@ A fallback strategy that uses a small LLM to interpret the screen buffer when ru
 Tools are configured via a JSON-based schema:
 ```json
 {
-  "tool_name": "claude-code",
+  "tool_name": "claude",
   "strategies": [
     { "type": "regex", "pattern": "^Task: (.*)$" },
     { "type": "ai_assisted", "model": "gemini-flash-tiny" }

@@ -30,7 +30,7 @@ The system integrates deeply with StrandYard for task management, allowing agent
 
 **PTY Providers (CLI/TUI tools)**
 - Uses `termemu` library for PTY management
-- Supports claude-code, codex, amp, and other CLI agents
+- Supports claude, codex, amp, and other CLI agents
 - Handles authentication through CLI tools
 - Screen buffer analysis and status extraction
 

@@ -239,15 +239,46 @@ describe("SessionViewer", () => {
     expect(onNavigate).toHaveBeenCalledWith("/");
   });
 
-  it("renders CSRF notice when a session action is blocked", async () => {
-    (apiClient.getSession as any).mockResolvedValue(baseSession);
-    (apiClient.pauseSession as any).mockRejectedValue(new Error("csrf token mismatch"));
+   it("renders CSRF notice when a session action is blocked", async () => {
+     (apiClient.getSession as any).mockResolvedValue(baseSession);
+     (apiClient.pauseSession as any).mockRejectedValue(new Error("csrf token mismatch"));
 
-    render(() => <SessionViewer sessionId="session-1" />);
+     render(() => <SessionViewer sessionId="session-1" />);
 
-    await screen.findByText("Session session-1 - native - running");
-    fireEvent.click(screen.getByText("Pause"));
+     await screen.findByText("Session session-1 - native - running");
+     fireEvent.click(screen.getByText("Pause"));
 
-    expect(await screen.findByText("Action blocked by CSRF protection. Refresh to re-establish the token.")).toBeDefined();
-  });
+     expect(await screen.findByText("Action blocked by CSRF protection. Refresh to re-establish the token.")).toBeDefined();
+   });
+
+   it("invokes onClose callback when close button is clicked", async () => {
+     (apiClient.getSession as any).mockResolvedValue(baseSession);
+     const onClose = vi.fn();
+
+     render(() => <SessionViewer sessionId="session-1" onClose={onClose} />);
+
+     await screen.findByText("Session session-1 - native - running");
+     
+     // Find and click the close button
+     const closeButton = screen.getByTitle("Close session viewer");
+     expect(closeButton).toBeDefined();
+     expect(closeButton.textContent).toContain("✕ Close");
+     
+     fireEvent.click(closeButton);
+     expect(onClose).toHaveBeenCalled();
+   });
+
+   it("close button is positioned at the right of the header", async () => {
+     (apiClient.getSession as any).mockResolvedValue(baseSession);
+
+     const { container } = render(() => <SessionViewer sessionId="session-1" />);
+
+     await screen.findByText("Session session-1 - native - running");
+     
+     const closeButton = screen.getByTitle("Close session viewer") as HTMLButtonElement;
+     const style = window.getComputedStyle(closeButton);
+     
+     // The button should have margin-left: auto applied
+     expect(closeButton.style.marginLeft).toBe("auto");
+   });
 });

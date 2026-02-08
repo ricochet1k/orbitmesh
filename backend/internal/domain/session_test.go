@@ -6,13 +6,13 @@ import (
 )
 
 func TestNewSession(t *testing.T) {
-	s := NewSession("test-id", "claude-code", "/path/to/work")
+	s := NewSession("test-id", "claude", "/path/to/work")
 
 	if s.ID != "test-id" {
 		t.Errorf("expected ID 'test-id', got %q", s.ID)
 	}
-	if s.ProviderType != "claude-code" {
-		t.Errorf("expected ProviderType 'claude-code', got %q", s.ProviderType)
+	if s.ProviderType != "claude" {
+		t.Errorf("expected ProviderType 'claude', got %q", s.ProviderType)
 	}
 	if s.WorkingDir != "/path/to/work" {
 		t.Errorf("expected WorkingDir '/path/to/work', got %q", s.WorkingDir)
@@ -85,7 +85,7 @@ func TestCanTransition(t *testing.T) {
 }
 
 func TestSessionTransitionTo_Valid(t *testing.T) {
-	s := NewSession("test-id", "claude-code", "/work")
+	s := NewSession("test-id", "claude", "/work")
 
 	err := s.TransitionTo(SessionStateStarting, "user initiated")
 	if err != nil {
@@ -111,7 +111,7 @@ func TestSessionTransitionTo_Valid(t *testing.T) {
 }
 
 func TestSessionTransitionTo_Invalid(t *testing.T) {
-	s := NewSession("test-id", "claude-code", "/work")
+	s := NewSession("test-id", "claude", "/work")
 
 	err := s.TransitionTo(SessionStateRunning, "invalid")
 	if !errors.Is(err, ErrInvalidTransition) {
@@ -126,7 +126,7 @@ func TestSessionTransitionTo_Invalid(t *testing.T) {
 }
 
 func TestSessionTransitionTo_FullLifecycle(t *testing.T) {
-	s := NewSession("test-id", "claude-code", "/work")
+	s := NewSession("test-id", "claude", "/work")
 
 	transitions := []struct {
 		to     SessionState
@@ -155,7 +155,7 @@ func TestSessionTransitionTo_FullLifecycle(t *testing.T) {
 }
 
 func TestSessionTransitionTo_ErrorRecovery(t *testing.T) {
-	s := NewSession("test-id", "claude-code", "/work")
+	s := NewSession("test-id", "claude", "/work")
 
 	_ = s.TransitionTo(SessionStateStarting, "starting")
 	_ = s.TransitionTo(SessionStateRunning, "running")
@@ -177,7 +177,7 @@ func TestSessionTransitionTo_ErrorRecovery(t *testing.T) {
 }
 
 func TestSessionGetState(t *testing.T) {
-	s := NewSession("test-id", "claude-code", "/work")
+	s := NewSession("test-id", "claude", "/work")
 
 	if s.GetState() != SessionStateCreated {
 		t.Errorf("expected Created, got %v", s.GetState())
@@ -191,7 +191,7 @@ func TestSessionGetState(t *testing.T) {
 }
 
 func TestSessionSetCurrentTask(t *testing.T) {
-	s := NewSession("test-id", "claude-code", "/work")
+	s := NewSession("test-id", "claude", "/work")
 	oldUpdated := s.UpdatedAt
 
 	s.SetCurrentTask("task-123")
@@ -205,7 +205,7 @@ func TestSessionSetCurrentTask(t *testing.T) {
 }
 
 func TestSessionSetOutput(t *testing.T) {
-	s := NewSession("test-id", "claude-code", "/work")
+	s := NewSession("test-id", "claude", "/work")
 
 	s.SetOutput("some output text")
 
@@ -215,7 +215,7 @@ func TestSessionSetOutput(t *testing.T) {
 }
 
 func TestSessionSetError(t *testing.T) {
-	s := NewSession("test-id", "claude-code", "/work")
+	s := NewSession("test-id", "claude", "/work")
 
 	s.SetError("something went wrong")
 

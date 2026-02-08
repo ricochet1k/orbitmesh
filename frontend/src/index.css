@@ -11,7 +11,6 @@
 @import "./styles/components/button.css";
 @import "./styles/components/input.css";
 @import "./styles/components/card.css";
-@import "./styles/components/agent-dock.css";
 
 /* Animation & motion primitives */
 @import "./styles/animations.css";
@@ -211,14 +210,9 @@ textarea:focus-visible {
   color: var(--ink-1);
 }
 
-.nav-icon svg {
+.nav-icon {
   width: 20px;
   height: 20px;
-  stroke: currentColor;
-  fill: none;
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 .nav-label {
@@ -251,7 +245,7 @@ textarea:focus-visible {
   font-size: 0.78rem;
 }
 
-.breadcrumbs li + li:before {
+.breadcrumbs li+li:before {
   content: "/";
   margin: 0 0.3rem;
   color: var(--ink-3);
@@ -475,10 +469,7 @@ textarea:focus-visible {
   align-items: start;
 }
 
-.task-tree-panel,
-.task-detail-panel,
-.commit-list-panel,
-.commit-detail-panel {
+.dashboard-panel {
   border-radius: var(--radius-5);
   padding: 1.2rem;
   background: var(--surface-2);
@@ -698,9 +689,20 @@ textarea:focus-visible {
   font-weight: 600;
 }
 
-.task-status.pending { background: rgba(180, 83, 9, 0.16); color: var(--warning); }
-.task-status.in_progress { background: rgba(15, 118, 110, 0.15); color: var(--success); }
-.task-status.completed { background: rgba(37, 99, 235, 0.15); color: #1d4ed8; }
+.task-status.pending {
+  background: rgba(180, 83, 9, 0.16);
+  color: var(--warning);
+}
+
+.task-status.in_progress {
+  background: rgba(15, 118, 110, 0.15);
+  color: var(--success);
+}
+
+.task-status.completed {
+  background: rgba(37, 99, 235, 0.15);
+  color: #1d4ed8;
+}
 
 .context-menu {
   position: fixed;
@@ -1061,11 +1063,30 @@ tbody tr:hover {
   text-transform: uppercase;
 }
 
-.running { background: rgba(15, 118, 110, 0.16); color: var(--success); }
-.starting { background: rgba(180, 83, 9, 0.18); color: var(--warning); }
-.paused { background: rgba(37, 99, 235, 0.16); color: #1d4ed8; }
-.error { background: rgba(185, 28, 28, 0.16); color: var(--danger); }
-.stopped { background: rgba(71, 85, 105, 0.16); color: #475569; }
+.running {
+  background: rgba(15, 118, 110, 0.16);
+  color: var(--success);
+}
+
+.starting {
+  background: rgba(180, 83, 9, 0.18);
+  color: var(--warning);
+}
+
+.paused {
+  background: rgba(37, 99, 235, 0.16);
+  color: #1d4ed8;
+}
+
+.error {
+  background: rgba(185, 28, 28, 0.16);
+  color: var(--danger);
+}
+
+.stopped {
+  background: rgba(71, 85, 105, 0.16);
+  color: #475569;
+}
 
 .sessions-list button {
   border: none;
@@ -1161,9 +1182,10 @@ tbody tr:hover {
     radial-gradient(circle at 80% 0%, rgba(14, 165, 233, 0.08), transparent 45%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(233, 238, 245, 0.9));
   display: flex;
-  align-items: center;
-  justify-content: center;
+  /* align-items: center; */
+  /* justify-content: center; */
   min-height: 360px;
+  overflow: hidden;
 }
 
 @keyframes rise {
@@ -1171,6 +1193,7 @@ tbody tr:hover {
     opacity: 0;
     transform: translateY(16px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);

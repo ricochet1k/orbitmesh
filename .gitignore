@@ -43,3 +43,4 @@ yarn-error.log*
 # User home directory
 ~/.orbitmesh
 node_modules
+.playwright-cli

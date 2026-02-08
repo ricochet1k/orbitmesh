@@ -1,32 +1,43 @@
-import { createMemo, createResource, createSignal, For, Show } from "solid-js";
-import { apiClient } from "../api/client";
+import { createFileRoute } from '@tanstack/solid-router'
+import {
+  createMemo,
+  createResource,
+  createSignal,
+  For,
+  Show,
+} from "solid-js"
+import { apiClient } from "../../api/client"
+
+export const Route = createFileRoute('/sessions/')({
+  component: SessionsView,
+})
 
 interface SessionsViewProps {
-  onNavigate?: (path: string) => void;
+  onNavigate?: (path: string) => void
 }
 
-export default function SessionsView(props: SessionsViewProps) {
-  const [sessions] = createResource(apiClient.listSessions);
-  const [selectedId, setSelectedId] = createSignal<string | null>(null);
+function SessionsView(props: SessionsViewProps) {
+  const [sessions] = createResource(apiClient.listSessions)
+  const [selectedId, setSelectedId] = createSignal<string | null>(null)
 
-  const sessionList = () => sessions()?.sessions ?? [];
-  const selectedSession = createMemo(() => sessionList().find((item) => item.id === selectedId()) ?? null);
+  const sessionList = () => sessions()?.sessions ?? []
+  const selectedSession = createMemo(() => sessionList().find((item) => item.id === selectedId()) ?? null)
 
   const stateCounts = createMemo(() => {
-    const counts = new Map<string, number>();
+    const counts = new Map<string, number>()
     sessionList().forEach((item) => {
-      counts.set(item.state, (counts.get(item.state) ?? 0) + 1);
-    });
-    return counts;
-  });
+      counts.set(item.state, (counts.get(item.state) ?? 0) + 1)
+    })
+    return counts
+  })
 
   const handleInspect = (id: string) => {
     if (props.onNavigate) {
-      props.onNavigate(`/sessions/${id}`);
-      return;
+      props.onNavigate(`/sessions/${id}`)
+      return
     }
-    window.location.assign(`/sessions/${id}`);
-  };
+    window.location.assign(`/sessions/${id}`)
+  }
 
   return (
     <div class="sessions-view">
@@ -112,41 +123,41 @@ export default function SessionsView(props: SessionsViewProps) {
             </div>
             <span class="panel-pill neutral">Preview</span>
           </div>
-           <Show when={selectedSession()} fallback={<p class="empty-state">Select a session to preview.</p>}>
-             {(session) => (
-               <div class="session-preview">
-                 <div>
-                   <p class="muted">Session ID</p>
-                   <strong>{session().id}</strong>
-                 </div>
-                 <div>
-                   <p class="muted">State</p>
-                   <strong>{session().state.replace("_", " ")}</strong>
-                 </div>
-                 <div>
-                   <p class="muted">Provider</p>
-                   <strong>{session().provider_type}</strong>
-                 </div>
-                 <div>
-                   <p class="muted">Task</p>
-                   <strong>{session().current_task || "None"}</strong>
-                 </div>
-                 <Show when={session().error_message}>
-                   {(errorMsg) => (
-                     <div class="session-error">
-                       <p class="muted">Error</p>
-                       <strong style="color: var(--color-error, red)">{errorMsg()}</strong>
-                     </div>
-                   )}
-                 </Show>
-                 <button type="button" onClick={() => handleInspect(session().id)}>
-                   Open full viewer
-                 </button>
-               </div>
-             )}
-           </Show>
+          <Show when={selectedSession()} fallback={<p class="empty-state">Select a session to preview.</p>}>
+            {(session) => (
+              <div class="session-preview">
+                <div>
+                  <p class="muted">Session ID</p>
+                  <strong>{session().id}</strong>
+                </div>
+                <div>
+                  <p class="muted">State</p>
+                  <strong>{session().state.replace("_", " ")}</strong>
+                </div>
+                <div>
+                  <p class="muted">Provider</p>
+                  <strong>{session().provider_type}</strong>
+                </div>
+                <div>
+                  <p class="muted">Task</p>
+                  <strong>{session().current_task || "None"}</strong>
+                </div>
+                <Show when={session().error_message}>
+                  {(errorMsg) => (
+                    <div class="session-error">
+                      <p class="muted">Error</p>
+                      <strong style="color: var(--color-error, red)">{errorMsg()}</strong>
+                    </div>
+                  )}
+                </Show>
+                <button type="button" onClick={() => handleInspect(session().id)}>
+                  Open full viewer
+                </button>
+              </div>
+            )}
+          </Show>
         </section>
       </main>
     </div>
-  );
+  )
 }

@@ -1,172 +1,176 @@
-import { createEffect, createMemo, createResource, createSignal, For, Show, onCleanup } from "solid-js";
-import { apiClient } from "../api/client";
-import type { SessionResponse, TaskNode, TaskStatus } from "../types/api";
-import AgentGraph from "../graph/AgentGraph";
-import { buildTaskGraph } from "../graph/graphData";
+import { createFileRoute } from '@tanstack/solid-router'
+import { createEffect, createMemo, createResource, createSignal, For, Show, onCleanup } from "solid-js"
+import { apiClient } from "../api/client"
+import type { SessionResponse, TaskNode, TaskStatus } from "../types/api"
+import AgentGraph from "../graph/AgentGraph"
+import { buildTaskGraph } from "../graph/graphData"
 
+export const Route = createFileRoute('/tasks')({
+  component: TaskTreeView,
+})
 interface ContextMenuState {
-  id: string;
-  x: number;
-  y: number;
+  id: string
+  x: number
+  y: number
 }
 
 const statusLabels: Record<TaskStatus, string> = {
   pending: "Pending",
   in_progress: "In Progress",
   completed: "Completed",
-};
+}
 
 interface TaskTreeViewProps {
-  onNavigate?: (path: string) => void;
+  onNavigate?: (path: string) => void
 }
 
 const providerOptions = [
   { value: "adk", label: "Local ADK" },
   { value: "pty", label: "PTY (Claude)" },
-];
+]
 
-export default function TaskTreeView(props: TaskTreeViewProps) {
-  const [treeResponse] = createResource(apiClient.getTaskTree);
-  const [treeData, setTreeData] = createSignal<TaskNode[]>([]);
-  const [search, setSearch] = createSignal("");
-  const [roleFilter, setRoleFilter] = createSignal("all");
-  const [statusFilter, setStatusFilter] = createSignal("all");
-  const [expanded, setExpanded] = createSignal<Set<string>>(new Set());
-  const [menu, setMenu] = createSignal<ContextMenuState | null>(null);
-  const [selectedId, setSelectedId] = createSignal(getInitialTaskId());
-  const [providerType, setProviderType] = createSignal(providerOptions[0]?.value ?? "adk");
-  const [startState, setStartState] = createSignal<"idle" | "starting" | "success" | "error">("idle");
-  const [startError, setStartError] = createSignal<string | null>(null);
-  const [sessionInfo, setSessionInfo] = createSignal<{ taskId: string; session: SessionResponse } | null>(null);
+function TaskTreeView(props: TaskTreeViewProps) {
+  const [treeResponse] = createResource(apiClient.getTaskTree)
+  const [treeData, setTreeData] = createSignal<TaskNode[]>([])
+  const [search, setSearch] = createSignal("")
+  const [roleFilter, setRoleFilter] = createSignal("all")
+  const [statusFilter, setStatusFilter] = createSignal("all")
+  const [expanded, setExpanded] = createSignal<Set<string>>(new Set())
+  const [menu, setMenu] = createSignal<ContextMenuState | null>(null)
+  const [selectedId, setSelectedId] = createSignal(getInitialTaskId())
+  const [providerType, setProviderType] = createSignal(providerOptions[0]?.value ?? "adk")
+  const [startState, setStartState] = createSignal<"idle" | "starting" | "success" | "error">("idle")
+  const [startError, setStartError] = createSignal<string | null>(null)
+  const [sessionInfo, setSessionInfo] = createSignal<{ taskId: string; session: SessionResponse } | null>(null)
 
-  const nodeRefs = new Map<string, HTMLDivElement>();
+  const nodeRefs = new Map<string, HTMLDivElement>()
 
   createEffect(() => {
     if (treeResponse()) {
-      setTreeData(treeResponse()?.tasks ?? []);
+      setTreeData(treeResponse()?.tasks ?? [])
     }
-  });
+  })
 
   createEffect(() => {
-    if (treeData().length === 0 || expanded().size > 0) return;
-    const next = new Set<string>();
-    treeData().forEach((task) => next.add(task.id));
-    setExpanded(next);
-  });
+    if (treeData().length === 0 || expanded().size > 0) return
+    const next = new Set<string>()
+    treeData().forEach((task) => next.add(task.id))
+    setExpanded(next)
+  })
 
   createEffect(() => {
-    const id = selectedId();
-    if (!id) return;
-    const path = findPath(treeData(), id);
+    const id = selectedId()
+    if (!id) return
+    const path = findPath(treeData(), id)
     if (path.length > 0) {
-      const next = new Set(expanded());
-      let changed = false;
+      const next = new Set(expanded())
+      let changed = false
       path.forEach((nodeId) => {
         if (!next.has(nodeId)) {
-          next.add(nodeId);
-          changed = true;
+          next.add(nodeId)
+          changed = true
         }
-      });
+      })
       if (changed) {
-        setExpanded(next);
+        setExpanded(next)
       }
     }
-    const node = nodeRefs.get(id);
+    const node = nodeRefs.get(id)
     if (node) {
       requestAnimationFrame(() => {
-        node.scrollIntoView({ block: "center", behavior: "smooth" });
-      });
+        node.scrollIntoView({ block: "center", behavior: "smooth" })
+      })
     }
-  });
+  })
 
   createEffect(() => {
-    const id = selectedId();
-    if (!id) return;
+    const id = selectedId()
+    if (!id) return
     if (sessionInfo()?.taskId && sessionInfo()?.taskId !== id) {
-      setSessionInfo(null);
+      setSessionInfo(null)
     }
-    setStartError(null);
-    setStartState("idle");
-  });
+    setStartError(null)
+    setStartState("idle")
+  })
 
   createEffect(() => {
-    const handleClick = () => setMenu(null);
-    window.addEventListener("click", handleClick);
-    onCleanup(() => window.removeEventListener("click", handleClick));
-  });
+    const handleClick = () => setMenu(null)
+    window.addEventListener("click", handleClick)
+    onCleanup(() => window.removeEventListener("click", handleClick))
+  })
 
   const roles = createMemo(() => {
-    const unique = new Set<string>();
+    const unique = new Set<string>()
     const collect = (nodes: TaskNode[]) => {
       nodes.forEach((node) => {
-        unique.add(node.role);
-        collect(node.children ?? []);
-      });
-    };
-    collect(treeData());
-    return Array.from(unique.values()).sort();
-  });
+        unique.add(node.role)
+        collect(node.children ?? [])
+      })
+    }
+    collect(treeData())
+    return Array.from(unique.values()).sort()
+  })
 
   const filteredTree = createMemo(() => {
-    const query = search().trim().toLowerCase();
-    const role = roleFilter();
-    const status = statusFilter();
+    const query = search().trim().toLowerCase()
+    const role = roleFilter()
+    const status = statusFilter()
 
     const matches = (node: TaskNode) => {
-      const roleMatches = role === "all" || node.role === role;
-      const statusMatches = status === "all" || node.status === status;
-      const queryMatches = query === "" || node.title.toLowerCase().includes(query);
-      return roleMatches && statusMatches && queryMatches;
-    };
+      const roleMatches = role === "all" || node.role === role
+      const statusMatches = status === "all" || node.status === status
+      const queryMatches = query === "" || node.title.toLowerCase().includes(query)
+      return roleMatches && statusMatches && queryMatches
+    }
 
     const filterNodes = (nodes: TaskNode[]): TaskNode[] => {
       return nodes.flatMap((node) => {
-        const children = filterNodes(node.children ?? []);
+        const children = filterNodes(node.children ?? [])
         if (matches(node) || children.length > 0) {
-          return [{ ...node, children }];
+          return [{ ...node, children }]
         }
-        return [];
-      });
-    };
+        return []
+      })
+    }
 
-    return filterNodes(treeData());
-  });
+    return filterNodes(treeData())
+  })
 
-  const graphData = createMemo(() => buildTaskGraph(treeData()));
-  const selectedTask = createMemo(() => findTaskById(treeData(), selectedId()));
+  const graphData = createMemo(() => buildTaskGraph(treeData()))
+  const selectedTask = createMemo(() => findTaskById(treeData(), selectedId()))
 
   const toggleExpanded = (id: string) => {
-    const next = new Set(expanded());
+    const next = new Set(expanded())
     if (next.has(id)) {
-      next.delete(id);
+      next.delete(id)
     } else {
-      next.add(id);
+      next.add(id)
     }
-    setExpanded(next);
-  };
+    setExpanded(next)
+  }
 
   const selectTask = (id: string) => {
-    setSelectedId(id);
-    updateTaskQuery(id);
-  };
+    setSelectedId(id)
+    updateTaskQuery(id)
+  }
 
   const onContextMenu = (event: MouseEvent, id: string) => {
-    event.preventDefault();
-    setMenu({ id, x: event.clientX, y: event.clientY });
-  };
+    event.preventDefault()
+    setMenu({ id, x: event.clientX, y: event.clientY })
+  }
 
   const updateStatus = (id: string, status: TaskStatus) => {
     setTreeData((prev) => updateNode(prev, id, (node) => ({
       ...node,
       status,
       updated_at: new Date().toISOString(),
-    })));
-    setMenu(null);
-  };
+    })))
+    setMenu(null)
+  }
 
   const addSubtask = (id: string) => {
-    const title = window.prompt("Subtask title");
-    if (!title) return;
+    const title = window.prompt("Subtask title")
+    if (!title) return
     const newNode: TaskNode = {
       id: `task-${Date.now().toString(36)}`,
       title,
@@ -174,51 +178,51 @@ export default function TaskTreeView(props: TaskTreeViewProps) {
       status: "pending",
       updated_at: new Date().toISOString(),
       children: [],
-    };
+    }
     setTreeData((prev) => updateNode(prev, id, (node) => ({
       ...node,
       children: [...(node.children ?? []), newNode],
       updated_at: new Date().toISOString(),
-    })));
-    const next = new Set(expanded());
-    next.add(id);
-    setExpanded(next);
-    setMenu(null);
-  };
+    })))
+    const next = new Set(expanded())
+    next.add(id)
+    setExpanded(next)
+    setMenu(null)
+  }
 
   const startAgent = async () => {
-    const task = selectedTask();
-    if (!task) return;
-    setStartState("starting");
-    setStartError(null);
+    const task = selectedTask()
+    if (!task) return
+    setStartState("starting")
+    setStartError(null)
     try {
       const session = await apiClient.createTaskSession({
         taskId: task.id,
         taskTitle: task.title,
         providerType: providerType(),
-      });
-      setSessionInfo({ taskId: task.id, session });
-      setStartState("success");
+      })
+      setSessionInfo({ taskId: task.id, session })
+      setStartState("success")
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to start session.";
-      setStartError(message);
-      setStartState("error");
+      const message = error instanceof Error ? error.message : "Failed to start session."
+      setStartError(message)
+      setStartState("error")
     }
-  };
+  }
 
-   const openSessionViewer = (id: string) => {
-     if (props.onNavigate) {
-       props.onNavigate(`/sessions/${id}`);
-       return;
-     }
-     window.location.assign(`/sessions/${id}`);
-   };
+  const openSessionViewer = (id: string) => {
+    if (props.onNavigate) {
+      props.onNavigate(`/sessions/${id}`)
+      return
+    }
+    window.location.assign(`/sessions/${id}`)
+  }
 
-   const dismissSessionInfo = () => {
-     setSessionInfo(null);
-     setStartState("idle");
-     setStartError(null);
-   };
+  const dismissSessionInfo = () => {
+    setSessionInfo(null)
+    setStartState("idle")
+    setStartError(null)
+  }
 
   return (
     <div class="task-tree-view">
@@ -247,7 +251,7 @@ export default function TaskTreeView(props: TaskTreeViewProps) {
       </header>
 
       <main class="task-tree-layout">
-        <section class="task-tree-panel">
+        <section class="dashboard-panel task-tree-panel">
           <div class="panel-header">
             <div>
               <p class="panel-kicker">Hierarchy</p>
@@ -298,7 +302,7 @@ export default function TaskTreeView(props: TaskTreeViewProps) {
           </Show>
         </section>
 
-        <section class="task-detail-panel">
+        <section class="dashboard-panel task-detail-panel">
           <div class="panel-header">
             <div>
               <p class="panel-kicker">Task control</p>
@@ -348,27 +352,27 @@ export default function TaskTreeView(props: TaskTreeViewProps) {
                   <Show when={startError()}>
                     {(message) => <p class="guardrail-banner error">{message()}</p>}
                   </Show>
-                   <Show
-                     when={sessionInfo() && sessionInfo()?.taskId === task().id ? sessionInfo() : null}
-                   >
-                     {(info) => (
-                       <div class="session-launch-card">
-                         <div>
-                           <p class="muted">Session ready</p>
-                           <strong>{info().session.id}</strong>
-                         </div>
-                         <div class="session-launch-meta">
-                           <span class={`state-badge ${info().session.state}`}>{info().session.state.replace("_", " ")}</span>
-                           <button type="button" onClick={() => openSessionViewer(info().session.id)}>
-                             Open Session Viewer
-                           </button>
-                           <button type="button" class="neutral" onClick={dismissSessionInfo} title="Dismiss">
-                             ✕
-                           </button>
-                         </div>
-                       </div>
-                     )}
-                   </Show>
+                  <Show
+                    when={sessionInfo() && sessionInfo()?.taskId === task().id ? sessionInfo() : null}
+                  >
+                    {(info) => (
+                      <div class="session-launch-card">
+                        <div>
+                          <p class="muted">Session ready</p>
+                          <strong>{info().session.id}</strong>
+                        </div>
+                        <div class="session-launch-meta">
+                          <span class={`state-badge ${info().session.state}`}>{info().session.state.replace("_", " ")}</span>
+                          <button type="button" onClick={() => openSessionViewer(info().session.id)}>
+                            Open Session Viewer
+                          </button>
+                          <button type="button" class="neutral" onClick={dismissSessionInfo} title="Dismiss">
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </Show>
                 </div>
               )}
             </Show>
@@ -378,7 +382,7 @@ export default function TaskTreeView(props: TaskTreeViewProps) {
           </Show>
         </section>
 
-        <section class="graph-view compact">
+        <section class="dashboard-panel graph-view compact">
           <div class="panel-header">
             <div>
               <p class="panel-kicker">Task topology</p>
@@ -411,23 +415,23 @@ export default function TaskTreeView(props: TaskTreeViewProps) {
         )}
       </Show>
     </div>
-  );
+  )
 }
 
 interface TaskNodeRowProps {
-  node: TaskNode;
-  depth: number;
-  expanded: () => Set<string>;
-  selectedId: () => string;
-  onToggle: (id: string) => void;
-  onSelect: (id: string) => void;
-  onContextMenu: (event: MouseEvent, id: string) => void;
-  registerRef: Map<string, HTMLDivElement>;
+  node: TaskNode
+  depth: number
+  expanded: () => Set<string>
+  selectedId: () => string
+  onToggle: (id: string) => void
+  onSelect: (id: string) => void
+  onContextMenu: (event: MouseEvent, id: string) => void
+  registerRef: Map<string, HTMLDivElement>
 }
 
 function TaskNodeRow(props: TaskNodeRowProps) {
-  const isExpanded = () => props.expanded().has(props.node.id);
-  const hasChildren = () => (props.node.children ?? []).length > 0;
+  const isExpanded = () => props.expanded().has(props.node.id)
+  const hasChildren = () => (props.node.children ?? []).length > 0
 
   return (
     <div class="task-node-block">
@@ -444,8 +448,8 @@ function TaskNodeRow(props: TaskNodeRowProps) {
           disabled={!hasChildren()}
           aria-expanded={isExpanded()}
           onClick={(event) => {
-            event.stopPropagation();
-            if (hasChildren()) props.onToggle(props.node.id);
+            event.stopPropagation()
+            if (hasChildren()) props.onToggle(props.node.id)
           }}
         >
           {hasChildren() ? (isExpanded() ? "-" : "+") : ""}
@@ -473,54 +477,54 @@ function TaskNodeRow(props: TaskNodeRowProps) {
         </For>
       </Show>
     </div>
-  );
+  )
 }
 
 function updateTaskQuery(id: string) {
-  const url = new URL(window.location.href);
-  url.searchParams.set("task", id);
-  history.replaceState({}, "", url);
+  const url = new URL(window.location.href)
+  url.searchParams.set("task", id)
+  history.replaceState({}, "", url)
 }
 
 function getInitialTaskId(): string {
-  const params = new URLSearchParams(window.location.search);
-  return params.get("task") ?? "";
+  const params = new URLSearchParams(window.location.search)
+  return params.get("task") ?? ""
 }
 
 function findPath(nodes: TaskNode[], id: string, trail: string[] = []): string[] {
   for (const node of nodes) {
-    const nextTrail = [...trail, node.id];
-    if (node.id === id) return nextTrail;
-    const childPath = findPath(node.children ?? [], id, nextTrail);
-    if (childPath.length > 0) return childPath;
+    const nextTrail = [...trail, node.id]
+    if (node.id === id) return nextTrail
+    const childPath = findPath(node.children ?? [], id, nextTrail)
+    if (childPath.length > 0) return childPath
   }
-  return [];
+  return []
 }
 
 function findTaskById(nodes: TaskNode[], id: string): TaskNode | null {
   for (const node of nodes) {
-    if (node.id === id) return node;
-    const childMatch = findTaskById(node.children ?? [], id);
-    if (childMatch) return childMatch;
+    if (node.id === id) return node
+    const childMatch = findTaskById(node.children ?? [], id)
+    if (childMatch) return childMatch
   }
-  return null;
+  return null
 }
 
 function updateNode(nodes: TaskNode[], id: string, updater: (node: TaskNode) => TaskNode): TaskNode[] {
   return nodes.map((node) => {
     if (node.id === id) {
-      return updater(node);
+      return updater(node)
     }
     if (node.children && node.children.length > 0) {
-      return { ...node, children: updateNode(node.children, id, updater) };
+      return { ...node, children: updateNode(node.children, id, updater) }
     }
-    return node;
-  });
+    return node
+  })
 }
 
 function countTasks(nodes: TaskNode[], status?: TaskStatus): number {
   return nodes.reduce((total, node) => {
-    const matches = status ? node.status === status : true;
-    return total + (matches ? 1 : 0) + countTasks(node.children ?? [], status);
-  }, 0);
+    const matches = status ? node.status === status : true
+    return total + (matches ? 1 : 0) + countTasks(node.children ?? [], status)
+  }, 0)
 }

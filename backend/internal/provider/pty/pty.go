@@ -24,10 +24,6 @@ var (
 	ErrAlreadyPaused  = errors.New("pty provider already paused")
 )
 
-var allowedPTYCommands = map[string]struct{}{
-	"claude-code": {},
-}
-
 type PTYProvider struct {
 	mu        sync.RWMutex
 	sessionID string
@@ -111,7 +107,7 @@ func (p *PTYProvider) Start(ctx context.Context, config provider.Config) error {
 }
 
 func resolvePTYCommand(config provider.Config) (string, []string, error) {
-	command := "claude-code"
+	command := "claude"
 	var args []string
 	if config.Custom != nil {
 		if rawCommand, ok := config.Custom["command"]; ok {
@@ -128,10 +124,6 @@ func resolvePTYCommand(config provider.Config) (string, []string, error) {
 			}
 			args = parsedArgs
 		}
-	}
-
-	if _, ok := allowedPTYCommands[command]; !ok {
-		return "", nil, fmt.Errorf("pty command %q not allow-listed (ref: Tolku0s)", command)
 	}
 
 	return command, args, nil

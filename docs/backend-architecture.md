@@ -46,7 +46,7 @@ error → stopping
 import "github.com/ricochet1k/orbitmesh/internal/domain"
 
 // Create a new session
-session := domain.NewSession("session-123", "claude-code", "/path/to/project")
+session := domain.NewSession("session-123", "claude", "/path/to/project")
 
 // Transition to a new state
 err := session.TransitionTo(domain.SessionStateStarting, "user requested start")
@@ -191,7 +191,7 @@ err = p.Stop(ctx)
 
 ### PTY Provider
 
-The PTY provider runs CLI-based AI agents (like `claude-code`) within a pseudo-terminal. This allows OrbitMesh to monitor and control tools that expect a real terminal environment.
+The PTY provider runs CLI-based AI agents (like `claude`) within a pseudo-terminal. This allows OrbitMesh to monitor and control tools that expect a real terminal environment.
 
 **Key Features:**
 - **Terminal Emulation**: Uses `creack/pty` to start processes with a linked TTY.
@@ -210,7 +210,7 @@ p := pty.NewClaudePTYProvider("session-123")
 err := p.Start(ctx, provider.Config{
 	WorkingDir: "/path/to/project",
 	Custom: map[string]any{
-		"command": "claude-code",
+		"command": "claude",
 		"args":    []string{"--resume"},
 	},
 })

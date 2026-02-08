@@ -15,7 +15,6 @@ import (
 
 	"github.com/ricochet1k/orbitmesh/internal/api"
 	"github.com/ricochet1k/orbitmesh/internal/provider"
-	"github.com/ricochet1k/orbitmesh/internal/provider/bash"
 	"github.com/ricochet1k/orbitmesh/internal/provider/native"
 	"github.com/ricochet1k/orbitmesh/internal/provider/pty"
 	"github.com/ricochet1k/orbitmesh/internal/service"
@@ -39,9 +38,6 @@ func main() {
 	})
 	factory.Register("pty", func(sessionID string, config provider.Config) (provider.Provider, error) {
 		return pty.NewClaudePTYProvider(sessionID), nil
-	})
-	factory.Register("bash", func(sessionID string, config provider.Config) (provider.Provider, error) {
-		return bash.NewBashProvider(sessionID), nil
 	})
 
 	broadcaster := service.NewEventBroadcaster(100)

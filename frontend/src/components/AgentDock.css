@@ -5,12 +5,16 @@
 
 /* Main dock container */
 .agent-dock {
+  position: fixed;
+  bottom: 0;
+  right: 30px;
+  height: 500px;
+  width: 400px;
+
   display: flex;
   flex-direction: column;
-  height: 100%;
   background: var(--color-surface-1);
-  border-left: 1px solid var(--color-border);
-  opacity: 0;
+  border: 1px solid var(--color-border);
   pointer-events: none;
   transition: opacity var(--duration-fast) var(--easing-standard);
 }
@@ -250,7 +254,7 @@
   max-height: 80px;
   outline: none;
   transition: border-color var(--duration-fast) var(--easing-standard),
-              box-shadow var(--duration-fast) var(--easing-standard);
+    box-shadow var(--duration-fast) var(--easing-standard);
 }
 
 .agent-dock-input:focus {
@@ -275,7 +279,7 @@
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: background var(--duration-fast) var(--easing-standard),
-              opacity var(--duration-fast) var(--easing-standard);
+    opacity var(--duration-fast) var(--easing-standard);
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -348,7 +352,7 @@
 
 /* Desktop layout - dock on right side */
 @media (min-width: 1200px) {
-  .agent-dock {
+  /* .agent-dock {
     position: relative;
     width: 320px;
     min-width: 320px;
@@ -356,7 +360,7 @@
     border-left: 1px solid var(--color-border);
     border-right: none;
     flex-shrink: 0;
-  }
+  } */
 }
 
 /* Tablet layout - dock below main content */
@@ -482,6 +486,7 @@
     opacity: 0;
     transform: translateY(4px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -496,6 +501,7 @@
 
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
+
   .agent-dock,
   .agent-dock-message {
     animation: none;

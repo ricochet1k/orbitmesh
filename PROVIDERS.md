@@ -106,7 +106,7 @@ Pseudo-terminal provider for running Claude via a terminal emulator session.
 **Status**: ⚠️ Requires setup
 
 **Requirements**:
-- `claude-code` command available in PATH
+- `claude` command available in PATH
 - Claude CLI properly configured
 - Terminal environment support
 
@@ -329,7 +329,7 @@ curl -s -X POST http://localhost:8080/api/sessions \
 - Ensure Gemini model is available
 
 **PTY**:
-- Ensure `claude-code` is in PATH
+- Ensure `claude` is in PATH
 - Verify Claude CLI is installed
 - Check terminal environment support
 

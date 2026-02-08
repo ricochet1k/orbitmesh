@@ -40,7 +40,7 @@ func TestJSONFileStorage_SaveAndLoad(t *testing.T) {
 	tmpDir := t.TempDir()
 	storage, _ := NewJSONFileStorage(tmpDir)
 
-	session := domain.NewSession("test-session-1", "claude-code", "/path/to/work")
+	session := domain.NewSession("test-session-1", "claude", "/path/to/work")
 	session.CurrentTask = "task-123"
 	session.Output = "some output"
 
@@ -125,7 +125,7 @@ func TestJSONFileStorage_List(t *testing.T) {
 	tmpDir := t.TempDir()
 	storage, _ := NewJSONFileStorage(tmpDir)
 
-	session1 := domain.NewSession("session-1", "claude-code", "/work1")
+	session1 := domain.NewSession("session-1", "claude", "/work1")
 	session2 := domain.NewSession("session-2", "gemini", "/work2")
 	session3 := domain.NewSession("session-3", "codex", "/work3")
 
@@ -169,7 +169,7 @@ func TestJSONFileStorage_AtomicWrite(t *testing.T) {
 	tmpDir := t.TempDir()
 	storage, _ := NewJSONFileStorage(tmpDir)
 
-	session := domain.NewSession("atomic-test", "claude-code", "/work")
+	session := domain.NewSession("atomic-test", "claude", "/work")
 	_ = storage.Save(session)
 
 	tmpPath := filepath.Join(tmpDir, "sessions", "atomic-test.json.tmp")
@@ -187,7 +187,7 @@ func TestJSONFileStorage_PreservesTimestamps(t *testing.T) {
 	tmpDir := t.TempDir()
 	storage, _ := NewJSONFileStorage(tmpDir)
 
-	session := domain.NewSession("time-test", "claude-code", "/work")
+	session := domain.NewSession("time-test", "claude", "/work")
 	createdAt := session.CreatedAt
 	updatedAt := session.UpdatedAt
 
@@ -243,7 +243,7 @@ func TestJSONFileStorage_TransitionsPersist(t *testing.T) {
 	tmpDir := t.TempDir()
 	storage, _ := NewJSONFileStorage(tmpDir)
 
-	session := domain.NewSession("transition-test", "claude-code", "/work")
+	session := domain.NewSession("transition-test", "claude", "/work")
 	_ = session.TransitionTo(domain.SessionStateStarting, "init")
 	_ = session.TransitionTo(domain.SessionStateRunning, "ready")
 	_ = session.TransitionTo(domain.SessionStatePaused, "paused by user")

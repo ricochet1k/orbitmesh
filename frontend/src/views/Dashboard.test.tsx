@@ -74,66 +74,67 @@ describe("Dashboard", () => {
     expect(screen.getByText("Loading sessions...")).toBeDefined();
   });
 
-  it("renders sessions list when loaded", async () => {
-    const mockSessions = {
-      sessions: [
-        { id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" },
-      ],
-    };
-    (apiClient.listSessions as any).mockResolvedValue(mockSessions);
+   it("renders sessions list when loaded", async () => {
+     const mockSessions = {
+       sessions: [
+         { id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" },
+       ],
+     };
+     (apiClient.listSessions as any).mockResolvedValue(mockSessions);
 
-    render(() => <Dashboard />);
+     render(() => <Dashboard />);
 
-    const idCell = await screen.findByText(/session-/);
-    expect(idCell).toBeDefined();
-    expect(screen.getByText("native")).toBeDefined();
-    expect(screen.getByText("running")).toBeDefined();
-    expect(screen.getByText("T1")).toBeDefined();
-    expect(await screen.findByText("Management guardrails")).toBeDefined();
-    expect(await screen.findByText("Role escalations")).toBeDefined();
-    expect(await screen.findByText("Bulk actions locked")).toBeDefined();
-  });
+     const idCell = await screen.findByText(/session-/);
+     expect(idCell).toBeDefined();
+     expect(screen.getByText("native")).toBeDefined();
+     expect(screen.getByText("running")).toBeDefined();
+     expect(screen.getByText("T1")).toBeDefined();
+     // Guardrails panel is now hidden - verify it doesn't exist
+     expect(screen.queryByText("Management guardrails")).toBeNull();
+     expect(screen.queryByText("Role escalations")).toBeNull();
+     // Simple action buttons are visible instead
+     expect(screen.getByText("Inspect")).toBeDefined();
+   });
 
-  it("shows request access helpers when actions are locked", async () => {
-    const lockedPermissions = {
-      ...defaultPermissions,
-      can_inspect_sessions: false,
-      can_initiate_bulk_actions: false,
-      guardrails: [
-        {
-          id: "session-inspection",
-          title: "Inspect sessions",
-          allowed: false,
-          detail: "Inspection is limited to on-call operators.",
-        },
-        {
-          id: "bulk-operations",
-          title: "Bulk operations",
-          allowed: false,
-          detail: "Bulk actions require approval for your role.",
-        },
-      ],
-    };
-    (apiClient.listSessions as any).mockResolvedValue({
-      sessions: [
-        { id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" },
-      ],
-    });
-    (apiClient.getPermissions as any).mockResolvedValue(lockedPermissions);
-    const onNavigate = vi.fn();
+   it("shows request access helpers when actions are locked", async () => {
+     const lockedPermissions = {
+       ...defaultPermissions,
+       can_inspect_sessions: false,
+       can_initiate_bulk_actions: false,
+       guardrails: [
+         {
+           id: "session-inspection",
+           title: "Inspect sessions",
+           allowed: false,
+           detail: "Inspection is limited to on-call operators.",
+         },
+         {
+           id: "bulk-operations",
+           title: "Bulk operations",
+           allowed: false,
+           detail: "Bulk actions require approval for your role.",
+         },
+       ],
+     };
+     (apiClient.listSessions as any).mockResolvedValue({
+       sessions: [
+         { id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" },
+       ],
+     });
+     (apiClient.getPermissions as any).mockResolvedValue(lockedPermissions);
+     const onNavigate = vi.fn();
 
-    render(() => <Dashboard onNavigate={onNavigate} />);
+     render(() => <Dashboard onNavigate={onNavigate} />);
 
-    expect(await screen.findByText("Inspect locked")).toBeDefined();
-    expect(screen.getAllByText("Inspection is limited to on-call operators.").length).toBe(2);
-    expect(screen.getByText("Bulk actions locked")).toBeDefined();
-    expect(screen.getAllByText("Bulk actions require approval for your role.").length).toBe(2);
-
-    const links = screen.getAllByText("Request access");
-    expect(links.length).toBe(2);
-    fireEvent.click(links[0]);
-    expect(onNavigate).toHaveBeenCalledWith("/");
-  });
+     // With guardrails hidden, these locked UI messages no longer appear in Dashboard
+     // The guardrails check still happens in SessionViewer instead
+     expect(screen.queryByText("Inspect locked")).toBeNull();
+     expect(screen.queryByText("Bulk actions locked")).toBeNull();
+     
+     // Simple buttons are always visible (permission checks happen at action time)
+     expect(await screen.findByText("Inspect")).toBeDefined();
+     expect(screen.getByText("Pause")).toBeDefined();
+   });
 
   it("renders empty list when no sessions", async () => {
     (apiClient.listSessions as any).mockResolvedValue({ sessions: [] });
@@ -142,44 +143,49 @@ describe("Dashboard", () => {
     expect(screen.queryByText("Loading sessions...")).toBeNull();
   });
 
-  it("shows guardrail fallback when policy missing", async () => {
-    (apiClient.listSessions as any).mockResolvedValue({ sessions: [] });
-    (apiClient.getPermissions as any).mockResolvedValue({
-      ...defaultPermissions,
-      guardrails: [],
-    });
+   it("doesn't show guardrails panel when hidden", async () => {
+     (apiClient.listSessions as any).mockResolvedValue({ sessions: [] });
+     (apiClient.getPermissions as any).mockResolvedValue({
+       ...defaultPermissions,
+       guardrails: [],
+     });
 
-    render(() => <Dashboard />);
+     render(() => <Dashboard />);
 
-    expect(await screen.findByText("Guardrail policy unavailable.")).toBeDefined();
-  });
+     // Guardrails panel is hidden, so "Guardrail policy unavailable" no longer appears
+     expect(screen.queryByText("Guardrail policy unavailable.")).toBeNull();
+     expect(screen.queryByText("Management guardrails")).toBeNull();
+   });
 
-  it("shows bulk action buttons when guardrail allows", async () => {
-    const permissiveGuardrails = defaultGuardrails.map((guardrail) =>
-      guardrail.id === "bulk-operations"
-        ? { ...guardrail, allowed: true }
-        : guardrail,
-    );
-    const permissivePermissions = {
-      ...defaultPermissions,
-      can_initiate_bulk_actions: true,
-      guardrails: permissiveGuardrails,
-    };
+   it("shows bulk action buttons always (permission checks at action time)", async () => {
+     const permissiveGuardrails = defaultGuardrails.map((guardrail) =>
+       guardrail.id === "bulk-operations"
+         ? { ...guardrail, allowed: true }
+         : guardrail,
+     );
+     const permissivePermissions = {
+       ...defaultPermissions,
+       can_initiate_bulk_actions: true,
+       guardrails: permissiveGuardrails,
+     };
 
-    (apiClient.listSessions as any).mockResolvedValue({
-      sessions: [
-        { id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" },
-      ],
-    });
-    (apiClient.getPermissions as any).mockResolvedValue(permissivePermissions);
+     (apiClient.listSessions as any).mockResolvedValue({
+       sessions: [
+         { id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" },
+       ],
+     });
+     (apiClient.getPermissions as any).mockResolvedValue(permissivePermissions);
 
-    render(() => <Dashboard />);
+     render(() => <Dashboard />);
 
-    expect(await screen.findByText("Pause")).toBeDefined();
-    expect(screen.getByText("Resume")).toBeDefined();
-    expect(screen.getByText("Stop")).toBeDefined();
-    expect(screen.queryByText("Bulk actions locked")).toBeNull();
-  });
+     // Buttons are always visible - guardrails UI is hidden
+     expect(await screen.findByText("Pause")).toBeDefined();
+     expect(screen.getByText("Resume")).toBeDefined();
+     expect(screen.getByText("Stop")).toBeDefined();
+     expect(screen.queryByText("Bulk actions locked")).toBeNull();
+     // Management guardrails panel is hidden
+     expect(screen.queryByText("Management guardrails")).toBeNull();
+   });
 
   it("skips bulk actions when confirmation is declined", async () => {
     const permissiveGuardrails = defaultGuardrails.map((guardrail) =>
@@ -210,31 +216,37 @@ describe("Dashboard", () => {
     confirmSpy.mockRestore();
   });
 
-  it("shows CSRF error notice when bulk action is blocked", async () => {
-    const permissiveGuardrails = defaultGuardrails.map((guardrail) =>
-      guardrail.id === "bulk-operations"
-        ? { ...guardrail, allowed: true }
-        : guardrail,
-    );
-    (apiClient.getPermissions as any).mockResolvedValue({
-      ...defaultPermissions,
-      can_initiate_bulk_actions: true,
-      guardrails: permissiveGuardrails,
-    });
-    (apiClient.listSessions as any).mockResolvedValue({
-      sessions: [
-        { id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" },
-      ],
-    });
-    (apiClient.pauseSession as any).mockRejectedValue(new Error("csrf token mismatch"));
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+   it("allows bulk actions even if they may fail (errors handled at action time)", async () => {
+     const permissiveGuardrails = defaultGuardrails.map((guardrail) =>
+       guardrail.id === "bulk-operations"
+         ? { ...guardrail, allowed: true }
+         : guardrail,
+     );
+     (apiClient.getPermissions as any).mockResolvedValue({
+       ...defaultPermissions,
+       can_initiate_bulk_actions: true,
+       guardrails: permissiveGuardrails,
+     });
+     (apiClient.listSessions as any).mockResolvedValue({
+       sessions: [
+         { id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" },
+       ],
+     });
+     (apiClient.pauseSession as any).mockRejectedValue(new Error("csrf token mismatch"));
+     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
 
-    render(() => <Dashboard />);
+     render(() => <Dashboard />);
 
-    const pauseButton = await screen.findByText("Pause");
-    fireEvent.click(pauseButton);
-
-    expect(await screen.findByText("Action blocked by CSRF protection. Refresh to re-establish the token.")).toBeDefined();
-    confirmSpy.mockRestore();
-  });
+     const pauseButton = await screen.findByText("Pause");
+     // With guardrails hidden, pause button is always visible and clickable
+     // Dashboard no longer displays action notices - SessionViewer handles that instead
+     fireEvent.click(pauseButton);
+     
+     // Confirm was called to proceed with the action
+     expect(confirmSpy).toHaveBeenCalled();
+     // pauseSession was attempted
+     expect(apiClient.pauseSession).toHaveBeenCalledWith("session-123456789");
+     
+     confirmSpy.mockRestore();
+   });
 });
