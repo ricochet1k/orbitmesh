@@ -23,67 +23,92 @@ func buildDefaultPermissions() apiTypes.PermissionsResponse {
 }
 
 func guardrailStatuses(perms apiTypes.PermissionsResponse) []apiTypes.GuardrailStatus {
-	roleDetail := "Role edits are hidden until an owner approves escalation."
-	if perms.CanManageRoles {
-		if perms.RequiresOwnerApprovalForRoleChanges {
-			roleDetail = "You can edit roles, but escalations still need owner confirmation."
-		} else {
-			roleDetail = "Role definitions stay editable inside your scope."
-		}
-	}
-
-	templateDetail := "Template tweaks require a higher trust level."
-	if perms.CanManageTemplates {
-		templateDetail = "Template workflows stay available for curated drafts."
-	}
-
-	bulkDetail := "Bulk commits require higher-level guardrails before they become active."
-	if perms.CanInitiateBulkActions {
-		bulkDetail = "Every bulk commit re-checks task-by-task permissions before applying changes."
-	}
-
-	sessionDetail := "Live telemetry inspections remain locked until higher trust is granted."
-	if perms.CanInspectSessions {
-		sessionDetail = "Live telemetry stays read-only unless your guardrail allows inspection."
-	}
+	roleDetail := guardrailGuidanceDetail(perms.CanManageRoles, "role")
+	templateDetail := guardrailGuidanceDetail(perms.CanManageTemplates, "template")
+	bulkDetail := guardrailGuidanceDetail(perms.CanInitiateBulkActions, "bulk")
+	sessionDetail := guardrailGuidanceDetail(perms.CanInspectSessions, "session")
 
 	return []apiTypes.GuardrailStatus{
 		{
-			ID:      "session-inspection",
-			Title:   "Inspect sessions",
-			Allowed: perms.CanInspectSessions,
-			Detail:  sanitizeGuardrailGuidance(sessionDetail),
+			ID:         "session-inspection",
+			Title:      "Inspect sessions",
+			Allowed:    perms.CanInspectSessions,
+			Detail:     sanitizeGuardrailGuidance(sessionDetail),
+			References: guardrailGuidanceReferences(),
 		},
 		{
-			ID:      "role-escalation",
-			Title:   "Role escalations",
-			Allowed: perms.CanManageRoles,
-			Detail:  sanitizeGuardrailGuidance(roleDetail),
+			ID:         "role-escalation",
+			Title:      "Role escalations",
+			Allowed:    perms.CanManageRoles,
+			Detail:     sanitizeGuardrailGuidance(roleDetail),
+			References: guardrailGuidanceReferences(),
 		},
 		{
-			ID:      "template-authoring",
-			Title:   "Template authoring",
-			Allowed: perms.CanManageTemplates,
-			Detail:  sanitizeGuardrailGuidance(templateDetail),
+			ID:         "template-authoring",
+			Title:      "Template authoring",
+			Allowed:    perms.CanManageTemplates,
+			Detail:     sanitizeGuardrailGuidance(templateDetail),
+			References: guardrailGuidanceReferences(),
 		},
 		{
-			ID:      "bulk-operations",
-			Title:   "Bulk operations",
-			Allowed: perms.CanInitiateBulkActions,
-			Detail:  sanitizeGuardrailGuidance(bulkDetail),
+			ID:         "bulk-operations",
+			Title:      "Bulk operations",
+			Allowed:    perms.CanInitiateBulkActions,
+			Detail:     sanitizeGuardrailGuidance(bulkDetail),
+			References: guardrailGuidanceReferences(),
 		},
 		{
-			ID:      "csrf-protection",
-			Title:   "CSRF validation",
-			Allowed: true,
-			Detail:  sanitizeGuardrailGuidance("State-changing requests double-submit a SameSite cookie and header."),
+			ID:         "csrf-protection",
+			Title:      "CSRF validation",
+			Allowed:    true,
+			Detail:     sanitizeGuardrailGuidance("State-changing requests require a CSRF token."),
+			References: guardrailGuidanceReferences(),
 		},
 		{
-			ID:      "audit-integrity",
-			Title:   "Audit integrity",
-			Allowed: true,
-			Detail:  sanitizeGuardrailGuidance("High-privilege changes generate immutable audit events and alerts."),
+			ID:         "audit-integrity",
+			Title:      "Audit integrity",
+			Allowed:    true,
+			Detail:     sanitizeGuardrailGuidance("High-privilege changes are logged for audit integrity."),
+			References: guardrailGuidanceReferences(),
 		},
+	}
+}
+
+func guardrailGuidanceDetail(allowed bool, scope string) string {
+	if allowed {
+		switch scope {
+		case "session":
+			return "Session inspection is available for live telemetry."
+		case "role":
+			return "Role editing is available within your scope."
+		case "template":
+			return "Template authoring is available within guardrails."
+		case "bulk":
+			return "Bulk operations are available with guardrail checks."
+		default:
+			return "This action is available within guardrails."
+		}
+	}
+
+	switch scope {
+	case "session":
+		return "Session inspection is restricted by guardrails."
+	case "role":
+		return "Role editing is restricted by guardrails."
+	case "template":
+		return "Template authoring is restricted by guardrails."
+	case "bulk":
+		return "Bulk operations are restricted by guardrails."
+	default:
+		return "This action is restricted by guardrails."
+	}
+}
+
+func guardrailGuidanceReferences() []string {
+	return []string{
+		"docs/guardrail-guidance.md",
+		"design-docs/04-ui-flows.md",
+		"design-docs/10-management-interface-threat-model.md",
 	}
 }
 

@@ -33,10 +33,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   const [messages, setMessages] = createSignal<TranscriptMessage[]>([])
   const [filter, setFilter] = createSignal("")
   const [autoScroll, setAutoScroll] = createSignal(true)
-  const [terminalChunk, setTerminalChunk] = createSignal<{ id: number; data: string } | null>(null)
-  const [chunkId, setChunkId] = createSignal(0)
   const [streamStatus, setStreamStatus] = createSignal("connecting")
-  const [hasTerminal, setHasTerminal] = createSignal(false)
   const [initialized, setInitialized] = createSignal(false)
   const [lastHeartbeatAt, setLastHeartbeatAt] = createSignal<number | null>(null)
   const [actionNotice, setActionNotice] = createSignal<{ tone: "error" | "success"; message: string } | null>(
@@ -99,12 +96,6 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
             timestamp: payload.timestamp,
             content,
           })
-          if (providerType() === "pty") {
-            const nextId = chunkId() + 1
-            setChunkId(nextId)
-            setTerminalChunk({ id: nextId, data: content })
-            setHasTerminal(true)
-          }
         }
         break
       }
@@ -149,12 +140,6 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
           content,
         })
 
-        if (key === "pty_data" && typeof value === "string") {
-          const nextId = chunkId() + 1
-          setChunkId(nextId)
-          setTerminalChunk({ id: nextId, data: atob(value) })
-          setHasTerminal(true)
-        }
         break
       }
       default:
@@ -189,12 +174,6 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
         timestamp: initial.updated_at,
         content: initial.output,
       })
-      if (providerType() === "pty") {
-        const nextId = chunkId() + 1
-        setChunkId(nextId)
-        setTerminalChunk({ id: nextId, data: initial.output })
-        setHasTerminal(true)
-      }
     }
   })
 
@@ -510,15 +489,17 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
             </div>
           </div>
 
-          <Show when={hasTerminal()}>
-            <TerminalView chunk={terminalChunk} title="PTY Stream" />
-          </Show>
-          <Show when={!hasTerminal()}>
-            <div class="empty-terminal">
-              <Show when={streamStatus() === "connection_timeout"} fallback={<span>PTY stream not detected.</span>}>
-                <span>PTY stream connection timeout. The process may have exited or the connection failed.</span>
-              </Show>
-            </div>
+          <Show
+            when={providerType() === "pty"}
+            fallback={
+              <div class="empty-terminal">
+                <Show when={streamStatus() === "connection_timeout"} fallback={<span>PTY stream not detected.</span>}>
+                  <span>PTY stream connection timeout. The process may have exited or the connection failed.</span>
+                </Show>
+              </div>
+            }
+          >
+            <TerminalView sessionId={sessionId()} title="PTY Stream" />
           </Show>
         </section>
       </main>

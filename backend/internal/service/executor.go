@@ -44,6 +44,7 @@ type AgentExecutor struct {
 	providerFactory ProviderFactory
 	healthInterval  time.Duration
 	opTimeout       time.Duration
+	terminalHubs    map[string]*TerminalHub
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -78,6 +79,7 @@ func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
 		providerFactory: cfg.ProviderFactory,
 		healthInterval:  healthInterval,
 		opTimeout:       opTimeout,
+		terminalHubs:    make(map[string]*TerminalHub),
 		ctx:             ctx,
 		cancel:          cancel,
 	}
@@ -243,6 +245,7 @@ func (e *AgentExecutor) StopSession(ctx context.Context, id string) error {
 	err := sc.provider.Stop(stopCtx)
 
 	sc.cancel()
+	e.closeTerminalHub(id)
 
 	e.transitionWithSave(sc, domain.SessionStateStopped, "session stopped")
 
@@ -322,6 +325,7 @@ func (e *AgentExecutor) KillSession(id string) error {
 	}
 
 	sc.cancel()
+	e.closeTerminalHub(id)
 
 	e.transitionWithSave(sc, domain.SessionStateStopped, "session killed")
 	return nil
@@ -374,6 +378,29 @@ func (e *AgentExecutor) SendInput(ctx context.Context, id string, input string) 
 	return sc.provider.SendInput(ctx, input)
 }
 
+func (e *AgentExecutor) TerminalHub(id string) (*TerminalHub, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	sc, exists := e.sessions[id]
+	if !exists {
+		return nil, ErrSessionNotFound
+	}
+
+	if hub, ok := e.terminalHubs[id]; ok {
+		return hub, nil
+	}
+
+	provider, ok := sc.provider.(TerminalProvider)
+	if !ok {
+		return nil, ErrTerminalNotSupported
+	}
+
+	hub := NewTerminalHub(id, provider)
+	e.terminalHubs[id] = hub
+	return hub, nil
+}
+
 func (e *AgentExecutor) Shutdown(ctx context.Context) error {
 	e.cancel()
 
@@ -417,6 +444,18 @@ func (e *AgentExecutor) transitionWithSave(sc *sessionContext, newState domain.S
 	}
 
 	e.broadcastStateChange(sc.session, oldState, newState, reason)
+}
+
+func (e *AgentExecutor) closeTerminalHub(id string) {
+	e.mu.Lock()
+	hub, ok := e.terminalHubs[id]
+	if ok {
+		delete(e.terminalHubs, id)
+	}
+	e.mu.Unlock()
+	if ok {
+		hub.Close()
+	}
 }
 
 func (e *AgentExecutor) broadcastStateChange(session *domain.Session, oldState, newState domain.SessionState, reason string) {

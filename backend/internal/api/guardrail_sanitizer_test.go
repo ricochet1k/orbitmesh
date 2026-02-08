@@ -74,7 +74,7 @@ func TestSanitizeGuardrailStatus(t *testing.T) {
 		Detail:  "Use token: [redacted] and [redacted]",
 	}
 
-	if got != expected {
+	if !reflect.DeepEqual(got, expected) {
 		t.Fatalf("sanitizeGuardrailStatus() = %#v, want %#v", got, expected)
 	}
 }

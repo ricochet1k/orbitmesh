@@ -253,7 +253,7 @@ test("Dashboard -> Tasks -> Session workflow", async ({ page }) => {
   await expect(page.locator(".terminal-body")).toContainText("echo workflow test");
 
   await page.locator(".terminal-body").click();
-  await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
+  await expect(page.locator(".terminal-body")).toBeFocused();
 
   await page.getByRole("button", { name: "Pause" }).click();
   await expect(page.getByText("Pause request sent.")).toBeVisible();

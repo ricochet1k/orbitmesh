@@ -40,6 +40,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Post("/api/sessions/{id}/pause", h.pauseSession)
 	r.Post("/api/sessions/{id}/resume", h.resumeSession)
 	r.Get("/api/sessions/{id}/events", h.sseEvents)
+	r.Get("/api/sessions/{id}/terminal/ws", h.terminalWebSocket)
 }
 
 func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {

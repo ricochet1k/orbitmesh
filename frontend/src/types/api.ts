@@ -92,6 +92,7 @@ export interface GuardrailStatus {
   title: string;
   allowed: boolean;
   detail: string;
+  references?: string[];
 }
 
 export interface PermissionsResponse {

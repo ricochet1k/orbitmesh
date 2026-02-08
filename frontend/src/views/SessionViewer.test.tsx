@@ -49,7 +49,11 @@ vi.mock("../api/client", () => ({
 }))
 
 vi.mock("../components/TerminalView", () => ({
-  default: (props: { title?: string }) => <div data-testid="terminal-view">{props.title}</div>,
+  default: (props: { title?: string; sessionId: string }) => (
+    <div data-testid="terminal-view" data-session-id={props.sessionId}>
+      {props.title}
+    </div>
+  ),
 }))
 
 const baseSession = {
@@ -105,21 +109,12 @@ describe("SessionViewer", () => {
     expect(await screen.findByText("Streaming output")).toBeDefined()
   })
 
-  it("renders terminal when PTY metadata arrives", async () => {
-    (apiClient.getSession as any).mockResolvedValue(baseSession)
+  it("renders terminal when session provider is PTY", async () => {
+    (apiClient.getSession as any).mockResolvedValue({ ...baseSession, provider_type: "pty" })
 
     render(() => <SessionViewer sessionId="session-1" />)
 
-    await screen.findByText("Session session-1 - native - running")
-    expect(screen.getByText("PTY stream not detected.")).toBeDefined()
-
-    eventSources[0]?.emit("metadata", {
-      type: "metadata",
-      timestamp: "2026-02-05T12:03:00Z",
-      session_id: "session-1",
-      data: { key: "pty_data", value: btoa("ls -la") },
-    })
-
+    await screen.findByText("Session session-1 - pty - running")
     expect(await screen.findByTestId("terminal-view")).toBeDefined()
   })
 

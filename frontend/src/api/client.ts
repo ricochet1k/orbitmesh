@@ -16,6 +16,12 @@ const CSRF_COOKIE_NAME = "orbitmesh-csrf-token";
 const CSRF_HEADER_NAME = "X-CSRF-Token";
 const DEFAULT_PROVIDER = "adk";
 
+function getWebSocketBaseUrl(): string {
+  if (typeof window === "undefined") return "";
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}`;
+}
+
 function readCookie(name: string): string {
   if (typeof document === "undefined") return "";
   const cookieMap = document.cookie.split(";").map((segment) => segment.trim());
@@ -139,5 +145,20 @@ export const apiClient = {
 
   getEventsUrl(id: string): string {
     return `${BASE_URL}/sessions/${id}/events`;
+  },
+
+  getTerminalWsUrl(
+    id: string,
+    options?: {
+      write?: boolean;
+      allowRaw?: boolean;
+    },
+  ): string {
+    const base = getWebSocketBaseUrl();
+    if (!base) return "";
+    const url = new URL(`${base}${BASE_URL}/sessions/${id}/terminal/ws`);
+    if (options?.write) url.searchParams.set("write", "true");
+    if (options?.allowRaw) url.searchParams.set("allow_raw", "true");
+    return url.toString();
   },
 };

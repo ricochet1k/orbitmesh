@@ -240,7 +240,7 @@ test.describe("MVP workflow", () => {
     await expect(page.locator(".terminal-shell")).toBeVisible();
 
     await page.click(".terminal-body");
-    await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
+    await expect(page.locator(".terminal-body")).toBeFocused();
 
     await page.getByRole("button", { name: "Pause" }).click();
     await expect(page.getByText("Pause request sent.")).toBeVisible();

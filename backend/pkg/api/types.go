@@ -124,10 +124,11 @@ type PermissionsResponse struct {
 }
 
 type GuardrailStatus struct {
-	ID      string `json:"id"`
-	Title   string `json:"title"`
-	Allowed bool   `json:"allowed"`
-	Detail  string `json:"detail"`
+	ID         string   `json:"id"`
+	Title      string   `json:"title"`
+	Allowed    bool     `json:"allowed"`
+	Detail     string   `json:"detail"`
+	References []string `json:"references,omitempty"`
 }
 
 type TaskStatus string

@@ -1569,6 +1569,47 @@ tbody tr:hover {
   text-transform: uppercase;
 }
 
+.terminal-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #a8b0cc;
+  font-size: 0.55rem;
+  letter-spacing: 0.14em;
+}
+
+.terminal-status {
+  padding: 0.1rem 0.35rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  text-transform: uppercase;
+}
+
+.terminal-status.live {
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.terminal-status.connecting {
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.4);
+}
+
+.terminal-status.resyncing {
+  color: #fb7185;
+  border-color: rgba(251, 113, 133, 0.45);
+}
+
+.terminal-status.error {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.45);
+}
+
+.terminal-status.closed {
+  color: #94a3b8;
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
 .terminal-dot {
   width: 10px;
   height: 10px;
@@ -1576,9 +1617,81 @@ tbody tr:hover {
   background: #38bdf8;
 }
 
+.terminal-dot.connecting {
+  background: #fbbf24;
+}
+
+.terminal-dot.resyncing {
+  background: #fb7185;
+}
+
+.terminal-dot.error {
+  background: #f87171;
+}
+
+.terminal-dot.closed {
+  background: #94a3b8;
+}
+
 .terminal-body {
   min-height: 280px;
   max-height: 420px;
+  overflow: auto;
+  outline: none;
+  background: #0b1324;
+  color: #e4e8e1;
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.35;
+  user-select: text;
+}
+
+.terminal-body:focus {
+  box-shadow: inset 0 0 0 1px rgba(248, 250, 252, 0.25);
+}
+
+.terminal-screen {
+  padding: 0.75rem 0.85rem;
+}
+
+.terminal-line {
+  white-space: pre;
+}
+
+.terminal-notice {
+  padding: 0.55rem 0.75rem;
+  color: #f8d19b;
+  background: rgba(251, 191, 36, 0.08);
+  border-bottom: 1px solid rgba(251, 191, 36, 0.15);
+}
+
+.terminal-placeholder {
+  padding: 0.75rem 0.85rem;
+  color: #9aa3bd;
+}
+
+.terminal-seq {
+  padding: 0.2rem 0.85rem 0.6rem;
+  text-align: right;
+  color: #8b95b2;
+  font-size: 0.55rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.terminal-bell {
+  color: #94a3b8;
+}
+
+.terminal-bell.active {
+  color: #f59e0b;
+  text-shadow: 0 0 8px rgba(245, 158, 11, 0.5);
+}
+
+.terminal-mode,
+.terminal-dimensions,
+.terminal-cursor-meta {
+  color: #94a3b8;
 }
 
 .empty-terminal {

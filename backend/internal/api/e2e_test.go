@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/ricochet1k/orbitmesh/internal/provider"
+	"github.com/ricochet1k/orbitmesh/internal/provider/pty"
 	"github.com/ricochet1k/orbitmesh/internal/service"
 	apiTypes "github.com/ricochet1k/orbitmesh/pkg/api"
 )
@@ -25,8 +26,8 @@ func TestE2ESessionCreationAndEvents(t *testing.T) {
 		Storage:     nil, // In-memory only
 		Broadcaster: broadcaster,
 		ProviderFactory: func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
-			if providerType == "bash" {
-				return bash.NewBashProvider(sessionID), nil
+			if providerType == "pty" {
+				return pty.NewPTYProvider(sessionID), nil
 			}
 			return nil, fmt.Errorf("unknown provider: %s", providerType)
 		},
@@ -44,7 +45,7 @@ func TestE2ESessionCreationAndEvents(t *testing.T) {
 
 	var sessionID string
 
-	t.Run("Step 1: Create session with bash provider", func(t *testing.T) {
+	t.Run("Step 1: Create session with PTY provider", func(t *testing.T) {
 		// First, get CSRF token
 		resp, err := http.Get(server.URL + "/api/sessions")
 		if err != nil {
@@ -65,8 +66,11 @@ func TestE2ESessionCreationAndEvents(t *testing.T) {
 
 		// Create session
 		reqBody := apiTypes.SessionRequest{
-			ProviderType: "bash",
+			ProviderType: "pty",
 			WorkingDir:   "/tmp",
+			Custom: map[string]any{
+				"command": "bash",
+			},
 		}
 		bodyBytes, _ := json.Marshal(reqBody)
 
@@ -94,8 +98,8 @@ func TestE2ESessionCreationAndEvents(t *testing.T) {
 		if sessionResp.ID == "" {
 			t.Fatal("No session ID in response")
 		}
-		if sessionResp.ProviderType != "bash" {
-			t.Fatalf("Expected provider_type=bash, got %s", sessionResp.ProviderType)
+		if sessionResp.ProviderType != "pty" {
+			t.Fatalf("Expected provider_type=pty, got %s", sessionResp.ProviderType)
 		}
 		if sessionResp.State != "starting" {
 			t.Fatalf("Expected state=starting, got %s", sessionResp.State)
@@ -213,8 +217,8 @@ func TestSessionErrorHandling(t *testing.T) {
 		Storage:     nil,
 		Broadcaster: broadcaster,
 		ProviderFactory: func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
-			if providerType == "bash" {
-				return bash.NewBashProvider(sessionID), nil
+			if providerType == "pty" {
+				return pty.NewPTYProvider(sessionID), nil
 			}
 			return nil, fmt.Errorf("unknown provider: %s", providerType)
 		},
@@ -316,8 +320,8 @@ func TestSessionLifecycle(t *testing.T) {
 		Storage:     nil,
 		Broadcaster: broadcaster,
 		ProviderFactory: func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
-			if providerType == "bash" {
-				return bash.NewBashProvider(sessionID), nil
+			if providerType == "pty" {
+				return pty.NewPTYProvider(sessionID), nil
 			}
 			return nil, fmt.Errorf("unknown provider: %s", providerType)
 		},
@@ -346,8 +350,11 @@ func TestSessionLifecycle(t *testing.T) {
 
 	// Create session
 	reqBody := apiTypes.SessionRequest{
-		ProviderType: "bash",
+		ProviderType: "pty",
 		WorkingDir:   "/tmp",
+		Custom: map[string]any{
+			"command": "bash",
+		},
 	}
 	bodyBytes, _ := json.Marshal(reqBody)
 

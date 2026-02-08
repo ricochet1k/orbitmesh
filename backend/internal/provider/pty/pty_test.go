@@ -2,13 +2,19 @@ package pty
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/provider"
+	"github.com/ricochet1k/orbitmesh/internal/storage"
 )
 
 func TestPTYProvider_Lifecycle(t *testing.T) {
+	baseDir := t.TempDir()
+	t.Setenv("HOME", baseDir)
+
 	p := NewClaudePTYProvider("test-session")
 
 	config := provider.Config{
@@ -61,27 +67,11 @@ func TestPTYProvider_Lifecycle(t *testing.T) {
 	if p.Status().State != provider.StateStopped {
 		t.Errorf("expected state stopped, got %v", p.Status().State)
 	}
-}
 
-func TestRegexExtractor(t *testing.T) {
-	extractor := &RegexExtractor{
-		Regex: claudeTaskRegex,
-	}
-
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"Task: Compiling code", "Compiling code"},
-		{"Some random output\nTask: Testing", "Testing"},
-		{"No task here", ""},
-		{"Task:   Whitespace check  ", "Whitespace check"},
-	}
-
-	for _, tt := range tests {
-		result, _ := extractor.Extract(tt.input)
-		if result != tt.expected {
-			t.Errorf("input: %q, expected: %q, got: %q", tt.input, tt.expected, result)
-		}
+	logPath := filepath.Join(storage.DefaultBaseDir(), "sessions", "test-session", "raw.ptylog")
+	if _, err := os.Stat(logPath); err != nil {
+		t.Fatalf("expected pty log file to exist at %s: %v", logPath, err)
 	}
 }
+
+// Task extraction via terminal output strings is deprecated in favor of screen diff rules.
