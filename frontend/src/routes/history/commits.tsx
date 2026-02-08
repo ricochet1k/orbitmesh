@@ -16,7 +16,7 @@ interface DiffRow {
   className?: string
 }
 
-function CommitHistoryView() {
+export default function CommitHistoryView() {
   const [commitList] = createResource(() => apiClient.listCommits(40))
   const [selectedSha, setSelectedSha] = createSignal(getInitialCommitSha())
   const [commitDetail] = createResource(
@@ -227,4 +227,3 @@ function formatTimestamp(raw: string): string {
   if (Number.isNaN(date.getTime())) return raw
   return date.toLocaleString()
 }
-

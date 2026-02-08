@@ -3,6 +3,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import CommitHistoryView from "./CommitHistoryView";
 import { apiClient } from "../api/client";
 
+vi.mock("@tanstack/solid-router", () => ({
+  createFileRoute: () => () => ({}),
+}));
+
 vi.mock("../api/client", () => ({
   apiClient: {
     listCommits: vi.fn(),

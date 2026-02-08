@@ -3,6 +3,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import TaskTreeView from "./TaskTreeView";
 import { apiClient } from "../api/client";
 
+vi.mock("@tanstack/solid-router", () => ({
+  createFileRoute: () => () => ({}),
+}));
+
 vi.mock("../api/client", () => ({
   apiClient: {
     getTaskTree: vi.fn(),

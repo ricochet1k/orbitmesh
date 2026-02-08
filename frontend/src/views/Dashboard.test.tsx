@@ -3,6 +3,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import Dashboard from "./Dashboard";
 import { apiClient } from "../api/client";
 
+vi.mock("@tanstack/solid-router", () => ({
+  createFileRoute: () => () => ({}),
+}));
+
 const defaultGuardrails = [
   {
     id: "session-inspection",
@@ -56,6 +60,8 @@ vi.mock("../api/client", () => ({
   apiClient: {
     listSessions: vi.fn(),
     getPermissions: vi.fn(),
+    getTaskTree: vi.fn(),
+    listCommits: vi.fn(),
     pauseSession: vi.fn(),
     resumeSession: vi.fn(),
     stopSession: vi.fn(),
@@ -66,6 +72,8 @@ describe("Dashboard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (apiClient.getPermissions as any).mockResolvedValue(defaultPermissions);
+    (apiClient.getTaskTree as any).mockResolvedValue({ tasks: [] });
+    (apiClient.listCommits as any).mockResolvedValue({ commits: [] });
   });
 
   it("renders loading state initially", async () => {

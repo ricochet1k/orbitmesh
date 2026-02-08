@@ -29,7 +29,7 @@ const providerOptions = [
   { value: "pty", label: "PTY (Claude)" },
 ]
 
-function TaskTreeView(props: TaskTreeViewProps) {
+export default function TaskTreeView(props: TaskTreeViewProps = {}) {
   const [treeResponse] = createResource(apiClient.getTaskTree)
   const [treeData, setTreeData] = createSignal<TaskNode[]>([])
   const [search, setSearch] = createSignal("")

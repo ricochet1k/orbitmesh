@@ -1,4 +1,4 @@
-import { createRootRoute, Link, Outlet } from '@tanstack/solid-router'
+import { createRootRoute, Outlet } from '@tanstack/solid-router'
 import { TanStackRouterDevtools } from '@tanstack/solid-router-devtools'
 import Sidebar from '../components/Sidebar'
 import AgentDock from '../components/AgentDock'

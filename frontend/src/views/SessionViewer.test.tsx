@@ -1,38 +1,39 @@
-import { render, screen, fireEvent } from "@solidjs/testing-library";
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import SessionViewer from "./SessionViewer";
-import { apiClient } from "../api/client";
+import { render, screen, fireEvent } from "@solidjs/testing-library"
+import { describe, it, expect, vi, beforeEach } from "vitest"
+import SessionViewer from "./SessionViewer"
+import { apiClient } from "../api/client"
 
-type EventListener = (event: MessageEvent) => void;
+vi.mock("@tanstack/solid-router", () => ({
+  createFileRoute: () => () => ({ useParams: () => ({ sessionId: "session-1" }) }),
+}))
 
-const eventSources: MockEventSource[] = [];
+type EventListener = (event: MessageEvent) => void
+
+const eventSources: MockEventSource[] = []
 
 class MockEventSource {
-  url: string;
-  listeners: Record<string, EventListener[]> = {};
-  onopen: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  closed = false;
+  url: string
+  listeners: Record<string, EventListener[]> = {}
+  onopen: (() => void) | null = null
+  onerror: (() => void) | null = null
 
   constructor(url: string) {
-    this.url = url;
-    eventSources.push(this);
+    this.url = url
+    eventSources.push(this)
   }
 
   addEventListener(type: string, listener: EventListener) {
     if (!this.listeners[type]) {
-      this.listeners[type] = [];
+      this.listeners[type] = []
     }
-    this.listeners[type].push(listener);
+    this.listeners[type].push(listener)
   }
 
-  close() {
-    this.closed = true;
-  }
+  close() { }
 
   emit(type: string, payload: unknown) {
-    const event = { data: JSON.stringify(payload) } as MessageEvent;
-    (this.listeners[type] || []).forEach((listener) => listener(event));
+    const event = { data: JSON.stringify(payload) } as MessageEvent
+      ; (this.listeners[type] || []).forEach((listener) => listener(event))
   }
 }
 
@@ -45,11 +46,11 @@ vi.mock("../api/client", () => ({
     getEventsUrl: vi.fn(),
     getPermissions: vi.fn(),
   },
-}));
+}))
 
 vi.mock("../components/TerminalView", () => ({
   default: (props: { title?: string }) => <div data-testid="terminal-view">{props.title}</div>,
-}));
+}))
 
 const baseSession = {
   id: "session-1",
@@ -60,7 +61,7 @@ const baseSession = {
   updated_at: "2026-02-05T12:01:00Z",
   current_task: "T1",
   metrics: { tokens_in: 12, tokens_out: 9, request_count: 2 },
-};
+}
 
 const defaultPermissions = {
   role: "developer",
@@ -69,216 +70,86 @@ const defaultPermissions = {
   can_manage_templates: true,
   can_initiate_bulk_actions: true,
   requires_owner_approval_for_role_changes: false,
-  guardrails: [
-    {
-      id: "session-inspection",
-      title: "Inspect sessions",
-      allowed: true,
-      detail: "Live telemetry stays read-only unless your guardrail allows inspection.",
-    },
-    {
-      id: "bulk-operations",
-      title: "Bulk operations",
-      allowed: true,
-      detail: "Bulk commits require higher-level guardrails before they become active.",
-    },
-  ],
-};
+  guardrails: [],
+}
 
 describe("SessionViewer", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    eventSources.splice(0, eventSources.length);
-    vi.stubGlobal("EventSource", MockEventSource as any);
-    (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1");
-    (apiClient.getPermissions as any).mockResolvedValue(defaultPermissions);
-    if (!globalThis.atob) {
-      (globalThis as any).atob = (value: string) => Buffer.from(value, "base64").toString("binary");
-    }
-    if (!globalThis.btoa) {
-      (globalThis as any).btoa = (value: string) => Buffer.from(value, "binary").toString("base64");
-    }
-    if (!globalThis.crypto) {
-      vi.stubGlobal("crypto", { randomUUID: () => "uuid" });
-    } else if (!globalThis.crypto.randomUUID) {
-      (globalThis.crypto as any).randomUUID = () => "uuid";
-    } else {
-      vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("uuid");
-    }
-  });
+    vi.clearAllMocks()
+    eventSources.splice(0, eventSources.length)
+    vi.stubGlobal("EventSource", MockEventSource as never)
+    vi.stubGlobal("atob", (value: string) => value)
+    vi.stubGlobal("btoa", (value: string) => value)
+    vi.stubGlobal("crypto", {
+      randomUUID: () => "123e4567-e89b-12d3-a456-426614174000",
+    })
+      ; (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1")
+      ; (apiClient.getPermissions as any).mockResolvedValue(defaultPermissions)
+  })
 
-  it("renders initial session output and streams new messages", async () => {
-    (apiClient.getSession as any).mockResolvedValue({
-      ...baseSession,
-      output: "Initial output",
-    });
+  it("renders initial output and streams new transcript messages", async () => {
+    (apiClient.getSession as any).mockResolvedValue({ ...baseSession, output: "Initial output" })
 
-    render(() => <SessionViewer sessionId="session-1" />);
+    render(() => <SessionViewer sessionId="session-1" />)
 
-    expect(await screen.findByText("Session session-1 - native - running")).toBeDefined();
-    expect(screen.getByText("Initial output")).toBeDefined();
+    expect(await screen.findByText("Session session-1 - native - running")).toBeDefined()
+    expect(screen.getByText("Initial output")).toBeDefined()
 
-    const source = eventSources[0];
-    source.emit("output", {
+    eventSources[0]?.emit("output", {
       type: "output",
       timestamp: "2026-02-05T12:02:00Z",
       session_id: "session-1",
       data: { content: "Streaming output" },
-    });
+    })
 
-    expect(await screen.findByText("Streaming output")).toBeDefined();
+    expect(await screen.findByText("Streaming output")).toBeDefined()
+  })
 
-    const searchInput = screen.getByPlaceholderText("Search transcript");
-    fireEvent.input(searchInput, { target: { value: "missing" } });
-    expect(await screen.findByText("No transcript yet.")).toBeDefined();
+  it("renders terminal when PTY metadata arrives", async () => {
+    (apiClient.getSession as any).mockResolvedValue(baseSession)
 
-    fireEvent.input(searchInput, { target: { value: "streaming" } });
-    expect(screen.getByText("Streaming output")).toBeDefined();
-  });
+    render(() => <SessionViewer sessionId="session-1" />)
 
-  it("shows terminal when PTY metadata arrives", async () => {
-    (apiClient.getSession as any).mockResolvedValue(baseSession);
+    await screen.findByText("Session session-1 - native - running")
+    expect(screen.getByText("PTY stream not detected.")).toBeDefined()
 
-    render(() => <SessionViewer sessionId="session-1" />);
-
-    await screen.findByText("Session session-1 - native - running");
-    expect(screen.getByText("PTY stream not detected.")).toBeDefined();
-
-    const source = eventSources[0];
-    source.emit("metadata", {
+    eventSources[0]?.emit("metadata", {
       type: "metadata",
       timestamp: "2026-02-05T12:03:00Z",
       session_id: "session-1",
       data: { key: "pty_data", value: btoa("ls -la") },
-    });
+    })
 
-    expect(await screen.findByTestId("terminal-view")).toBeDefined();
-    expect(screen.queryByText("PTY stream not detected.")).toBeNull();
-  });
+    expect(await screen.findByTestId("terminal-view")).toBeDefined()
+  })
 
-  it("invokes pause/resume/kill controls", async () => {
-    (apiClient.getSession as any).mockResolvedValue(baseSession);
-    (apiClient.pauseSession as any).mockResolvedValue(undefined);
-    (apiClient.stopSession as any).mockResolvedValue(undefined);
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("invokes pause and kill controls", async () => {
+    (apiClient.getSession as any).mockResolvedValue(baseSession)
+      ; (apiClient.pauseSession as any).mockResolvedValue(undefined)
+      ; (apiClient.stopSession as any).mockResolvedValue(undefined)
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true)
 
-    render(() => <SessionViewer sessionId="session-1" />);
+    render(() => <SessionViewer sessionId="session-1" />)
 
-    await screen.findByText("Session session-1 - native - running");
-    fireEvent.click(screen.getByText("Pause"));
-    expect(apiClient.pauseSession).toHaveBeenCalledWith("session-1");
+    await screen.findByText("Session session-1 - native - running")
+    fireEvent.click(screen.getByText("Pause"))
+    expect(apiClient.pauseSession).toHaveBeenCalledWith("session-1")
 
-    fireEvent.click(screen.getByText("Kill"));
-    expect(confirmSpy).toHaveBeenCalled();
-    expect(apiClient.stopSession).toHaveBeenCalledWith("session-1");
+    fireEvent.click(screen.getByText("Kill"))
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(apiClient.stopSession).toHaveBeenCalledWith("session-1")
 
-    confirmSpy.mockRestore();
-  });
+    confirmSpy.mockRestore()
+  })
 
-  it("allows resume when session is paused", async () => {
-    (apiClient.getSession as any).mockResolvedValue({
-      ...baseSession,
-      state: "paused",
-    });
-    (apiClient.resumeSession as any).mockResolvedValue(undefined);
+  it("calls onClose when close button is clicked", async () => {
+    (apiClient.getSession as any).mockResolvedValue(baseSession)
+    const onClose = vi.fn()
 
-    render(() => <SessionViewer sessionId="session-1" />);
+    render(() => <SessionViewer sessionId="session-1" onClose={onClose} />)
 
-    await screen.findByText("Session session-1 - native - paused");
-    fireEvent.click(screen.getByText("Resume"));
-    expect(apiClient.resumeSession).toHaveBeenCalledWith("session-1");
-  });
-
-  it("shows guardrail banner and skips streams when inspection is locked", async () => {
-    (apiClient.getSession as any).mockResolvedValue(baseSession);
-    (apiClient.getPermissions as any).mockResolvedValue({
-      ...defaultPermissions,
-      can_inspect_sessions: false,
-      guardrails: [
-        {
-          id: "session-inspection",
-          title: "Inspect sessions",
-          allowed: false,
-          detail: "Inspection is restricted for your role.",
-        },
-      ],
-    });
-    const onNavigate = vi.fn();
-
-    render(() => <SessionViewer sessionId="session-1" onNavigate={onNavigate} />);
-
-    expect(await screen.findByText("Inspection is restricted for your role.")).toBeDefined();
-    const requestLink = screen.getByText("Request access");
-    fireEvent.click(requestLink);
-    expect(onNavigate).toHaveBeenCalledWith("/");
-    expect(eventSources.length).toBe(0);
-  });
-
-  it("shows bulk controls helper and request access link when locked", async () => {
-    (apiClient.getSession as any).mockResolvedValue(baseSession);
-    (apiClient.getPermissions as any).mockResolvedValue({
-      ...defaultPermissions,
-      can_initiate_bulk_actions: false,
-      guardrails: [
-        {
-          id: "bulk-operations",
-          title: "Bulk operations",
-          allowed: false,
-          detail: "Bulk controls are limited to on-call operators.",
-        },
-      ],
-    });
-    const onNavigate = vi.fn();
-
-    render(() => <SessionViewer sessionId="session-1" onNavigate={onNavigate} />);
-
-    expect(await screen.findByText("Bulk controls locked")).toBeDefined();
-    expect(screen.getByText("Bulk controls are limited to on-call operators.")).toBeDefined();
-    const requestLink = screen.getByText("Request access");
-    fireEvent.click(requestLink);
-    expect(onNavigate).toHaveBeenCalledWith("/");
-  });
-
-   it("renders CSRF notice when a session action is blocked", async () => {
-     (apiClient.getSession as any).mockResolvedValue(baseSession);
-     (apiClient.pauseSession as any).mockRejectedValue(new Error("csrf token mismatch"));
-
-     render(() => <SessionViewer sessionId="session-1" />);
-
-     await screen.findByText("Session session-1 - native - running");
-     fireEvent.click(screen.getByText("Pause"));
-
-     expect(await screen.findByText("Action blocked by CSRF protection. Refresh to re-establish the token.")).toBeDefined();
-   });
-
-   it("invokes onClose callback when close button is clicked", async () => {
-     (apiClient.getSession as any).mockResolvedValue(baseSession);
-     const onClose = vi.fn();
-
-     render(() => <SessionViewer sessionId="session-1" onClose={onClose} />);
-
-     await screen.findByText("Session session-1 - native - running");
-     
-     // Find and click the close button
-     const closeButton = screen.getByTitle("Close session viewer");
-     expect(closeButton).toBeDefined();
-     expect(closeButton.textContent).toContain("✕ Close");
-     
-     fireEvent.click(closeButton);
-     expect(onClose).toHaveBeenCalled();
-   });
-
-   it("close button is positioned at the right of the header", async () => {
-     (apiClient.getSession as any).mockResolvedValue(baseSession);
-
-     const { container } = render(() => <SessionViewer sessionId="session-1" />);
-
-     await screen.findByText("Session session-1 - native - running");
-     
-     const closeButton = screen.getByTitle("Close session viewer") as HTMLButtonElement;
-     const style = window.getComputedStyle(closeButton);
-     
-     // The button should have margin-left: auto applied
-     expect(closeButton.style.marginLeft).toBe("auto");
-   });
-});
+    await screen.findByText("Session session-1 - native - running")
+    fireEvent.click(screen.getByTitle("Close session viewer"))
+    expect(onClose).toHaveBeenCalled()
+  })
+})

@@ -146,7 +146,7 @@ function SessionsView(props: SessionsViewProps) {
                   {(errorMsg) => (
                     <div class="session-error">
                       <p class="muted">Error</p>
-                      <strong style="color: var(--color-error, red)">{errorMsg()}</strong>
+                      <strong style={{ "color": "var(--color-error, red)" }}>{errorMsg()}</strong>
                     </div>
                   )}
                 </Show>

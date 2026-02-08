@@ -22,7 +22,7 @@ export default function TerminalView(props: TerminalViewProps) {
         background: "#0f1210",
         foreground: "#e4e8e1",
         cursor: "#f59e0b",
-        selection: "rgba(217, 119, 6, 0.35)",
+        selectionBackground: "rgba(217, 119, 6, 0.35)",
       },
     });
 

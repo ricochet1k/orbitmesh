@@ -15,12 +15,20 @@ interface TranscriptMessage {
   content: string
 }
 
+interface SessionViewerProps {
+  sessionId?: string
+  onNavigate?: (path: string) => void
+  onDockSession?: (id: string) => void
+  onClose?: () => void
+}
+
 const CODE_BLOCK_REGEX = /```(\w+)?\n([\s\S]*?)```/g
 
-export default function SessionViewer() {
-  const params = Route.useParams()
+export default function SessionViewer(props: SessionViewerProps = {}) {
+  const routeParams = props.sessionId ? null : Route.useParams()
+  const sessionId = () => props.sessionId ?? routeParams?.().sessionId ?? ""
 
-  const [session] = createResource(() => params().sessionId, apiClient.getSession)
+  const [session] = createResource(sessionId, apiClient.getSession)
   const [permissions] = createResource(apiClient.getPermissions)
   const [messages, setMessages] = createSignal<TranscriptMessage[]>([])
   const [filter, setFilter] = createSignal("")
@@ -193,7 +201,7 @@ export default function SessionViewer() {
   createEffect(() => {
     if (permissions.loading) return
     if (!canInspect()) return
-    const url = apiClient.getEventsUrl(params().sessionId)
+    const url = apiClient.getEventsUrl(sessionId())
     setStreamStatus("connecting")
     const source = new EventSource(url)
 
@@ -273,7 +281,7 @@ export default function SessionViewer() {
     setPendingAction("pause")
     setActionNotice(null)
     try {
-      await apiClient.pauseSession(params().sessionId)
+      await apiClient.pauseSession(sessionId())
       setActionNotice({ tone: "success", message: "Pause request sent." })
     } catch (error) {
       setActionNotice({ tone: "error", message: formatActionError(error) })
@@ -293,7 +301,7 @@ export default function SessionViewer() {
     setPendingAction("resume")
     setActionNotice(null)
     try {
-      await apiClient.resumeSession(params().sessionId)
+      await apiClient.resumeSession(sessionId())
       setActionNotice({ tone: "success", message: "Resume request sent." })
     } catch (error) {
       setActionNotice({ tone: "error", message: formatActionError(error) })
@@ -314,7 +322,7 @@ export default function SessionViewer() {
     setPendingAction("stop")
     setActionNotice(null)
     try {
-      await apiClient.stopSession(params().sessionId)
+      await apiClient.stopSession(sessionId())
       setActionNotice({ tone: "success", message: "Kill request sent." })
     } catch (error) {
       setActionNotice({ tone: "error", message: formatActionError(error) })
@@ -328,13 +336,31 @@ export default function SessionViewer() {
   const exportTranscript = (format: "json" | "markdown") => {
     const data = messages()
     if (format === "json") {
-      downloadFile(`${params().sessionId}-transcript.json`, JSON.stringify(data, null, 2))
+      downloadFile(`${sessionId()}-transcript.json`, JSON.stringify(data, null, 2))
       return
     }
     const markdown = data
       .map((msg) => `### ${msg.type.toUpperCase()} · ${msg.timestamp}\n\n${msg.content}\n`)
       .join("\n")
-    downloadFile(`${params().sessionId}-transcript.md`, markdown)
+    downloadFile(`${sessionId()}-transcript.md`, markdown)
+  }
+
+  createEffect(() => {
+    const id = sessionId()
+    if (!id || !props.onDockSession) return
+    props.onDockSession(id)
+  })
+
+  const handleClose = () => {
+    if (props.onClose) {
+      props.onClose()
+      return
+    }
+    if (props.onNavigate) {
+      props.onNavigate("/sessions")
+      return
+    }
+    window.location.assign("/sessions")
   }
 
   return (
@@ -385,7 +411,7 @@ export default function SessionViewer() {
             <button
               type="button"
               class="neutral"
-              onClick={() => alert("todo")}
+               onClick={handleClose}
               title="Close session viewer"
               style={{ "margin-left": "auto" }}
             >
@@ -460,7 +486,7 @@ export default function SessionViewer() {
           <div class="session-metrics">
             <div>
               <span>ID</span>
-              <strong>{params().sessionId}</strong>
+               <strong>{sessionId()}</strong>
             </div>
             <div>
               <span>Provider</span>
@@ -553,4 +579,3 @@ function downloadFile(filename: string, content: string) {
   anchor.click()
   URL.revokeObjectURL(url)
 }
-

@@ -9,20 +9,15 @@ export const Route = createFileRoute('/')({
   component: Dashboard,
 })
 
-// interface DashboardProps {
-//   taskTree?: TaskNode[];
-//   commits?: CommitSummary[];
-//   onNavigate?: (path: string) => void;
-// }
+interface DashboardProps {
+  onNavigate?: (path: string) => void
+}
 
-function Dashboard() {
+export default function Dashboard(props: DashboardProps = {}) {
   const [sessions] = createResource(apiClient.listSessions)
   const [permissions] = createResource(apiClient.getPermissions)
   const [taskTree] = createResource(apiClient.getTaskTree)
   const [commitList] = createResource(() => apiClient.listCommits(30))
-  const [actionNotice, setActionNotice] = createSignal<{ tone: "error" | "success"; message: string } | null>(
-    null,
-  )
   const [pendingAction, setPendingAction] = createSignal<{ id: string; action: string } | null>(null)
 
   const sessionList = () => sessions()?.sessions ?? []
@@ -39,15 +34,12 @@ function Dashboard() {
     return pending?.id === id && pending?.action === action
   }
 
-  const formatActionError = (error: unknown) => {
-    if (error instanceof Error) {
-      const message = error.message || "Action failed."
-      if (message.toLowerCase().includes("csrf")) {
-        return "Action blocked by CSRF protection. Refresh to re-establish the token."
-      }
-      return message
+  const navigateTo = (path: string) => {
+    if (props.onNavigate) {
+      props.onNavigate(path)
+      return
     }
-    return "Action failed."
+    window.location.assign(path)
   }
 
   const runBulkAction = async (sessionId: string, action: "pause" | "resume" | "stop") => {
@@ -59,17 +51,12 @@ function Dashboard() {
     if (!window.confirm(confirmText)) return
 
     setPendingAction({ id: sessionId, action })
-    setActionNotice(null)
     try {
       if (action === "pause") await apiClient.pauseSession(sessionId)
       if (action === "resume") await apiClient.resumeSession(sessionId)
       if (action === "stop") await apiClient.stopSession(sessionId)
-      setActionNotice({
-        tone: "success",
-        message: `Request sent to ${label} ${sessionId.substring(0, 8)}...`,
-      })
-    } catch (error) {
-      setActionNotice({ tone: "error", message: formatActionError(error) })
+    } catch {
+      // Errors are handled in the destination session view.
     } finally {
       setPendingAction(null)
     }
@@ -83,33 +70,25 @@ function Dashboard() {
   })
 
   const handleGraphSelect = (node: GraphNode) => {
-    if (!props.onNavigate) return
     if (node.type === "task") {
-      props.onNavigate(`/tasks?task=${node.id}`)
+      navigateTo(`/tasks?task=${node.id}`)
       return
     }
     if (node.type === "commit") {
-      props.onNavigate(`/history/commits?commit=${node.id}`)
+      navigateTo(`/history/commits?commit=${node.id}`)
       return
     }
     if (node.id === "task-root") {
-      props.onNavigate("/tasks")
+      navigateTo("/tasks")
       return
     }
     if (node.id === "commit-root") {
-      props.onNavigate("/history/commits")
+      navigateTo("/history/commits")
     }
   }
 
   const handleInspect = (sessionId: string) => {
-    if (!props.onNavigate) return
-    props.onNavigate(`/sessions/${sessionId}`)
-  }
-
-  const handleRequestAccess = (event: MouseEvent) => {
-    if (!props.onNavigate) return
-    event.preventDefault()
-    props.onNavigate("/")
+    navigateTo(`/sessions/${sessionId}`)
   }
 
   return (
@@ -404,4 +383,3 @@ function Dashboard() {
     </div>
   )
 }
-
