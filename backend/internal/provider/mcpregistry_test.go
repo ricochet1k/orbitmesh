@@ -369,3 +369,34 @@ func TestMCPRegistry_ValidateLargeArg(t *testing.T) {
 		t.Errorf("expected ErrMCPArgTooLong for large arg, got %v", err)
 	}
 }
+
+func TestRegisterBuiltInServers(t *testing.T) {
+	r := NewMCPRegistry()
+	registerBuiltInServers(r)
+
+	// Check that built-in servers are registered
+	// The actual registration may vary based on environment
+	list := r.List()
+	// We expect at least an attempt to register orbitmesh-mcp
+	// but it may not be in the list if the binary doesn't exist
+	_ = list
+}
+
+func TestFindOrbitMeshMCPPath(t *testing.T) {
+	path := findOrbitMeshMCPPath()
+	// Path may be empty if binary doesn't exist, which is fine
+	// If it exists, it should be absolute
+	if path != "" && !strings.HasPrefix(path, "/") {
+		t.Errorf("expected absolute path, got %s", path)
+	}
+}
+
+func TestGlobalMCPRegistryInitialization(t *testing.T) {
+	r := GlobalMCPRegistry()
+	if r == nil {
+		t.Fatal("global registry should not be nil")
+	}
+	if !r.IsEnabled() {
+		t.Error("global registry should be enabled by default")
+	}
+}

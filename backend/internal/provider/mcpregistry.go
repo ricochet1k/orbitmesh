@@ -3,6 +3,7 @@ package provider
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -216,7 +217,55 @@ func newDefaultMCPRegistry() *MCPRegistry {
 	r := NewMCPRegistry()
 	r.Enable()
 	r.SetAllowAll(true)
+	registerBuiltInServers(r)
 	return r
+}
+
+func registerBuiltInServers(r *MCPRegistry) {
+	// Register orbitmesh-mcp server
+	// This allows users to reference it by name in their configs
+	// The actual path resolution happens at runtime
+	orbitmeshMCPPath := findOrbitMeshMCPPath()
+	if orbitmeshMCPPath != "" {
+		_ = r.Register(MCPRegistryEntry{
+			Name:         "orbitmesh-mcp",
+			Command:      orbitmeshMCPPath,
+			AllowAnyArgs: true,
+		})
+	}
+}
+
+func findOrbitMeshMCPPath() string {
+	// Try to find orbitmesh-mcp in common locations
+	candidates := []string{
+		"./bin/orbitmesh-mcp",
+		"./orbitmesh-mcp",
+		"/usr/local/bin/orbitmesh-mcp",
+	}
+
+	for _, path := range candidates {
+		if filepath.IsAbs(path) {
+			continue
+		}
+		// Convert relative paths to absolute
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			continue
+		}
+		candidates = append(candidates, absPath)
+	}
+
+	// Check if any of these paths exist
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			if absPath, err := filepath.Abs(path); err == nil {
+				return absPath
+			}
+			return path
+		}
+	}
+
+	return ""
 }
 
 func GlobalMCPRegistry() *MCPRegistry {
