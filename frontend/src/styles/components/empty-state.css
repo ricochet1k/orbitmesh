@@ -1,0 +1,161 @@
+/**
+ * Empty State Component Styles
+ * 
+ * Provides styled placeholder content for views with no data
+ */
+
+/* ========================================
+   Empty State Container
+   ======================================== */
+
+.empty-state-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-12) var(--space-6);
+  text-align: center;
+  min-height: 280px;
+  background: var(--color-surface-1);
+  border-radius: var(--radius-xl);
+  border: 1px dashed var(--color-border);
+}
+
+.empty-state-default {
+  border-color: var(--color-border);
+  background: var(--color-surface-1);
+}
+
+.empty-state-info {
+  border-color: rgba(37, 99, 235, 0.3);
+  background: rgba(37, 99, 235, 0.04);
+}
+
+.empty-state-warning {
+  border-color: rgba(180, 83, 9, 0.3);
+  background: rgba(180, 83, 9, 0.04);
+}
+
+/* ========================================
+   Empty State Icon
+   ======================================== */
+
+.empty-state-icon {
+  font-size: var(--font-size-5xl);
+  line-height: 1;
+  margin-bottom: var(--space-4);
+  opacity: 0.6;
+  animation: fadeIn var(--duration-slow) var(--easing-standard);
+}
+
+/* ========================================
+   Empty State Text
+   ======================================== */
+
+.empty-state-title {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-3);
+  animation: fadeIn var(--duration-slow) var(--easing-standard) 100ms backwards;
+}
+
+.empty-state-description {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  max-width: 420px;
+  line-height: var(--line-height-relaxed);
+  margin-bottom: var(--space-6);
+  animation: fadeIn var(--duration-slow) var(--easing-standard) 200ms backwards;
+}
+
+/* ========================================
+   Empty State Actions
+   ======================================== */
+
+.empty-state-actions {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  justify-content: center;
+  animation: fadeIn var(--duration-slow) var(--easing-standard) 300ms backwards;
+}
+
+.empty-state-action-primary {
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  color: white;
+  border: none;
+  padding: var(--space-3) var(--space-6);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  transition: transform var(--duration-fast) var(--easing-standard),
+              box-shadow var(--duration-fast) var(--easing-standard);
+}
+
+.empty-state-action-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-2);
+}
+
+.empty-state-action-primary:active {
+  transform: translateY(0);
+}
+
+.empty-state-action-secondary {
+  background: var(--color-surface-0);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  padding: var(--space-3) var(--space-6);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--easing-standard),
+              border-color var(--duration-fast) var(--easing-standard),
+              color var(--duration-fast) var(--easing-standard);
+}
+
+.empty-state-action-secondary:hover {
+  background: var(--color-interactive-hover);
+  border-color: rgba(37, 99, 235, 0.3);
+  color: var(--color-text-primary);
+}
+
+/* ========================================
+   Responsive Adjustments
+   ======================================== */
+
+@media (max-width: 640px) {
+  .empty-state-container {
+    padding: var(--space-8) var(--space-4);
+    min-height: 240px;
+  }
+
+  .empty-state-icon {
+    font-size: var(--font-size-4xl);
+  }
+
+  .empty-state-title {
+    font-size: var(--font-size-lg);
+  }
+
+  .empty-state-description {
+    font-size: var(--font-size-xs);
+  }
+
+  .empty-state-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .empty-state-action-primary,
+  .empty-state-action-secondary {
+    width: 100%;
+  }
+}

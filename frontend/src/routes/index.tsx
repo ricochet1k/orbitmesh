@@ -4,6 +4,8 @@ import { apiClient } from '../api/client'
 import AgentGraph from '../graph/AgentGraph'
 import { buildUnifiedGraph } from '../graph/graphData'
 import type { GraphNode } from '../graph/types'
+import EmptyState from '../components/EmptyState'
+import SkeletonLoader from '../components/SkeletonLoader'
 
 export const Route = createFileRoute('/')({
   component: Dashboard,
@@ -179,20 +181,41 @@ export default function Dashboard(props: DashboardProps = {}) {
           {/* <Show when={actionNotice()}>
              {(notice) => <p class={`guardrail-banner ${notice().tone}`}>{notice().message}</p>}
            </Show> */}
-          <Show when={!sessions.loading} fallback={<p>Loading sessions...</p>}>
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Provider</th>
-                  <th>State</th>
-                  <th>Task</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                <For each={sessions()?.sessions}>
-                  {(session) => (
+          <Show 
+            when={!sessions.loading} 
+            fallback={<SkeletonLoader variant="table" count={5} />}
+          >
+            <Show 
+              when={sessionList().length > 0}
+              fallback={
+                <EmptyState
+                  icon="🚀"
+                  title="No active sessions"
+                  description="Get started by navigating to the Tasks view and starting an agent session."
+                  action={{
+                    label: "Go to Tasks",
+                    onClick: () => navigateTo("/tasks")
+                  }}
+                  secondaryAction={{
+                    label: "View Documentation",
+                    onClick: () => window.open("/docs", "_blank")
+                  }}
+                />
+              }
+            >
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Provider</th>
+                    <th>State</th>
+                    <th>Task</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <For each={sessions()?.sessions}>
+                    {(session) => (
                     <tr>
                       <td>{session.id.substring(0, 8)}...</td>
                       <td>{session.provider_type}</td>
@@ -334,10 +357,11 @@ export default function Dashboard(props: DashboardProps = {}) {
                         </div>
                       </td>
                     </tr>
-                  )}
-                </For>
-              </tbody>
-            </table>
+                      )}
+                  </For>
+                </tbody>
+              </table>
+            </Show>
           </Show>
         </section>
 

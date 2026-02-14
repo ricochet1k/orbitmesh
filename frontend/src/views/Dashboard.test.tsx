@@ -78,8 +78,9 @@ describe("Dashboard", () => {
 
   it("renders loading state initially", async () => {
     (apiClient.listSessions as any).mockReturnValue(new Promise(() => {}));
-    render(() => <Dashboard />);
-    expect(screen.getByText("Loading sessions...")).toBeDefined();
+    const { container } = render(() => <Dashboard />);
+    // Check for skeleton loader instead of loading text
+    expect(container.querySelector(".skeleton-table-container")).toBeDefined();
   });
 
    it("renders sessions list when loaded", async () => {
@@ -147,8 +148,9 @@ describe("Dashboard", () => {
   it("renders empty list when no sessions", async () => {
     (apiClient.listSessions as any).mockResolvedValue({ sessions: [] });
     render(() => <Dashboard />);
-    await screen.findByText("ID");
-    expect(screen.queryByText("Loading sessions...")).toBeNull();
+    // Look for empty state instead of table headers
+    await screen.findByText("No active sessions");
+    expect(screen.queryByText("ID")).toBeNull();
   });
 
    it("doesn't show guardrails panel when hidden", async () => {

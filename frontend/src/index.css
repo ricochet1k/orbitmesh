@@ -11,6 +11,8 @@
 @import "./styles/components/button.css";
 @import "./styles/components/input.css";
 @import "./styles/components/card.css";
+@import "./styles/components/empty-state.css";
+@import "./styles/components/skeleton.css";
 
 /* Animation & motion primitives */
 @import "./styles/animations.css";

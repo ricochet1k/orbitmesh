@@ -7,6 +7,8 @@ import {
   Show,
 } from "solid-js"
 import { apiClient } from "../../api/client"
+import EmptyState from "../../components/EmptyState"
+import SkeletonLoader from "../../components/SkeletonLoader"
 
 export const Route = createFileRoute('/sessions/')({
   component: SessionsView,
@@ -81,37 +83,58 @@ function SessionsView(props: SessionsViewProps) {
             <span class="panel-pill">Live</span>
           </div>
 
-          <Show when={!sessions.loading} fallback={<p class="muted">Loading sessions...</p>}>
-            <div class="session-list">
-              <For each={sessionList()}>
-                {(session) => (
-                  <div class={`session-card ${selectedId() === session.id ? "active" : ""}`}>
-                    <button
-                      type="button"
-                      class="session-card-main"
-                      onClick={() => setSelectedId(session.id)}
-                    >
-                      <div>
-                        <p class="session-card-id">{session.id}</p>
-                        <p class="muted">{session.current_task || "No active task"}</p>
-                      </div>
-                      <div class="session-card-meta">
-                        <span class={`state-badge ${session.state}`}>{session.state.replace("_", " ")}</span>
-                        <span class="muted">{session.provider_type}</span>
-                      </div>
-                    </button>
-                    <div class="session-card-actions">
-                      <button type="button" onClick={() => handleInspect(session.id)}>
-                        Open viewer
+          <Show 
+            when={!sessions.loading} 
+            fallback={<SkeletonLoader variant="list" count={5} />}
+          >
+            <Show
+              when={sessionList().length > 0}
+              fallback={
+                <EmptyState
+                  icon="📭"
+                  title="No sessions yet"
+                  description="Create a new session to start an agent task. Navigate to the Tasks view to get started."
+                  action={{
+                    label: "Go to Tasks",
+                    onClick: () => {
+                      if (props.onNavigate) {
+                        props.onNavigate("/tasks")
+                      } else {
+                        window.location.assign("/tasks")
+                      }
+                    }
+                  }}
+                />
+              }
+            >
+              <div class="session-list">
+                <For each={sessionList()}>
+                  {(session) => (
+                    <div class={`session-card ${selectedId() === session.id ? "active" : ""}`}>
+                      <button
+                        type="button"
+                        class="session-card-main"
+                        onClick={() => setSelectedId(session.id)}
+                      >
+                        <div>
+                          <p class="session-card-id">{session.id}</p>
+                          <p class="muted">{session.current_task || "No active task"}</p>
+                        </div>
+                        <div class="session-card-meta">
+                          <span class={`state-badge ${session.state}`}>{session.state.replace("_", " ")}</span>
+                          <span class="muted">{session.provider_type}</span>
+                        </div>
                       </button>
+                      <div class="session-card-actions">
+                        <button type="button" onClick={() => handleInspect(session.id)}>
+                          Open viewer
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                )}
-              </For>
-              <Show when={sessionList().length === 0}>
-                <p class="empty-state">No sessions found.</p>
-              </Show>
-            </div>
+                  )}
+                </For>
+              </div>
+            </Show>
           </Show>
         </section>
 

@@ -4,6 +4,8 @@ import { apiClient } from "../api/client"
 import type { SessionResponse, TaskNode, TaskStatus } from "../types/api"
 import AgentGraph from "../graph/AgentGraph"
 import { buildTaskGraph } from "../graph/graphData"
+import EmptyState from "../components/EmptyState"
+import SkeletonLoader from "../components/SkeletonLoader"
 
 export const Route = createFileRoute('/tasks')({
   component: TaskTreeView,
@@ -279,26 +281,54 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
             </select>
           </div>
 
-          <Show when={!treeResponse.loading} fallback={<p class="muted">Loading task tree...</p>}>
-            <div class="task-tree">
-              <For each={filteredTree()}>
-                {(node) => (
-                  <TaskNodeRow
-                    node={node}
-                    depth={0}
-                    expanded={expanded}
-                    selectedId={selectedId}
-                    onToggle={toggleExpanded}
-                    onSelect={selectTask}
-                    onContextMenu={onContextMenu}
-                    registerRef={nodeRefs}
+          <Show 
+            when={!treeResponse.loading} 
+            fallback={<SkeletonLoader variant="list" count={8} />}
+          >
+            <Show 
+              when={treeData().length > 0}
+              fallback={
+                <EmptyState
+                  icon="📋"
+                  title="No tasks available"
+                  description="The task tree is empty. Create your first task to start organizing your work."
+                  variant="info"
+                />
+              }
+            >
+              <div class="task-tree">
+                <For each={filteredTree()}>
+                  {(node) => (
+                    <TaskNodeRow
+                      node={node}
+                      depth={0}
+                      expanded={expanded}
+                      selectedId={selectedId}
+                      onToggle={toggleExpanded}
+                      onSelect={selectTask}
+                      onContextMenu={onContextMenu}
+                      registerRef={nodeRefs}
+                    />
+                  )}
+                </For>
+                <Show when={filteredTree().length === 0 && treeData().length > 0}>
+                  <EmptyState
+                    icon="🔍"
+                    title="No matching tasks"
+                    description="Try adjusting your search or filter criteria to find tasks."
+                    variant="info"
+                    action={{
+                      label: "Clear Filters",
+                      onClick: () => {
+                        setSearch("")
+                        setRoleFilter("all")
+                        setStatusFilter("all")
+                      }
+                    }}
                   />
-                )}
-              </For>
-              <Show when={filteredTree().length === 0}>
-                <p class="muted">No tasks match the active filters.</p>
-              </Show>
-            </div>
+                </Show>
+              </div>
+            </Show>
           </Show>
         </section>
 
