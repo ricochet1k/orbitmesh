@@ -24,18 +24,15 @@ test.describe("Agent Dock", () => {
     await setupCommonMocks(page, { taskTree: mockTaskTree });
   });
 
-  test("Agent dock is hidden when no session is active", async ({ page }) => {
+  test("Agent dock is minimized when no session is active", async ({ page }) => {
     await page.goto("/");
 
-    // Dock should not be visible or should show empty state
-    const dock = page.locator(".agent-dock, [data-testid='agent-dock']");
-    const emptyState = page.locator(".dock-empty, .agent-dock-empty");
+    const dock = page.getByTestId("agent-dock");
+    const toggle = page.getByTestId("agent-dock-toggle");
 
-    if (await dock.isVisible()) {
-      // If dock is visible, it should show empty state
-      const emptyContent = emptyState.or(dock.locator("text=/No active/i"));
-      await expect(emptyContent).toBeVisible();
-    }
+    await expect(dock).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(dock).toContainText(/No session/i);
   });
 
   test("Agent dock appears when session is started", async ({ page }) => {
@@ -170,6 +167,8 @@ test.describe("Agent Dock", () => {
     await expect(page.getByText("Session ready")).toBeVisible({ timeout: 3000 });
     await page.getByRole("button", { name: "Open Session Viewer" }).click();
 
+    await page.getByTestId("agent-dock-toggle").click();
+
     // Verify messages display
     await expect(page.getByText("First message from agent")).toBeVisible({
       timeout: 3000,
@@ -248,6 +247,8 @@ test.describe("Agent Dock", () => {
     await page.getByRole("button", { name: "Start agent" }).click();
     await expect(page.getByText("Session ready")).toBeVisible({ timeout: 3000 });
     await page.getByRole("button", { name: "Open Session Viewer" }).click();
+
+    await page.getByTestId("agent-dock-toggle").click();
 
     // Find and interact with composer input
     const composerInput = page.locator(".composer-input, textarea");
@@ -328,6 +329,8 @@ test.describe("Agent Dock", () => {
     await expect(page.getByText("Session ready")).toBeVisible({ timeout: 3000 });
     await page.getByRole("button", { name: "Open Session Viewer" }).click();
 
+    await page.getByTestId("agent-dock-toggle").click();
+
     // Find send button
     const sendButton = page.locator("button:has-text('Send'), [aria-label*='Send' i]");
     if (await sendButton.isVisible()) {
@@ -404,6 +407,8 @@ test.describe("Agent Dock", () => {
     await page.getByRole("button", { name: "Start agent" }).click();
     await expect(page.getByText("Session ready")).toBeVisible({ timeout: 5000 });
     await page.getByRole("button", { name: "Open Session Viewer" }).click();
+
+    await page.getByTestId("agent-dock-toggle").click();
 
     // Test keyboard input to composer
     const composerInput = page.locator(".composer-input, textarea");
@@ -489,6 +494,8 @@ test.describe("Agent Dock", () => {
     await expect(page.getByText("Session ready")).toBeVisible({ timeout: 3000 });
     await page.getByRole("button", { name: "Open Session Viewer" }).click();
 
+    await page.getByTestId("agent-dock-toggle").click();
+
     // Quick action buttons should be visible (allow extra time for full page navigation)
     const pauseButton = page.getByRole("button", { name: /Pause/i });
     const killButton = page.getByRole("button", { name: /Kill/i });
@@ -571,6 +578,8 @@ test.describe("Agent Dock", () => {
     await page.getByRole("button", { name: "Start agent" }).click();
     await expect(page.getByText("Session ready")).toBeVisible({ timeout: 3000 });
     await page.getByRole("button", { name: "Open Session Viewer" }).click();
+
+    await page.getByTestId("agent-dock-toggle").click();
 
     // Transcript should exist and contain messages
     const transcript = page.locator(".transcript, .messages, [role='log']");

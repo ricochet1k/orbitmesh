@@ -1,5 +1,6 @@
 import { createFileRoute } from '@tanstack/solid-router'
 import {
+  createEffect,
   createMemo,
   createResource,
   createSignal,
@@ -21,9 +22,17 @@ interface SessionsViewProps {
 function SessionsView(props: SessionsViewProps) {
   const [sessions] = createResource(apiClient.listSessions)
   const [selectedId, setSelectedId] = createSignal<string | null>(null)
+  const [hasLoaded, setHasLoaded] = createSignal(false)
+  const isLoading = () => !hasLoaded()
 
   const sessionList = () => sessions()?.sessions ?? []
   const selectedSession = createMemo(() => sessionList().find((item) => item.id === selectedId()) ?? null)
+
+  createEffect(() => {
+    if (sessions() !== undefined) {
+      setHasLoaded(true)
+    }
+  })
 
   const stateCounts = createMemo(() => {
     const counts = new Map<string, number>()
@@ -42,29 +51,29 @@ function SessionsView(props: SessionsViewProps) {
   }
 
   return (
-    <div class="sessions-view">
+    <div class="sessions-view" data-testid="sessions-view">
       <header class="view-header">
         <div>
           <p class="eyebrow">Session directory</p>
-          <h1>Sessions</h1>
+          <h1 data-testid="sessions-heading">Sessions</h1>
           <p class="dashboard-subtitle">
             Review active and recent sessions, then open a live viewer for deeper inspection.
           </p>
         </div>
         <div class="header-meta">
-          <div class="meta-card">
+          <div class="meta-card" data-testid="sessions-meta-total">
             <p>Total sessions</p>
             <Show when={!sessions.loading} fallback={<span>Loading...</span>}>
               <strong>{sessionList().length}</strong>
             </Show>
           </div>
-          <div class="meta-card">
+          <div class="meta-card" data-testid="sessions-meta-running">
             <p>Running</p>
             <Show when={!sessions.loading} fallback={<span>Loading...</span>}>
               <strong>{stateCounts().get("running") ?? 0}</strong>
             </Show>
           </div>
-          <div class="meta-card">
+          <div class="meta-card" data-testid="sessions-meta-needs-attention">
             <p>Needs attention</p>
             <Show when={!sessions.loading} fallback={<span>Loading...</span>}>
               <strong>{stateCounts().get("error") ?? 0}</strong>
@@ -84,7 +93,7 @@ function SessionsView(props: SessionsViewProps) {
           </div>
 
           <Show 
-            when={!sessions.loading} 
+            when={!isLoading()} 
             fallback={<SkeletonLoader variant="list" count={5} />}
           >
             <Show
@@ -107,10 +116,13 @@ function SessionsView(props: SessionsViewProps) {
                 />
               }
             >
-              <div class="session-list">
+              <div class="session-list" data-testid="sessions-list">
                 <For each={sessionList()}>
                   {(session) => (
-                    <div class={`session-card ${selectedId() === session.id ? "active" : ""}`}>
+                    <div
+                      class={`session-card ${selectedId() === session.id ? "active" : ""}`}
+                      data-session-id={session.id}
+                    >
                       <button
                         type="button"
                         class="session-card-main"
@@ -138,7 +150,7 @@ function SessionsView(props: SessionsViewProps) {
           </Show>
         </section>
 
-        <section class="session-detail-panel">
+        <section class="session-detail-panel" data-testid="session-detail-panel">
           <div class="panel-header">
             <div>
               <p class="panel-kicker">Session focus</p>
@@ -148,7 +160,7 @@ function SessionsView(props: SessionsViewProps) {
           </div>
           <Show when={selectedSession()} fallback={<p class="empty-state">Select a session to preview.</p>}>
             {(session) => (
-              <div class="session-preview">
+              <div class="session-preview" data-testid="session-preview">
                 <div>
                   <p class="muted">Session ID</p>
                   <strong>{session().id}</strong>
@@ -167,7 +179,7 @@ function SessionsView(props: SessionsViewProps) {
                 </div>
                 <Show when={session().error_message}>
                   {(errorMsg) => (
-                    <div class="session-error">
+                    <div class="session-error" data-testid="session-error">
                       <p class="muted">Error</p>
                       <strong style={{ "color": "var(--color-error, red)" }}>{errorMsg()}</strong>
                     </div>

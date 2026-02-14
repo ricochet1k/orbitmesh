@@ -1,0 +1,21 @@
+@keyframes mcpPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(37, 99, 235, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+  }
+}
+
+.mcp-pulse {
+  animation: mcpPulse var(--motion-medium) var(--easing-standard);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mcp-pulse {
+    animation-duration: 0.01ms;
+  }
+}

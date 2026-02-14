@@ -10,6 +10,7 @@ vi.mock("@tanstack/solid-router", () => ({
 vi.mock("../api/client", () => ({
   apiClient: {
     getTaskTree: vi.fn(),
+    listProviders: vi.fn(),
     createTaskSession: vi.fn(),
   }
 }));
@@ -50,6 +51,7 @@ describe("TaskTreeView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (apiClient.getTaskTree as any).mockResolvedValue(taskTreePayload);
+    (apiClient.listProviders as any).mockResolvedValue({ providers: [] });
     (apiClient.createTaskSession as any).mockResolvedValue({
       id: "session-1",
       provider_type: "adk",
@@ -109,6 +111,7 @@ describe("TaskTreeView", () => {
       taskId: "task-1",
       taskTitle: "Parent Task",
       providerType: "adk",
+      providerId: undefined,
     });
 
     expect(await screen.findByText("Open Session Viewer")).toBeDefined();

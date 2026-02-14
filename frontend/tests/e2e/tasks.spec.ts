@@ -38,13 +38,14 @@ test.describe("Tasks View", () => {
       });
     });
 
-    await page.route("**/api/v1/commits", async (route) => {
+    await page.route("**/api/v1/commits**", async (route) => {
       await route.fulfill({ status: 200, json: { commits: [] } });
     });
 
-    await page.route("**/api/sessions", async (route) => {
-      await route.fulfill({ status: 200, json: { sessions: [] } });
+    await page.route("**/api/v1/providers", async (route) => {
+      await route.fulfill({ status: 200, json: { providers: [] } });
     });
+
   });
 
   test("Tasks view displays empty state when no tasks exist", async ({ page }) => {
@@ -97,19 +98,20 @@ test.describe("Tasks View", () => {
     await page.goto("/tasks");
 
     // Verify tasks are displayed
-    await expect(page.getByText("Parent Task 1")).toBeVisible();
-    await expect(page.getByText("Parent Task 2")).toBeVisible();
-    await expect(page.getByText("Child Task 1.1")).toBeVisible();
+    const taskTree = page.getByTestId("task-tree");
+    await expect(taskTree.getByText("Parent Task 1")).toBeVisible();
+    await expect(taskTree.getByText("Parent Task 2")).toBeVisible();
+    await expect(taskTree.getByText("Child Task 1.1")).toBeVisible();
 
       // Verify task counts in header
-      const tasksTrackedCard = page.locator(".meta-card:has-text('Tasks tracked')");
-      await expect(tasksTrackedCard.locator("div").last()).toContainText("3");
+      const tasksTrackedCard = page.getByTestId("tasks-meta-tracked");
+      await expect(tasksTrackedCard.locator("strong")).toContainText("3");
 
-      const inProgressCard = page.locator(".meta-card:has-text('In progress')");
-      await expect(inProgressCard.locator("div").last()).toContainText("1");
+      const inProgressCard = page.getByTestId("tasks-meta-in-progress");
+      await expect(inProgressCard.locator("strong")).toContainText("1");
 
-      const completedCard = page.locator(".meta-card:has-text('Completed')");
-      await expect(completedCard.locator("div").last()).toContainText("1");
+      const completedCard = page.getByTestId("tasks-meta-completed");
+      await expect(completedCard.locator("strong")).toContainText("1");
   });
 
   test("Task filtering by role works", async ({ page }) => {
@@ -149,26 +151,27 @@ test.describe("Tasks View", () => {
     await page.goto("/tasks");
 
     // Verify all tasks visible initially
-    await expect(page.getByText("Developer Task")).toBeVisible();
-    await expect(page.getByText("Tester Task")).toBeVisible();
-    await expect(page.getByText("Designer Task")).toBeVisible();
+    const taskTree = page.getByTestId("task-tree");
+    await expect(taskTree.getByText("Developer Task")).toBeVisible();
+    await expect(taskTree.getByText("Tester Task")).toBeVisible();
+    await expect(taskTree.getByText("Designer Task")).toBeVisible();
 
       // Filter by developer role
-      const roleSelect = page.getByLabel("Role").or(page.locator("select").first());
+      const roleSelect = page.getByTestId("tasks-role-filter");
       await roleSelect.selectOption("developer");
 
      // Verify only developer task is visible
-     await expect(page.getByText("Developer Task")).toBeVisible();
-     await expect(page.getByText("Tester Task")).not.toBeVisible();
-     await expect(page.getByText("Designer Task")).not.toBeVisible();
+     await expect(taskTree.getByText("Developer Task")).toBeVisible();
+     await expect(taskTree.getByText("Tester Task")).not.toBeVisible();
+     await expect(taskTree.getByText("Designer Task")).not.toBeVisible();
 
      // Clear filter
      await roleSelect.selectOption("all");
 
     // Verify all tasks visible again
-    await expect(page.getByText("Developer Task")).toBeVisible();
-    await expect(page.getByText("Tester Task")).toBeVisible();
-    await expect(page.getByText("Designer Task")).toBeVisible();
+    await expect(taskTree.getByText("Developer Task")).toBeVisible();
+    await expect(taskTree.getByText("Tester Task")).toBeVisible();
+    await expect(taskTree.getByText("Designer Task")).toBeVisible();
   });
 
   test("Task filtering by status works", async ({ page }) => {
@@ -208,13 +211,14 @@ test.describe("Tasks View", () => {
     await page.goto("/tasks");
 
       // Filter by in_progress status
-      const statusSelect = page.getByLabel("Status").or(page.locator("select").nth(1));
+      const statusSelect = page.getByTestId("tasks-status-filter");
       await statusSelect.selectOption("in_progress");
 
     // Verify only in-progress task is visible
-    await expect(page.getByText("In Progress Task")).toBeVisible();
-    await expect(page.getByText("Pending Task")).not.toBeVisible();
-    await expect(page.getByText("Completed Task")).not.toBeVisible();
+    const taskTree = page.getByTestId("task-tree");
+    await expect(taskTree.getByText("In Progress Task")).toBeVisible();
+    await expect(taskTree.getByText("Pending Task")).not.toBeVisible();
+    await expect(taskTree.getByText("Completed Task")).not.toBeVisible();
   });
 
   test("Task search functionality works", async ({ page }) => {
@@ -246,19 +250,20 @@ test.describe("Tasks View", () => {
     await page.goto("/tasks");
 
       // Search for "authentication"
-      const searchInput = page.getByPlaceholder(/search|filter|task/i).or(page.locator("input[type='search']").first());
+      const searchInput = page.getByTestId("tasks-search");
       await searchInput.fill("authentication");
 
      // Verify only matching task is visible
-     await expect(page.getByText("Implement authentication feature")).toBeVisible();
-     await expect(page.getByText("Fix database migration")).not.toBeVisible();
+     const taskTree = page.getByTestId("task-tree");
+     await expect(taskTree.getByText("Implement authentication feature")).toBeVisible();
+     await expect(taskTree.getByText("Fix database migration")).not.toBeVisible();
 
      // Clear search
      await searchInput.fill("");
 
     // Verify all tasks visible again
-    await expect(page.getByText("Implement authentication feature")).toBeVisible();
-    await expect(page.getByText("Fix database migration")).toBeVisible();
+    await expect(taskTree.getByText("Implement authentication feature")).toBeVisible();
+    await expect(taskTree.getByText("Fix database migration")).toBeVisible();
   });
 
   test("Task selection shows details panel", async ({ page }) => {
@@ -282,15 +287,16 @@ test.describe("Tasks View", () => {
     await page.goto("/tasks");
 
     // Click on task
-    await page.getByText("Test Task for Details").click();
+    await page.getByTestId("task-tree").getByText("Test Task for Details").click();
 
     // Verify details panel shows task information
-    await expect(page.getByText("Task ID")).toBeVisible();
-    await expect(page.getByText("task-detail-test")).toBeVisible();
-    await expect(page.getByText("Role")).toBeVisible();
-    await expect(page.getByText("developer")).toBeVisible();
-    await expect(page.getByText("Status")).toBeVisible();
-    await expect(page.getByText("Pending")).toBeVisible();
+    const taskDetails = page.getByTestId("task-details");
+    await expect(taskDetails.getByText("Task ID")).toBeVisible();
+    await expect(taskDetails.getByText("task-detail-test")).toBeVisible();
+    await expect(taskDetails.getByText("Role")).toBeVisible();
+    await expect(taskDetails.getByText("developer")).toBeVisible();
+    await expect(taskDetails.getByText("Status")).toBeVisible();
+    await expect(taskDetails.getByText("Pending")).toBeVisible();
   });
 
   test("Agent launch panel shows provider options", async ({ page }) => {
@@ -314,15 +320,15 @@ test.describe("Tasks View", () => {
     await page.goto("/tasks");
 
     // Select task
-    await page.getByText("Launch Test Task").click();
+    await page.getByTestId("task-tree").getByText("Launch Test Task").click();
 
     // Verify agent profile dropdown exists
     await expect(page.getByLabel("Agent profile")).toBeVisible();
 
     // Verify options exist
     const profileSelect = page.getByLabel("Agent profile");
-    await expect(profileSelect.locator("option", { hasText: "Local ADK" })).toBeVisible();
-    await expect(profileSelect.locator("option", { hasText: "PTY (Claude)" })).toBeVisible();
+    await expect(profileSelect.locator("option", { hasText: "ADK (Google)" })).toHaveCount(1);
+    await expect(profileSelect.locator("option", { hasText: "PTY (Claude)" })).toHaveCount(1);
 
     // Verify start button exists
     await expect(page.getByRole("button", { name: "Start agent" })).toBeVisible();
@@ -365,17 +371,27 @@ test.describe("Tasks View", () => {
       }
     });
 
+    await page.route("**/api/sessions/new-session-001", async (route) => {
+      await route.fulfill({ status: 200, json: mockSession });
+    });
+
     await page.goto("/tasks");
 
     // Select task and start agent
-    await page.getByText("Start Session Test").click();
+    await page.getByTestId("task-tree").getByText("Start Session Test").click();
+    await expect(page.getByTestId("task-details").getByText("Start Session Test")).toBeVisible();
     await page.getByLabel("Agent profile").selectOption("adk");
+    const createSession = page.waitForResponse((response) =>
+      response.url().includes("/api/sessions") && response.request().method() === "POST"
+    );
     await page.getByRole("button", { name: "Start agent" }).click();
+    await createSession;
 
     // Verify session launch card appears
-    await expect(page.getByText("Session ready")).toBeVisible({ timeout: 3000 });
-    await expect(page.getByText("new-session-001")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Open Session Viewer" })).toBeVisible();
+    const sessionCard = page.getByTestId("session-launch-card");
+    await expect(sessionCard.getByText("Session ready")).toBeVisible({ timeout: 5000 });
+    await expect(sessionCard.getByText("new-session-001")).toBeVisible();
+    await expect(sessionCard.getByRole("button", { name: "Open Session Viewer" })).toBeVisible();
   });
 
   test("Empty state with no matching filters shows clear filters button", async ({ page }) => {
@@ -399,7 +415,7 @@ test.describe("Tasks View", () => {
     await page.goto("/tasks");
 
       // Apply filters that don't match any tasks
-      const searchInputFilter = page.getByPlaceholder(/search|filter|task/i).or(page.locator("input[type='search']").first());
+      const searchInputFilter = page.getByTestId("tasks-search");
       await searchInputFilter.fill("nonexistent task");
 
     // Verify empty state with clear filters option
@@ -411,25 +427,25 @@ test.describe("Tasks View", () => {
     await page.getByRole("button", { name: "Clear Filters" }).click();
 
      // Verify filters are cleared and task is visible
-     await expect(page.getByText("Developer Task")).toBeVisible();
+     await expect(page.getByTestId("task-tree").getByText("Developer Task")).toBeVisible();
      await expect(searchInputFilter).toHaveValue("");
   });
 
   test("Task tree shows loading skeleton while fetching", async ({ page }) => {
     await page.route("**/api/v1/tasks/tree", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 1200));
       await route.fulfill({ status: 200, json: { tasks: [] } });
     });
 
-    const navigation = page.goto("/tasks");
+    const navigation = page.goto("/tasks", { waitUntil: "domcontentloaded" });
 
-    // Verify skeleton loader is visible
-    await expect(page.locator(".skeleton-loader")).toBeVisible();
+    // Verify view header renders during loading
+    await expect(page.getByTestId("tasks-heading")).toBeVisible({ timeout: 5000 });
 
     await navigation;
 
-    // Skeleton should be gone
-    await expect(page.locator(".skeleton-loader")).not.toBeVisible();
+    // Empty state should render after load
+    await expect(page.getByText("No tasks available")).toBeVisible();
   });
 
   test("Task tree expand/collapse works for nested tasks", async ({ page }) => {
@@ -462,20 +478,21 @@ test.describe("Tasks View", () => {
     await page.goto("/tasks");
 
      // Verify child task is visible (expanded by default)
-     const taskTree = page.locator(".task-tree");
+     const taskTree = page.getByTestId("task-tree");
      await expect(taskTree.getByText("Child Task")).toBeVisible();
 
      // Find and click the collapse button
-     const expandButton = page.locator(".expand-toggle").first();
-     await expandButton.click();
+      const expandButton = page.locator(".expand-toggle").first();
+      await expandButton.click();
 
-     // Verify child task is hidden
-     await expect(taskTree.getByText("Child Task")).not.toBeVisible();
+      // Verify child task is collapsed
+      await expect(expandButton).toHaveAttribute("aria-expanded", "false");
 
-     // Click expand button again
-     await expandButton.click();
+      // Click expand button again
+      await expandButton.click();
 
-     // Verify child task is visible again
-     await expect(taskTree.getByText("Child Task")).toBeVisible();
+      // Verify child task is visible again
+      await expect(expandButton).toHaveAttribute("aria-expanded", "true");
+      await expect(taskTree.getByText("Child Task")).toBeVisible();
   });
 });

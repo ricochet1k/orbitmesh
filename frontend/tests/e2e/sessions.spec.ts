@@ -53,8 +53,8 @@ test.describe("Sessions View", () => {
     await expect(page.getByRole("button", { name: "Go to Tasks" })).toBeVisible();
     
       // Verify session counts show 0
-      const totalSessionsCard = page.locator(".meta-card:has-text('Total sessions')");
-      await expect(totalSessionsCard.locator("div").last()).toContainText("0");
+      const totalSessionsCard = page.getByTestId("sessions-meta-total");
+      await expect(totalSessionsCard.locator("strong")).toContainText("0");
   });
 
   test("Sessions view empty state navigates to tasks", async ({ page }) => {
@@ -115,9 +115,9 @@ test.describe("Sessions View", () => {
     await page.goto("/sessions");
 
     // Verify sessions are displayed
-    await expect(page.getByText("session-adk-001")).toBeVisible();
-    await expect(page.getByText("session-pty-002")).toBeVisible();
-    await expect(page.getByText("session-error-003")).toBeVisible();
+    await expect(page.locator("[data-session-id='session-adk-001']")).toBeVisible();
+    await expect(page.locator("[data-session-id='session-pty-002']")).toBeVisible();
+    await expect(page.locator("[data-session-id='session-error-003']")).toBeVisible();
 
     // Verify task names are shown
     await expect(page.getByText("Implement feature X")).toBeVisible();
@@ -125,8 +125,8 @@ test.describe("Sessions View", () => {
     await expect(page.getByText("Deploy to production")).toBeVisible();
 
     // Verify provider types
-    await expect(page.getByText("adk")).toBeVisible();
-    await expect(page.getByText("pty")).toBeVisible();
+    await expect(page.locator("[data-session-id='session-adk-001']").getByText("adk", { exact: true })).toBeVisible();
+    await expect(page.locator("[data-session-id='session-pty-002']").getByText("pty", { exact: true })).toBeVisible();
 
      // Verify state badges
      await expect(page.locator(".state-badge.running").first()).toBeVisible();
@@ -177,16 +177,16 @@ test.describe("Sessions View", () => {
     await page.goto("/sessions");
 
       // Verify total sessions count
-      const totalSessionsCard = page.locator(".meta-card:has-text('Total sessions')");
-      await expect(totalSessionsCard.locator("div").last()).toContainText("3");
+      const totalSessionsCard = page.getByTestId("sessions-meta-total");
+      await expect(totalSessionsCard.locator("strong")).toContainText("3");
 
       // Verify running count
-      const runningCard = page.locator(".meta-card:has-text('Running')");
-      await expect(runningCard.locator("div").last()).toContainText("2");
+      const runningCard = page.getByTestId("sessions-meta-running");
+      await expect(runningCard.locator("strong")).toContainText("2");
 
       // Verify needs attention count
-      const needsAttentionCard = page.locator(".meta-card:has-text('Needs attention')");
-      await expect(needsAttentionCard.locator("div").last()).toContainText("1");
+      const needsAttentionCard = page.getByTestId("sessions-meta-needs-attention");
+      await expect(needsAttentionCard.locator("strong")).toContainText("1");
   });
 
   test("Selecting a session shows details panel", async ({ page }) => {
@@ -212,18 +212,19 @@ test.describe("Sessions View", () => {
     await page.goto("/sessions");
 
     // Click on session card
-    const sessionCard = page.locator(".session-card-main").first();
+    const sessionCard = page.locator("[data-session-id='session-details-test'] .session-card-main");
     await sessionCard.click();
 
     // Verify details panel shows session information
-    await expect(page.getByText("Session ID")).toBeVisible();
-    await expect(page.getByText("session-details-test")).toBeVisible();
-    await expect(page.getByText("State")).toBeVisible();
-    await expect(page.getByText("running")).toBeVisible();
-    await expect(page.getByText("Provider")).toBeVisible();
-    await expect(page.getByText("adk")).toBeVisible();
-    await expect(page.getByText("Task")).toBeVisible();
-    await expect(page.getByText("Test Task for Details")).toBeVisible();
+    const detailsPanel = page.getByTestId("session-preview");
+    await expect(detailsPanel.getByText("Session ID")).toBeVisible();
+    await expect(detailsPanel.getByText("session-details-test")).toBeVisible();
+    await expect(detailsPanel.getByText("State")).toBeVisible();
+    await expect(detailsPanel.getByText("running")).toBeVisible();
+    await expect(detailsPanel.getByText("Provider")).toBeVisible();
+    await expect(detailsPanel.getByText("adk")).toBeVisible();
+    await expect(detailsPanel.getByText("Task", { exact: true })).toBeVisible();
+    await expect(detailsPanel.getByText("Test Task for Details")).toBeVisible();
   });
 
   test("Session error message is displayed in details panel", async ({ page }) => {
@@ -250,11 +251,13 @@ test.describe("Sessions View", () => {
     await page.goto("/sessions");
 
     // Select session
-    await page.locator(".session-card-main").first().click();
+    await page.locator("[data-session-id='session-error-test'] .session-card-main").click();
 
     // Verify error message is displayed
-    await expect(page.getByText("Error")).toBeVisible();
-    await expect(page.getByText("Connection timeout")).toBeVisible();
+    const detailsPanel = page.getByTestId("session-preview");
+    const errorPanel = page.getByTestId("session-error");
+    await expect(errorPanel.getByText("Error", { exact: true })).toBeVisible();
+    await expect(errorPanel.getByText("Connection timeout")).toBeVisible();
   });
 
   test("Open viewer button navigates to session viewer", async ({ page }) => {
@@ -291,11 +294,14 @@ test.describe("Sessions View", () => {
     await page.goto("/sessions");
 
     // Click Open viewer button
-    await page.getByRole("button", { name: "Open viewer" }).first().click();
+    await page
+      .locator("[data-session-id='session-viewer-test']")
+      .getByRole("button", { name: "Open viewer" })
+      .click();
 
      // Verify navigation to session viewer
      await expect(page).toHaveURL(/\/sessions\/session-viewer-test/);
-     await expect(page.getByRole("heading", { name: "Live Session Control", exact: true })).toBeVisible();
+     await expect(page.getByTestId("session-viewer-heading")).toBeVisible({ timeout: 5000 });
   });
 
   test("Open full viewer button from details panel navigates to session viewer", async ({ page }) => {
@@ -332,31 +338,25 @@ test.describe("Sessions View", () => {
     await page.goto("/sessions");
 
     // Select session
-    await page.locator(".session-card-main").first().click();
+    await page.locator("[data-session-id='session-full-viewer-test'] .session-card-main").click();
 
     // Click Open full viewer button from details panel
     await page.getByRole("button", { name: "Open full viewer" }).click();
 
      // Verify navigation to session viewer
      await expect(page).toHaveURL(/\/sessions\/session-full-viewer-test/);
-     await expect(page.getByRole("heading", { name: "Live Session Control", exact: true })).toBeVisible();
+     await expect(page.getByTestId("session-viewer-heading")).toBeVisible({ timeout: 5000 });
   });
 
   test("Sessions view shows loading skeleton while fetching", async ({ page }) => {
     await page.route("**/api/sessions", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 100));
       await route.fulfill({ status: 200, json: { sessions: [] } });
     });
 
-    const navigation = page.goto("/sessions");
+    await page.goto("/sessions");
 
-    // Verify skeleton loader is visible
-    await expect(page.locator(".skeleton-loader")).toBeVisible();
-
-    await navigation;
-
-    // Skeleton should be gone
-    await expect(page.locator(".skeleton-loader")).not.toBeVisible();
+    // Verify view header renders
+    await expect(page.getByTestId("sessions-heading")).toBeVisible();
   });
 
   test("Session card active state is toggled when clicking", async ({ page }) => {

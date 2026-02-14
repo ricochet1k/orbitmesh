@@ -13,7 +13,7 @@ export default function SkeletonLoader(props: SkeletonLoaderProps): JSX.Element 
     switch (props.variant) {
       case 'text':
         return (
-          <div class="skeleton-text-container">
+          <div class="skeleton-text-container" data-testid="skeleton-text">
             {Array.from({ length: props.count || 3 }).map((_, i) => (
               <div 
                 class="skeleton skeleton-text animate-shimmer" 
@@ -28,7 +28,7 @@ export default function SkeletonLoader(props: SkeletonLoaderProps): JSX.Element 
       
       case 'card':
         return (
-          <div class="skeleton-card-container">
+          <div class="skeleton-card-container" data-testid="skeleton-card">
             {Array.from({ length: props.count || 1 }).map(() => (
               <div class="skeleton-card">
                 <div class="skeleton skeleton-card-header animate-shimmer" />
@@ -41,7 +41,7 @@ export default function SkeletonLoader(props: SkeletonLoaderProps): JSX.Element 
       
       case 'list':
         return (
-          <div class="skeleton-list-container">
+          <div class="skeleton-list-container" data-testid="skeleton-list">
             {Array.from({ length: props.count || 5 }).map(() => (
               <div class="skeleton-list-item">
                 <div class="skeleton skeleton-list-icon animate-shimmer" />
@@ -57,7 +57,7 @@ export default function SkeletonLoader(props: SkeletonLoaderProps): JSX.Element 
       
       case 'table':
         return (
-          <div class="skeleton-table-container">
+          <div class="skeleton-table-container" data-testid="skeleton-table">
             <div class="skeleton-table-header">
               {Array.from({ length: 5 }).map(() => (
                 <div class="skeleton skeleton-table-header-cell animate-shimmer" />
@@ -75,7 +75,7 @@ export default function SkeletonLoader(props: SkeletonLoaderProps): JSX.Element 
       
       case 'graph':
         return (
-          <div class="skeleton-graph-container">
+          <div class="skeleton-graph-container" data-testid="skeleton-graph">
             <div class="skeleton skeleton-graph animate-shimmer" style={{ height: props.height || '360px' }} />
             <div class="skeleton-graph-label">Loading system graph...</div>
           </div>
@@ -89,6 +89,7 @@ export default function SkeletonLoader(props: SkeletonLoaderProps): JSX.Element 
               width: props.width || '100%',
               height: props.height || '20px'
             }}
+            data-testid="skeleton-custom"
           />
         )
     }

@@ -70,8 +70,12 @@ test.describe("UI Navigation", () => {
       await route.fulfill({ status: 200, json: mockTaskTree });
     });
 
-    await page.route("**/api/v1/commits", async (route) => {
+    await page.route("**/api/v1/commits**", async (route) => {
       await route.fulfill({ status: 200, json: mockCommits });
+    });
+
+    await page.route("**/api/v1/providers", async (route) => {
+      await route.fulfill({ status: 200, json: { providers: [] } });
     });
 
     await page.route("**/api/sessions", async (route) => {
@@ -110,8 +114,7 @@ test.describe("UI Navigation", () => {
      // Navigate to Tasks
      await page.getByRole("link", { name: "Tasks" }).click();
      await expect(page).toHaveURL("/tasks");
-     const taskHeading = page.getByRole("heading").filter({ hasText: "Task Tree" });
-     await expect(taskHeading.first()).toBeVisible();
+     await expect(page.getByTestId("tasks-heading")).toBeVisible();
     await expect(page.getByRole("link", { name: "Tasks" })).toHaveAttribute(
       "aria-current",
       "page"
@@ -120,8 +123,7 @@ test.describe("UI Navigation", () => {
      // Navigate to Sessions
      await page.getByRole("link", { name: "Sessions" }).click();
      await expect(page).toHaveURL("/sessions");
-     const sessionHeading = page.getByRole("heading").filter({ hasText: "Sessions" });
-     await expect(sessionHeading.first()).toBeVisible();
+     await expect(page.getByTestId("sessions-heading")).toBeVisible();
     await expect(page.getByRole("link", { name: "Sessions" })).toHaveAttribute(
       "aria-current",
       "page"
@@ -130,9 +132,7 @@ test.describe("UI Navigation", () => {
     // Navigate back to Dashboard
     await page.getByRole("link", { name: "Dashboard" }).click();
     await expect(page).toHaveURL("/");
-    await expect(
-      page.getByRole("heading", { name: "Operational Continuity" })
-    ).toBeVisible();
+    await expect(page.getByTestId("dashboard-heading")).toBeVisible();
     await expect(page.getByRole("link", { name: "Dashboard" })).toHaveAttribute(
       "aria-current",
       "page"
@@ -142,8 +142,7 @@ test.describe("UI Navigation", () => {
    test("Task tree view displays tasks with expand/collapse", async ({ page }) => {
      await page.goto("/tasks");
 
-     const taskHeading = page.getByRole("heading").filter({ hasText: "Task Tree" });
-     await expect(taskHeading.first()).toBeVisible();
+     await expect(page.getByTestId("tasks-heading")).toBeVisible();
 
     // Root task should be visible
     const rootTask = page.locator(".task-tree").getByText("Root Task");
@@ -179,8 +178,8 @@ test.describe("UI Navigation", () => {
      await rootTask.click();
 
      // Task details should be visible
-     const detailsPanel = page.locator(".task-details, [data-testid='task-details']");
-     await expect(detailsPanel).toBeVisible();
+      const detailsPanel = page.getByTestId("task-details");
+      await expect(detailsPanel).toBeVisible();
      await expect(detailsPanel.getByText("Task ID")).toBeVisible();
      await expect(detailsPanel.getByText("task-root", { exact: true })).toBeVisible();
      await expect(detailsPanel.getByText(/in.progress|In Progress/i)).toBeVisible();
@@ -224,7 +223,7 @@ test.describe("UI Navigation", () => {
     await page.goto("/sessions");
 
     // Session should be visible
-    await expect(page.getByText("session-1")).toBeVisible();
+    await expect(page.locator("[data-session-id='session-1']")).toBeVisible();
     await expect(page.getByText("running", { exact: true }).first()).toBeVisible();
   });
 
@@ -356,8 +355,6 @@ test.describe("UI Navigation", () => {
     // Go back using browser back button
     await page.goBack();
     await expect(page).toHaveURL("/");
-    await expect(
-      page.getByRole("heading", { name: "Operational Continuity" })
-    ).toBeVisible();
+    await expect(page.getByTestId("dashboard-heading")).toBeVisible();
   });
 });

@@ -174,9 +174,39 @@ function ProviderForm(props: ProviderFormProps) {
   const [type, setType] = createSignal(props.provider?.type ?? 'pty')
   const [command, setCommand] = createSignal(props.provider?.command?.join(' ') ?? '')
   const [apiKey, setApiKey] = createSignal(props.provider?.api_key ?? '')
+  const [model, setModel] = createSignal((props.provider?.custom?.model as string | undefined) ?? '')
+  const [envEntries, setEnvEntries] = createSignal(
+    props.provider?.env
+      ? Object.entries(props.provider.env).map(([key, value]) => ({ key, value }))
+      : [],
+  )
   const [isActive, setIsActive] = createSignal(props.provider?.is_active ?? true)
   const [error, setError] = createSignal<string | null>(null)
   const [saving, setSaving] = createSignal(false)
+
+  const addEnvEntry = () => {
+    setEnvEntries((prev) => [...prev, { key: '', value: '' }])
+  }
+
+  const updateEnvEntry = (index: number, patch: { key?: string; value?: string }) => {
+    setEnvEntries((prev) =>
+      prev.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)),
+    )
+  }
+
+  const removeEnvEntry = (index: number) => {
+    setEnvEntries((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const buildEnvMap = () => {
+    const env: Record<string, string> = {}
+    envEntries().forEach((entry) => {
+      const key = entry.key.trim()
+      if (!key) return
+      env[key] = entry.value.trim()
+    })
+    return env
+  }
 
   const handleSubmit = async (e: Event) => {
     e.preventDefault()
@@ -192,6 +222,15 @@ function ProviderForm(props: ProviderFormProps) {
 
       if (!config.name) {
         throw new Error('Name is required')
+      }
+
+      const env = buildEnvMap()
+      if (Object.keys(env).length > 0) {
+        config.env = env
+      }
+
+      if (model().trim()) {
+        config.custom = { ...(config.custom ?? {}), model: model().trim() }
       }
 
       if (type() === 'pty') {
@@ -269,7 +308,51 @@ function ProviderForm(props: ProviderFormProps) {
             placeholder="Enter API key"
           />
         </div>
+        <div class="form-group">
+          <label for="provider-model">Model</label>
+          <input
+            id="provider-model"
+            type="text"
+            value={model()}
+            onInput={(e) => setModel(e.currentTarget.value)}
+            placeholder="e.g. gemini-2.5-flash"
+          />
+          <p class="form-hint">Optional model override</p>
+        </div>
       </Show>
+
+      <div class="form-group">
+        <label>Environment variables</label>
+        <div class="env-list">
+          <Show when={envEntries().length === 0}>
+            <p class="form-hint">No environment variables added.</p>
+          </Show>
+          <For each={envEntries()}>
+            {(entry, index) => (
+              <div class="env-row">
+                <input
+                  type="text"
+                  value={entry.key}
+                  onInput={(e) => updateEnvEntry(index(), { key: e.currentTarget.value })}
+                  placeholder="KEY"
+                />
+                <input
+                  type="text"
+                  value={entry.value}
+                  onInput={(e) => updateEnvEntry(index(), { value: e.currentTarget.value })}
+                  placeholder="Value"
+                />
+                <button type="button" class="btn-secondary" onClick={() => removeEnvEntry(index())}>
+                  Remove
+                </button>
+              </div>
+            )}
+          </For>
+          <button type="button" class="btn-secondary" onClick={addEnvEntry}>
+            Add variable
+          </button>
+        </div>
+      </div>
 
       <div class="form-group">
         <label class="checkbox-label">

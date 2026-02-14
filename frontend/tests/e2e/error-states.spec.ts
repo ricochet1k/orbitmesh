@@ -61,7 +61,7 @@ test.describe("Error States", () => {
     await page.goto("/");
 
       // Page should still load
-      await expect(page.getByRole("heading", { name: "Operational Continuity" })).toBeVisible();
+      await expect(page.getByTestId("dashboard-heading")).toBeVisible({ timeout: 5000 });
 
       // Session count should show 0 or loading state or error message
       // The app should handle the error gracefully without crashing
@@ -102,7 +102,7 @@ test.describe("Error States", () => {
      await page.goto("/tasks");
 
       // Verify page loads
-      await expect(page.getByRole("heading", { name: "Task Tree" })).toBeVisible();
+      await expect(page.getByTestId("tasks-heading")).toBeVisible({ timeout: 5000 });
 
       // Error message or empty state should be displayed
       const errorOrEmpty = page.getByText(/Unable to load tasks|No tasks|error|Service unavailable/i);
@@ -143,7 +143,7 @@ test.describe("Error States", () => {
      await page.goto("/sessions/nonexistent-session");
 
       // Page should load without crashing
-      await expect(page.getByRole("heading", { name: "Live Session Control" })).toBeVisible();
+      await expect(page.getByTestId("session-viewer-heading")).toBeVisible({ timeout: 5000 });
 
       // Page should render even if session not found
       // The app should handle this gracefully
@@ -182,11 +182,11 @@ test.describe("Error States", () => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
 
       // Page should show loading state
-      const loadingState = page.getByText(/Loading|Connecting/i);
+      const loadingState = page.getByTestId("skeleton-table");
       await expect(loadingState).toBeVisible({ timeout: 1000 });
 
       // Page should still be functional after loading
-      await expect(page.getByRole("heading", { name: "Operational Continuity" })).toBeVisible();
+      await expect(page.getByTestId("dashboard-heading")).toBeVisible({ timeout: 5000 });
   });
 
   test("Session action failure shows error message", async ({ page }) => {
@@ -240,7 +240,9 @@ test.describe("Error States", () => {
     await page.getByRole("button", { name: "Pause" }).click();
 
     // Verify error message is displayed
-    await expect(page.getByText(/Action failed|Failed to pause|error/i)).toBeVisible({ timeout: 3000 });
+    const actionNotice = page.getByTestId("session-action-notice");
+    await expect(actionNotice).toBeVisible({ timeout: 3000 });
+    await expect(actionNotice).toContainText("Failed to pause session");
   });
 
   test("CSRF token error shows helpful message", async ({ page }) => {
@@ -294,7 +296,9 @@ test.describe("Error States", () => {
     await page.getByRole("button", { name: "Pause" }).click();
 
     // Verify CSRF-specific error message
-    await expect(page.getByText(/CSRF|Refresh to re-establish|token/i)).toBeVisible({ timeout: 3000 });
+    const actionNotice = page.getByTestId("session-action-notice");
+    await expect(actionNotice).toBeVisible({ timeout: 3000 });
+    await expect(actionNotice).toContainText("Refresh to re-establish the token");
   });
 
   test("Permission denied error is displayed", async ({ page }) => {
@@ -392,7 +396,7 @@ test.describe("Error States", () => {
     await page.goto("/tasks");
 
      // Page should load without crashing
-      await expect(page.getByRole("heading", { name: "Task Tree" })).toBeVisible();
+      await expect(page.getByTestId("tasks-heading")).toBeVisible({ timeout: 5000 });
 
       // Page should handle malformed JSON gracefully
       // The app should not crash despite bad data
@@ -408,7 +412,7 @@ test.describe("Error States", () => {
 
     // Page should still render basic structure
     // Sidebar should be visible
-    await expect(page.locator(".sidebar")).toBeVisible();
+    await expect(page.locator(".sidebar")).toBeVisible({ timeout: 5000 });
 
     // Main content area should exist
     // The app should not crash entirely
@@ -466,7 +470,7 @@ test.describe("Error States", () => {
     await page.goto("/tasks");
 
     // Select task and try to start agent
-    await page.getByText("Test Task").click();
+    await page.getByTestId("task-tree").getByText("Test Task", { exact: true }).click();
     await page.getByLabel("Agent profile").selectOption("adk");
     await page.getByRole("button", { name: "Start agent" }).click();
 

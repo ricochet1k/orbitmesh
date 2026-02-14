@@ -1,11 +1,12 @@
 import { createFileRoute } from '@tanstack/solid-router'
 import { createEffect, createMemo, createResource, createSignal, For, Show, onCleanup } from "solid-js"
 import { apiClient } from "../api/client"
-import type { SessionResponse, TaskNode, TaskStatus } from "../types/api"
+import type { ProviderConfigResponse, SessionResponse, TaskNode, TaskStatus } from "../types/api"
 import AgentGraph from "../graph/AgentGraph"
 import { buildTaskGraph } from "../graph/graphData"
 import EmptyState from "../components/EmptyState"
 import SkeletonLoader from "../components/SkeletonLoader"
+import { setDockSessionId } from "../state/agentDock"
 
 export const Route = createFileRoute('/tasks')({
   component: TaskTreeView,
@@ -26,26 +27,56 @@ interface TaskTreeViewProps {
   onNavigate?: (path: string) => void
 }
 
-const providerOptions = [
-  { value: "adk", label: "Local ADK" },
-  { value: "pty", label: "PTY (Claude)" },
+const typeOptions = [
+  { value: "adk", label: "ADK (Google)", providerType: "adk" },
+  { value: "pty", label: "PTY (Claude)", providerType: "pty" },
+  { value: "anthropic", label: "Anthropic", providerType: "anthropic" },
+  { value: "openai", label: "OpenAI", providerType: "openai" },
 ]
 
 export default function TaskTreeView(props: TaskTreeViewProps = {}) {
   const [treeResponse] = createResource(apiClient.getTaskTree)
+  const [providers] = createResource(apiClient.listProviders)
   const [treeData, setTreeData] = createSignal<TaskNode[]>([])
   const [search, setSearch] = createSignal("")
   const [roleFilter, setRoleFilter] = createSignal("all")
   const [statusFilter, setStatusFilter] = createSignal("all")
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set())
+  const [autoExpanded, setAutoExpanded] = createSignal(false)
   const [menu, setMenu] = createSignal<ContextMenuState | null>(null)
   const [selectedId, setSelectedId] = createSignal(getInitialTaskId())
-  const [providerType, setProviderType] = createSignal(providerOptions[0]?.value ?? "adk")
+  const [providerChoice, setProviderChoice] = createSignal(typeOptions[0]?.value ?? "type:adk")
+  const [providerInitialized, setProviderInitialized] = createSignal(false)
   const [startState, setStartState] = createSignal<"idle" | "starting" | "success" | "error">("idle")
   const [startError, setStartError] = createSignal<string | null>(null)
   const [sessionInfo, setSessionInfo] = createSignal<{ taskId: string; session: SessionResponse } | null>(null)
 
   const nodeRefs = new Map<string, HTMLDivElement>()
+
+  const providerConfigs = () => providers()?.providers ?? []
+
+  const providerOptions = createMemo(() => {
+    const options: Array<{
+      value: string
+      label: string
+      providerType: string
+      providerId?: string
+    }> = []
+    providerConfigs().forEach((provider: ProviderConfigResponse) => {
+      const inactive = provider.is_active ? "" : " (inactive)"
+      options.push({
+        value: `config:${provider.id}`,
+        label: `${provider.name} (${provider.type})${inactive}`,
+        providerType: provider.type,
+        providerId: provider.id,
+      })
+    })
+    return [...options, ...typeOptions]
+  })
+
+  const selectedProvider = createMemo(() =>
+    providerOptions().find((option) => option.value === providerChoice()) ?? providerOptions()[0],
+  )
 
   createEffect(() => {
     if (treeResponse()) {
@@ -54,10 +85,19 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
   })
 
   createEffect(() => {
-    if (treeData().length === 0 || expanded().size > 0) return
+    if (providerInitialized()) return
+    if (providerConfigs().length > 0) {
+      setProviderChoice(`config:${providerConfigs()[0].id}`)
+    }
+    setProviderInitialized(true)
+  })
+
+  createEffect(() => {
+    if (treeData().length === 0 || expanded().size > 0 || autoExpanded()) return
     const next = new Set<string>()
     treeData().forEach((task) => next.add(task.id))
     setExpanded(next)
+    setAutoExpanded(true)
   })
 
   createEffect(() => {
@@ -201,9 +241,11 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
       const session = await apiClient.createTaskSession({
         taskId: task.id,
         taskTitle: task.title,
-        providerType: providerType(),
+        providerType: selectedProvider()?.providerType,
+        providerId: selectedProvider()?.providerId,
       })
       setSessionInfo({ taskId: task.id, session })
+      setDockSessionId(session.id)
       setStartState("success")
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to start session."
@@ -227,25 +269,25 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
   }
 
   return (
-    <div class="task-tree-view">
+    <div class="task-tree-view" data-testid="tasks-view">
       <header class="view-header">
         <div>
           <p class="eyebrow">Task operations</p>
-          <h1>Task Tree</h1>
+          <h1 data-testid="tasks-heading">Task Tree</h1>
           <p class="dashboard-subtitle">
             Explore hierarchical task progress, filter by role or status, and sync selections with the system graph.
           </p>
         </div>
         <div class="header-meta">
-          <div class="meta-card">
+          <div class="meta-card" data-testid="tasks-meta-tracked">
             <p>Tasks tracked</p>
             <strong>{countTasks(treeData())}</strong>
           </div>
-          <div class="meta-card">
+          <div class="meta-card" data-testid="tasks-meta-in-progress">
             <p>In progress</p>
             <strong>{countTasks(treeData(), "in_progress")}</strong>
           </div>
-          <div class="meta-card">
+          <div class="meta-card" data-testid="tasks-meta-completed">
             <p>Completed</p>
             <strong>{countTasks(treeData(), "completed")}</strong>
           </div>
@@ -266,14 +308,23 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
             <input
               type="search"
               placeholder="Search tasks"
+              data-testid="tasks-search"
               value={search()}
               onInput={(event) => setSearch(event.currentTarget.value)}
             />
-            <select value={roleFilter()} onChange={(event) => setRoleFilter(event.currentTarget.value)}>
+            <select
+              value={roleFilter()}
+              data-testid="tasks-role-filter"
+              onChange={(event) => setRoleFilter(event.currentTarget.value)}
+            >
               <option value="all">All roles</option>
               <For each={roles()}>{(role) => <option value={role}>{role}</option>}</For>
             </select>
-            <select value={statusFilter()} onChange={(event) => setStatusFilter(event.currentTarget.value)}>
+            <select
+              value={statusFilter()}
+              data-testid="tasks-status-filter"
+              onChange={(event) => setStatusFilter(event.currentTarget.value)}
+            >
               <option value="all">All status</option>
               <option value="pending">Pending</option>
               <option value="in_progress">In Progress</option>
@@ -296,7 +347,7 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
                 />
               }
             >
-              <div class="task-tree">
+              <div class="task-tree" data-testid="task-tree">
                 <For each={filteredTree()}>
                   {(node) => (
                     <TaskNodeRow
@@ -332,7 +383,7 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
           </Show>
         </section>
 
-        <section class="dashboard-panel task-detail-panel">
+        <section class="dashboard-panel task-detail-panel" data-testid="task-detail-panel">
           <div class="panel-header">
             <div>
               <p class="panel-kicker">Task control</p>
@@ -343,7 +394,7 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
           <Show when={!treeResponse.loading && !treeResponse.error} fallback={<p class="muted">Loading task focus...</p>}>
             <Show when={selectedTask()} fallback={<p class="empty-state">Select a task to start an agent session.</p>}>
               {(task) => (
-                <div class="task-detail">
+                <div class="task-detail" data-testid="task-details">
                   <div class="task-detail-card">
                     <div>
                       <span>Task</span>
@@ -369,10 +420,23 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
                   <div class="task-start-controls">
                     <label>
                       Agent profile
-                      <select value={providerType()} onChange={(event) => setProviderType(event.currentTarget.value)}>
-                        <For each={providerOptions}>
-                          {(option) => <option value={option.value}>{option.label}</option>}
-                        </For>
+                      <select value={providerChoice()} onChange={(event) => setProviderChoice(event.currentTarget.value)}>
+                        <Show when={providerConfigs().length > 0}>
+                          <optgroup label="Saved providers">
+                            <For each={providerConfigs()}>
+                              {(provider) => (
+                                <option value={`config:${provider.id}`}>
+                                  {provider.name} ({provider.type}){provider.is_active ? "" : " (inactive)"}
+                                </option>
+                              )}
+                            </For>
+                          </optgroup>
+                        </Show>
+                        <optgroup label="Provider types">
+                          <For each={typeOptions}>
+                            {(option) => <option value={option.value}>{option.label}</option>}
+                          </For>
+                        </optgroup>
                       </select>
                     </label>
                     <button type="button" onClick={startAgent} disabled={startState() === "starting"}>
@@ -386,7 +450,7 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
                     when={sessionInfo() && sessionInfo()?.taskId === task().id ? sessionInfo() : null}
                   >
                     {(info) => (
-                      <div class="session-launch-card">
+                      <div class="session-launch-card" data-testid="session-launch-card">
                         <div>
                           <p class="muted">Session ready</p>
                           <strong>{info().session.id}</strong>

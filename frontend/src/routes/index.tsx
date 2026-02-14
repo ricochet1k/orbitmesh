@@ -93,23 +93,23 @@ export default function Dashboard(props: DashboardProps = {}) {
   }
 
   return (
-    <div class="dashboard">
+    <div class="dashboard" data-testid="dashboard-view">
       <header class="app-header">
         <div>
           <p class="eyebrow">OrbitMesh Control Plane</p>
-          <h1>Operational Continuity</h1>
+          <h1 data-testid="dashboard-heading">Operational Continuity</h1>
           <p class="dashboard-subtitle">
             A full-picture view of sessions and system state in one place.
           </p>
         </div>
         <div class="header-meta">
-          <div class="meta-card">
+          <div class="meta-card" data-testid="dashboard-meta-role">
             <p>Active role</p>
             <Show when={!permissions.loading} fallback={<span>Loading...</span>}>
               <strong>{permissions()?.role}</strong>
             </Show>
           </div>
-          <div class="meta-card">
+          <div class="meta-card" data-testid="dashboard-meta-active-sessions">
             <p>Active sessions</p>
             <Show when={!sessions.loading} fallback={<span>Loading...</span>}>
               <strong>{activeCount()}</strong>
@@ -136,21 +136,21 @@ export default function Dashboard(props: DashboardProps = {}) {
             <span class="panel-pill">Live</span>
           </div>
           <div class="overview-grid">
-            <div class="overview-card">
+            <div class="overview-card" data-testid="dashboard-overview-sessions">
               <p>Sessions in motion</p>
               <Show when={!sessions.loading} fallback={<span>Calculating...</span>}>
                 <strong>{activeCount()}</strong>
                 <span>{countByState("running")} running</span>
               </Show>
             </div>
-            <div class="overview-card">
+            <div class="overview-card" data-testid="dashboard-overview-paused">
               <p>Paused or starting</p>
               <Show when={!sessions.loading} fallback={<span>Calculating...</span>}>
                 <strong>{countByState("paused") + countByState("starting")}</strong>
                 <span>{countByState("starting")} starting</span>
               </Show>
             </div>
-            <div class="overview-card">
+            <div class="overview-card" data-testid="dashboard-overview-attention">
               <p>Attention needed</p>
               <Show when={!sessions.loading} fallback={<span>Calculating...</span>}>
                 <strong>{countByState("error")}</strong>
@@ -202,7 +202,7 @@ export default function Dashboard(props: DashboardProps = {}) {
                 />
               }
             >
-              <table>
+              <table data-testid="dashboard-sessions-table">
                 <thead>
                   <tr>
                     <th>ID</th>
@@ -215,7 +215,7 @@ export default function Dashboard(props: DashboardProps = {}) {
                 <tbody>
                   <For each={sessions()?.sessions}>
                     {(session) => (
-                    <tr>
+                    <tr data-session-id={session.id}>
                       <td>{session.id.substring(0, 8)}...</td>
                       <td>{session.provider_type}</td>
                       <td>

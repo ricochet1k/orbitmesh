@@ -96,7 +96,7 @@ test.describe("UI Navigation - Focused Tests", () => {
     await page.goto("/");
 
     // Dashboard should have the Operational Continuity heading
-    await expect(page.getByRole("heading", { name: "Operational Continuity" })).toBeVisible();
+    await expect(page.getByTestId("dashboard-heading")).toBeVisible();
   });
 
   test("Navigate between pages", async ({ page }) => {

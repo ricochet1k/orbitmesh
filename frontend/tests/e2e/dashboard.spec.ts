@@ -41,8 +41,12 @@ test.describe("Dashboard View", () => {
       await route.fulfill({ status: 200, json: { tasks: [] } });
     });
 
-    await page.route("**/api/v1/commits", async (route) => {
+    await page.route("**/api/v1/commits**", async (route) => {
       await route.fulfill({ status: 200, json: { commits: [] } });
+    });
+
+    await page.route("**/api/v1/providers", async (route) => {
+      await route.fulfill({ status: 200, json: { providers: [] } });
     });
   });
 
@@ -62,8 +66,8 @@ test.describe("Dashboard View", () => {
      await expect(goToTasksButton).toBeVisible({ timeout: 5000 });
      
      // Verify session count is 0
-     await expect(page.getByText("Active sessions")).toBeVisible({ timeout: 5000 });
-     const activeSessionsCard = page.locator(".meta-card").filter({ hasText: "Active sessions" }).first();
+     await expect(page.getByTestId("dashboard-meta-active-sessions")).toBeVisible({ timeout: 5000 });
+     const activeSessionsCard = page.getByTestId("dashboard-meta-active-sessions");
      await expect(activeSessionsCard.getByText("0")).toBeVisible({ timeout: 5000 });
    });
 
@@ -81,7 +85,7 @@ test.describe("Dashboard View", () => {
 
       // Verify navigation to tasks view
       await expect(page).toHaveURL("/tasks", { timeout: 5000 });
-      await expect(page.getByRole("heading", { name: /Task Tree|Tasks/ })).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId("tasks-heading")).toBeVisible({ timeout: 5000 });
    });
 
    test("Dashboard displays sessions when they exist", async ({ page }) => {
@@ -127,16 +131,16 @@ test.describe("Dashboard View", () => {
      await page.goto("/");
 
       // Verify sessions are displayed in table (wait for table to load)
-      const table = page.locator("table");
+      const table = page.getByTestId("dashboard-sessions-table");
       await expect(table).toBeVisible({ timeout: 5000 });
       const rows = page.locator("table tbody tr");
       await expect(rows).toHaveCount(3, { timeout: 5000 });
      await expect(page.getByText("Test Task 3")).toBeVisible();
 
     // Verify session counts
-      const activeSessionsCard = page.locator(".meta-card:has-text('Active sessions')");
-      const countText = activeSessionsCard.locator("div").last();
-      await expect(countText).toContainText("3");
+     const activeSessionsCard = page.getByTestId("dashboard-meta-active-sessions");
+     const countText = activeSessionsCard.locator("strong");
+     await expect(countText).toContainText("3");
 
      // Verify state badges
      await expect(page.locator(".state-badge.running").first()).toBeVisible();
@@ -197,12 +201,13 @@ test.describe("Dashboard View", () => {
      await page.goto("/");
 
       // Verify overview cards are visible and contain the right values
-      const overviewCards = page.locator(".overview-card");
+      const overviewCards = page.locator("[data-testid^='dashboard-overview-']");
       await expect(overviewCards).toHaveCount(3, { timeout: 5000 });
       
       // Check the counts are visible
-      await expect(page.getByText(/^4$/)).toBeVisible({ timeout: 5000 });
-      await expect(page.getByText(/running/i)).toBeVisible({ timeout: 5000 });
+      const sessionsOverview = page.getByTestId("dashboard-overview-sessions");
+      await expect(sessionsOverview.getByText("4")).toBeVisible({ timeout: 5000 });
+      await expect(sessionsOverview.getByText(/running/i)).toBeVisible({ timeout: 5000 });
    });
 
    test("Dashboard Inspect button navigates to session viewer", async ({ page }) => {
@@ -242,7 +247,9 @@ test.describe("Dashboard View", () => {
      await page.waitForSelector("table tbody tr", { timeout: 5000 });
 
      // Click Inspect button
-     const inspectButton = page.getByRole("button", { name: "Inspect" }).first();
+      const inspectButton = page
+        .locator("tr[data-session-id='session-inspect-test']")
+        .getByRole("button", { name: "Inspect" });
      await expect(inspectButton).toBeVisible({ timeout: 5000 });
      await inspectButton.click();
 
@@ -280,7 +287,9 @@ test.describe("Dashboard View", () => {
      await page.waitForSelector("table tbody tr", { timeout: 5000 });
 
      // Click Pause button
-     const pauseButton = page.getByRole("button", { name: "Pause" }).first();
+      const pauseButton = page
+        .locator("tr[data-session-id='session-pause-test']")
+        .getByRole("button", { name: "Pause" });
      await expect(pauseButton).toBeVisible({ timeout: 5000 });
      await pauseButton.click();
 
@@ -321,7 +330,9 @@ test.describe("Dashboard View", () => {
      await page.waitForSelector("table tbody tr", { timeout: 5000 });
 
      // Click Resume button
-     const resumeButton = page.getByRole("button", { name: "Resume" }).first();
+      const resumeButton = page
+        .locator("tr[data-session-id='session-resume-test']")
+        .getByRole("button", { name: "Resume" });
      await expect(resumeButton).toBeVisible({ timeout: 5000 });
      await resumeButton.click();
 
@@ -363,7 +374,9 @@ test.describe("Dashboard View", () => {
      await page.waitForSelector("table tbody tr", { timeout: 5000 });
 
       // Click Stop button
-      const stopButton = page.getByRole("button", { name: "Stop" }).first();
+      const stopButton = page
+        .locator("tr[data-session-id='session-stop-test']")
+        .getByRole("button", { name: "Stop" });
       await expect(stopButton).toBeVisible({ timeout: 5000 });
       await stopButton.click();
 

@@ -13,6 +13,7 @@
 @import "./styles/components/card.css";
 @import "./styles/components/empty-state.css";
 @import "./styles/components/skeleton.css";
+@import "./styles/components/mcp.css";
 
 /* Animation & motion primitives */
 @import "./styles/animations.css";
@@ -2181,6 +2182,27 @@ tbody tr:hover {
   justify-content: flex-end;
   gap: 0.5rem;
   margin-top: 0.5rem;
+}
+
+.env-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.env-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.env-row input {
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-2);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 0.82rem;
+  color: var(--ink-2);
 }
 
 .error-message {

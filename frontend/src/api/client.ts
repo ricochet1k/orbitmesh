@@ -85,11 +85,13 @@ export const apiClient = {
     taskId: string;
     taskTitle: string;
     providerType?: string;
+    providerId?: string;
     workingDir?: string;
   }): Promise<SessionResponse> {
-    const { taskId, taskTitle, providerType, workingDir } = params;
+    const { taskId, taskTitle, providerType, providerId, workingDir } = params;
     return apiClient.createSession({
       provider_type: providerType ?? DEFAULT_PROVIDER,
+      provider_id: providerId,
       working_dir: workingDir,
       task_id: taskId,
       task_title: taskTitle,

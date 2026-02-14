@@ -3,6 +3,7 @@ import { createResource, createSignal, createEffect, createMemo, onCleanup, Show
 import { apiClient } from '../../api/client'
 import TerminalView from '../../components/TerminalView'
 import type { ActivityEntry, ActivityEntryMutation, Event, SessionState } from '../../types/api'
+import { setDockSessionId } from '../../state/agentDock'
 
 export const Route = createFileRoute('/sessions/$sessionId')({
   component: SessionViewer,
@@ -465,8 +466,9 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
 
   createEffect(() => {
     const id = sessionId()
-    if (!id || !props.onDockSession) return
-    props.onDockSession(id)
+    if (!id) return
+    setDockSessionId(id)
+    if (props.onDockSession) props.onDockSession(id)
   })
 
   const handleClose = () => {
@@ -486,7 +488,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
       <header class="view-header">
         <div>
           <p class="eyebrow">Session Viewer</p>
-          <h1>Live Session Control</h1>
+          <h1 data-testid="session-viewer-heading">Live Session Control</h1>
           <p class="dashboard-subtitle">Track the real-time transcript, monitor PTY output, and intervene fast.</p>
         </div>
         <div class="session-meta">
@@ -561,10 +563,18 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
         </div>
       </header>
       <Show when={actionNotice()}>
-        {(notice) => <p class={`guardrail-banner ${notice().tone}`}>{notice().message}</p>}
+        {(notice) => (
+          <p class={`guardrail-banner ${notice().tone}`} data-testid="session-action-notice">
+            {notice().message}
+          </p>
+        )}
       </Show>
       <Show when={session()?.error_message}>
-        {(errorMsg) => <p class="guardrail-banner error">Session error: {errorMsg()}</p>}
+        {(errorMsg) => (
+          <p class="guardrail-banner error" data-testid="session-error-banner">
+            Session error: {errorMsg()}
+          </p>
+        )}
       </Show>
 
       <main class="session-layout">
@@ -575,14 +585,15 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
               <h2>Activity Feed</h2>
             </div>
             <div class="panel-tools">
-              <button
-                type="button"
-                class="neutral"
-                onClick={handleLoadEarlier}
-                disabled={!activityCursor() || activityHistoryLoading()}
-              >
-                {activityHistoryLoading() ? "Loading..." : "Load earlier"}
-              </button>
+                <button
+                  type="button"
+                  class="neutral"
+                  onClick={handleLoadEarlier}
+                  disabled={!activityCursor() || activityHistoryLoading()}
+                  data-testid="session-load-earlier"
+                >
+                  {activityHistoryLoading() ? "Loading..." : "Load earlier"}
+                </button>
               <input
                 type="search"
                 placeholder="Search transcript"
@@ -635,27 +646,27 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
             </div>
           </div>
           <div class="session-metrics">
-            <div>
+            <div data-testid="session-info-id">
               <span>ID</span>
                <strong>{sessionId()}</strong>
             </div>
-            <div>
+            <div data-testid="session-info-provider">
               <span>Provider</span>
               <strong>{providerType() || "unknown"}</strong>
             </div>
-            <div>
+            <div data-testid="session-info-task">
               <span>Current task</span>
               <strong>{session()?.current_task || "None"}</strong>
             </div>
-            <div>
+            <div data-testid="session-info-tokens-in">
               <span>Tokens in</span>
               <strong>{session()?.metrics?.tokens_in ?? "-"}</strong>
             </div>
-            <div>
+            <div data-testid="session-info-tokens-out">
               <span>Tokens out</span>
               <strong>{session()?.metrics?.tokens_out ?? "-"}</strong>
             </div>
-            <div>
+            <div data-testid="session-info-requests">
               <span>Requests</span>
               <strong>{session()?.metrics?.request_count ?? "-"}</strong>
             </div>

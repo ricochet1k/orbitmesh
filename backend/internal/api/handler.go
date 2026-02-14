@@ -118,6 +118,25 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		if providerConfig.APIKey != "" {
+			if config.Environment == nil {
+				config.Environment = map[string]string{}
+			}
+			envKey := ""
+			switch providerConfig.Type {
+			case "adk":
+				envKey = "GOOGLE_API_KEY"
+			case "anthropic":
+				envKey = "ANTHROPIC_API_KEY"
+			case "openai":
+				envKey = "OPENAI_API_KEY"
+			}
+			if envKey != "" {
+				if _, ok := config.Environment[envKey]; !ok {
+					config.Environment[envKey] = providerConfig.APIKey
+				}
+			}
+		}
 		if len(providerConfig.Custom) > 0 {
 			if config.Custom == nil {
 				config.Custom = map[string]any{}

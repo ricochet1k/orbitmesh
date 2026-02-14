@@ -48,6 +48,7 @@ Agents should use the `strand` CLI to interact with these tasks:
 ## Live Documentation
 
 - Keep `AGENTS.md` current: add clarifications or corrections anytime instructions evolve or additional guidance is needed for future agents.
+- Keep `TESTING.md` aligned with the intended testing strategy and test layout as tooling and practices evolve.
 
 ## Tooling Addendum
 

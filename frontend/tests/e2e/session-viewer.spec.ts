@@ -67,20 +67,17 @@ test.describe("Session Viewer", () => {
     await page.goto("/sessions/test-session-001");
 
      // Verify page loads
-     await expect(page.getByRole("heading", { name: "Live Session Control", exact: true })).toBeVisible();
+     await expect(page.getByTestId("session-viewer-heading")).toBeVisible();
 
     // Verify session information is displayed
-    await expect(page.getByText("test-session-001")).toBeVisible();
-    await expect(page.getByText("adk")).toBeVisible();
-    await expect(page.getByText("Test Task")).toBeVisible();
+    await expect(page.getByTestId("session-info-id")).toContainText("test-session-001");
+    await expect(page.getByTestId("session-info-provider")).toContainText("adk");
+    await expect(page.getByTestId("session-info-task")).toContainText("Test Task");
 
     // Verify metrics are displayed
-    await expect(page.getByText("Tokens in")).toBeVisible();
-    await expect(page.getByText("100")).toBeVisible();
-    await expect(page.getByText("Tokens out")).toBeVisible();
-    await expect(page.getByText("50")).toBeVisible();
-    await expect(page.getByText("Requests")).toBeVisible();
-    await expect(page.getByText("5")).toBeVisible();
+    await expect(page.getByTestId("session-info-tokens-in")).toContainText("100");
+    await expect(page.getByTestId("session-info-tokens-out")).toContainText("50");
+    await expect(page.getByTestId("session-info-requests")).toContainText("5");
   });
 
   test("Session viewer displays activity entries in transcript", async ({ page }) => {
@@ -475,8 +472,8 @@ test.describe("Session Viewer", () => {
     await expect(page.getByText("Latest message")).toBeVisible();
 
     // Click Load earlier button
-    const loadEarlierButton = page.getByRole("button", { name: "Load earlier" });
-    await expect(loadEarlierButton).toBeEnabled();
+    const loadEarlierButton = page.getByTestId("session-load-earlier");
+    await expect(loadEarlierButton).toBeEnabled({ timeout: 5000 });
     await loadEarlierButton.click();
 
     // Verify earlier message is now visible
@@ -517,7 +514,7 @@ test.describe("Session Viewer", () => {
 
     // Verify navigation back to sessions list
     await expect(page).toHaveURL("/sessions");
-    await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
+    await expect(page.getByTestId("sessions-heading")).toBeVisible();
   });
 
   test("Session error message is displayed when present", async ({ page }) => {
