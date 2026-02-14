@@ -32,6 +32,57 @@ Terminal Header:
 
 Effort: 2-3 days instead of 6-10 days.
 
+## Simplified UX Design (MVP)
+
+**Location:** Terminal Header (status bar, e.g., top-left or top-right of the terminal window)
+
+**Elements:**
+
+1.  **Connection State Indicator:**
+    *   **Purpose:** Provide immediate visual feedback on the WebSocket connection status.
+    *   **Display:**
+        *   `🟢 Connected`: Green circle/dot icon + "Connected" text. Indicates a stable, active connection.
+        *   `🟡 Reconnecting...`: Yellow circle/dot icon + "Reconnecting..." text. Indicates a temporary connection loss, actively attempting to re-establish.
+        *   `🔄 Resyncing...`: Blue spinning icon (or similar animated loading indicator) + "Resyncing..." text. Indicates data synchronization is in progress after reconnection or initial load.
+    *   **Placement:** Typically to the far left of the status bar.
+    *   **Styling:** Minimal, clear, and concise. Icons should be small (e.g., 16x16px).
+    *   **Interaction:** No interactive elements for MVP.
+
+2.  **Viewer Count Badge with Tooltip Warning:**
+    *   **Purpose:** Inform the user if other active viewers are present, with a subtle warning if more than one user is watching.
+    *   **Display:**
+        *   `👁️ {count} viewer(s)`: Eye icon + numerical count of viewers + "viewer(s)" text.
+        *   `⚠️`: A small warning icon (e.g., yellow triangle with exclamation mark) immediately following the viewer count, *only* displayed when `count > 1`.
+    *   **Placement:** To the right of the Connection State Indicator.
+    *   **Styling:** Compact. The warning icon should be visually distinct but not overly intrusive.
+    *   **Tooltip (on hover over `👁️ {count} viewer(s)` or `⚠️`):**
+        *   When `count > 1`: "Others are watching this terminal"
+        *   When `count = 1`: No tooltip, as the warning is not applicable. (Optional: "You are the only viewer" - defer for MVP simplicity).
+
+**Example Rendering in Status Bar:**
+
+*   **Single viewer, connected:**
+    ```
+    🟢 Connected | 👁️ 1 viewer
+    ```
+
+*   **Multiple viewers (2), connected:**
+    ```
+    🟢 Connected | 👁️ 2 viewers ⚠️
+    ```
+    (On hover, tooltip displays: "Others are watching this terminal")
+
+*   **Multiple viewers (5), reconnecting:**
+    ```
+    🟡 Reconnecting... | 👁️ 5 viewers ⚠️
+    ```
+    (On hover, tooltip displays: "Others are watching this terminal")
+
+**Implementation Notes:**
+*   This design keeps the UI overhead minimal, adhering to the 2-3 days implementation estimate.
+*   No lock controls or complex ownership displays are included, aligning with the simplified MVP scope.
+*   Focus is on clear, passive information display.
+
 ---
 
 ## Original Design (Alternatives for Reference)
