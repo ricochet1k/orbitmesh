@@ -171,18 +171,20 @@ test.describe("UI Navigation", () => {
     }
   });
 
-  test("Task details display on task selection", async ({ page }) => {
-    await page.goto("/tasks");
+   test("Task details display on task selection", async ({ page }) => {
+     await page.goto("/tasks");
 
-    // Click on a task to select it
-    const rootTask = page.locator(".task-tree").getByText("Root Task").first();
-    await rootTask.click();
+     // Click on a task to select it
+     const rootTask = page.locator(".task-tree").getByText("Root Task").first();
+     await rootTask.click();
 
-    // Task details should be visible
-    await expect(page.getByText("Task ID")).toBeVisible();
-    await expect(page.getByText("task-root", { exact: true })).toBeVisible();
-    await expect(page.getByText(/in.progress/i)).toBeVisible();
-  });
+     // Task details should be visible
+     const detailsPanel = page.locator(".task-details, [data-testid='task-details']");
+     await expect(detailsPanel).toBeVisible();
+     await expect(detailsPanel.getByText("Task ID")).toBeVisible();
+     await expect(detailsPanel.getByText("task-root", { exact: true })).toBeVisible();
+     await expect(detailsPanel.getByText(/in.progress|In Progress/i)).toBeVisible();
+   });
 
   test("Empty state displays when no tasks", async ({ page }) => {
     // Mock empty task tree

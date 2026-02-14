@@ -461,20 +461,21 @@ test.describe("Tasks View", () => {
 
     await page.goto("/tasks");
 
-    // Verify child task is visible (expanded by default)
-    await expect(page.getByText("Child Task")).toBeVisible();
+     // Verify child task is visible (expanded by default)
+     const taskTree = page.locator(".task-tree");
+     await expect(taskTree.getByText("Child Task")).toBeVisible();
 
-    // Find and click the collapse button
-    const expandButton = page.locator(".expand-toggle").first();
-    await expandButton.click();
+     // Find and click the collapse button
+     const expandButton = page.locator(".expand-toggle").first();
+     await expandButton.click();
 
-    // Verify child task is hidden
-    await expect(page.getByText("Child Task")).not.toBeVisible();
+     // Verify child task is hidden
+     await expect(taskTree.getByText("Child Task")).not.toBeVisible();
 
-    // Click expand button again
-    await expandButton.click();
+     // Click expand button again
+     await expandButton.click();
 
-    // Verify child task is visible again
-    await expect(page.getByText("Child Task")).toBeVisible();
+     // Verify child task is visible again
+     await expect(taskTree.getByText("Child Task")).toBeVisible();
   });
 });
