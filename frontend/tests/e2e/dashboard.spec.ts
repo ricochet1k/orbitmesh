@@ -205,22 +205,6 @@ test.describe("Dashboard View", () => {
       await expect(page.getByText(/running/i)).toBeVisible({ timeout: 5000 });
    });
 
-    await page.goto("/");
-
-      // Verify "Sessions in motion" shows 4 total with 2 running
-      const sessionsInMotion = page.locator(".overview-card:has-text('Sessions in motion')");
-      await expect(sessionsInMotion.locator("div")).toContainText("4");
-      await expect(sessionsInMotion).toContainText("2 running");
-
-      // Verify "Paused or starting" shows 1
-      const pausedOrStarting = page.locator(".overview-card:has-text('Paused or starting')");
-      await expect(pausedOrStarting.locator("div")).toContainText("1");
-
-      // Verify "Attention needed" shows 1 error
-      const attentionNeeded = page.locator(".overview-card:has-text('Attention needed')");
-      await expect(attentionNeeded.locator("div")).toContainText("1");
-  });
-
    test("Dashboard Inspect button navigates to session viewer", async ({ page }) => {
      const mockSessions = {
        sessions: [
@@ -262,33 +246,10 @@ test.describe("Dashboard View", () => {
      await expect(inspectButton).toBeVisible({ timeout: 5000 });
      await inspectButton.click();
 
-      // Verify navigation to session viewer
-      await expect(page).toHaveURL(/\/sessions\/session-inspect-test/, { timeout: 5000 });
-      await expect(page.getByRole("heading", { name: "Live Session Control" })).toBeVisible({ timeout: 5000 });
-   });
-
-    await page.route("**/api/sessions/session-inspect-test", async (route) => {
-      await route.fulfill({
-        status: 200,
-        json: mockSessions.sessions[0],
-      });
+       // Verify navigation to session viewer
+       await expect(page).toHaveURL(/\/sessions\/session-inspect-test/, { timeout: 5000 });
+       await expect(page.getByRole("heading", { name: "Live Session Control" })).toBeVisible({ timeout: 5000 });
     });
-
-    await page.route("**/api/sessions/session-inspect-test/activity**", async (route) => {
-      await route.fulfill({ status: 200, json: { entries: [], next_cursor: null } });
-    });
-
-    await page.goto("/");
-
-     // Click Inspect button
-     const inspectButton = page.getByRole("button", { name: "Inspect" }).first();
-     await expect(inspectButton).toBeEnabled();
-     await inspectButton.click();
-
-     // Verify navigation to session viewer
-     await expect(page).toHaveURL(/\/sessions\/session-inspect-test/);
-     await expect(page.getByRole("heading", { name: "Live Session Control", exact: true })).toBeVisible();
-  });
 
    test("Dashboard Pause button works for running session", async ({ page }) => {
      const mockSessions = {
@@ -484,18 +445,7 @@ test.describe("Dashboard View", () => {
      // Wait for navigation to complete
      await navigation;
      
-     // Verify page loaded
-     await expect(page).toHaveURL("/", { timeout: 5000 });
+      // Verify page loaded
+      await expect(page).toHaveURL("/", { timeout: 5000 });
    });
-
-    const navigation = page.goto("/");
-
-    // Check for loading text
-    await expect(page.getByText("Loading...")).toBeVisible();
-
-    await navigation;
-
-    // Loading should be gone
-    await expect(page.getByText("Loading...")).not.toBeVisible();
-  });
 });
