@@ -55,7 +55,7 @@ const mockTaskTree = {
 const mockCommits = { commits: [] };
 
 test.describe("Comprehensive OrbitMesh MVP Workflow", () => {
-  test.setTimeout(45000); // 45 second timeout per test
+  test.setTimeout(15000);
   let sessionState = "running";
 
   test.beforeEach(async ({ page, context }) => {
@@ -179,6 +179,10 @@ test.describe("Comprehensive OrbitMesh MVP Workflow", () => {
       }
     );
 
+    await page.route("**/api/sessions/*/activity**", async (route) => {
+      await route.fulfill({ status: 200, json: { entries: [], next_cursor: null } });
+    });
+
     page.on("dialog", (dialog) => dialog.accept());
   });
 
@@ -195,10 +199,7 @@ test.describe("Comprehensive OrbitMesh MVP Workflow", () => {
     const tasksLink = page.getByRole("link", { name: /Tasks/i });
     await tasksLink.click();
     await expect(page).toHaveURL(/\/tasks/);
-    await page.waitForTimeout(500);
-
-    bodyText = await page.locator("body").textContent();
-    expect(bodyText?.toLowerCase()).toContain("task");
+    await expect(page.getByRole("heading", { name: "Task Tree", exact: true })).toBeVisible();
 
     // Step 3: Navigate to Sessions
     const sessionsLink = page.getByRole("link", { name: /Sessions/i });
@@ -215,52 +216,41 @@ test.describe("Comprehensive OrbitMesh MVP Workflow", () => {
 
   test("2. Task Selection - Click task and view details", async ({ page }) => {
     await page.goto("/tasks");
-    await page.waitForTimeout(500);
 
-    // Find and click task
-    const taskText = page.locator("body").getByText(/Comprehensive|playwright/i);
+    // Find and click task in the task tree (not the SVG graph)
+    const taskText = page.locator(".task-tree, .task-item").getByText(/Comprehensive|playwright/i);
     if (await taskText.first().isVisible()) {
       await taskText.first().click();
-      await page.waitForTimeout(500);
-
-      // Should show some details
-      const bodyText = await page.locator("body").textContent();
-      expect(bodyText).toContain(/task|Task|id|ID/i);
+      await expect(page.getByText("Task ID")).toBeVisible();
     }
   });
 
   test("3. Session Creation - Start agent from task", async ({ page }) => {
     await page.goto("/tasks");
-    await page.waitForTimeout(500);
 
-    // Find task
-    const taskText = page.locator("body").getByText(/Comprehensive|playwright/i);
+    // Find task in the task tree (not the SVG graph)
+    const taskText = page.locator(".task-tree, .task-item").getByText(/Comprehensive|playwright/i);
     if (await taskText.first().isVisible()) {
       await taskText.first().click();
-      await page.waitForTimeout(300);
 
       // Look for start button or agent profile select
       const startButton = page.getByRole("button", { name: /start|Start/i });
-      const agentSelect = page.locator("select");
+      const agentSelect = page.getByLabel("Agent profile");
 
       if (
-        (await agentSelect.first().isVisible()) &&
+        (await agentSelect.isVisible()) &&
         (await startButton.isVisible())
       ) {
         // Select agent type if needed
         try {
-          await agentSelect.first().selectOption("adk");
+          await agentSelect.selectOption("adk");
         } catch (e) {
           // May already be selected
         }
 
         // Click start
         await startButton.click();
-        await page.waitForTimeout(1000);
-
-        // Should see session ready or session info
-        const bodyText = await page.locator("body").textContent();
-        expect(bodyText).toContain(/session|Session|ready|Ready/i);
+        await expect(page.getByText("Session ready")).toBeVisible();
       }
     }
   });
@@ -268,22 +258,21 @@ test.describe("Comprehensive OrbitMesh MVP Workflow", () => {
   test("4. Session Control - Pause and resume session", async ({ page }) => {
     // Create session first
     await page.goto("/tasks");
-    const taskText = page.locator("body").getByText(/Comprehensive|playwright/i);
+    const taskText = page.locator(".task-tree, .task-item").getByText(/Comprehensive|playwright/i);
     if (await taskText.first().isVisible()) {
       await taskText.first().click();
-      await page.waitForTimeout(300);
 
-      const agentSelect = page.locator("select");
+      const agentSelect = page.getByLabel("Agent profile");
       const startButton = page.getByRole("button", { name: /start|Start/i });
 
       if (await startButton.isVisible()) {
         try {
-          await agentSelect.first().selectOption("adk");
+          await agentSelect.selectOption("adk");
         } catch (e) {
           // Skip if not available
         }
         await startButton.click();
-        await page.waitForTimeout(1000);
+        await expect(page.getByText("Session ready")).toBeVisible();
       }
     }
 
@@ -291,25 +280,20 @@ test.describe("Comprehensive OrbitMesh MVP Workflow", () => {
     const openViewerButton = page.getByRole("button", { name: /Open|open/i });
     if (await openViewerButton.count() > 0) {
       await openViewerButton.first().click();
-      await page.waitForTimeout(500);
+      await expect(page.getByRole("heading", { name: "Live Session Control" })).toBeVisible();
     }
 
     // Try to find pause button
     const pauseButton = page.getByRole("button", { name: /pause|Pause/i });
     if (await pauseButton.isVisible()) {
       await pauseButton.click();
-      await page.waitForTimeout(500);
-
-      // Should show pause confirmation
-      const bodyText = await page.locator("body").textContent();
-      expect(bodyText).toContain(/pause|Pause/i);
+      await expect(page.getByText(/Pause request sent|pause/i)).toBeVisible();
     }
 
     // Try to find resume button
     const resumeButton = page.getByRole("button", { name: /resume|Resume/i });
     if (await resumeButton.isVisible()) {
       await resumeButton.click();
-      await page.waitForTimeout(500);
     }
   });
 
@@ -370,7 +354,6 @@ test.describe("Comprehensive OrbitMesh MVP Workflow", () => {
       if (href && !href.includes("#")) {
         const initialUrl = page.url();
         await link.click();
-        await page.waitForTimeout(300);
 
         // Should have navigated
         const newUrl = page.url();
@@ -382,26 +365,23 @@ test.describe("Comprehensive OrbitMesh MVP Workflow", () => {
 
   test("8. Form Interaction - Agent profile selection works", async ({ page }) => {
     await page.goto("/tasks");
-    const taskText = page.locator("body").getByText(/Comprehensive|playwright/i);
+    const taskText = page.locator(".task-tree, .task-item").getByText(/Comprehensive|playwright/i);
 
     if (await taskText.first().isVisible()) {
       await taskText.first().click();
-      await page.waitForTimeout(300);
 
-      // Find select element
-      const select = page.locator("select, [role='combobox']");
-      if (await select.first().isVisible()) {
+      // Find the agent profile select (not filter selects)
+      const agentSelect = page.getByLabel("Agent profile");
+      if (await agentSelect.isVisible()) {
         // Should be able to select an option
-        const options = select.first().locator("option");
+        const options = agentSelect.locator("option");
         const optionCount = await options.count();
         expect(optionCount).toBeGreaterThan(0);
 
-        // Try to select first non-default option
-        if (optionCount > 1) {
-          await select.first().selectOption(1);
-          const value = await select.first().inputValue();
-          expect(value).toBeTruthy();
-        }
+        // Try to select a specific option
+        await agentSelect.selectOption("adk");
+        const value = await agentSelect.inputValue();
+        expect(value).toBe("adk");
       }
     }
   });
@@ -409,29 +389,24 @@ test.describe("Comprehensive OrbitMesh MVP Workflow", () => {
   test("9. Message Display - Agent output shows in session", async ({ page }) => {
     // Navigate to create session
     await page.goto("/tasks");
-    const taskText = page.locator("body").getByText(/Comprehensive|playwright/i);
+    const taskText = page.locator(".task-tree, .task-item").getByText(/Comprehensive|playwright/i);
 
     if (await taskText.first().isVisible()) {
       await taskText.first().click();
-      await page.waitForTimeout(300);
 
       const startButton = page.getByRole("button", { name: /start|Start/i });
       if (await startButton.isVisible()) {
         try {
-          const select = page.locator("select");
-          if (await select.first().isVisible()) {
-            await select.first().selectOption("adk");
+          const agentSelect = page.getByLabel("Agent profile");
+          if (await agentSelect.isVisible()) {
+            await agentSelect.selectOption("adk");
           }
         } catch (e) {
           // Skip
         }
 
         await startButton.click();
-        await page.waitForTimeout(1000);
-
-        // Should see output text
-        const bodyText = await page.locator("body").textContent();
-        expect(bodyText).toBeTruthy();
+        await expect(page.getByText("Session ready")).toBeVisible();
       }
     }
   });
@@ -448,11 +423,10 @@ test.describe("Comprehensive OrbitMesh MVP Workflow", () => {
     });
 
     await page.goto("/tasks");
-    const taskText = page.locator("body").getByText(/Comprehensive|playwright/i);
+    const taskText = page.locator(".task-tree, .task-item").getByText(/Comprehensive|playwright/i);
 
     if (await taskText.first().isVisible()) {
       await taskText.first().click();
-      await page.waitForTimeout(300);
 
       // Page should still be functional
       const main = page.locator("main");
@@ -462,9 +436,6 @@ test.describe("Comprehensive OrbitMesh MVP Workflow", () => {
       const startButton = page.getByRole("button", { name: /start|Start/i });
       if (await startButton.isVisible()) {
         await startButton.click();
-        await page.waitForTimeout(500);
-
-        // Page should still be there
         await expect(main.first()).toBeVisible();
       }
     }

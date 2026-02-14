@@ -78,6 +78,10 @@ test.describe("MVP Workflow End-to-End", () => {
       await route.fulfill({ status: 200, json: { sessions: [] } });
     });
 
+    await page.route("**/api/sessions/*/activity**", async (route) => {
+      await route.fulfill({ status: 200, json: { entries: [], next_cursor: null } });
+    });
+
     page.on("dialog", (dialog) => dialog.accept());
   });
 
@@ -184,7 +188,7 @@ data: ${JSON.stringify({
 
     // Step 2: Navigate to tasks
     await page.getByRole("link", { name: "Tasks" }).click();
-    await expect(page.getByRole("heading", { name: "Task Tree" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Task Tree", exact: true })).toBeVisible();
 
     // Step 3: Click on a task to select it
     const taskItem = page.locator(".task-tree").getByText("MVP Workflow Task").first();
@@ -192,7 +196,7 @@ data: ${JSON.stringify({
 
     // Step 4: Verify task details panel shows
     await expect(page.getByText("Task ID")).toBeVisible();
-    await expect(page.getByText("task-mvp-1")).toBeVisible();
+    await expect(page.getByText("task-mvp-1", { exact: true })).toBeVisible();
 
     // Step 5: Select agent profile and start session
     await page.getByLabel("Agent profile").selectOption("adk");
@@ -200,7 +204,7 @@ data: ${JSON.stringify({
 
     // Step 6: Verify session was created and is ready
     const launchCard = page.locator(".session-launch-card, [role='status']");
-    await expect(launchCard.getByText("Session ready")).toBeVisible({ timeout: 5000 });
+    await expect(launchCard.getByText("Session ready")).toBeVisible({ timeout: 3000 });
     await expect(launchCard.getByText(sessionId)).toBeVisible();
 
     // Step 7: Open session viewer
@@ -213,7 +217,7 @@ data: ${JSON.stringify({
 
     // Step 9: Verify agent output is streaming
     await expect(page.getByText("Agent output: Workflow started successfully")).toBeVisible({
-      timeout: 5000,
+      timeout: 3000,
     });
 
     // Step 10: Verify metrics are displayed
@@ -318,10 +322,10 @@ data: ${JSON.stringify({
     // Create session
     await page.goto("/");
     await page.getByRole("link", { name: "Tasks" }).click();
-    await page.getByText("MVP Workflow Task").click();
+    await page.locator(".task-tree").getByText("MVP Workflow Task").first().click();
     await page.getByLabel("Agent profile").selectOption("pty");
     await page.getByRole("button", { name: "Start agent" }).click();
-    await expect(page.getByText("Session ready")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("Session ready")).toBeVisible({ timeout: 3000 });
 
     // Open and verify session
     await page.getByRole("button", { name: "Open Session Viewer" }).click();
@@ -425,15 +429,15 @@ data: ${JSON.stringify({
     // Create and open session
     await page.goto("/");
     await page.getByRole("link", { name: "Tasks" }).click();
-    await page.getByText("MVP Workflow Task").click();
+    await page.locator(".task-tree").getByText("MVP Workflow Task").first().click();
     await page.getByLabel("Agent profile").selectOption("adk");
     await page.getByRole("button", { name: "Start agent" }).click();
-    await expect(page.getByText("Session ready")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("Session ready")).toBeVisible({ timeout: 3000 });
     await page.getByRole("button", { name: "Open Session Viewer" }).click();
 
     // Verify each message appears in sequence
     for (const message of outputMessages) {
-      await expect(page.getByText(message)).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText(message)).toBeVisible({ timeout: 3000 });
     }
   });
 
@@ -458,7 +462,7 @@ data: ${JSON.stringify({
 
     await page.goto("/");
     await page.getByRole("link", { name: "Tasks" }).click();
-    await page.getByText("MVP Workflow Task").click();
+    await page.locator(".task-tree").getByText("MVP Workflow Task").first().click();
     await page.getByLabel("Agent profile").selectOption("adk");
     await page.getByRole("button", { name: "Start agent" }).click();
 
@@ -544,17 +548,17 @@ data: ${JSON.stringify({
     // Start first session
     await page.goto("/");
     await page.getByRole("link", { name: "Tasks" }).click();
-    await page.getByText("MVP Workflow Task").click();
+    await page.locator(".task-tree").getByText("MVP Workflow Task").first().click();
     await page.getByLabel("Agent profile").selectOption("adk");
     await page.getByRole("button", { name: "Start agent" }).click();
-    await expect(page.getByText("Session ready")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("Session ready")).toBeVisible({ timeout: 3000 });
 
     // Start second session
     await page.getByRole("link", { name: "Tasks" }).click();
-    await page.getByText("Error Handling Task").click();
+    await page.locator(".task-tree").getByText("Error Handling Task").first().click();
     await page.getByLabel("Agent profile").selectOption("adk");
     await page.getByRole("button", { name: "Start agent" }).click();
-    await expect(page.getByText("Session ready")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("Session ready")).toBeVisible({ timeout: 3000 });
 
     // Verify we can navigate between sessions via Sessions view
     await page.getByRole("link", { name: "Sessions" }).click();
@@ -625,14 +629,14 @@ data: ${JSON.stringify({
 
     await page.goto("/");
     await page.getByRole("link", { name: "Tasks" }).click();
-    await page.getByText("MVP Workflow Task").click();
+    await page.locator(".task-tree").getByText("MVP Workflow Task").first().click();
     await page.getByLabel("Agent profile").selectOption("adk");
     await page.getByRole("button", { name: "Start agent" }).click();
-    await expect(page.getByText("Session ready")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("Session ready")).toBeVisible({ timeout: 3000 });
     await page.getByRole("button", { name: "Open Session Viewer" }).click();
 
-    // Task information should be visible in session
-    await expect(page.getByRole("heading", { name: "Live Session Control" })).toBeVisible();
+    // Task information should be visible in session (allow extra time for full page navigation)
+    await expect(page.getByRole("heading", { name: "Live Session Control" })).toBeVisible({ timeout: 5000 });
 
     // Current task should be displayed
     const taskInfo = page.locator(".current-task, [data-testid='current-task']");

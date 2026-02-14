@@ -215,6 +215,10 @@ test.beforeEach(async ({ context, page }) => {
     sessionStates.set(id, "running");
     await route.fulfill({ status: 204, body: "" });
   });
+
+  await page.route(/\/api\/sessions\/([^/]+)\/activity/, async (route) => {
+    await route.fulfill({ status: 200, json: { entries: [], next_cursor: null } });
+  });
 });
 
 test("Dashboard -> Tasks -> Session workflow", async ({ page }) => {
@@ -222,7 +226,7 @@ test("Dashboard -> Tasks -> Session workflow", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Operational Continuity" })).toBeVisible();
 
   await page.getByRole("link", { name: "Tasks" }).click();
-  await expect(page.getByRole("heading", { name: "Task Tree" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Task Tree", exact: true })).toBeVisible();
 
   await page
     .locator(".task-tree")
@@ -244,8 +248,8 @@ test("Dashboard -> Tasks -> Session workflow", async ({ page }) => {
   });
 
   await launchCard.getByRole("button", { name: "Open Session Viewer" }).click();
-  await expect(page.getByRole("heading", { name: "Live Session Control" })).toBeVisible();
-  await expect(page.locator(".stream-pill.live")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Live Session Control" })).toBeVisible({ timeout: 5000 });
+  await expect(page.locator(".stream-pill.live")).toBeVisible({ timeout: 3000 });
 
   await expect(page.getByText("Agent stream connected.")).toBeVisible();
   await expect(page.getByText("State changed: running -> paused")).toBeVisible();
@@ -259,7 +263,7 @@ test("Dashboard -> Tasks -> Session workflow", async ({ page }) => {
   await expect(page.getByText("Pause request sent.")).toBeVisible();
 
   await page.reload();
-  await expect(page.getByRole("button", { name: "Resume" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Resume" })).toBeEnabled({ timeout: 5000 });
   await page.getByRole("button", { name: "Resume" }).click();
   await expect(page.getByText("Resume request sent.")).toBeVisible();
 

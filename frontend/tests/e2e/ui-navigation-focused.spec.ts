@@ -60,6 +60,10 @@ test.describe("UI Navigation - Focused Tests", () => {
     await page.route("**/api/sessions", async (route) => {
       await route.fulfill({ status: 200, json: { sessions: [] } });
     });
+
+    await page.route("**/api/sessions/*/activity**", async (route) => {
+      await route.fulfill({ status: 200, json: { entries: [], next_cursor: null } });
+    });
   });
 
   test("Navigate to Tasks page", async ({ page }) => {
@@ -72,12 +76,9 @@ test.describe("UI Navigation - Focused Tests", () => {
     // Should be on tasks page
     await expect(page).toHaveURL(/\/tasks/);
 
-    // Wait for content to load
-    await page.waitForTimeout(500);
-
     // Should have task content
     const pageContent = await page.locator("body").textContent();
-    expect(pageContent).toContain(/task|Task/i);
+    expect(pageContent).toMatch(/task|Task/i);
   });
 
   test("Navigate to Sessions page", async ({ page }) => {
@@ -94,10 +95,8 @@ test.describe("UI Navigation - Focused Tests", () => {
   test("Verify Dashboard loads with heading", async ({ page }) => {
     await page.goto("/");
 
-    // Dashboard should have heading
-    const heading = page.getByRole("heading");
-    const headingCount = await heading.count();
-    expect(headingCount).toBeGreaterThan(0);
+    // Dashboard should have the Operational Continuity heading
+    await expect(page.getByRole("heading", { name: "Operational Continuity" })).toBeVisible();
   });
 
   test("Navigate between pages", async ({ page }) => {

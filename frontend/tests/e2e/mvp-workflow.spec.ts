@@ -132,6 +132,11 @@ test.describe("MVP workflow", () => {
       const url = new URL(request.url());
       const { pathname } = url;
 
+      if (!pathname.startsWith("/api/")) {
+        await route.continue();
+        return;
+      }
+
       if (request.method() === "GET" && pathname === "/api/v1/me/permissions") {
         await route.fulfill({ status: 200, json: permissionsPayload });
         return;
@@ -207,6 +212,11 @@ test.describe("MVP workflow", () => {
         return;
       }
 
+      if (request.method() === "GET" && pathname.match(/^\/api\/sessions\/[^/]+\/activity$/)) {
+        await route.fulfill({ status: 200, json: { entries: [], next_cursor: null } });
+        return;
+      }
+
       await route.fulfill({ status: 404, body: "" });
     });
 
@@ -216,7 +226,7 @@ test.describe("MVP workflow", () => {
     await expect(page.getByRole("heading", { name: "Operational Continuity" })).toBeVisible();
 
     await page.getByRole("link", { name: "Tasks" }).click();
-    await expect(page.getByRole("heading", { name: "Task Tree" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Task Tree", exact: true })).toBeVisible();
 
     await page.getByText("MVP Workflow").first().click();
     await expect(page.getByText("Agent Launchpad")).toBeVisible();
@@ -234,7 +244,7 @@ test.describe("MVP workflow", () => {
     });
 
     await page.getByRole("button", { name: "Open Session Viewer" }).click();
-    await expect(page.getByRole("heading", { name: "Live Session Control" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Live Session Control" })).toBeVisible({ timeout: 5000 });
 
     await expect(page.getByText("Agent output: task initialized.")).toBeVisible();
     await expect(page.locator(".terminal-shell")).toBeVisible();
@@ -249,7 +259,7 @@ test.describe("MVP workflow", () => {
     await expect(page.getByText("Kill request sent.")).toBeVisible();
 
     await page.goto(`/sessions/${pausedSession.id}`);
-    await expect(page.getByRole("heading", { name: "Live Session Control" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Live Session Control" })).toBeVisible({ timeout: 5000 });
     await page.getByRole("button", { name: "Resume" }).click();
     await expect(page.getByText("Resume request sent.")).toBeVisible();
   });
