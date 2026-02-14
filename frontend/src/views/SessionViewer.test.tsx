@@ -43,6 +43,7 @@ vi.mock("../api/client", () => ({
     pauseSession: vi.fn(),
     resumeSession: vi.fn(),
     stopSession: vi.fn(),
+    getActivityEntries: vi.fn(),
     getEventsUrl: vi.fn(),
     getPermissions: vi.fn(),
   },
@@ -88,6 +89,7 @@ describe("SessionViewer", () => {
       randomUUID: () => "123e4567-e89b-12d3-a456-426614174000",
     })
       ; (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1")
+      ; (apiClient.getActivityEntries as any).mockResolvedValue({ entries: [], next_cursor: null })
       ; (apiClient.getPermissions as any).mockResolvedValue(defaultPermissions)
   })
 
@@ -97,7 +99,7 @@ describe("SessionViewer", () => {
     render(() => <SessionViewer sessionId="session-1" />)
 
     expect(await screen.findByText("Session session-1 - native - running")).toBeDefined()
-    expect(screen.getByText("Initial output")).toBeDefined()
+    expect(await screen.findByText("Initial output")).toBeDefined()
 
     eventSources[0]?.emit("output", {
       type: "output",
@@ -109,6 +111,55 @@ describe("SessionViewer", () => {
     expect(await screen.findByText("Streaming output")).toBeDefined()
   })
 
+  it("renders activity entry revisions without duplication", async () => {
+    (apiClient.getSession as any).mockResolvedValue(baseSession)
+
+    render(() => <SessionViewer sessionId="session-1" />)
+
+    await screen.findByText("Session session-1 - native - running")
+
+    eventSources[0]?.emit("activity_entry", {
+      type: "activity_entry",
+      timestamp: "2026-02-05T12:02:00Z",
+      session_id: "session-1",
+      data: {
+        action: "upsert",
+        entry: {
+          id: "act-1",
+          session_id: "session-1",
+          kind: "agent_message",
+          ts: "2026-02-05T12:02:00Z",
+          rev: 1,
+          open: true,
+          data: { text: "First entry" },
+        },
+      },
+    })
+
+    expect(await screen.findByText("First entry")).toBeDefined()
+
+    eventSources[0]?.emit("activity_entry", {
+      type: "activity_entry",
+      timestamp: "2026-02-05T12:02:05Z",
+      session_id: "session-1",
+      data: {
+        action: "finalize",
+        entry: {
+          id: "act-1",
+          session_id: "session-1",
+          kind: "agent_message",
+          ts: "2026-02-05T12:02:05Z",
+          rev: 2,
+          open: false,
+          data: { text: "Updated entry" },
+        },
+      },
+    })
+
+    expect(await screen.findByText("Updated entry")).toBeDefined()
+    expect(screen.queryByText("First entry")).toBeNull()
+  })
+
   it("renders terminal when session provider is PTY", async () => {
     (apiClient.getSession as any).mockResolvedValue({ ...baseSession, provider_type: "pty" })
 
@@ -116,6 +167,23 @@ describe("SessionViewer", () => {
 
     await screen.findByText("Session session-1 - pty - running")
     expect(await screen.findByTestId("terminal-view")).toBeDefined()
+  })
+
+  it("does not render raw output for PTY sessions", async () => {
+    (apiClient.getSession as any).mockResolvedValue({ ...baseSession, provider_type: "pty" })
+
+    render(() => <SessionViewer sessionId="session-1" />)
+
+    await screen.findByText("Session session-1 - pty - running")
+
+    eventSources[0]?.emit("output", {
+      type: "output",
+      timestamp: "2026-02-05T12:02:00Z",
+      session_id: "session-1",
+      data: { content: "PTY raw output" },
+    })
+
+    expect(screen.queryByText("PTY raw output")).toBeNull()
   })
 
   it("invokes pause and kill controls", async () => {
@@ -146,5 +214,47 @@ describe("SessionViewer", () => {
     await screen.findByText("Session session-1 - native - running")
     fireEvent.click(screen.getByTitle("Close session viewer"))
     expect(onClose).toHaveBeenCalled()
+  })
+
+  it("shows state-aware tooltips for disabled buttons", async () => {
+    // Test with paused session
+    const pausedSession = { ...baseSession, state: "paused" as const }
+    ; (apiClient.getSession as any).mockResolvedValue(pausedSession)
+
+    render(() => <SessionViewer sessionId="session-1" />)
+
+    await screen.findByText("Session session-1 - native - paused")
+
+    // Pause button should be disabled with tooltip explaining state
+    const pauseButton = screen.getByText("Pause") as HTMLButtonElement
+    expect(pauseButton.disabled).toBe(true)
+    expect(pauseButton.getAttribute("title")).toBe("Cannot pause: session is paused")
+
+    // Resume button should be enabled with action tooltip
+    const resumeButton = screen.getByText("Resume") as HTMLButtonElement
+    expect(resumeButton.disabled).toBe(false)
+    expect(resumeButton.getAttribute("title")).toBe("Resume the paused session")
+
+    // Kill button should be enabled
+    const killButton = screen.getByText("Kill") as HTMLButtonElement
+    expect(killButton.disabled).toBe(false)
+    expect(killButton.getAttribute("title")).toBe("Kill the session")
+  })
+
+  it("shows action-in-progress tooltips", async () => {
+    ; (apiClient.getSession as any).mockResolvedValue(baseSession)
+    ; (apiClient.pauseSession as any).mockImplementation(() => new Promise(() => { })) // Never resolves
+
+    render(() => <SessionViewer sessionId="session-1" />)
+
+    await screen.findByText("Session session-1 - native - running")
+
+    // Click pause to start action
+    const pauseButton = screen.getByText("Pause") as HTMLButtonElement
+    fireEvent.click(pauseButton)
+
+    // Button should show in-progress tooltip
+    expect(pauseButton.disabled).toBe(true)
+    expect(pauseButton.getAttribute("title")).toBe("Pause action is in progress...")
   })
 })

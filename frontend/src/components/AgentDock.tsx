@@ -330,7 +330,11 @@ export default function AgentDock(props: AgentDockProps) {
               onClick={handlePauseResume}
               disabled={!isSessionActive() || pendingAction() !== null}
               title={
-                sessionState() === "paused"
+                pendingAction() !== null
+                  ? "Action is in progress..."
+                  : !isSessionActive()
+                  ? `Cannot control: session is ${sessionState()}`
+                  : sessionState() === "paused"
                   ? "Resume session"
                   : "Pause session"
               }
@@ -342,7 +346,13 @@ export default function AgentDock(props: AgentDockProps) {
               class="btn btn-icon btn-danger btn-sm"
               onClick={handleKillSession}
               disabled={sessionState() === "stopped" || pendingAction() !== null}
-              title="Stop session"
+              title={
+                pendingAction() !== null
+                  ? "Action is in progress..."
+                  : sessionState() === "stopped"
+                  ? "Session is already stopped"
+                  : "Stop session"
+              }
             >
               ⊗
             </button>

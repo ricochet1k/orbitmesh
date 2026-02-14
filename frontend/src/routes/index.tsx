@@ -288,6 +288,13 @@ export default function Dashboard(props: DashboardProps = {}) {
                                 session.state !== "running" || isActionPending(session.id, "pause")
                               }
                               onClick={() => runBulkAction(session.id, "pause")}
+                              title={
+                                isActionPending(session.id, "pause")
+                                  ? "Pause action is in progress..."
+                                  : session.state !== "running"
+                                  ? `Cannot pause: session is ${session.state}`
+                                  : "Pause the running session"
+                              }
                             >
                               Pause
                             </button>
@@ -297,6 +304,13 @@ export default function Dashboard(props: DashboardProps = {}) {
                                 session.state !== "paused" || isActionPending(session.id, "resume")
                               }
                               onClick={() => runBulkAction(session.id, "resume")}
+                              title={
+                                isActionPending(session.id, "resume")
+                                  ? "Resume action is in progress..."
+                                  : session.state !== "paused"
+                                  ? `Cannot resume: session is ${session.state}`
+                                  : "Resume the paused session"
+                              }
                             >
                               Resume
                             </button>
@@ -306,6 +320,13 @@ export default function Dashboard(props: DashboardProps = {}) {
                                 session.state === "stopped" || isActionPending(session.id, "stop")
                               }
                               onClick={() => runBulkAction(session.id, "stop")}
+                              title={
+                                isActionPending(session.id, "stop")
+                                  ? "Stop action is in progress..."
+                                  : session.state === "stopped"
+                                  ? "Session is already stopped"
+                                  : "Stop the session"
+                              }
                             >
                               Stop
                             </button>

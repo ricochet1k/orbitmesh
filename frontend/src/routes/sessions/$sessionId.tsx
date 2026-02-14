@@ -2,7 +2,7 @@ import { createFileRoute } from '@tanstack/solid-router'
 import { createResource, createSignal, createEffect, createMemo, onCleanup, Show, For } from 'solid-js'
 import { apiClient } from '../../api/client'
 import TerminalView from '../../components/TerminalView'
-import type { Event, SessionState } from '../../types/api'
+import type { ActivityEntry, ActivityEntryMutation, Event, SessionState } from '../../types/api'
 
 export const Route = createFileRoute('/sessions/$sessionId')({
   component: SessionViewer,
@@ -13,6 +13,10 @@ interface TranscriptMessage {
   type: "agent" | "user" | "system" | "error"
   timestamp: string
   content: string
+  entryId?: string
+  revision?: number
+  open?: boolean
+  kind?: string
 }
 
 interface SessionViewerProps {
@@ -31,6 +35,13 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   const [session] = createResource(sessionId, apiClient.getSession)
   const [permissions] = createResource(apiClient.getPermissions)
   const [messages, setMessages] = createSignal<TranscriptMessage[]>([])
+  const [activityCursor, setActivityCursor] = createSignal<string | null>(null)
+  const [activityHistoryReady, setActivityHistoryReady] = createSignal(false)
+  const [activityHistoryLoading, setActivityHistoryLoading] = createSignal(false)
+  const [hasActivityHistory, setHasActivityHistory] = createSignal(false)
+  const [initialOutput, setInitialOutput] = createSignal<string | null>(null)
+  const [initialOutputTimestamp, setInitialOutputTimestamp] = createSignal<string | null>(null)
+  const [initialOutputApplied, setInitialOutputApplied] = createSignal(false)
   const [filter, setFilter] = createSignal("")
   const [autoScroll, setAutoScroll] = createSignal(true)
   const [streamStatus, setStreamStatus] = createSignal("connecting")
@@ -57,6 +68,40 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     )
   })
 
+  const mergeMessages = (incoming: TranscriptMessage[], options: { sort?: boolean } = {}) => {
+    if (incoming.length === 0) return
+    setMessages((prev) => {
+      const merged = [...prev]
+      const indexById = new Map<string, number>()
+      merged.forEach((msg, idx) => indexById.set(msg.id, idx))
+      for (const next of incoming) {
+        const existingIndex = indexById.get(next.id)
+        if (existingIndex !== undefined) {
+          const existing = merged[existingIndex]
+          if (
+            next.revision !== undefined &&
+            existing.revision !== undefined &&
+            next.revision < existing.revision
+          ) {
+            continue
+          }
+          merged[existingIndex] = { ...existing, ...next }
+        } else {
+          merged.push(next)
+          indexById.set(next.id, merged.length - 1)
+        }
+      }
+      if (options.sort) {
+        merged.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+      }
+      return merged
+    })
+  }
+
+  const removeMessageById = (id: string) => {
+    setMessages((prev) => prev.filter((msg) => msg.id !== id))
+  }
+
   const pushMessage = (message: TranscriptMessage) => {
     setMessages((prev) => [...prev, message])
   }
@@ -68,12 +113,22 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     }
   }
 
-  const handleEvent = (event: MessageEvent) => {
+  const handleEvent = (eventType: string, event: MessageEvent) => {
     markStreamActive()
     if (typeof event.data !== "string") return
     let payload: Event | null = null
     try {
-      payload = JSON.parse(event.data)
+      const parsed = JSON.parse(event.data)
+      if (parsed && typeof parsed === "object" && "type" in parsed) {
+        payload = parsed
+      } else {
+        payload = {
+          type: eventType as Event["type"],
+          timestamp: new Date().toISOString(),
+          session_id: sessionId(),
+          data: parsed,
+        }
+      }
     } catch (err) {
       pushMessage({
         id: crypto.randomUUID(),
@@ -88,6 +143,9 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
 
     switch (payload.type) {
       case "output": {
+        if (providerType() === "pty") {
+          break
+        }
         const content = payload.data?.content ?? ""
         if (content) {
           pushMessage({
@@ -142,6 +200,22 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
 
         break
       }
+      case "activity_entry": {
+        const mutation = normalizeActivityMutation(payload.data)
+        if (mutation.entries && mutation.entries.length > 0) {
+          const messages = mutation.entries.map((entry) => toActivityMessage(entry))
+          mergeMessages(messages, { sort: true })
+          break
+        }
+        if (!mutation.entry) break
+        const entryId = toActivityMessageId(mutation.entry)
+        if (mutation.action === "delete") {
+          removeMessageById(entryId)
+          break
+        }
+        mergeMessages([toActivityMessage(mutation.entry)], { sort: true })
+        break
+      }
       default:
         break
     }
@@ -149,6 +223,39 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
 
   const handleHeartbeat = () => {
     markStreamActive()
+  }
+
+  const loadActivityHistory = async (options: { cursor?: string | null; reset?: boolean } = {}) => {
+    if (activityHistoryLoading()) return
+    const id = sessionId()
+    if (!id) return
+    setActivityHistoryLoading(true)
+    if (options.reset) {
+      setActivityCursor(null)
+      setHasActivityHistory(false)
+    }
+    try {
+      const response = await apiClient.getActivityEntries(id, {
+        limit: 100,
+        cursor: options.cursor ?? undefined,
+      })
+      const entries = response?.entries ?? []
+      if (entries.length > 0) {
+        setHasActivityHistory(true)
+        mergeMessages(entries.map((entry) => toActivityMessage(entry)), { sort: true })
+      }
+      setActivityCursor(response?.next_cursor ?? null)
+    } catch (error) {
+      // ignore load failures; stream will still populate if available
+    } finally {
+      setActivityHistoryLoading(false)
+      setActivityHistoryReady(true)
+    }
+  }
+
+  const handleLoadEarlier = () => {
+    if (!activityCursor()) return
+    void loadActivityHistory({ cursor: activityCursor() })
   }
 
   const scrollToBottom = () => {
@@ -168,13 +275,43 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
       content: `Session ${initial.id} - ${initial.provider_type} - ${initial.state}`,
     })
     if (initial.output) {
-      pushMessage({
-        id: crypto.randomUUID(),
-        type: "agent",
-        timestamp: initial.updated_at,
-        content: initial.output,
-      })
+      setInitialOutput(initial.output)
+      setInitialOutputTimestamp(initial.updated_at)
     }
+  })
+
+  createEffect(() => {
+    if (initialOutputApplied()) return
+    const initial = session()
+    if (!initial) return
+    if (!activityHistoryReady()) return
+    if (initial.provider_type === "pty") {
+      setInitialOutputApplied(true)
+      return
+    }
+    if (!initialOutput() || hasActivityHistory()) {
+      setInitialOutputApplied(true)
+      return
+    }
+    pushMessage({
+      id: crypto.randomUUID(),
+      type: "agent",
+      timestamp: initialOutputTimestamp() ?? initial.updated_at,
+      content: initialOutput() ?? "",
+    })
+    setInitialOutputApplied(true)
+  })
+
+  createEffect(() => {
+    const id = sessionId()
+    if (!id || permissions.loading) return
+    if (!canInspect()) {
+      setActivityHistoryReady(true)
+      return
+    }
+    setActivityHistoryReady(false)
+    setInitialOutputApplied(false)
+    void loadActivityHistory({ reset: true })
   })
 
   createEffect(() => {
@@ -203,12 +340,14 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
       }
     }, heartbeatCheckIntervalMs)
 
-    const bind = (type: string) => source.addEventListener(type, handleEvent)
+    const bind = (type: string) =>
+      source.addEventListener(type, (event) => handleEvent(type, event as MessageEvent))
     bind("output")
     bind("status_change")
     bind("metric")
     bind("error")
     bind("metadata")
+    bind("activity_entry")
     source.addEventListener("heartbeat", handleHeartbeat)
 
     source.onopen = () => {
@@ -366,7 +505,15 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
               type="button"
               onClick={handlePause}
               disabled={!canManage() || sessionState() !== "running" || pendingAction() === "pause"}
-              title={!canManage() ? guardrailDetail("bulk-operations") : ""}
+              title={
+                !canManage()
+                  ? guardrailDetail("bulk-operations")
+                  : pendingAction() === "pause"
+                  ? "Pause action is in progress..."
+                  : sessionState() !== "running"
+                  ? `Cannot pause: session is ${sessionState()}`
+                  : "Pause the running session"
+              }
             >
               Pause
             </button>
@@ -374,7 +521,15 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
               type="button"
               onClick={handleResume}
               disabled={!canManage() || sessionState() !== "paused" || pendingAction() === "resume"}
-              title={!canManage() ? guardrailDetail("bulk-operations") : ""}
+              title={
+                !canManage()
+                  ? guardrailDetail("bulk-operations")
+                  : pendingAction() === "resume"
+                  ? "Resume action is in progress..."
+                  : sessionState() !== "paused"
+                  ? `Cannot resume: session is ${sessionState()}`
+                  : "Resume the paused session"
+              }
             >
               Resume
             </button>
@@ -383,7 +538,13 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
               class="danger"
               onClick={handleStop}
               disabled={!canManage() || pendingAction() === "stop"}
-              title={!canManage() ? guardrailDetail("bulk-operations") : ""}
+              title={
+                !canManage()
+                  ? guardrailDetail("bulk-operations")
+                  : pendingAction() === "stop"
+                  ? "Kill action is in progress..."
+                  : "Kill the session"
+              }
             >
               Kill
             </button>
@@ -414,6 +575,14 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
               <h2>Activity Feed</h2>
             </div>
             <div class="panel-tools">
+              <button
+                type="button"
+                class="neutral"
+                onClick={handleLoadEarlier}
+                disabled={!activityCursor() || activityHistoryLoading()}
+              >
+                {activityHistoryLoading() ? "Loading..." : "Load earlier"}
+              </button>
               <input
                 type="search"
                 placeholder="Search transcript"
@@ -433,6 +602,9 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
                   <article class={`transcript-item ${message.type}`}>
                     <header>
                       <span class="transcript-type">{message.type}</span>
+                      <Show when={message.open !== undefined}>
+                        <span class="transcript-status">{message.open ? "open" : "final"}</span>
+                      </Show>
                       <time>{new Date(message.timestamp).toLocaleTimeString()}</time>
                     </header>
                     <div class="transcript-content">
@@ -505,6 +677,54 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
       </main>
     </div>
   )
+}
+
+function normalizeActivityMutation(data: ActivityEntryMutation | ActivityEntry | any): ActivityEntryMutation {
+  if (!data) return {}
+  if (Array.isArray(data.entries)) return { entries: data.entries }
+  if (data.entry) return data
+  if (data.id && data.kind) return { entry: data as ActivityEntry }
+  return {}
+}
+
+function toActivityMessageId(entry: ActivityEntry): string {
+  return `activity:${entry.id}`
+}
+
+function toActivityMessage(entry: ActivityEntry): TranscriptMessage {
+  return {
+    id: toActivityMessageId(entry),
+    entryId: entry.id,
+    revision: entry.rev,
+    open: entry.open,
+    kind: entry.kind,
+    type: mapActivityKindToType(entry.kind),
+    timestamp: entry.ts,
+    content: formatActivityContent(entry),
+  }
+}
+
+function mapActivityKindToType(kind: string): TranscriptMessage["type"] {
+  const normalized = kind.toLowerCase()
+  if (normalized.includes("error")) return "error"
+  if (normalized.includes("user")) return "user"
+  if (normalized.includes("agent") || normalized.includes("assistant")) return "agent"
+  return "system"
+}
+
+function formatActivityContent(entry: ActivityEntry): string {
+  const data = entry.data ?? {}
+  if (typeof data.text === "string" && data.text.trim().length > 0) return data.text
+  if (typeof data.content === "string" && data.content.trim().length > 0) return data.content
+  if (typeof data.message === "string" && data.message.trim().length > 0) return data.message
+  if (typeof data.summary === "string" && data.summary.trim().length > 0) return data.summary
+  if (typeof data.tool === "string") {
+    if (typeof data.result === "string") {
+      return `Tool ${data.tool}: ${data.result}`
+    }
+    return `Tool ${data.tool}`
+  }
+  return `${entry.kind}`
 }
 
 function getStreamStatusLabel(status: string): string {
