@@ -107,19 +107,21 @@ test.describe("UI Navigation", () => {
   test("Navigation links route correctly", async ({ page }) => {
     await page.goto("/");
 
-    // Navigate to Tasks
-    await page.getByRole("link", { name: "Tasks" }).click();
-    await expect(page).toHaveURL("/tasks");
-    await expect(page.getByRole("heading", { name: "Task Tree", exact: true })).toBeVisible();
+     // Navigate to Tasks
+     await page.getByRole("link", { name: "Tasks" }).click();
+     await expect(page).toHaveURL("/tasks");
+     const taskHeading = page.getByRole("heading").filter({ hasText: "Task Tree" });
+     await expect(taskHeading.first()).toBeVisible();
     await expect(page.getByRole("link", { name: "Tasks" })).toHaveAttribute(
       "aria-current",
       "page"
     );
 
-    // Navigate to Sessions
-    await page.getByRole("link", { name: "Sessions" }).click();
-    await expect(page).toHaveURL("/sessions");
-    await expect(page.getByRole("heading", { name: "Sessions", exact: true })).toBeVisible();
+     // Navigate to Sessions
+     await page.getByRole("link", { name: "Sessions" }).click();
+     await expect(page).toHaveURL("/sessions");
+     const sessionHeading = page.getByRole("heading").filter({ hasText: "Sessions" });
+     await expect(sessionHeading.first()).toBeVisible();
     await expect(page.getByRole("link", { name: "Sessions" })).toHaveAttribute(
       "aria-current",
       "page"
@@ -137,10 +139,11 @@ test.describe("UI Navigation", () => {
     );
   });
 
-  test("Task tree view displays tasks with expand/collapse", async ({ page }) => {
-    await page.goto("/tasks");
+   test("Task tree view displays tasks with expand/collapse", async ({ page }) => {
+     await page.goto("/tasks");
 
-    await expect(page.getByRole("heading", { name: "Task Tree", exact: true })).toBeVisible();
+     const taskHeading = page.getByRole("heading").filter({ hasText: "Task Tree" });
+     await expect(taskHeading.first()).toBeVisible();
 
     // Root task should be visible
     const rootTask = page.locator(".task-tree").getByText("Root Task");

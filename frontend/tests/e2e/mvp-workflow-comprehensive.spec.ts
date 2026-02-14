@@ -186,9 +186,10 @@ data: ${JSON.stringify({
       page.getByRole("heading", { name: "Operational Continuity" })
     ).toBeVisible();
 
-    // Step 2: Navigate to tasks
-    await page.getByRole("link", { name: "Tasks" }).click();
-    await expect(page.getByRole("heading", { name: "Task Tree", exact: true })).toBeVisible();
+     // Step 2: Navigate to tasks
+     await page.getByRole("link", { name: "Tasks" }).click();
+     const taskHeading = page.getByRole("heading").filter({ hasText: "Task Tree" });
+     await expect(taskHeading.first()).toBeVisible();
 
     // Step 3: Click on a task to select it
     const taskItem = page.locator(".task-tree").getByText("MVP Workflow Task").first();

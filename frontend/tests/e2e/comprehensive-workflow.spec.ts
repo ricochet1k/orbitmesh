@@ -255,7 +255,7 @@ test.describe("Comprehensive OrbitMesh MVP Workflow", () => {
     }
   });
 
-  test("4. Session Control - Pause and resume session", async ({ page }) => {
+   test("4. Session Control - Pause/Resume session", async ({ page }) => {
     // Create session first
     await page.goto("/tasks");
     const taskText = page.locator(".task-tree, .task-item").getByText(/Comprehensive|playwright/i);

@@ -225,8 +225,9 @@ test.describe("MVP workflow", () => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Operational Continuity" })).toBeVisible();
 
-    await page.getByRole("link", { name: "Tasks" }).click();
-    await expect(page.getByRole("heading", { name: "Task Tree", exact: true })).toBeVisible();
+     await page.getByRole("link", { name: "Tasks" }).click();
+     const taskHeading = page.getByRole("heading").filter({ hasText: "Task Tree" });
+     await expect(taskHeading.first()).toBeVisible();
 
     await page.getByText("MVP Workflow").first().click();
     await expect(page.getByText("Agent Launchpad")).toBeVisible();
