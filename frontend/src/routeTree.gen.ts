@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TasksRouteImport } from './routes/tasks'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as ExtractorsRouteImport } from './routes/extractors'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SessionsIndexRouteImport } from './routes/sessions/index'
@@ -25,6 +26,11 @@ const TasksRoute = TasksRouteImport.update({
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExtractorsRoute = ExtractorsRouteImport.update({
+  id: '/extractors',
+  path: '/extractors',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AboutRoute = AboutRouteImport.update({
@@ -56,6 +62,7 @@ const HistoryCommitsRoute = HistoryCommitsRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/extractors': typeof ExtractorsRoute
   '/settings': typeof SettingsRoute
   '/tasks': typeof TasksRoute
   '/history/commits': typeof HistoryCommitsRoute
@@ -65,6 +72,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/extractors': typeof ExtractorsRoute
   '/settings': typeof SettingsRoute
   '/tasks': typeof TasksRoute
   '/history/commits': typeof HistoryCommitsRoute
@@ -75,6 +83,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/extractors': typeof ExtractorsRoute
   '/settings': typeof SettingsRoute
   '/tasks': typeof TasksRoute
   '/history/commits': typeof HistoryCommitsRoute
@@ -86,6 +95,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/about'
+    | '/extractors'
     | '/settings'
     | '/tasks'
     | '/history/commits'
@@ -95,6 +105,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/about'
+    | '/extractors'
     | '/settings'
     | '/tasks'
     | '/history/commits'
@@ -104,6 +115,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/about'
+    | '/extractors'
     | '/settings'
     | '/tasks'
     | '/history/commits'
@@ -114,6 +126,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
+  ExtractorsRoute: typeof ExtractorsRoute
   SettingsRoute: typeof SettingsRoute
   TasksRoute: typeof TasksRoute
   HistoryCommitsRoute: typeof HistoryCommitsRoute
@@ -135,6 +148,13 @@ declare module '@tanstack/solid-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/extractors': {
+      id: '/extractors'
+      path: '/extractors'
+      fullPath: '/extractors'
+      preLoaderRoute: typeof ExtractorsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/about': {
@@ -178,6 +198,7 @@ declare module '@tanstack/solid-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
+  ExtractorsRoute: ExtractorsRoute,
   SettingsRoute: SettingsRoute,
   TasksRoute: TasksRoute,
   HistoryCommitsRoute: HistoryCommitsRoute,

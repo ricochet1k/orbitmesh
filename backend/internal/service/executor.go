@@ -10,6 +10,7 @@ import (
 	"github.com/ricochet1k/orbitmesh/internal/domain"
 	"github.com/ricochet1k/orbitmesh/internal/provider"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
+	"github.com/ricochet1k/orbitmesh/internal/terminal"
 )
 
 var (
@@ -399,6 +400,23 @@ func (e *AgentExecutor) TerminalHub(id string) (*TerminalHub, error) {
 	hub := NewTerminalHub(id, provider)
 	e.terminalHubs[id] = hub
 	return hub, nil
+}
+
+func (e *AgentExecutor) TerminalSnapshot(id string) (terminal.Snapshot, error) {
+	e.mu.RLock()
+	sc, exists := e.sessions[id]
+	e.mu.RUnlock()
+
+	if !exists {
+		return terminal.Snapshot{}, ErrSessionNotFound
+	}
+
+	provider, ok := sc.provider.(TerminalProvider)
+	if !ok {
+		return terminal.Snapshot{}, ErrTerminalNotSupported
+	}
+
+	return provider.TerminalSnapshot()
 }
 
 func (e *AgentExecutor) Shutdown(ctx context.Context) error {

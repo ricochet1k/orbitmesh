@@ -20,9 +20,10 @@ type RuleConfig struct {
 }
 
 type RuleProfile struct {
-	ID    string           `json:"id"`
-	Match RuleProfileMatch `json:"match"`
-	Rules []RuleDefinition `json:"rules"`
+	ID      string           `json:"id"`
+	Enabled *bool            `json:"enabled,omitempty"`
+	Match   RuleProfileMatch `json:"match"`
+	Rules   []RuleDefinition `json:"rules"`
 }
 
 type RuleProfileMatch struct {
@@ -148,6 +149,9 @@ func (c *RuleConfig) MatchProfile(command string, args []string) (*CompiledProfi
 		return nil, errors.New("rules config is nil")
 	}
 	for _, profile := range c.Profiles {
+		if !profileEnabled(profile) {
+			continue
+		}
 		compiled, err := CompileProfile(profile)
 		if err != nil {
 			return nil, err
@@ -190,6 +194,53 @@ func CompileProfile(profile RuleProfile) (*CompiledProfile, error) {
 	return compiled, nil
 }
 
+func SaveRuleConfig(path string, cfg *RuleConfig) error {
+	if cfg == nil {
+		return errors.New("rules config is nil")
+	}
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	if path == "" {
+		path = DefaultRulesPath()
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "pty-rules-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	_ = tmp.Chmod(0o600)
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
+
 func matchProfile(profile *CompiledProfile, command string, args []string) bool {
 	if profile == nil {
 		return false
@@ -227,6 +278,13 @@ func validateProfile(profile RuleProfile) error {
 		}
 	}
 	return nil
+}
+
+func profileEnabled(profile RuleProfile) bool {
+	if profile.Enabled == nil {
+		return true
+	}
+	return *profile.Enabled
 }
 
 func validateRule(profileID string, rule RuleDefinition) error {

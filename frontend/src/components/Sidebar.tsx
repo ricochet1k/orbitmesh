@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/solid-router"
-import { BsViewList } from "solid-icons/bs"
+import { BsSliders, BsViewList } from "solid-icons/bs"
 import { FaSolidTasks } from "solid-icons/fa"
 import { IoSettingsSharp } from "solid-icons/io"
 import { RiSystemDashboardHorizontalFill } from "solid-icons/ri"
@@ -30,6 +30,10 @@ export default function Sidebar() {
         <Link to="/sessions" class={`nav-item`}>
           <BsViewList class="nav-icon" />
           <span class="nav-label">Sessions</span>
+        </Link>
+        <Link to="/extractors" class={`nav-item`}>
+          <BsSliders class="nav-icon" />
+          <span class="nav-label">Extractors</span>
         </Link>
         <Link to="/settings" class={`nav-item`}>
           <IoSettingsSharp class="nav-icon" />

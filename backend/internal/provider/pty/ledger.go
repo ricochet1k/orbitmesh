@@ -51,6 +51,10 @@ func OpenInputDebugLog(sessionID string) (*os.File, error) {
 	return openSessionAppendFile(sessionID, inputDebugLogFile)
 }
 
+func PTYLogPath(sessionID string) string {
+	return filepath.Join(storage.DefaultBaseDir(), "sessions", sessionID, ptyRawLogFile)
+}
+
 func TailActivityLog(path string, limit int) ([]string, error) {
 	if limit <= 0 {
 		return []string{}, nil

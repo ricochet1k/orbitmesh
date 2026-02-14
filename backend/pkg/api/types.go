@@ -181,3 +181,126 @@ type CommitDetail struct {
 type CommitDetailResponse struct {
 	Commit CommitDetail `json:"commit"`
 }
+
+type ExtractorConfig struct {
+	Version  int                `json:"version"`
+	Profiles []ExtractorProfile `json:"profiles"`
+}
+
+type ExtractorProfile struct {
+	ID      string                `json:"id"`
+	Enabled *bool                 `json:"enabled,omitempty"`
+	Match   ExtractorProfileMatch `json:"match"`
+	Rules   []ExtractorRule       `json:"rules"`
+}
+
+type ExtractorProfileMatch struct {
+	CommandRegex string `json:"command_regex"`
+	ArgsRegex    string `json:"args_regex"`
+}
+
+type ExtractorRule struct {
+	ID       string             `json:"id"`
+	Enabled  bool               `json:"enabled"`
+	Trigger  ExtractorTrigger   `json:"trigger"`
+	Extract  ExtractorExtract   `json:"extract"`
+	Emit     ExtractorEmit      `json:"emit"`
+	Identity *ExtractorIdentity `json:"identity,omitempty"`
+}
+
+type ExtractorIdentity struct {
+	Capture string `json:"capture,omitempty"`
+	Static  string `json:"static,omitempty"`
+}
+
+type ExtractorTrigger struct {
+	RegionChanged *ExtractorRegionTrigger `json:"region_changed,omitempty"`
+}
+
+type ExtractorRegionTrigger struct {
+	Top    int  `json:"top"`
+	Bottom int  `json:"bottom"`
+	Left   *int `json:"left,omitempty"`
+	Right  *int `json:"right,omitempty"`
+}
+
+type ExtractorExtract struct {
+	Type    string          `json:"type"`
+	Region  ExtractorRegion `json:"region"`
+	Pattern string          `json:"pattern,omitempty"`
+}
+
+type ExtractorRegion struct {
+	Top    *int `json:"top"`
+	Bottom *int `json:"bottom"`
+	Left   *int `json:"left,omitempty"`
+	Right  *int `json:"right,omitempty"`
+}
+
+type ExtractorEmit struct {
+	Kind         string `json:"kind"`
+	UpdateWindow string `json:"update_window,omitempty"`
+	Finalize     bool   `json:"finalize,omitempty"`
+	Open         *bool  `json:"open,omitempty"`
+}
+
+type ExtractorConfigResponse struct {
+	Config ExtractorConfig `json:"config"`
+	Valid  bool            `json:"valid"`
+	Errors []string        `json:"errors,omitempty"`
+	Exists bool            `json:"exists"`
+}
+
+type ExtractorValidateRequest struct {
+	Config ExtractorConfig `json:"config"`
+}
+
+type ExtractorValidateResponse struct {
+	Valid  bool     `json:"valid"`
+	Errors []string `json:"errors,omitempty"`
+}
+
+type ExtractorReplayRequest struct {
+	Config      *ExtractorConfig `json:"config,omitempty"`
+	ProfileID   string           `json:"profile_id"`
+	StartOffset *int64           `json:"start_offset,omitempty"`
+}
+
+type ExtractorReplayResponse struct {
+	Offset      int64                     `json:"offset"`
+	Diagnostics PTYLogDiagnostics         `json:"diagnostics"`
+	Records     []ExtractorActivityRecord `json:"records"`
+}
+
+type ExtractorActivityRecord struct {
+	Type  string                  `json:"type"`
+	Entry *ExtractorActivityEntry `json:"entry,omitempty"`
+	ID    string                  `json:"id,omitempty"`
+	Rev   int                     `json:"rev,omitempty"`
+	TS    time.Time               `json:"ts,omitempty"`
+}
+
+type ExtractorActivityEntry struct {
+	ID        string         `json:"id"`
+	SessionID string         `json:"session_id"`
+	Kind      string         `json:"kind"`
+	TS        time.Time      `json:"ts"`
+	Rev       int            `json:"rev"`
+	Open      bool           `json:"open"`
+	Data      map[string]any `json:"data,omitempty"`
+}
+
+type PTYLogDiagnostics struct {
+	Frames        int   `json:"frames"`
+	Bytes         int64 `json:"bytes"`
+	PartialFrame  bool  `json:"partial_frame"`
+	PartialOffset int64 `json:"partial_offset"`
+	CorruptFrames int   `json:"corrupt_frames"`
+	CorruptOffset int64 `json:"corrupt_offset"`
+}
+
+type TerminalSnapshot struct {
+	Rows  int      `json:"rows"`
+	Cols  int      `json:"cols"`
+	Lines []string `json:"lines"`
+}

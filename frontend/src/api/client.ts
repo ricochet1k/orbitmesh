@@ -8,6 +8,12 @@ import {
   CommitListResponse,
   CommitDetailResponse,
   ErrorResponse,
+  ActivityHistoryResponse,
+  ExtractorConfig,
+  ExtractorConfigResponse,
+  ExtractorValidateResponse,
+  ExtractorReplayResponse,
+  TerminalSnapshot,
 } from "../types/api";
 import { sanitizePermissionsResponse } from "../utils/guardrailGuidance";
 
@@ -93,6 +99,22 @@ export const apiClient = {
     return resp.json();
   },
 
+  async getActivityEntries(
+    id: string,
+    params: {
+      limit?: number;
+      cursor?: string | null;
+    } = {},
+  ): Promise<ActivityHistoryResponse> {
+    const search = new URLSearchParams();
+    if (params.limit) search.set("limit", String(params.limit));
+    if (params.cursor) search.set("cursor", params.cursor);
+    const suffix = search.toString();
+    const resp = await fetch(`${BASE_URL}/sessions/${id}/activity${suffix ? `?${suffix}` : ""}`);
+    if (!resp.ok) throw new Error(await readErrorMessage(resp));
+    return resp.json();
+  },
+
   async stopSession(id: string): Promise<void> {
     const resp = await fetch(`${BASE_URL}/sessions/${id}`, {
       method: "DELETE",
@@ -139,6 +161,58 @@ export const apiClient = {
 
   async getCommit(sha: string): Promise<CommitDetailResponse> {
     const resp = await fetch(`${BASE_URL}/v1/commits/${sha}`);
+    if (!resp.ok) throw new Error(await readErrorMessage(resp));
+    return resp.json();
+  },
+
+  async getExtractorConfig(): Promise<ExtractorConfigResponse> {
+    const resp = await fetch(`${BASE_URL}/v1/extractor/config`);
+    if (!resp.ok) throw new Error(await readErrorMessage(resp));
+    return resp.json();
+  },
+
+  async saveExtractorConfig(config: ExtractorConfig): Promise<ExtractorConfigResponse> {
+    const resp = await fetch(`${BASE_URL}/v1/extractor/config`, {
+      method: "PUT",
+      headers: withCSRFHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(config),
+    });
+    if (!resp.ok) throw new Error(await readErrorMessage(resp));
+    return resp.json();
+  },
+
+  async validateExtractorConfig(config: ExtractorConfig): Promise<ExtractorValidateResponse> {
+    const resp = await fetch(`${BASE_URL}/v1/extractor/validate`, {
+      method: "POST",
+      headers: withCSRFHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ config }),
+    });
+    if (!resp.ok) throw new Error(await readErrorMessage(resp));
+    return resp.json();
+  },
+
+  async replayExtractor(params: {
+    sessionId: string;
+    config?: ExtractorConfig;
+    profileId: string;
+    startOffset?: number;
+  }): Promise<ExtractorReplayResponse> {
+    const { sessionId, config, profileId, startOffset } = params;
+    const resp = await fetch(`${BASE_URL}/v1/sessions/${sessionId}/extractor/replay`, {
+      method: "POST",
+      headers: withCSRFHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        config: config ?? undefined,
+        profile_id: profileId,
+        start_offset: startOffset,
+      }),
+    });
+    if (!resp.ok) throw new Error(await readErrorMessage(resp));
+    return resp.json();
+  },
+
+  async getTerminalSnapshot(id: string): Promise<TerminalSnapshot> {
+    const resp = await fetch(`${BASE_URL}/v1/sessions/${id}/terminal/snapshot`);
     if (!resp.ok) throw new Error(await readErrorMessage(resp));
     return resp.json();
   },

@@ -33,6 +33,9 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/v1/tasks/tree", h.tasksTree)
 	r.Get("/api/v1/commits", h.listCommits)
 	r.Get("/api/v1/commits/{sha}", h.getCommit)
+	r.Get("/api/v1/extractor/config", h.getExtractorConfig)
+	r.Put("/api/v1/extractor/config", h.putExtractorConfig)
+	r.Post("/api/v1/extractor/validate", h.validateExtractorConfig)
 	r.Get("/api/sessions", h.listSessions)
 	r.Post("/api/sessions", h.createSession)
 	r.Get("/api/sessions/{id}", h.getSession)
@@ -41,6 +44,8 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Post("/api/sessions/{id}/resume", h.resumeSession)
 	r.Get("/api/sessions/{id}/events", h.sseEvents)
 	r.Get("/api/sessions/{id}/terminal/ws", h.terminalWebSocket)
+	r.Get("/api/v1/sessions/{id}/terminal/snapshot", h.getTerminalSnapshot)
+	r.Post("/api/v1/sessions/{id}/extractor/replay", h.replayExtractor)
 }
 
 func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {

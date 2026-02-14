@@ -52,13 +52,40 @@ export interface SessionStatusResponse extends SessionResponse {
   metrics: SessionMetrics;
 }
 
-export type EventType = "status_change" | "output" | "metric" | "error" | "metadata";
+export type EventType =
+  | "status_change"
+  | "output"
+  | "metric"
+  | "error"
+  | "metadata"
+  | "activity_entry";
 
 export interface Event {
   type: EventType;
   timestamp: string;
   session_id: string;
   data: any;
+}
+
+export interface ActivityEntry {
+  id: string;
+  session_id: string;
+  kind: string;
+  ts: string;
+  rev: number;
+  open: boolean;
+  data: Record<string, any>;
+}
+
+export interface ActivityEntryMutation {
+  action?: "upsert" | "finalize" | "delete";
+  entry?: ActivityEntry;
+  entries?: ActivityEntry[];
+}
+
+export interface ActivityHistoryResponse {
+  entries: ActivityEntry[];
+  next_cursor?: string | null;
 }
 
 export interface StatusChangeData {
@@ -154,4 +181,117 @@ export interface CommitDetail {
 
 export interface CommitDetailResponse {
   commit: CommitDetail;
+}
+
+export interface ExtractorConfig {
+  version: number;
+  profiles: ExtractorProfile[];
+}
+
+export interface ExtractorProfile {
+  id: string;
+  enabled?: boolean;
+  match: ExtractorProfileMatch;
+  rules: ExtractorRule[];
+}
+
+export interface ExtractorProfileMatch {
+  command_regex: string;
+  args_regex: string;
+}
+
+export interface ExtractorRule {
+  id: string;
+  enabled: boolean;
+  trigger: ExtractorTrigger;
+  extract: ExtractorExtract;
+  emit: ExtractorEmit;
+  identity?: ExtractorIdentity;
+}
+
+export interface ExtractorIdentity {
+  capture?: string;
+  static?: string;
+}
+
+export interface ExtractorTrigger {
+  region_changed?: ExtractorRegionTrigger;
+}
+
+export interface ExtractorRegionTrigger {
+  top: number;
+  bottom: number;
+  left?: number;
+  right?: number;
+}
+
+export interface ExtractorExtract {
+  type: string;
+  region: ExtractorRegion;
+  pattern?: string;
+}
+
+export interface ExtractorRegion {
+  top?: number;
+  bottom?: number;
+  left?: number;
+  right?: number;
+}
+
+export interface ExtractorEmit {
+  kind: string;
+  update_window?: string;
+  finalize?: boolean;
+  open?: boolean;
+}
+
+export interface ExtractorConfigResponse {
+  config: ExtractorConfig;
+  valid: boolean;
+  errors?: string[];
+  exists: boolean;
+}
+
+export interface ExtractorValidateResponse {
+  valid: boolean;
+  errors?: string[];
+}
+
+export interface ExtractorReplayResponse {
+  offset: number;
+  diagnostics: PTYLogDiagnostics;
+  records: ExtractorActivityRecord[];
+}
+
+export interface ExtractorActivityRecord {
+  type: string;
+  entry?: ExtractorActivityEntry;
+  id?: string;
+  rev?: number;
+  ts?: string;
+}
+
+export interface ExtractorActivityEntry {
+  id: string;
+  session_id: string;
+  kind: string;
+  ts: string;
+  rev: number;
+  open: boolean;
+  data?: Record<string, any>;
+}
+
+export interface PTYLogDiagnostics {
+  frames: number;
+  bytes: number;
+  partial_frame: boolean;
+  partial_offset: number;
+  corrupt_frames: number;
+  corrupt_offset: number;
+}
+
+export interface TerminalSnapshot {
+  rows: number;
+  cols: number;
+  lines: string[];
 }

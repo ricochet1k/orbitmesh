@@ -1,12 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const port = 5173;
+const port = 4173;
 
 export default defineConfig({
   testDir: "tests/e2e",
-  timeout: 30_000,
+  timeout: 15_000,
+  fullyParallel: true,
   expect: {
-    timeout: 5_000,
+    timeout: 2_000,
   },
   use: {
     baseURL: `http://127.0.0.1:${port}`,
@@ -21,9 +22,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `pnpm dev -- --host 127.0.0.1 --port ${port}`,
+    command: `npm run dev -- --host 127.0.0.1 --port ${port}`,
     url: `http://127.0.0.1:${port}`,
-    reuseExistingServer: true,
-    timeout: 120_000,
+    reuseExistingServer: false,
+    timeout: 15_000,
   },
 });

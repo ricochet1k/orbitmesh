@@ -3,9 +3,10 @@ module github.com/ricochet1k/orbitmesh
 go 1.25
 
 require (
-	github.com/creack/pty v1.1.24
 	github.com/go-chi/chi/v5 v5.2.5
+	github.com/gorilla/websocket v1.5.3
 	github.com/modelcontextprotocol/go-sdk v1.2.0
+	github.com/ricochet1k/termemu v0.0.0-20260209182826-78fb158143ff
 	google.golang.org/adk v0.4.0
 	google.golang.org/genai v1.45.0
 )
@@ -20,6 +21,7 @@ require (
 	github.com/bep/godartsass/v2 v2.5.0 // indirect
 	github.com/bep/golibsass v1.2.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/creack/pty v1.1.24 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
@@ -34,13 +36,11 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.11 // indirect
 	github.com/googleapis/gax-go/v2 v2.17.0 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
-	github.com/ricochet1k/termemu v0.0.0-20260120052220-bb98834ccc7d // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/spf13/afero v1.14.0 // indirect
 	github.com/spf13/cast v1.9.2 // indirect
