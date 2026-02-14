@@ -15,6 +15,7 @@ import (
 	"github.com/ricochet1k/orbitmesh/internal/domain"
 	"github.com/ricochet1k/orbitmesh/internal/provider"
 	"github.com/ricochet1k/orbitmesh/internal/service"
+	"github.com/ricochet1k/orbitmesh/internal/storage"
 	"github.com/ricochet1k/orbitmesh/internal/terminal"
 )
 
@@ -147,7 +148,8 @@ func newTerminalTestEnv(t *testing.T) *terminalTestEnv {
 		},
 	})
 
-	env.handler = NewHandler(env.executor, env.broadcaster)
+	providerStorage := storage.NewProviderConfigStorage(t.TempDir())
+	env.handler = NewHandler(env.executor, env.broadcaster, providerStorage)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()

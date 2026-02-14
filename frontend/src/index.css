@@ -2052,3 +2052,142 @@ tbody tr:hover {
     justify-items: start;
   }
 }
+
+/* ===== Provider Configuration Styles ===== */
+
+.providers-list {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.provider-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-3);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.95);
+  transition: border var(--motion-fast) var(--easing-standard),
+    background var(--motion-fast) var(--easing-standard);
+}
+
+.provider-card:hover {
+  border-color: rgba(37, 99, 235, 0.25);
+  background: rgba(37, 99, 235, 0.04);
+}
+
+.provider-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.provider-info h3 {
+  font-size: 0.95rem;
+  margin: 0;
+  color: var(--ink-1);
+}
+
+.provider-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 600;
+  margin-top: 0.25rem;
+}
+
+.status-badge.active {
+  background: rgba(15, 118, 110, 0.15);
+  color: var(--success);
+}
+
+.status-badge.inactive {
+  background: rgba(180, 83, 9, 0.18);
+  color: var(--warning);
+}
+
+.provider-form {
+  padding: 1rem;
+  margin-top: 0.5rem;
+  border-radius: var(--radius-3);
+  border: 1px solid var(--border);
+  background: var(--surface-3);
+  display: grid;
+  gap: 0.85rem;
+}
+
+.form-group {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.form-group label {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+.form-group input,
+.form-group select {
+  padding: 0.45rem 0.65rem;
+  border-radius: var(--radius-2);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 0.85rem;
+  color: var(--ink-1);
+  transition: border var(--motion-fast) var(--easing-standard);
+}
+
+.form-group input:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: var(--accent-1);
+  box-shadow: var(--focus-shadow);
+}
+
+.form-hint {
+  font-size: 0.72rem;
+  color: var(--ink-3);
+  margin-top: 0.15rem;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.error-message {
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-2);
+  background: rgba(185, 28, 28, 0.08);
+  color: var(--danger);
+  font-size: 0.82rem;
+  border: 1px solid rgba(185, 28, 28, 0.25);
+}

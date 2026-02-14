@@ -12,19 +12,26 @@ import (
 	"github.com/ricochet1k/orbitmesh/internal/domain"
 	"github.com/ricochet1k/orbitmesh/internal/provider"
 	"github.com/ricochet1k/orbitmesh/internal/service"
+	"github.com/ricochet1k/orbitmesh/internal/storage"
 	apiTypes "github.com/ricochet1k/orbitmesh/pkg/api"
 )
 
 // Handler routes REST API requests to the agent executor service.
 type Handler struct {
-	executor    *service.AgentExecutor
-	broadcaster *service.EventBroadcaster
-	gitDir      string
+	executor        *service.AgentExecutor
+	broadcaster     *service.EventBroadcaster
+	providerStorage *storage.ProviderConfigStorage
+	gitDir          string
 }
 
 // NewHandler creates a Handler backed by the given executor and broadcaster.
-func NewHandler(executor *service.AgentExecutor, broadcaster *service.EventBroadcaster) *Handler {
-	return &Handler{executor: executor, broadcaster: broadcaster, gitDir: resolveGitDir()}
+func NewHandler(executor *service.AgentExecutor, broadcaster *service.EventBroadcaster, providerStorage *storage.ProviderConfigStorage) *Handler {
+	return &Handler{
+		executor:        executor,
+		broadcaster:     broadcaster,
+		providerStorage: providerStorage,
+		gitDir:          resolveGitDir(),
+	}
 }
 
 // Mount registers all API routes on the provided router.
@@ -46,6 +53,11 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/sessions/{id}/terminal/ws", h.terminalWebSocket)
 	r.Get("/api/v1/sessions/{id}/terminal/snapshot", h.getTerminalSnapshot)
 	r.Post("/api/v1/sessions/{id}/extractor/replay", h.replayExtractor)
+	r.Get("/api/v1/providers", h.listProviders)
+	r.Post("/api/v1/providers", h.createProvider)
+	r.Get("/api/v1/providers/{id}", h.getProvider)
+	r.Put("/api/v1/providers/{id}", h.updateProvider)
+	r.Delete("/api/v1/providers/{id}", h.deleteProvider)
 }
 
 func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
@@ -53,6 +65,22 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body", err.Error())
 		return
+	}
+
+	var providerConfig *storage.ProviderConfig
+	if req.ProviderID != "" {
+		cfg, err := h.providerStorage.Get(req.ProviderID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "provider not found", err.Error())
+			return
+		}
+		providerConfig = cfg
+		if req.ProviderType == "" {
+			req.ProviderType = cfg.Type
+		} else if req.ProviderType != cfg.Type {
+			writeError(w, http.StatusBadRequest, "provider_type does not match provider config", "")
+			return
+		}
 	}
 
 	if req.ProviderType == "" {
@@ -78,6 +106,41 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		Custom:       req.Custom,
 		TaskID:       req.TaskID,
 		TaskTitle:    req.TaskTitle,
+	}
+	if providerConfig != nil {
+		if len(providerConfig.Env) > 0 {
+			if config.Environment == nil {
+				config.Environment = map[string]string{}
+			}
+			for k, v := range providerConfig.Env {
+				if _, ok := config.Environment[k]; !ok {
+					config.Environment[k] = v
+				}
+			}
+		}
+		if len(providerConfig.Custom) > 0 {
+			if config.Custom == nil {
+				config.Custom = map[string]any{}
+			}
+			for k, v := range providerConfig.Custom {
+				if _, ok := config.Custom[k]; !ok {
+					config.Custom[k] = v
+				}
+			}
+		}
+		if providerConfig.Type == "pty" && len(providerConfig.Command) > 0 {
+			if config.Custom == nil {
+				config.Custom = map[string]any{}
+			}
+			if _, ok := config.Custom["command"]; !ok {
+				config.Custom["command"] = providerConfig.Command[0]
+			}
+			if len(providerConfig.Command) > 1 {
+				if _, ok := config.Custom["args"]; !ok {
+					config.Custom["args"] = providerConfig.Command[1:]
+				}
+			}
+		}
 	}
 	if len(req.MCPServers) > 0 {
 		config.MCPServers = make([]provider.MCPServerConfig, len(req.MCPServers))

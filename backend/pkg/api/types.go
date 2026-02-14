@@ -16,6 +16,7 @@ const (
 
 type SessionRequest struct {
 	ProviderType string            `json:"provider_type"`
+	ProviderID   string            `json:"provider_id,omitempty"`
 	WorkingDir   string            `json:"working_dir,omitempty"`
 	Environment  map[string]string `json:"environment,omitempty"`
 	SystemPrompt string            `json:"system_prompt,omitempty"`
@@ -303,4 +304,30 @@ type TerminalSnapshot struct {
 	Rows  int      `json:"rows"`
 	Cols  int      `json:"cols"`
 	Lines []string `json:"lines"`
+}
+
+type ProviderConfigRequest struct {
+	ID       string            `json:"id,omitempty"`
+	Name     string            `json:"name"`
+	Type     string            `json:"type"`
+	Command  []string          `json:"command,omitempty"`
+	APIKey   string            `json:"api_key,omitempty"`
+	Env      map[string]string `json:"env,omitempty"`
+	Custom   map[string]any    `json:"custom,omitempty"`
+	IsActive bool              `json:"is_active"`
+}
+
+type ProviderConfigResponse struct {
+	ID       string            `json:"id"`
+	Name     string            `json:"name"`
+	Type     string            `json:"type"`
+	Command  []string          `json:"command,omitempty"`
+	APIKey   string            `json:"api_key,omitempty"`
+	Env      map[string]string `json:"env,omitempty"`
+	Custom   map[string]any    `json:"custom,omitempty"`
+	IsActive bool              `json:"is_active"`
+}
+
+type ProviderConfigListResponse struct {
+	Providers []ProviderConfigResponse `json:"providers"`
 }

@@ -16,6 +16,7 @@ export interface MCPServerConfig {
 
 export interface SessionRequest {
   provider_type: string;
+  provider_id?: string;
   working_dir?: string;
   environment?: Record<string, string>;
   system_prompt?: string;
@@ -294,4 +295,30 @@ export interface TerminalSnapshot {
   rows: number;
   cols: number;
   lines: string[];
+}
+
+export interface ProviderConfigRequest {
+  id?: string;
+  name: string;
+  type: string;
+  command?: string[];
+  api_key?: string;
+  env?: Record<string, string>;
+  custom?: Record<string, any>;
+  is_active: boolean;
+}
+
+export interface ProviderConfigResponse {
+  id: string;
+  name: string;
+  type: string;
+  command?: string[];
+  api_key?: string;
+  env?: Record<string, string>;
+  custom?: Record<string, any>;
+  is_active: boolean;
+}
+
+export interface ProviderConfigListResponse {
+  providers: ProviderConfigResponse[];
 }

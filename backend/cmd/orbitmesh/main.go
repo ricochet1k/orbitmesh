@@ -27,10 +27,13 @@ const (
 )
 
 func main() {
-	store, err := storage.NewJSONFileStorage(storage.DefaultBaseDir())
+	baseDir := storage.DefaultBaseDir()
+	store, err := storage.NewJSONFileStorage(baseDir)
 	if err != nil {
 		log.Fatalf("storage init: %v", err)
 	}
+
+	providerStorage := storage.NewProviderConfigStorage(baseDir)
 
 	factory := provider.NewDefaultFactory()
 	factory.Register("adk", func(sessionID string, config provider.Config) (provider.Provider, error) {
@@ -56,7 +59,7 @@ func main() {
 	r.Use(api.CORSMiddleware)
 	r.Use(api.CSRFMiddleware)
 
-	handler := api.NewHandler(executor, broadcaster)
+	handler := api.NewHandler(executor, broadcaster, providerStorage)
 	handler.Mount(r)
 
 	srv := &http.Server{

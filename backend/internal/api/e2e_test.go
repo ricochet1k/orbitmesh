@@ -15,6 +15,7 @@ import (
 	"github.com/ricochet1k/orbitmesh/internal/provider"
 	"github.com/ricochet1k/orbitmesh/internal/provider/pty"
 	"github.com/ricochet1k/orbitmesh/internal/service"
+	"github.com/ricochet1k/orbitmesh/internal/storage"
 	apiTypes "github.com/ricochet1k/orbitmesh/pkg/api"
 )
 
@@ -34,7 +35,8 @@ func TestE2ESessionCreationAndEvents(t *testing.T) {
 	})
 	defer executor.Shutdown(context.Background())
 
-	handler := NewHandler(executor, broadcaster)
+	providerStorage := storage.NewProviderConfigStorage(t.TempDir())
+	handler := NewHandler(executor, broadcaster, providerStorage)
 	r := chi.NewRouter()
 	r.Use(CORSMiddleware)
 	r.Use(CSRFMiddleware)
@@ -225,7 +227,8 @@ func TestSessionErrorHandling(t *testing.T) {
 	})
 	defer executor.Shutdown(context.Background())
 
-	handler := NewHandler(executor, broadcaster)
+	providerStorage := storage.NewProviderConfigStorage(t.TempDir())
+	handler := NewHandler(executor, broadcaster, providerStorage)
 	r := chi.NewRouter()
 	r.Use(CORSMiddleware)
 	r.Use(CSRFMiddleware)
@@ -328,7 +331,8 @@ func TestSessionLifecycle(t *testing.T) {
 	})
 	defer executor.Shutdown(context.Background())
 
-	handler := NewHandler(executor, broadcaster)
+	providerStorage := storage.NewProviderConfigStorage(t.TempDir())
+	handler := NewHandler(executor, broadcaster, providerStorage)
 	r := chi.NewRouter()
 	r.Use(CORSMiddleware)
 	r.Use(CSRFMiddleware)

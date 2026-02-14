@@ -17,6 +17,7 @@ import (
 	"github.com/ricochet1k/orbitmesh/internal/domain"
 	"github.com/ricochet1k/orbitmesh/internal/provider"
 	"github.com/ricochet1k/orbitmesh/internal/service"
+	"github.com/ricochet1k/orbitmesh/internal/storage"
 	apiTypes "github.com/ricochet1k/orbitmesh/pkg/api"
 )
 
@@ -168,7 +169,8 @@ func newTestEnv(t *testing.T) *testEnv {
 		},
 	})
 
-	env.handler = NewHandler(env.executor, env.broadcaster)
+	providerStorage := storage.NewProviderConfigStorage(t.TempDir())
+	env.handler = NewHandler(env.executor, env.broadcaster, providerStorage)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()

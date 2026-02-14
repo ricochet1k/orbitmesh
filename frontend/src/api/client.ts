@@ -14,6 +14,9 @@ import {
   ExtractorValidateResponse,
   ExtractorReplayResponse,
   TerminalSnapshot,
+  ProviderConfigRequest,
+  ProviderConfigResponse,
+  ProviderConfigListResponse,
 } from "../types/api";
 import { sanitizePermissionsResponse } from "../utils/guardrailGuidance";
 
@@ -234,5 +237,45 @@ export const apiClient = {
     if (options?.write) url.searchParams.set("write", "true");
     if (options?.allowRaw) url.searchParams.set("allow_raw", "true");
     return url.toString();
+  },
+
+  async listProviders(): Promise<ProviderConfigListResponse> {
+    const resp = await fetch(`${BASE_URL}/v1/providers`);
+    if (!resp.ok) throw new Error(await readErrorMessage(resp));
+    return resp.json();
+  },
+
+  async getProvider(id: string): Promise<ProviderConfigResponse> {
+    const resp = await fetch(`${BASE_URL}/v1/providers/${id}`);
+    if (!resp.ok) throw new Error(await readErrorMessage(resp));
+    return resp.json();
+  },
+
+  async createProvider(req: ProviderConfigRequest): Promise<ProviderConfigResponse> {
+    const resp = await fetch(`${BASE_URL}/v1/providers`, {
+      method: "POST",
+      headers: withCSRFHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(req),
+    });
+    if (!resp.ok) throw new Error(await readErrorMessage(resp));
+    return resp.json();
+  },
+
+  async updateProvider(id: string, req: ProviderConfigRequest): Promise<ProviderConfigResponse> {
+    const resp = await fetch(`${BASE_URL}/v1/providers/${id}`, {
+      method: "PUT",
+      headers: withCSRFHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(req),
+    });
+    if (!resp.ok) throw new Error(await readErrorMessage(resp));
+    return resp.json();
+  },
+
+  async deleteProvider(id: string): Promise<void> {
+    const resp = await fetch(`${BASE_URL}/v1/providers/${id}`, {
+      method: "DELETE",
+      headers: withCSRFHeaders(),
+    });
+    if (!resp.ok) throw new Error(await readErrorMessage(resp));
   },
 };
