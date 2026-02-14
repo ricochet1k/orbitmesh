@@ -284,27 +284,9 @@ test.describe("Dashboard View", () => {
      await expect(pauseButton).toBeVisible({ timeout: 5000 });
      await pauseButton.click();
 
-     // Verify pause request was made
-     await page.waitForTimeout(500);
+      // Verify pause request was made
+      await page.waitForTimeout(500);
    });
-
-    await page.route("**/api/sessions/session-pause-test/pause", async (route) => {
-      await route.fulfill({ status: 204, body: "" });
-    });
-
-    // Auto-accept confirmation dialogs
-    page.on("dialog", (dialog) => dialog.accept());
-
-    await page.goto("/");
-
-     // Click Pause button
-     const pauseButton = page.getByRole("button", { name: "Pause" }).first();
-     await expect(pauseButton).toBeEnabled();
-     await pauseButton.click();
-
-     // Verify pause request was made
-     await expect(page.getByText(/Pause request sent|paused/i)).toBeVisible({ timeout: 2000 });
-  });
 
    test("Dashboard Resume button works for paused session", async ({ page }) => {
      const mockSessions = {
@@ -343,26 +325,9 @@ test.describe("Dashboard View", () => {
      await expect(resumeButton).toBeVisible({ timeout: 5000 });
      await resumeButton.click();
 
-     // Verify resume request was made
-     await page.waitForTimeout(500);
+      // Verify resume request was made
+      await page.waitForTimeout(500);
    });
-
-    await page.route("**/api/sessions/session-resume-test/resume", async (route) => {
-      await route.fulfill({ status: 204, body: "" });
-    });
-
-    page.on("dialog", (dialog) => dialog.accept());
-
-    await page.goto("/");
-
-     // Click Resume button
-     const resumeButton = page.getByRole("button", { name: "Resume" }).first();
-     await expect(resumeButton).toBeEnabled();
-     await resumeButton.click();
-
-     // Verify resume request was made
-     await expect(page.getByText(/Resume request sent|running/i)).toBeVisible({ timeout: 2000 });
-  });
 
    test("Dashboard Stop button works with confirmation", async ({ page }) => {
      const mockSessions = {
@@ -402,28 +367,9 @@ test.describe("Dashboard View", () => {
       await expect(stopButton).toBeVisible({ timeout: 5000 });
       await stopButton.click();
 
-      // Verify stop request was made
-      await page.waitForTimeout(500);
+       // Verify stop request was made
+       await page.waitForTimeout(500);
    });
-
-    await page.route("**/api/sessions/session-stop-test", async (route) => {
-      if (route.request().method() === "DELETE") {
-        await route.fulfill({ status: 204, body: "" });
-      }
-    });
-
-    page.on("dialog", (dialog) => dialog.accept());
-
-    await page.goto("/");
-
-     // Click Stop button
-     const stopButton = page.getByRole("button", { name: "Stop" }).first();
-     await expect(stopButton).toBeEnabled();
-     await stopButton.click();
-
-     // Verify stop request was made
-     await expect(page.getByText(/Stop request sent|stopped/i)).toBeVisible({ timeout: 2000 });
-  });
 
    test("Dashboard shows loading state while fetching data", async ({ page }) => {
      // Delay the response to test loading state
