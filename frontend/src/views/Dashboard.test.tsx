@@ -51,9 +51,24 @@ const defaultPermissions = {
   can_inspect_sessions: true,
   can_manage_roles: false,
   can_manage_templates: true,
-  can_initiate_bulk_actions: false,
+  can_initiate_bulk_actions: true, // Changed to true for easier testing of state-based restrictions
   requires_owner_approval_for_role_changes: true,
   guardrails: defaultGuardrails,
+};
+
+const permissionsWithRestrictions = {
+  ...defaultPermissions,
+  can_inspect_sessions: false,
+  can_initiate_bulk_actions: false,
+  guardrails: defaultGuardrails.map((g) => {
+    if (g.id === "session-inspection") {
+      return { ...g, allowed: false, detail: "Session inspection restricted by policy." };
+    }
+    if (g.id === "bulk-operations") {
+      return { ...g, allowed: false, detail: "Bulk actions restricted by policy." };
+    }
+    return g;
+  }),
 };
 
 vi.mock("../api/client", () => ({
@@ -256,7 +271,48 @@ describe("Dashboard", () => {
      expect(confirmSpy).toHaveBeenCalled();
      // pauseSession was attempted
      expect(apiClient.pauseSession).toHaveBeenCalledWith("session-123456789");
-     
-     confirmSpy.mockRestore();
-   });
+      
+      confirmSpy.mockRestore();
+    });
+
+    it("shows permission restriction tooltips for disabled inspect button", async () => {
+      (apiClient.listSessions as any).mockResolvedValue({
+        sessions: [
+          { id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" },
+        ],
+      });
+      (apiClient.getPermissions as any).mockResolvedValue(permissionsWithRestrictions);
+
+      render(() => <Dashboard />);
+
+      const inspectButton = await screen.findByText("Inspect") as HTMLButtonElement;
+      expect(inspectButton.disabled).toBe(true);
+      expect(inspectButton.getAttribute("title")).toBe("Session inspection restricted by policy.");
+    });
+
+    it("shows permission restriction tooltips for disabled bulk action buttons", async () => {
+      (apiClient.listSessions as any).mockResolvedValue({
+        sessions: [
+          { id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" },
+        ],
+      });
+      (apiClient.getPermissions as any).mockResolvedValue(permissionsWithRestrictions);
+
+      render(() => <Dashboard />);
+      screen.debug();
+
+      // Find the parent div for bulk actions when canManage() is false
+      const bulkActionsDiv = await screen.findByTitle("Bulk actions restricted by policy.");
+
+      // Assert that the parent div has the correct title
+      expect(bulkActionsDiv).toBeDefined();
+
+      // Also assert that the individual buttons inside are disabled
+      const pauseButton = screen.getByText("Pause") as HTMLButtonElement;
+      expect(pauseButton.disabled).toBe(true);
+      const resumeButton = screen.getByText("Resume") as HTMLButtonElement;
+      expect(resumeButton.disabled).toBe(true);
+      const stopButton = screen.getByText("Stop") as HTMLButtonElement;
+      expect(stopButton.disabled).toBe(true);
+    });
 });

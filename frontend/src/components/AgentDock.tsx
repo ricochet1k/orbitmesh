@@ -32,6 +32,7 @@ export default function AgentDock(props: AgentDockProps) {
     () => props.sessionId || "",
     (id) => (id ? apiClient.getSession(id) : Promise.resolve(null)),
   )
+  const [permissions] = createResource(apiClient.getPermissions)
   const [messages, setMessages] = createSignal<TranscriptMessage[]>([])
   const [dockState, setDockState] = createSignal<DockState>({ type: "empty" })
   const [autoScroll, setAutoScroll] = createSignal(true)
@@ -40,6 +41,11 @@ export default function AgentDock(props: AgentDockProps) {
   const [actionError, setActionError] = createSignal<string | null>(null)
   let transcriptRef: HTMLDivElement | undefined
   let inputRef: HTMLTextAreaElement | undefined
+
+  const canManage = () => permissions()?.can_initiate_bulk_actions ?? false
+  const guardrailDetail = (id: string) =>
+    permissions()?.guardrails?.find((item) => item.id === id)?.detail ?? ""
+
 
   // Stream setup
   createEffect(() => {
@@ -328,9 +334,11 @@ export default function AgentDock(props: AgentDockProps) {
               type="button"
               class="btn btn-icon btn-sm"
               onClick={handlePauseResume}
-              disabled={!isSessionActive() || pendingAction() !== null}
+              disabled={!canManage() || !isSessionActive() || pendingAction() !== null}
               title={
-                pendingAction() !== null
+                !canManage()
+                  ? guardrailDetail("bulk-operations") || "Bulk session controls are locked for your role."
+                  : pendingAction() !== null
                   ? "Action is in progress..."
                   : !isSessionActive()
                   ? `Cannot control: session is ${sessionState()}`
@@ -345,9 +353,11 @@ export default function AgentDock(props: AgentDockProps) {
               type="button"
               class="btn btn-icon btn-danger btn-sm"
               onClick={handleKillSession}
-              disabled={sessionState() === "stopped" || pendingAction() !== null}
+              disabled={!canManage() || sessionState() === "stopped" || pendingAction() !== null}
               title={
-                pendingAction() !== null
+                !canManage()
+                  ? guardrailDetail("bulk-operations") || "Bulk session controls are locked for your role."
+                  : pendingAction() !== null
                   ? "Action is in progress..."
                   : sessionState() === "stopped"
                   ? "Session is already stopped"

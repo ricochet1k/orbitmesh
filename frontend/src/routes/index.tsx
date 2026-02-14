@@ -25,11 +25,10 @@ export default function Dashboard(props: DashboardProps = {}) {
   const sessionList = () => sessions()?.sessions ?? []
   const activeCount = () => sessionList().length
   const countByState = (state: string) => sessionList().filter((item) => item.state === state).length
-  // HIDDEN: Guardrail UI components
-  // const guardrails = () => permissions()?.guardrails ?? [];
-  // const allowedGuardrails = () => guardrails().filter((item) => item.allowed).length;
-  // const restrictedGuardrails = () => guardrails().filter((item) => !item.allowed).length;
-  // const guardrailDetail = (id: string) => guardrails().find((item) => item.id === id)?.detail ?? "";
+  const guardrails = () => permissions()?.guardrails ?? []
+  const guardrailDetail = (id: string) => guardrails().find((item) => item.id === id)?.detail ?? ""
+  const canInspect = () => permissions()?.can_inspect_sessions ?? false
+  const canManage = () => permissions()?.can_initiate_bulk_actions ?? false
 
   const isActionPending = (id: string, action: string) => {
     const pending = pendingAction()
@@ -299,61 +298,87 @@ export default function Dashboard(props: DashboardProps = {}) {
                              </Show>
                            </div>
                          </Show> */}
-                        {/* REPLACEMENT: Simple action buttons without guardrail checks */}
                         <div class="action-stack">
-                          <button type="button" onClick={() => handleInspect(session.id)}>
-                            Inspect
-                          </button>
-                          <div class="bulk-actions">
-                            <button
-                              type="button"
-                              disabled={
-                                session.state !== "running" || isActionPending(session.id, "pause")
-                              }
-                              onClick={() => runBulkAction(session.id, "pause")}
-                              title={
-                                isActionPending(session.id, "pause")
-                                  ? "Pause action is in progress..."
-                                  : session.state !== "running"
-                                  ? `Cannot pause: session is ${session.state}`
-                                  : "Pause the running session"
-                              }
-                            >
-                              Pause
+                          <Show
+                            when={canInspect()}
+                            fallback={
+                              <button
+                                type="button"
+                                disabled={true}
+                                title={guardrailDetail("session-inspection") || "Session inspection is restricted."}
+                              >
+                                Inspect
+                              </button>
+                            }
+                          >
+                            <button type="button" onClick={() => handleInspect(session.id)}>
+                              Inspect
                             </button>
-                            <button
-                              type="button"
-                              disabled={
-                                session.state !== "paused" || isActionPending(session.id, "resume")
-                              }
-                              onClick={() => runBulkAction(session.id, "resume")}
-                              title={
-                                isActionPending(session.id, "resume")
-                                  ? "Resume action is in progress..."
-                                  : session.state !== "paused"
-                                  ? `Cannot resume: session is ${session.state}`
-                                  : "Resume the paused session"
-                              }
-                            >
-                              Resume
-                            </button>
-                            <button
-                              type="button"
-                              disabled={
-                                session.state === "stopped" || isActionPending(session.id, "stop")
-                              }
-                              onClick={() => runBulkAction(session.id, "stop")}
-                              title={
-                                isActionPending(session.id, "stop")
-                                  ? "Stop action is in progress..."
-                                  : session.state === "stopped"
-                                  ? "Session is already stopped"
-                                  : "Stop the session"
-                              }
-                            >
-                              Stop
-                            </button>
-                          </div>
+                          </Show>
+                          <Show
+                            when={canManage()}
+                            fallback={
+                              <div
+                                class="bulk-actions"
+                                title={guardrailDetail("bulk-operations") || "Bulk actions are restricted."}
+                              >
+                                <button type="button" disabled={true}>Pause</button>
+                                <button type="button" disabled={true}>Resume</button>
+                                <button type="button" disabled={true}>Stop</button>
+                              </div>
+                            }
+                          >
+                            <div class="bulk-actions">
+                              <button
+                                type="button"
+                                disabled={
+                                  session.state !== "running" || isActionPending(session.id, "pause")
+                                }
+                                onClick={() => runBulkAction(session.id, "pause")}
+                                title={
+                                  isActionPending(session.id, "pause")
+                                    ? "Pause action is in progress..."
+                                    : session.state !== "running"
+                                    ? `Cannot pause: session is ${session.state}`
+                                    : "Pause the running session"
+                                }
+                              >
+                                Pause
+                              </button>
+                              <button
+                                type="button"
+                                disabled={
+                                  session.state !== "paused" || isActionPending(session.id, "resume")
+                                }
+                                onClick={() => runBulkAction(session.id, "resume")}
+                                title={
+                                  isActionPending(session.id, "resume")
+                                    ? "Resume action is in progress..."
+                                    : session.state !== "paused"
+                                    ? `Cannot resume: session is ${session.state}`
+                                    : "Resume the paused session"
+                                }
+                              >
+                                Resume
+                              </button>
+                              <button
+                                type="button"
+                                disabled={
+                                  session.state === "stopped" || isActionPending(session.id, "stop")
+                                }
+                                onClick={() => runBulkAction(session.id, "stop")}
+                                title={
+                                  isActionPending(session.id, "stop")
+                                    ? "Stop action is in progress..."
+                                    : session.state === "stopped"
+                                    ? "Session is already stopped"
+                                    : "Stop the session"
+                                }
+                              >
+                                Stop
+                              </button>
+                            </div>
+                          </Show>
                         </div>
                       </td>
                     </tr>
