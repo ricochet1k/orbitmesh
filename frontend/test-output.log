@@ -1,0 +1,190 @@
+
+> @orbitmesh/frontend@0.0.1 test
+> vitest --reporter=verbose
+
+
+ DEV  v1.6.1 /Users/matt/mycode/orbitmesh/frontend
+
+ ✓ src/api/client.test.ts > apiClient > listSessions fetches sessions successfully
+ ✓ src/api/client.test.ts > apiClient > createSession sends POST request with CSRF token
+ ✓ src/api/client.test.ts > apiClient > createTaskSession sends task metadata
+ ✓ src/api/client.test.ts > apiClient > getSession fetches single session
+ ✓ src/api/client.test.ts > apiClient > stopSession sends DELETE request with CSRF token
+ ✓ src/api/client.test.ts > apiClient > getPermissions fetches guardrail details
+ ✓ src/api/client.test.ts > apiClient > sanitizes guardrail guidance content
+ ✓ src/api/client.test.ts > apiClient > defaults missing guardrails to an empty array
+ ✓ src/api/client.test.ts > apiClient > throws error when response is not ok
+ ✓ src/api/client.test.ts > apiClient > prefers JSON error payloads when available
+ ✓ src/routes/navigation.test.tsx > Navigation Integration Tests > Deep Linking > loads dashboard route without blank state
+ ✓ src/routes/navigation.test.tsx > Navigation Integration Tests > Deep Linking > loads tasks route without blank state
+ ✓ src/routes/navigation.test.tsx > Navigation Integration Tests > Deep Linking > loads sessions route without blank state
+ ✓ src/routes/navigation.test.tsx > Navigation Integration Tests > Deep Linking > loads settings route without blank state
+ ✓ src/routes/navigation.test.tsx > Navigation Integration Tests > Deep Linking > loads extractors route without blank state
+ ✓ src/routes/navigation.test.tsx > Navigation Integration Tests > Deep Linking > handles deep links to nested routes (sessions with ID)
+ ✓ src/routes/navigation.test.tsx > Navigation Integration Tests > Deep Linking > handles deep links to task details
+ ✓ src/routes/navigation.test.tsx > Navigation Integration Tests > Keyboard Navigation > allows tabbing through sidebar links in order
+ ✓ src/views/SessionViewer.test.tsx > SessionViewer > renders initial output and streams new transcript messages
+ ✓ src/views/SessionViewer.test.tsx > SessionViewer > renders activity entry revisions without duplication
+ ✓ src/views/SessionViewer.test.tsx > SessionViewer > renders terminal when session provider is PTY
+ ✓ src/views/SessionViewer.test.tsx > SessionViewer > does not render raw output for PTY sessions
+ ✓ src/views/SessionViewer.test.tsx > SessionViewer > invokes pause and kill controls
+ ✓ src/views/SessionViewer.test.tsx > SessionViewer > calls onClose when close button is clicked
+ ✓ src/views/SessionViewer.test.tsx > SessionViewer > shows state-aware tooltips for disabled buttons
+ ✓ src/views/SessionViewer.test.tsx > SessionViewer > shows action-in-progress tooltips
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – basic rendering > renders an svg element with no props
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – basic rendering > renders with custom nodes and links
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – basic rendering > sets explicit width and height attributes on svg
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – basic rendering > renders with 100% width/height style for responsiveness
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – basic rendering > maintains viewBox for responsive scaling
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – basic rendering > renders correct number of circles for nodes
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – basic rendering > renders correct number of lines for links
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – basic rendering > renders text labels for each node
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – basic rendering > handles empty arrays gracefully
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – basic rendering > uses default nodes when none provided
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – selection > supports onSelect callback prop
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – selection > applies different radius to selected node
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – selection > applies thicker stroke to selected node
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – selection > applies bold font weight to selected node label
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – node colors > applies var(--graph-agent) fill to agent nodes
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – node colors > applies var(--graph-task) fill to task nodes
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – node colors > applies var(--graph-commit) fill to commit nodes
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – reactivity > re-renders when nodes prop changes
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – reactivity > re-renders when selectedId prop changes
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – reactivity > stops prior simulation when props change
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – directional layout bias > places higher-priority nodes closer to the top (lower Y)
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – directional layout bias > places deeper nodes further to the right (higher X)
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – large graphs > renders a large graph without errors
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – large graphs > renders a dense graph with viewBox
+ ✓ src/graph/AgentGraph.test.tsx > graphData – depth and priority population > buildTaskGraph > returns empty graph for empty input
+ ✓ src/graph/AgentGraph.test.tsx > graphData – depth and priority population > buildTaskGraph > creates a root agent node at depth 0 priority 4
+ ✓ src/graph/AgentGraph.test.tsx > graphData – depth and priority population > buildTaskGraph > assigns depth 1 to top-level tasks
+ ✓ src/graph/AgentGraph.test.tsx > graphData – depth and priority population > buildTaskGraph > increments depth for nested children
+ ✓ src/graph/AgentGraph.test.tsx > graphData – depth and priority population > buildTaskGraph > maps task status to priority: in_progress > pending > completed
+ ✓ src/graph/AgentGraph.test.tsx > graphData – depth and priority population > buildTaskGraph > creates links from parent to child
+ ✓ src/graph/AgentGraph.test.tsx > graphData – depth and priority population > buildCommitGraph > returns empty graph for empty input
+ ✓ src/graph/AgentGraph.test.tsx > graphData – depth and priority population > buildCommitGraph > creates root at depth 0 and commits at depth 1
+ ✓ src/graph/AgentGraph.test.tsx > graphData – depth and priority population > buildCommitGraph > gives newer commits (earlier in array) higher priority
+ ✓ src/graph/AgentGraph.test.tsx > graphData – depth and priority population > buildUnifiedGraph > merges task and commit graphs
+ ✓ src/graph/AgentGraph.test.tsx > graphData – depth and priority population > buildUnifiedGraph > preserves depth and priority from both sub-graphs
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – simulation configuration > does not error during rapid mount/unmount cycles
+ ✓ src/graph/AgentGraph.test.tsx > AgentGraph – simulation configuration > renders nodes at non-overlapping positions for small graphs
+ ✓ src/views/Dashboard.test.tsx > Dashboard > renders loading state initially
+ ✓ src/views/Dashboard.test.tsx > Dashboard > renders sessions list when loaded
+ ✓ src/views/Dashboard.test.tsx > Dashboard > shows request access helpers when actions are locked
+ ✓ src/views/Dashboard.test.tsx > Dashboard > renders empty list when no sessions
+ ✓ src/views/Dashboard.test.tsx > Dashboard > doesn't show guardrails panel when hidden
+ ✓ src/views/Dashboard.test.tsx > Dashboard > shows bulk action buttons always (permission checks at action time)
+ ✓ src/views/Dashboard.test.tsx > Dashboard > skips bulk actions when confirmation is declined
+ ✓ src/views/Dashboard.test.tsx > Dashboard > allows bulk actions even if they may fail (errors handled at action time)
+ ✓ src/components/Sidebar.test.tsx > Sidebar Navigation > renders the brand name
+ ✓ src/components/Sidebar.test.tsx > Sidebar Navigation > renders all primary navigation links
+ ✓ src/components/Sidebar.test.tsx > Sidebar Navigation > renders navigation icons for each route
+ ✓ src/components/Sidebar.test.tsx > Sidebar Navigation > links to correct routes
+ ✓ src/components/Sidebar.test.tsx > Sidebar Navigation > has proper ARIA label for accessibility
+ ✓ src/components/Sidebar.test.tsx > Sidebar Navigation > renders sidebar with proper semantic structure
+ ✓ src/components/Sidebar.test.tsx > Sidebar Navigation > renders navigation elements with proper classes
+ ✓ src/components/Sidebar.test.tsx > Sidebar Navigation > displays nav labels for each navigation item
+ ✓ src/utils/guardrailGuidance.test.ts > sanitizeGuardrailGuidance > strips HTML and redacts secrets
+ ✓ src/utils/guardrailGuidance.test.ts > sanitizeGuardrailGuidance > removes control characters and redacts access keys
+ ✓ src/utils/guardrailGuidance.test.ts > sanitizeGuardrailGuidance > defaults nullish input to an empty string
+ ✓ src/utils/guardrailGuidance.test.ts > sanitizeGuardrailGuidance > coerces non-string input before sanitizing
+ ✓ src/utils/guardrailGuidance.test.ts > sanitizeGuardrailStatus > sanitizes detail while preserving other fields
+ ✓ src/utils/guardrailGuidance.test.ts > sanitizeGuardrailStatus > handles non-string detail values
+ ✓ src/utils/guardrailGuidance.test.ts > sanitizePermissionsResponse > sanitizes guardrail guidance within permissions
+ ✓ src/utils/guardrailGuidance.test.ts > sanitizePermissionsResponse > defaults missing guardrails to an empty array
+ ✓ src/utils/guardrailGuidance.test.ts > sanitizePermissionsResponse > coerces guardrail detail values in permissions
+ ✓ src/views/TaskTreeView.test.tsx > TaskTreeView > renders tasks from the API
+ ✓ src/views/TaskTreeView.test.tsx > TaskTreeView > filters by role and status
+ ✓ src/views/TaskTreeView.test.tsx > TaskTreeView > keeps parents when a child matches search
+ ✓ src/views/TaskTreeView.test.tsx > TaskTreeView > starts a task session from the detail panel
+ ✓ src/components/TerminalView.test.tsx > TerminalView > renders snapshots and applies diff patches
+ ✓ src/components/TerminalView.test.tsx > TerminalView > keeps terminal output as selectable text
+ ✓ src/views/CommitHistoryView.test.tsx > CommitHistoryView > renders commit list and shows initial diff
+ ✓ src/views/CommitHistoryView.test.tsx > CommitHistoryView > updates detail when selecting a commit
+ × src/routes/navigation.test.tsx > Navigation Integration Tests > Keyboard Navigation > supports Enter key to navigate 1010ms
+   → expected "spy" to be called with arguments: [ '/tasks' ]
+
+Received: 
+
+
+
+Number of calls: 0
+
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<a[39m
+        [33mdata-testid[39m=[32m"tasks-link"[39m
+        [33mhref[39m=[32m"/tasks"[39m
+        [33mrole[39m=[32m"link"[39m
+      [36m>[39m
+        [0mTasks[0m
+      [36m</a>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+ ✓ src/routes/navigation.test.tsx > Navigation Integration Tests > Keyboard Navigation > sidebar links are keyboard accessible with proper tab order
+ ✓ src/routes/navigation.test.tsx > Navigation Integration Tests > Route State Management > maintains route state when navigating back and forth
+ ✓ src/routes/navigation.test.tsx > Navigation Integration Tests > Route State Management > reflects current location in navigation state
+ ✓ src/routes/navigation.test.tsx > Navigation Integration Tests > Breadcrumb Navigation > generates correct breadcrumb for root path
+ ✓ src/routes/navigation.test.tsx > Navigation Integration Tests > Breadcrumb Navigation > generates correct breadcrumb for tasks
+ ✓ src/routes/navigation.test.tsx > Navigation Integration Tests > Breadcrumb Navigation > generates correct breadcrumb for nested session route
+ ✓ src/routes/navigation.test.tsx > Navigation Integration Tests > Breadcrumb Navigation > generates correct breadcrumb for task details
+ ✓ src/routes/navigation.test.tsx > Navigation Integration Tests > Breadcrumb Navigation > handles breadcrumb navigation for extractors with details
+ ✓ src/routes/navigation.test.tsx > Navigation Integration Tests > Active Route Highlighting > identifies active route from location pathname
+ ✓ src/routes/navigation.test.tsx > Navigation Integration Tests > Active Route Highlighting > highlights nested routes under parent
+ ✓ src/routes/navigation.test.tsx > Navigation Integration Tests > Active Route Highlighting > clears active state when navigating away
+ ✓ src/routes/navigation.test.tsx > Navigation Integration Tests > Error Boundaries in Navigation > handles invalid route gracefully
+ ✓ src/routes/navigation.test.tsx > Navigation Integration Tests > Error Boundaries in Navigation > preserves state on navigation error
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/routes/navigation.test.tsx > Navigation Integration Tests > Keyboard Navigation > supports Enter key to navigate
+AssertionError: expected "spy" to be called with arguments: [ '/tasks' ]
+
+Received: 
+
+
+
+Number of calls: 0
+
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<a[39m
+        [33mdata-testid[39m=[32m"tasks-link"[39m
+        [33mhref[39m=[32m"/tasks"[39m
+        [33mrole[39m=[32m"link"[39m
+      [36m>[39m
+        [0mTasks[0m
+      [36m</a>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+ ❯ src/routes/navigation.test.tsx:126:30
+    124|       // Navigation should be triggered
+    125|       await waitFor(() => {
+    126|         expect(mockNavigate).toHaveBeenCalledWith("/tasks");
+       |                              ^
+    127|       });
+    128|     });
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed | 9 passed (10)
+      Tests  1 failed | 109 passed (110)
+   Start at  22:16:33
+   Duration  2.14s (transform 1.29s, setup 0ms, collect 2.46s, tests 1.96s, environment 3.85s, prepare 609ms)
+
+
+ FAIL  Tests failed. Watching for file changes...
+       press h to show help, press q to quit

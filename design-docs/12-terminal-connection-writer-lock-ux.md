@@ -1,11 +1,40 @@
 # Terminal Connection and Writer-Lock UX
 
 ## Status
-- Alternatives
+- **DECISION MADE (2026-02-13)**: Writer-locking is out of scope for MVP. See simplified requirements below.
+- Alternatives (superseded by owner decision)
 - Author: Claude (build agent)
 - Date: 2026-02-14
 - Task: Tw14d68
 - Parent Review: Tiq2p2l (Usability review for custom terminal renderer)
+
+## Owner Decision: Simplified Scope
+
+After reviewing alternatives 1-4, **writer-locking is OUT OF SCOPE for MVP**. The alternatives below are preserved for reference but will not be implemented as designed.
+
+### New Requirements (Simplified)
+1. **Connection state indicator** - Show connecting/reconnecting/resyncing states visually
+2. **Viewer count warning** - Display a small notice when >1 person is viewing (non-blocking)
+3. **NO lock controls** - No take/release buttons, no permission blocking, no "who has control" UI
+
+### Rationale
+- MVP timeline requires simplification
+- Warning about concurrent viewers is sufficient for now
+- Full locking can be post-MVP if actual conflicts occur in practice
+
+### Implementation Guidance
+Use the **simplest visual approach** from alternatives below (connection indicator only), add a viewer count badge. Example:
+
+```
+Terminal Header:
+🟢 Connected | 👁️ 2 viewers (tooltip: "Others are watching this terminal")
+```
+
+Effort: 2-3 days instead of 6-10 days.
+
+---
+
+## Original Design (Alternatives for Reference)
 
 ## Why this design is needed
 
