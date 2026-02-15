@@ -25,8 +25,6 @@ export default function Dashboard(props: DashboardProps = {}) {
   const sessionList = () => sessions()?.sessions ?? []
   const activeCount = () => sessionList().length
   const countByState = (state: string) => sessionList().filter((item) => item.state === state).length
-  const guardrails = () => permissions()?.guardrails ?? []
-  const guardrailDetail = (id: string) => guardrails().find((item) => item.id === id)?.detail ?? ""
   const canInspect = () => permissions()?.can_inspect_sessions ?? false
   const canManage = () => permissions()?.can_initiate_bulk_actions ?? false
 
@@ -115,14 +113,6 @@ export default function Dashboard(props: DashboardProps = {}) {
               <strong>{activeCount()}</strong>
             </Show>
           </div>
-          {/* HIDDEN: Guardrail posture display */}
-          {/* <div class="meta-card">
-             <p>Guardrail posture</p>
-             <Show when={!permissions.loading} fallback={<span>Loading...</span>}>
-               <strong>{allowedGuardrails()} allowed</strong>
-               <span class="meta-sub">{restrictedGuardrails()} restricted</span>
-             </Show>
-           </div> */}
         </div>
       </header>
 
@@ -157,14 +147,6 @@ export default function Dashboard(props: DashboardProps = {}) {
                 <span>{countByState("stopped")} stopped</span>
               </Show>
             </div>
-            {/* HIDDEN: Guardrails active card */}
-            {/* <div class="overview-card">
-               <p>Guardrails active</p>
-               <Show when={!permissions.loading} fallback={<span>Calculating...</span>}>
-                 <strong>{allowedGuardrails()}</strong>
-                 <span>{restrictedGuardrails()} restricted</span>
-               </Show>
-             </div> */}
           </div>
         </section>
 
@@ -176,10 +158,6 @@ export default function Dashboard(props: DashboardProps = {}) {
             </div>
             <span class="panel-pill neutral">Operators ready</span>
           </div>
-          {/* HIDDEN: Guardrail action notice banner */}
-          {/* <Show when={actionNotice()}>
-             {(notice) => <p class={`guardrail-banner ${notice().tone}`}>{notice().message}</p>}
-           </Show> */}
           <Show 
             when={!sessions.loading} 
             fallback={<SkeletonLoader variant="table" count={5} />}
@@ -225,79 +203,6 @@ export default function Dashboard(props: DashboardProps = {}) {
                       </td>
                       <td>{session.current_task || "None"}</td>
                       <td>
-                        {/* HIDDEN: Guardrail permission checks for actions */}
-                        {/* <Show
-                           when={!permissions.loading}
-                           fallback={<span class="muted-action">Guardrail pending</span>}
-                         >
-                           <div class="action-stack">
-                             <Show
-                               when={permissions()?.can_inspect_sessions}
-                               fallback={
-                                 <div class="guardrail-helper" role="note">
-                                   <span class="muted-action">Inspect locked</span>
-                                   <p class="guardrail-helper-text">
-                                     {guardrailDetail("session-inspection") ||
-                                       "Session inspection is restricted by current guardrails."}
-                                   </p>
-                                   <a class="guardrail-helper-link" href="/" onClick={handleRequestAccess}>
-                                     Request access
-                                   </a>
-                                 </div>
-                               }
-                             >
-                               <button type="button" onClick={() => handleInspect(session.id)}>
-                                 Inspect
-                               </button>
-                             </Show>
-
-                             <Show
-                               when={permissions()?.can_initiate_bulk_actions}
-                               fallback={
-                                 <div class="guardrail-helper" role="note">
-                                   <span class="muted-action">Bulk actions locked</span>
-                                   <p class="guardrail-helper-text">
-                                     {guardrailDetail("bulk-operations") ||
-                                       "Bulk operations are restricted by current guardrails."}
-                                   </p>
-                                   <a class="guardrail-helper-link" href="/" onClick={handleRequestAccess}>
-                                     Request access
-                                   </a>
-                                 </div>
-                               }
-                             >
-                               <div class="bulk-actions">
-                                 <button
-                                   type="button"
-                                   disabled={
-                                     session.state !== "running" || isActionPending(session.id, "pause")
-                                   }
-                                   onClick={() => runBulkAction(session.id, "pause")}
-                                 >
-                                   Pause
-                                 </button>
-                                 <button
-                                   type="button"
-                                   disabled={
-                                     session.state !== "paused" || isActionPending(session.id, "resume")
-                                   }
-                                   onClick={() => runBulkAction(session.id, "resume")}
-                                 >
-                                   Resume
-                                 </button>
-                                 <button
-                                   type="button"
-                                   disabled={
-                                     session.state === "stopped" || isActionPending(session.id, "stop")
-                                   }
-                                   onClick={() => runBulkAction(session.id, "stop")}
-                                 >
-                                   Stop
-                                 </button>
-                               </div>
-                             </Show>
-                           </div>
-                         </Show> */}
                         <div class="action-stack">
                           <Show
                             when={canInspect()}
@@ -305,7 +210,7 @@ export default function Dashboard(props: DashboardProps = {}) {
                               <button
                                 type="button"
                                 disabled={true}
-                                title={guardrailDetail("session-inspection") || "Session inspection is restricted."}
+                                title="Session inspection is not permitted for your role."
                               >
                                 Inspect
                               </button>
@@ -320,7 +225,7 @@ export default function Dashboard(props: DashboardProps = {}) {
                             fallback={
                               <div
                                 class="bulk-actions"
-                                title={guardrailDetail("bulk-operations") || "Bulk actions are restricted."}
+                                title="Bulk actions are not permitted for your role."
                               >
                                 <button type="button" disabled={true}>Pause</button>
                                 <button type="button" disabled={true}>Resume</button>
@@ -389,49 +294,6 @@ export default function Dashboard(props: DashboardProps = {}) {
             </Show>
           </Show>
         </section>
-
-        {/* HIDDEN: Guardrails management panel */}
-        {/* <section class="guardrails-panel">
-           <div class="panel-header">
-             <div>
-               <p class="guardrails-label">Management guardrails</p>
-               <h2>Permission health</h2>
-             </div>
-             <span class="panel-pill">Protected</span>
-           </div>
-
-           <Show
-             when={!permissions.loading}
-             fallback={<p class="guardrails-loading">Loading guardrail policy...</p>}
-           >
-             <p class="guardrails-role">
-               Role: <strong>{permissions()?.role}</strong>
-             </p>
-             <Show
-               when={guardrails().length > 0}
-               fallback={<p class="guardrails-loading">Guardrail policy unavailable.</p>}
-             >
-               <div class="guardrail-grid">
-                 <For each={guardrails()}>
-                   {(item) => (
-                     <article class="guardrail-card" classList={{ active: item.allowed }}>
-                       <header>
-                         <h3>{item.title}</h3>
-                         <span>{item.allowed ? "Allowed" : "Restricted"}</span>
-                       </header>
-                       <p>{item.detail}</p>
-                     </article>
-                   )}
-                 </For>
-               </div>
-             </Show>
-             <p class="guardrails-note">
-               {permissions()?.requires_owner_approval_for_role_changes
-                 ? "Role escalations now require explicit owner confirmation before they can be saved."
-                 : "Role changes follow an automatic review process."}
-             </p>
-           </Show>
-         </section> */}
 
         <section class="graph-view">
           <div class="panel-header">

@@ -18,7 +18,6 @@ import {
   ProviderConfigResponse,
   ProviderConfigListResponse,
 } from "../types/api";
-import { sanitizePermissionsResponse } from "../utils/guardrailGuidance";
 
 const BASE_URL = "/api";
 const CSRF_COOKIE_NAME = "orbitmesh-csrf-token";
@@ -147,8 +146,7 @@ export const apiClient = {
   async getPermissions(): Promise<PermissionsResponse> {
     const resp = await fetch(`${BASE_URL}/v1/me/permissions`);
     if (!resp.ok) throw new Error(await readErrorMessage(resp));
-    const payload = await resp.json();
-    return sanitizePermissionsResponse(payload);
+    return resp.json();
   },
 
   async getTaskTree(): Promise<TaskTreeResponse> {

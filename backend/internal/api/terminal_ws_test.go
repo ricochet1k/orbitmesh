@@ -191,7 +191,6 @@ func TestTerminalWebSocket_AuthFailure(t *testing.T) {
 
 	original := defaultPermissions
 	defaultPermissions.CanInspectSessions = false
-	defaultPermissions.Guardrails = guardrailStatuses(defaultPermissions)
 	defer func() { defaultPermissions = original }()
 
 	url := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/sessions/session-1/terminal/ws"

@@ -1,42 +1,3 @@
-export const defaultGuardrails = [
-  {
-    id: "session-inspection",
-    title: "Inspect sessions",
-    allowed: true,
-    detail: "Live telemetry stays read-only unless your guardrail allows inspection.",
-  },
-  {
-    id: "role-escalation",
-    title: "Role escalations",
-    allowed: false,
-    detail: "Role edits are hidden until an owner approves escalation.",
-  },
-  {
-    id: "template-authoring",
-    title: "Template authoring",
-    allowed: true,
-    detail: "Template workflows stay available for curated drafts.",
-  },
-  {
-    id: "bulk-operations",
-    title: "Bulk operations",
-    allowed: false,
-    detail: "Bulk commits require higher-level guardrails before they become active.",
-  },
-  {
-    id: "csrf-protection",
-    title: "CSRF validation",
-    allowed: true,
-    detail: "State-changing requests double-submit a SameSite cookie and header.",
-  },
-  {
-    id: "audit-integrity",
-    title: "Audit integrity",
-    allowed: true,
-    detail: "High-privilege changes generate immutable audit events and alerts.",
-  },
-]
-
 export const defaultPermissions = {
   role: "developer",
   can_inspect_sessions: true,
@@ -44,22 +5,12 @@ export const defaultPermissions = {
   can_manage_templates: true,
   can_initiate_bulk_actions: true,
   requires_owner_approval_for_role_changes: true,
-  guardrails: defaultGuardrails,
 }
 
-export const permissionsWithRestrictions = {
+export const restrictedPermissions = {
   ...defaultPermissions,
   can_inspect_sessions: false,
   can_initiate_bulk_actions: false,
-  guardrails: defaultGuardrails.map((guardrail) => {
-    if (guardrail.id === "session-inspection") {
-      return { ...guardrail, allowed: false, detail: "Session inspection restricted by policy." }
-    }
-    if (guardrail.id === "bulk-operations") {
-      return { ...guardrail, allowed: false, detail: "Bulk actions restricted by policy." }
-    }
-    return guardrail
-  }),
 }
 
 export const baseSession = {

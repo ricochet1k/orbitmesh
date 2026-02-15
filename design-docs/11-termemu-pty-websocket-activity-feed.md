@@ -386,7 +386,7 @@ Compatibility strategy:
 ## Security and safety
 
 1. WebSocket auth/CSRF parity with existing session controls.
-2. Session-scoped authorization (`can_inspect_sessions`, plus manage action guardrails for write input).
+2. Session-scoped authorization (`can_inspect_sessions`, plus manage action permissions for write input).
 3. Input sanitization for `input.raw` and optional disable via config.
 4. Log and rate-limit abusive input events.
 5. Avoid shell interpretation in backend; pass bytes directly to PTY.

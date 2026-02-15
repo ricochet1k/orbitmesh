@@ -431,7 +431,6 @@ textarea:focus-visible {
   grid-template-columns: minmax(280px, 360px) minmax(420px, 1fr);
   grid-template-areas:
     "overview sessions"
-    "guardrails sessions"
     "graph graph";
   gap: 1.2rem;
   align-items: start;
@@ -889,12 +888,6 @@ textarea:focus-visible {
   grid-area: sessions;
 }
 
-.guardrails-panel {
-  grid-area: guardrails;
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(255, 255, 255, 0.96));
-  border: 1px solid rgba(37, 99, 235, 0.2);
-}
-
 .graph-view {
   grid-area: graph;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(233, 238, 245, 0.95));
@@ -918,8 +911,7 @@ textarea:focus-visible {
   margin-bottom: 0.75rem;
 }
 
-.panel-kicker,
-.guardrails-label {
+.panel-kicker {
   text-transform: uppercase;
   font-size: 0.64rem;
   letter-spacing: 0.22em;
@@ -971,61 +963,6 @@ textarea:focus-visible {
 .overview-card span {
   font-size: 0.78rem;
   color: var(--ink-2);
-}
-
-.guardrails-role {
-  font-size: 0.9rem;
-  margin-bottom: 0.8rem;
-  color: var(--ink-2);
-}
-
-.guardrail-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 0.7rem;
-}
-
-.guardrail-card {
-  padding: 0.8rem;
-  border-radius: var(--radius-3);
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.guardrail-card header {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-}
-
-.guardrail-card h3 {
-  font-size: 0.88rem;
-  margin: 0;
-}
-
-.guardrail-card span {
-  font-size: 0.64rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-}
-
-.guardrail-card.active {
-  border-color: rgba(37, 99, 235, 0.35);
-  box-shadow: var(--shadow-2);
-}
-
-.guardrails-note {
-  margin-top: 0.8rem;
-  font-size: 0.82rem;
-  color: var(--ink-2);
-}
-
-.guardrails-loading {
-  color: var(--ink-3);
 }
 
 table {
@@ -1131,31 +1068,7 @@ tbody tr:hover {
   color: var(--ink-3);
 }
 
-.guardrail-helper {
-  display: grid;
-  gap: 0.25rem;
-}
-
-.guardrail-helper-text {
-  margin: 0;
-  font-size: 0.76rem;
-  color: var(--ink-2);
-}
-
-.guardrail-helper-link {
-  width: fit-content;
-  font-size: 0.74rem;
-  font-weight: 600;
-  color: #1d4ed8;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.guardrail-helper-link:hover {
-  color: #2563eb;
-}
-
-.guardrail-banner {
+.notice-banner {
   margin: 0.7rem 0 0.5rem;
   padding: 0.5rem 0.75rem;
   border-radius: var(--radius-2);
@@ -1165,13 +1078,13 @@ tbody tr:hover {
   font-size: 0.78rem;
 }
 
-.guardrail-banner.error {
+.notice-banner.error {
   border-color: rgba(185, 28, 28, 0.3);
   background: rgba(185, 28, 28, 0.08);
   color: var(--danger);
 }
 
-.guardrail-banner.success {
+.notice-banner.success {
   border-color: rgba(15, 118, 110, 0.35);
   background: rgba(15, 118, 110, 0.1);
   color: var(--success);
@@ -2007,7 +1920,6 @@ tbody tr:hover {
     grid-template-areas:
       "overview"
       "sessions"
-      "guardrails"
       "graph";
     padding: 1.5rem;
   }

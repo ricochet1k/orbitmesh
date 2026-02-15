@@ -1,45 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { apiClient } from "./client";
 
-const guardrailsPayload = [
-  {
-    id: "session-inspection",
-    title: "Inspect sessions",
-    allowed: true,
-    detail: "Live telemetry stays read-only unless your guardrail allows inspection.",
-  },
-  {
-    id: "role-escalation",
-    title: "Role escalations",
-    allowed: false,
-    detail: "Role edits are hidden until an owner approves escalation.",
-  },
-  {
-    id: "template-authoring",
-    title: "Template authoring",
-    allowed: true,
-    detail: "Template workflows stay available for curated drafts.",
-  },
-  {
-    id: "bulk-operations",
-    title: "Bulk operations",
-    allowed: false,
-    detail: "Bulk commits require higher-level guardrails before they become active.",
-  },
-  {
-    id: "csrf-protection",
-    title: "CSRF validation",
-    allowed: true,
-    detail: "State-changing requests double-submit a SameSite cookie and header.",
-  },
-  {
-    id: "audit-integrity",
-    title: "Audit integrity",
-    allowed: true,
-    detail: "High-privilege changes generate immutable audit events and alerts.",
-  },
-];
-
 const permissionsPayload = {
   role: "developer",
   can_inspect_sessions: true,
@@ -47,7 +8,6 @@ const permissionsPayload = {
   can_manage_templates: true,
   can_initiate_bulk_actions: false,
   requires_owner_approval_for_role_changes: true,
-  guardrails: guardrailsPayload,
 };
 
 describe("apiClient", () => {
@@ -148,7 +108,7 @@ describe("apiClient", () => {
     }));
   });
 
-  it("getPermissions fetches guardrail details", async () => {
+  it("getPermissions fetches permissions", async () => {
     (fetch as any).mockResolvedValue({
       ok: true,
       json: () => Promise.resolve(permissionsPayload),
@@ -157,37 +117,6 @@ describe("apiClient", () => {
     const result = await apiClient.getPermissions();
     expect(fetch).toHaveBeenCalledWith("/api/v1/me/permissions");
     expect(result).toEqual(permissionsPayload);
-  });
-
-  it("sanitizes guardrail guidance content", async () => {
-    const dirtyGuardrails = guardrailsPayload.map((guardrail) =>
-      guardrail.id === "bulk-operations"
-        ? { ...guardrail, detail: "Use <em>token</em>: abc123 and Bearer abc.def" }
-        : guardrail,
-    );
-    const dirtyPermissions = { ...permissionsPayload, guardrails: dirtyGuardrails };
-
-    (fetch as any).mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve(dirtyPermissions),
-    });
-
-    const result = await apiClient.getPermissions();
-    const sanitizedDetail = result.guardrails.find((item) => item.id === "bulk-operations")?.detail;
-    expect(sanitizedDetail).toBe("Use token: [redacted] and Bearer [redacted]");
-  });
-
-  it("defaults missing guardrails to an empty array", async () => {
-    const payloadWithoutGuardrails = { ...permissionsPayload } as any;
-    delete payloadWithoutGuardrails.guardrails;
-
-    (fetch as any).mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve(payloadWithoutGuardrails),
-    });
-
-    const result = await apiClient.getPermissions();
-    expect(result.guardrails).toEqual([]);
   });
 
   it("throws error when response is not ok", async () => {

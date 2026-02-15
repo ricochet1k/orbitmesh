@@ -11,6 +11,7 @@ class MockEventSource {
   url: string;
   listeners: Record<string, EventListener[]> = {};
   onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
 
   constructor(url: string) {
     this.url = url;
@@ -32,6 +33,10 @@ class MockEventSource {
   close() {}
 
   emit(type: string, payload: unknown = {}) {
+    if (type === "error" && this.onerror) {
+      this.onerror();
+      return;
+    }
     const event = { data: JSON.stringify(payload) } as MessageEvent;
     (this.listeners[type] || []).forEach((listener) => listener(event));
   }
@@ -53,6 +58,11 @@ describe("AgentDock", () => {
     vi.clearAllMocks();
     eventSources.splice(0, eventSources.length);
     vi.stubGlobal("EventSource", MockEventSource as never);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: { cancel: vi.fn().mockResolvedValue(undefined) },
+    }));
   });
 
   it("surfaces stream disconnect errors safely", async () => {
@@ -68,7 +78,6 @@ describe("AgentDock", () => {
     (apiClient.getPermissions as any).mockResolvedValue({
       role: "developer",
       can_initiate_bulk_actions: false,
-      guardrails: [],
     });
     (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1");
 

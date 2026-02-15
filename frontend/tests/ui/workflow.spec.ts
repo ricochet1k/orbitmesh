@@ -19,20 +19,6 @@ const permissions = {
   can_manage_templates: false,
   can_initiate_bulk_actions: true,
   requires_owner_approval_for_role_changes: false,
-  guardrails: [
-    {
-      id: "session-inspection",
-      title: "Session inspection",
-      allowed: true,
-      detail: "Session inspection allowed for this role.",
-    },
-    {
-      id: "bulk-operations",
-      title: "Bulk operations",
-      allowed: true,
-      detail: "Bulk operations allowed for this role.",
-    },
-  ],
 };
 
 const taskTree = {

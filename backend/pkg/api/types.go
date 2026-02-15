@@ -115,21 +115,12 @@ type ErrorResponse struct {
 }
 
 type PermissionsResponse struct {
-	Role                                string            `json:"role"`
-	CanInspectSessions                  bool              `json:"can_inspect_sessions"`
-	CanManageRoles                      bool              `json:"can_manage_roles"`
-	CanManageTemplates                  bool              `json:"can_manage_templates"`
-	CanInitiateBulkActions              bool              `json:"can_initiate_bulk_actions"`
-	RequiresOwnerApprovalForRoleChanges bool              `json:"requires_owner_approval_for_role_changes"`
-	Guardrails                          []GuardrailStatus `json:"guardrails"`
-}
-
-type GuardrailStatus struct {
-	ID         string   `json:"id"`
-	Title      string   `json:"title"`
-	Allowed    bool     `json:"allowed"`
-	Detail     string   `json:"detail"`
-	References []string `json:"references,omitempty"`
+	Role                                string `json:"role"`
+	CanInspectSessions                  bool   `json:"can_inspect_sessions"`
+	CanManageRoles                      bool   `json:"can_manage_roles"`
+	CanManageTemplates                  bool   `json:"can_manage_templates"`
+	CanInitiateBulkActions              bool   `json:"can_initiate_bulk_actions"`
+	RequiresOwnerApprovalForRoleChanges bool   `json:"requires_owner_approval_for_role_changes"`
 }
 
 type TaskStatus string

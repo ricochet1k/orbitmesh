@@ -16,7 +16,6 @@ export const mockData = {
     can_manage_templates: false,
     can_initiate_bulk_actions: true,
     requires_owner_approval_for_role_changes: false,
-    guardrails: [],
     ...overrides,
   }),
 
@@ -227,12 +226,6 @@ export interface PermissionsPayload {
   can_manage_templates: boolean;
   can_initiate_bulk_actions: boolean;
   requires_owner_approval_for_role_changes: boolean;
-  guardrails: Array<{
-    id: string;
-    title: string;
-    allowed: boolean;
-    detail: string;
-  }>;
 }
 
 export interface TaskPayload {

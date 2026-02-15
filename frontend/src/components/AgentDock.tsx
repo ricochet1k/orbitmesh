@@ -9,6 +9,7 @@ import {
 } from "solid-js"
 import { apiClient } from "../api/client"
 import type { Event, SessionState } from "../types/api"
+import { startEventStream } from "../utils/eventStream"
 import { dockSessionId } from "../state/agentDock"
 import "./AgentDock.css"
 
@@ -44,7 +45,7 @@ export default function AgentDock(props: AgentDockProps) {
   const [actionError, setActionError] = createSignal<string | null>(null)
   const [isExpanded, setIsExpanded] = createSignal(false)
   const [streamStatus, setStreamStatus] = createSignal<
-    "idle" | "connecting" | "live" | "disconnected" | "error"
+    "idle" | "connecting" | "reconnecting" | "live" | "disconnected" | "error"
   >("idle")
   const [lastAction, setLastAction] = createSignal<
     { label: string; detail?: string; tone?: "info" | "error" }
@@ -54,9 +55,6 @@ export default function AgentDock(props: AgentDockProps) {
   let inputRef: HTMLTextAreaElement | undefined
 
   const canManage = () => permissions()?.can_initiate_bulk_actions ?? false
-  const guardrailDetail = (id: string) =>
-    permissions()?.guardrails?.find((item) => item.id === id)?.detail ?? ""
-
 
   const hasSession = () => Boolean(sessionId())
 
@@ -68,6 +66,7 @@ export default function AgentDock(props: AgentDockProps) {
     if (dockState().type === "error") return "Error"
     if (streamStatus() === "connecting") return "Connecting"
     if (streamStatus() === "disconnected") return "Disconnected"
+    if (streamStatus() === "reconnecting") return "Reconnecting"
     const state = session()?.state
     if (!state) return "Unknown"
     return state.replace("_", " ")
@@ -157,8 +156,6 @@ export default function AgentDock(props: AgentDockProps) {
     setLastAction(null)
 
     // Connect to event stream
-    const eventSource = new EventSource(apiClient.getEventsUrl(activeSessionId))
-
     const handleEvent = (eventType: Event["type"], event: MessageEvent) => {
       if (typeof event.data !== "string") return
       let payload: Event | null = null
@@ -275,31 +272,62 @@ export default function AgentDock(props: AgentDockProps) {
       markStreamActive()
     }
 
-    const handleStreamError = () => {
-      setDockState({
-        type: "error",
-        message: "Connection lost. Attempting to reconnect...",
-      })
-      setStreamStatus("disconnected")
-      eventSource.close()
-    }
-
-    const bind = (type: Event["type"]) =>
-      eventSource.addEventListener(type, (event) => handleEvent(type, event as MessageEvent))
-    bind("output")
-    bind("status_change")
-    bind("metric")
-    bind("error")
-    bind("metadata")
-    bind("activity_entry")
-    eventSource.addEventListener("heartbeat", handleHeartbeat)
-    eventSource.addEventListener("error", handleStreamError)
-    eventSource.onopen = () => setStreamStatus("live")
+    const stream = startEventStream(
+      apiClient.getEventsUrl(activeSessionId),
+      {
+        onStatus: (status) => {
+          if (status === "connecting") {
+            setStreamStatus("connecting")
+          } else if (status === "backoff") {
+            setStreamStatus("reconnecting")
+            setDockState({
+              type: "error",
+              message: "Connection lost. Attempting to reconnect...",
+            })
+          } else if (status === "not_found") {
+            setStreamStatus("error")
+            setDockState({
+              type: "error",
+              message: "Stream endpoint not found.",
+            })
+          }
+        },
+        onOpen: () => {
+          setStreamStatus("live")
+          if (dockState().type === "error") {
+            setDockState({ type: "loading" })
+          }
+        },
+        onError: (status) => {
+          if (status === 404) {
+            setStreamStatus("error")
+            setDockState({
+              type: "error",
+              message: "Stream endpoint not found.",
+            })
+            return
+          }
+          setStreamStatus("disconnected")
+        },
+        onEventSource: (source) => {
+          const bind = (type: Event["type"]) =>
+            source.addEventListener(type, (event) => handleEvent(type, event as MessageEvent))
+          bind("output")
+          bind("status_change")
+          bind("metric")
+          bind("error")
+          bind("metadata")
+          bind("activity_entry")
+          source.addEventListener("heartbeat", handleHeartbeat)
+        },
+      },
+      {
+        connectionTimeoutMs: 10000,
+      },
+    )
 
     onCleanup(() => {
-      eventSource.removeEventListener("heartbeat", handleHeartbeat)
-      eventSource.removeEventListener("error", handleStreamError)
-      eventSource.close()
+      stream.close()
     })
   })
 
@@ -523,7 +551,7 @@ export default function AgentDock(props: AgentDockProps) {
                   disabled={!canManage() || !isSessionActive() || pendingAction() !== null}
                   title={
                     !canManage()
-                      ? guardrailDetail("bulk-operations") || "Bulk session controls are locked for your role."
+                      ? "Bulk session controls are not permitted for your role."
                       : pendingAction() !== null
                       ? "Action is in progress..."
                       : !isSessionActive()
@@ -542,7 +570,7 @@ export default function AgentDock(props: AgentDockProps) {
                   disabled={!canManage() || sessionState() === "stopped" || pendingAction() !== null}
                   title={
                     !canManage()
-                      ? guardrailDetail("bulk-operations") || "Bulk session controls are locked for your role."
+                      ? "Bulk session controls are not permitted for your role."
                       : pendingAction() !== null
                       ? "Action is in progress..."
                       : sessionState() === "stopped"

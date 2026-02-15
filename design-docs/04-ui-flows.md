@@ -69,11 +69,11 @@ This is the primary happy path for operating agents in OrbitMesh.
    Click on task in tree
    └─> Detail panel opens (right sidebar or modal)
    └─> Display: full task description, assigned role, todos, history
-   └─> Show: estimated time, dependencies, guardrails
+   └─> Show: estimated time, dependencies, permissions
    └─> Key action highlighted: "Start Agent" button
 
-3. CHECK GUARDRAILS (if restricted)
-   Is "start_agent" guardrail allowed?
+3. CHECK PERMISSIONS (if restricted)
+   Is "start_agent" permission allowed?
    ├─ YES: Show enabled button, proceed
    └─ NO: Show disabled button with "Request access" link
       └─> Opens request modal (email/notification to reviewer)
@@ -396,7 +396,7 @@ Guidance:
 - Show countdown to next retry attempt
 ```
 
-**Permission Denied (Guardrail):**
+**Permission Denied:**
 ```
 ┌─────────────────────────────────────────┐
 │ Task: Critical System Change            │
@@ -406,21 +406,18 @@ Guidance:
 │                                         │
 │ 🔒 This action requires approval       │
 │                                         │
-│ Guardrail: start_agent_on_prod         │
+│ Permission: start_agent_on_prod        │
 │ Requires: security_lead approval       │
 │                                         │
 │ [ Request Access ]                     │
-│                                         │
-│ Learn more: /docs/guardrails           │
 │                                         │
 └─────────────────────────────────────────┘
 
 Guidance:
 - Disable button visually (grayed out)
 - Show lock icon + explanation
-- Identify guardrail ID + required role
+- Identify permission + required role
 - "Request Access" opens modal to notify reviewer
-- Link to docs for more info
 - Don't hide the option (keep it visible!)
 ```
 

@@ -25,22 +25,6 @@ func sampleTaskTree() []apiTypes.TaskNode {
 			UpdatedAt: now.Add(-2 * time.Hour),
 			Children: []apiTypes.TaskNode{
 				{
-					ID:        "task-guardrails",
-					Title:     "Guardrail baselines",
-					Role:      "developer",
-					Status:    apiTypes.TaskStatusCompleted,
-					UpdatedAt: now.Add(-5 * time.Hour),
-					Children: []apiTypes.TaskNode{
-						{
-							ID:        "task-guardrails-copy",
-							Title:     "Copy review for live rollout",
-							Role:      "documentation",
-							Status:    apiTypes.TaskStatusCompleted,
-							UpdatedAt: now.Add(-4 * time.Hour),
-						},
-					},
-				},
-				{
 					ID:        "task-telemetry",
 					Title:     "Telemetry baselines",
 					Role:      "developer",

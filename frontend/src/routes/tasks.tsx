@@ -444,7 +444,7 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
                     </button>
                   </div>
                   <Show when={startError()}>
-                    {(message) => <p class="guardrail-banner error">{message()}</p>}
+                    {(message) => <p class="notice-banner error">{message()}</p>}
                   </Show>
                   <Show
                     when={sessionInfo() && sessionInfo()?.taskId === task().id ? sessionInfo() : null}
@@ -472,7 +472,7 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
             </Show>
           </Show>
           <Show when={treeResponse.error}>
-            <p class="guardrail-banner error">Unable to load tasks. Check the API connection.</p>
+            <p class="notice-banner error">Unable to load tasks. Check the API connection.</p>
           </Show>
         </section>
 

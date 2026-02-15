@@ -4,6 +4,7 @@ import { apiClient } from '../../api/client'
 import TerminalView from '../../components/TerminalView'
 import type { ActivityEntry, ActivityEntryMutation, Event, SessionState } from '../../types/api'
 import { setDockSessionId } from '../../state/agentDock'
+import { startEventStream } from '../../utils/eventStream'
 
 export const Route = createFileRoute('/sessions/$sessionId')({
   component: SessionViewer,
@@ -58,8 +59,6 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   const providerType = () => session()?.provider_type ?? ""
   const canInspect = () => permissions()?.can_inspect_sessions ?? false
   const canManage = () => permissions()?.can_initiate_bulk_actions ?? false
-  const guardrailDetail = (id: string) =>
-    permissions()?.guardrails?.find((item) => item.id === id)?.detail ?? ""
 
   const filteredMessages = createMemo(() => {
     const term = filter().trim().toLowerCase()
@@ -319,17 +318,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     if (permissions.loading) return
     if (!canInspect()) return
     const url = apiClient.getEventsUrl(sessionId())
-    setStreamStatus("connecting")
-    const source = new EventSource(url)
-
-    // Set a timeout for the initial connection to prevent hanging
     const connectionTimeoutMs = 10000
-    const connectionTimeout = window.setTimeout(() => {
-      if (streamStatus() === "connecting") {
-        setStreamStatus("connection_timeout")
-        source.close()
-      }
-    }, connectionTimeoutMs)
 
     const heartbeatTimeoutMs = 35000
     const heartbeatCheckIntervalMs = 5000
@@ -341,34 +330,56 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
       }
     }, heartbeatCheckIntervalMs)
 
-    const bind = (type: string) =>
-      source.addEventListener(type, (event) => handleEvent(type, event as MessageEvent))
-    bind("output")
-    bind("status_change")
-    bind("metric")
-    bind("error")
-    bind("metadata")
-    bind("activity_entry")
-    source.addEventListener("heartbeat", handleHeartbeat)
-
-    source.onopen = () => {
-      window.clearTimeout(connectionTimeout)
-      markStreamActive()
-    }
-
-    source.onerror = () => {
-      window.clearTimeout(connectionTimeout)
-      if (streamStatus() === "connecting") {
-        setStreamStatus("connection_failed")
-      } else {
-        setStreamStatus("disconnected")
-      }
-    }
+    const stream = startEventStream(
+      url,
+      {
+        onStatus: (status) => {
+          if (status === "connecting") {
+            setStreamStatus("connecting")
+          } else if (status === "backoff") {
+            setStreamStatus("reconnecting")
+          } else if (status === "not_found") {
+            setStreamStatus("connection_failed")
+          }
+        },
+        onOpen: () => {
+          markStreamActive()
+        },
+        onTimeout: () => {
+          setStreamStatus("connection_timeout")
+        },
+        onError: (status) => {
+          if (status === 404) {
+            setStreamStatus("connection_failed")
+            return
+          }
+          if (streamStatus() === "connection_timeout") return
+          if (streamStatus() === "connecting") {
+            setStreamStatus("connection_failed")
+          } else {
+            setStreamStatus("disconnected")
+          }
+        },
+        onEventSource: (source) => {
+          const bind = (type: string) =>
+            source.addEventListener(type, (event) => handleEvent(type, event as MessageEvent))
+          bind("output")
+          bind("status_change")
+          bind("metric")
+          bind("error")
+          bind("metadata")
+          bind("activity_entry")
+          source.addEventListener("heartbeat", handleHeartbeat)
+        },
+      },
+      {
+        connectionTimeoutMs,
+      },
+    )
 
     onCleanup(() => {
-      source.close()
+      stream.close()
       window.clearInterval(heartbeatInterval)
-      window.clearTimeout(connectionTimeout)
     })
   })
 
@@ -393,7 +404,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     if (!canManage()) {
       setActionNotice({
         tone: "error",
-        message: guardrailDetail("bulk-operations") || "Bulk session controls are locked for your role.",
+        message: "Bulk session controls are not permitted for your role.",
       })
       return
     }
@@ -413,7 +424,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     if (!canManage()) {
       setActionNotice({
         tone: "error",
-        message: guardrailDetail("bulk-operations") || "Bulk session controls are locked for your role.",
+        message: "Bulk session controls are not permitted for your role.",
       })
       return
     }
@@ -433,7 +444,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     if (!canManage()) {
       setActionNotice({
         tone: "error",
-        message: guardrailDetail("bulk-operations") || "Bulk session controls are locked for your role.",
+        message: "Bulk session controls are not permitted for your role.",
       })
       return
     }
@@ -509,7 +520,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
               disabled={!canManage() || sessionState() !== "running" || pendingAction() === "pause"}
               title={
                 !canManage()
-                  ? guardrailDetail("bulk-operations")
+                  ? "Bulk session controls are not permitted for your role."
                   : pendingAction() === "pause"
                   ? "Pause action is in progress..."
                   : sessionState() !== "running"
@@ -525,7 +536,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
               disabled={!canManage() || sessionState() !== "paused" || pendingAction() === "resume"}
               title={
                 !canManage()
-                  ? guardrailDetail("bulk-operations")
+                  ? "Bulk session controls are not permitted for your role."
                   : pendingAction() === "resume"
                   ? "Resume action is in progress..."
                   : sessionState() !== "paused"
@@ -542,7 +553,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
               disabled={!canManage() || pendingAction() === "stop"}
               title={
                 !canManage()
-                  ? guardrailDetail("bulk-operations")
+                  ? "Bulk session controls are not permitted for your role."
                   : pendingAction() === "stop"
                   ? "Kill action is in progress..."
                   : "Kill the session"
@@ -564,14 +575,14 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
       </header>
       <Show when={actionNotice()}>
         {(notice) => (
-          <p class={`guardrail-banner ${notice().tone}`} data-testid="session-action-notice">
+          <p class={`notice-banner ${notice().tone}`} data-testid="session-action-notice">
             {notice().message}
           </p>
         )}
       </Show>
       <Show when={session()?.error_message}>
         {(errorMsg) => (
-          <p class="guardrail-banner error" data-testid="session-error-banner">
+          <p class="notice-banner error" data-testid="session-error-banner">
             Session error: {errorMsg()}
           </p>
         )}

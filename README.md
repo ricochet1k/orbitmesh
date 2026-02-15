@@ -233,7 +233,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed development guidelines.
 - **Storage**: File-based JSON with no external database dependencies
 - **CI/CD**: GitHub Actions for automated testing and deployment
 
-See [design-docs/](design-docs/) for detailed architecture documentation including [Frontend Architecture](design-docs/03-frontend-architecture.md), [docs/backend-architecture.md](docs/backend-architecture.md) for core backend components, and [docs/guardrail-guidance.md](docs/guardrail-guidance.md) for guardrail guidance authoring rules.
+See [design-docs/](design-docs/) for detailed architecture documentation including [Frontend Architecture](design-docs/03-frontend-architecture.md) and [docs/backend-architecture.md](docs/backend-architecture.md) for core backend components.
 
 ## License
 

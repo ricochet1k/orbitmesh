@@ -40,7 +40,6 @@ test.describe("Error States", () => {
           can_manage_templates: false,
           can_initiate_bulk_actions: true,
           requires_owner_approval_for_role_changes: false,
-          guardrails: [],
         },
       });
     });
@@ -79,7 +78,6 @@ test.describe("Error States", () => {
           can_manage_templates: false,
           can_initiate_bulk_actions: true,
           requires_owner_approval_for_role_changes: false,
-          guardrails: [],
         },
       });
     });
@@ -117,7 +115,6 @@ test.describe("Error States", () => {
           can_manage_templates: false,
           can_initiate_bulk_actions: true,
           requires_owner_approval_for_role_changes: false,
-          guardrails: [],
         },
       });
     });
@@ -154,7 +151,6 @@ test.describe("Error States", () => {
           can_manage_templates: false,
           can_initiate_bulk_actions: true,
           requires_owner_approval_for_role_changes: false,
-          guardrails: [],
         },
       });
     });
@@ -212,7 +208,6 @@ test.describe("Error States", () => {
           can_manage_templates: false,
           can_initiate_bulk_actions: true,
           requires_owner_approval_for_role_changes: false,
-          guardrails: [],
         },
       });
     });
@@ -268,7 +263,6 @@ test.describe("Error States", () => {
           can_manage_templates: false,
           can_initiate_bulk_actions: true,
           requires_owner_approval_for_role_changes: false,
-          guardrails: [],
         },
       });
     });
@@ -314,14 +308,6 @@ test.describe("Error States", () => {
           can_manage_templates: false,
           can_initiate_bulk_actions: false,
           requires_owner_approval_for_role_changes: false,
-          guardrails: [
-            {
-              id: "session-inspection",
-              title: "Session inspection",
-              allowed: false,
-              detail: "You do not have permission to inspect sessions",
-            },
-          ],
         },
       });
     });
@@ -372,7 +358,6 @@ test.describe("Error States", () => {
           can_manage_templates: false,
           can_initiate_bulk_actions: true,
           requires_owner_approval_for_role_changes: false,
-          guardrails: [],
         },
       });
     });
@@ -436,7 +421,6 @@ test.describe("Error States", () => {
           can_manage_templates: false,
           can_initiate_bulk_actions: true,
           requires_owner_approval_for_role_changes: false,
-          guardrails: [],
         },
       });
     });
@@ -483,7 +467,6 @@ test.describe("Error States", () => {
           can_manage_templates: false,
           can_initiate_bulk_actions: true,
           requires_owner_approval_for_role_changes: false,
-          guardrails: [],
         },
       });
     });
@@ -527,7 +510,6 @@ test.describe("Error States", () => {
           can_manage_templates: false,
           can_initiate_bulk_actions: true,
           requires_owner_approval_for_role_changes: false,
-          guardrails: [],
         },
       });
     });

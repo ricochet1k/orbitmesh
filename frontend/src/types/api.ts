@@ -115,14 +115,6 @@ export interface MetadataData {
   value: any;
 }
 
-export interface GuardrailStatus {
-  id: string;
-  title: string;
-  allowed: boolean;
-  detail: string;
-  references?: string[];
-}
-
 export interface PermissionsResponse {
   role: string;
   can_inspect_sessions: boolean;
@@ -130,7 +122,6 @@ export interface PermissionsResponse {
   can_manage_templates: boolean;
   can_initiate_bulk_actions: boolean;
   requires_owner_approval_for_role_changes: boolean;
-  guardrails: GuardrailStatus[];
 }
 
 export interface ErrorResponse {

@@ -31,7 +31,6 @@ const mockPermissions = {
   can_manage_templates: false,
   can_initiate_bulk_actions: true,
   requires_owner_approval_for_role_changes: false,
-  guardrails: [],
 };
 
 test.describe("UI Navigation - Focused Tests", () => {
