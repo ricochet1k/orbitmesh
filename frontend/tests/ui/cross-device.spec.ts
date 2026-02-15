@@ -26,6 +26,7 @@ const mockTaskTree = {
 };
 
 const mockCommits = { commits: [] };
+const mockProviders = { providers: [] };
 
 const setupMocks = async (page: any) => {
   await page.route("**/api/v1/me/permissions", async (route) => {
@@ -36,8 +37,12 @@ const setupMocks = async (page: any) => {
     await route.fulfill({ status: 200, json: mockTaskTree });
   });
 
-  await page.route("**/api/v1/commits", async (route) => {
+  await page.route("**/api/v1/commits**", async (route) => {
     await route.fulfill({ status: 200, json: mockCommits });
+  });
+
+  await page.route("**/api/v1/providers", async (route) => {
+    await route.fulfill({ status: 200, json: mockProviders });
   });
 
   await page.route("**/api/sessions", async (route) => {

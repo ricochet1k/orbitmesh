@@ -88,6 +88,9 @@ func NewJSONFileStorage(baseDir string) (*JSONFileStorage, error) {
 }
 
 func DefaultBaseDir() string {
+	if baseDir := os.Getenv("ORBITMESH_BASE_DIR"); baseDir != "" {
+		return baseDir
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ".orbitmesh"

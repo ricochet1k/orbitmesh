@@ -41,8 +41,12 @@ test.describe("Responsive Behavior", () => {
       await route.fulfill({ status: 200, json: { tasks: [] } });
     });
 
-    await page.route("**/api/v1/commits", async (route) => {
+    await page.route("**/api/v1/commits**", async (route) => {
       await route.fulfill({ status: 200, json: { commits: [] } });
+    });
+
+    await page.route("**/api/v1/providers", async (route) => {
+      await route.fulfill({ status: 200, json: { providers: [] } });
     });
 
     await page.route("**/api/sessions", async (route) => {
@@ -100,12 +104,12 @@ test.describe("Responsive Behavior", () => {
       // Navigate to Tasks
       await page.getByRole("link", { name: "Tasks" }).click();
       await expect(page).toHaveURL("/tasks");
-      await expect(page.getByRole("heading", { name: "Task Tree" })).toBeVisible();
+      await expect(page.getByTestId("tasks-heading")).toBeVisible();
 
       // Navigate to Sessions
       await page.getByRole("link", { name: "Sessions" }).click();
       await expect(page).toHaveURL("/sessions");
-      await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
+      await expect(page.getByTestId("sessions-heading")).toBeVisible();
   });
 
   test("Desktop: Tasks view displays correctly at 1920x1080", async ({ page }) => {
@@ -131,7 +135,7 @@ test.describe("Responsive Behavior", () => {
 
     // Verify task tree layout
     await expect(page.locator(".task-tree-layout")).toBeVisible();
-    await expect(page.getByText("Test Task")).toBeVisible();
+    await expect(page.getByTestId("task-tree").getByText("Test Task")).toBeVisible();
 
       // Verify controls are visible
       const searchInput = page.getByPlaceholder(/search|filter/i).or(page.locator("input[type='search']").first());
@@ -162,7 +166,7 @@ test.describe("Responsive Behavior", () => {
     await page.goto("/tasks");
 
     // Verify task is visible
-    await expect(page.getByText("Mobile Test Task")).toBeVisible();
+    await expect(page.getByTestId("task-tree").getByText("Mobile Test Task")).toBeVisible();
 
       // Verify search and filters are accessible
       const mobileSearch = page.getByPlaceholder(/search|filter/i).or(page.locator("input[type='search']").first());
@@ -331,11 +335,11 @@ test.describe("Responsive Behavior", () => {
     await page.goto("/tasks");
 
     // Tap on task (using click works for touch as well in Playwright)
-    await page.getByText("Touch Test Task").click();
+    await page.getByTestId("task-tree").getByText("Touch Test Task").click();
 
     // Verify task details appear
     await expect(page.getByText("Task ID")).toBeVisible();
-    await expect(page.getByText("touch-task")).toBeVisible();
+    await expect(page.getByTestId("task-details").getByText("touch-task")).toBeVisible();
   });
 
   test("Large desktop: Dashboard uses available space at 2560x1440", async ({ page }) => {

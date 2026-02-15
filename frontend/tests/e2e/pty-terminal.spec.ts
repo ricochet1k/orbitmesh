@@ -4,7 +4,7 @@ test.describe("PTY Terminal Output E2E", () => {
   test("should display bash prompt from bash session", async ({ page }) => {
     // Navigate to homepage to get CSRF token
     await page.goto("/");
-    await page.waitForTimeout(500);
+    await page.waitForFunction(() => document.cookie.includes("orbitmesh-csrf-token="));
 
     // Create a PTY session with bash
     const response = await page.evaluate(async () => {
@@ -38,9 +38,6 @@ test.describe("PTY Terminal Output E2E", () => {
     const sessionId = response.data.id;
     expect(sessionId).toBeTruthy();
 
-    // Wait for session to start
-    await page.waitForTimeout(1000);
-
     // Navigate to the session viewer
     await page.goto(`/sessions/${sessionId}`);
 
@@ -54,8 +51,12 @@ test.describe("PTY Terminal Output E2E", () => {
     const terminalBody = page.locator(".terminal-body");
     await expect(terminalBody).toBeVisible();
 
-    // Wait for terminal output
-    await page.waitForTimeout(2000);
+    await expect
+      .poll(
+        async () => page.evaluate(() => document.querySelectorAll(".terminal-line").length),
+        { timeout: 5000 },
+      )
+      .toBeGreaterThan(0);
 
     // Check if we received terminal lines
     const lines = await page.evaluate(() => {
@@ -73,7 +74,7 @@ test.describe("PTY Terminal Output E2E", () => {
 
   test("should display real-time echo output", async ({ page }) => {
     await page.goto("/");
-    await page.waitForTimeout(500);
+    await page.waitForFunction(() => document.cookie.includes("orbitmesh-csrf-token="));
 
     // Create a PTY session with continuous echo loop
     const response = await page.evaluate(async () => {
@@ -106,14 +107,22 @@ test.describe("PTY Terminal Output E2E", () => {
 
     expect(response.status).toBe(201);
     const sessionId = response.data.id;
-    await page.waitForTimeout(1000);
 
     await page.goto(`/sessions/${sessionId}`);
     await expect(page.locator(".terminal-shell")).toBeVisible({ timeout: 10000 });
     await expect(page.locator(".terminal-status")).toHaveText("live", { timeout: 10000 });
 
-    // Wait for echo output to accumulate
-    await page.waitForTimeout(3000);
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(() =>
+            Array.from(document.querySelectorAll(".terminal-line")).some((el) =>
+              el.textContent?.includes("test line"),
+            ),
+          ),
+        { timeout: 5000 },
+      )
+      .toBeTruthy();
 
     const terminalData = await page.evaluate(() => {
       const lines = Array.from(document.querySelectorAll(".terminal-line"))

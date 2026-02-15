@@ -41,7 +41,5 @@ yarn-error.log*
 .env.local
 .env.*.local
 
-# User home directory
-~/.orbitmesh
 node_modules
 .playwright-cli

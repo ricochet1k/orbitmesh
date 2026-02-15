@@ -53,6 +53,13 @@ tasks:
     cmds:
       - pnpm test:e2e
 
+  test:e2e:full:
+    desc: Run full frontend end-to-end tests
+    dir: frontend
+    deps: [install]
+    cmds:
+      - pnpm test:e2e:full
+
   lint:
     desc: Lint frontend code
     dir: frontend

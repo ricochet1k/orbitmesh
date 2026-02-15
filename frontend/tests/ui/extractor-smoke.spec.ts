@@ -137,6 +137,11 @@ test("extractor editor flow @smoke", async ({ context, page }) => {
       return;
     }
 
+    if (request.method() === "GET" && pathname === "/api/v1/providers") {
+      await route.fulfill({ status: 200, json: { providers: [] } });
+      return;
+    }
+
     if (request.method() === "GET" && pathname === "/api/sessions") {
       await route.fulfill({ status: 200, json: sessionsPayload });
       return;
@@ -166,7 +171,7 @@ test("extractor editor flow @smoke", async ({ context, page }) => {
   });
 
   await page.goto("/extractors", { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".extractor-view", { timeout: 10000 });
+  await page.waitForSelector(".extractor-view", { timeout: 5000 });
   await expect(page.getByRole("heading", { name: "Extractor Rules" })).toBeVisible();
 
   await expect(page.getByRole("button", { name: /claude-default/ })).toBeVisible();

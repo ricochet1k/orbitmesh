@@ -432,8 +432,13 @@ test.describe("Tasks View", () => {
   });
 
   test("Task tree shows loading skeleton while fetching", async ({ page }) => {
+    let releaseResponse!: () => void;
+    const responseGate = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+
     await page.route("**/api/v1/tasks/tree", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await responseGate;
       await route.fulfill({ status: 200, json: { tasks: [] } });
     });
 
@@ -441,6 +446,8 @@ test.describe("Tasks View", () => {
 
     // Verify view header renders during loading
     await expect(page.getByTestId("tasks-heading")).toBeVisible({ timeout: 5000 });
+
+    releaseResponse();
 
     await navigation;
 

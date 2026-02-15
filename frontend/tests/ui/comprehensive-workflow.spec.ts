@@ -6,7 +6,7 @@ import { expect, test } from "@playwright/test"
  * These tests verify:
  * - UI Navigation (sidebar, routing, responsive layouts)
  * - Agent Dock functionality (messages, controls)
- * - MVP Workflow (end-to-end session management)
+ * - MVP Workflow (mocked session management)
  * - Cross-device support (desktop, tablet, mobile)
  */
 
@@ -53,9 +53,10 @@ const mockTaskTree = {
 }
 
 const mockCommits = { commits: [] }
+const mockProviders = { providers: [] }
 
 test.describe("Comprehensive OrbitMesh MVP Workflow", () => {
-  test.setTimeout(15000)
+  test.setTimeout(10000)
   let sessionState = "running"
 
   test.beforeEach(async ({ page, context }) => {
@@ -81,6 +82,10 @@ test.describe("Comprehensive OrbitMesh MVP Workflow", () => {
 
     await page.route("**/api/v1/commits*", async (route) => {
       await route.fulfill({ status: 200, json: mockCommits })
+    })
+
+    await page.route("**/api/v1/providers", async (route) => {
+      await route.fulfill({ status: 200, json: mockProviders })
     })
 
     await page.route("**/api/sessions", async (route) => {
@@ -280,7 +285,7 @@ test.describe("Comprehensive OrbitMesh MVP Workflow", () => {
     const openViewerButton = page.getByRole("button", { name: /Open|open/i })
     if (await openViewerButton.count() > 0) {
       await openViewerButton.first().click()
-      await expect(page.getByRole("heading", { name: "Live Session Control" })).toBeVisible()
+      await expect(page.getByTestId("session-viewer-heading")).toBeVisible({ timeout: 5000 })
     }
 
     // Try to find pause button
@@ -293,7 +298,9 @@ test.describe("Comprehensive OrbitMesh MVP Workflow", () => {
     // Try to find resume button
     const resumeButton = page.getByRole("button", { name: /resume|Resume/i })
     if (await resumeButton.isVisible()) {
-      await resumeButton.click()
+      if (await resumeButton.isEnabled()) {
+        await resumeButton.click()
+      }
     }
   })
 

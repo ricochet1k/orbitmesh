@@ -53,8 +53,12 @@ test.describe("UI Navigation - Focused Tests", () => {
       await route.fulfill({ status: 200, json: mockTaskTree });
     });
 
-    await page.route("**/api/v1/commits", async (route) => {
+    await page.route("**/api/v1/commits**", async (route) => {
       await route.fulfill({ status: 200, json: { commits: [] } });
+    });
+
+    await page.route("**/api/v1/providers", async (route) => {
+      await route.fulfill({ status: 200, json: { providers: [] } });
     });
 
     await page.route("**/api/sessions", async (route) => {

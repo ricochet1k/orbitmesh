@@ -19,5 +19,26 @@
   ],
   "rules": {
     "@typescript-eslint/no-explicit-any": "off"
-  }
+  },
+  "overrides": [
+    {
+      "files": [
+        "tests/**/*.spec.ts",
+        "tests/**/*.spec.tsx"
+      ],
+      "rules": {
+        "no-restricted-syntax": [
+          "error",
+          {
+            "selector": "CallExpression[callee.property.name='waitForTimeout']",
+            "message": "Avoid waitForTimeout in tests; wait on UI or network state instead."
+          },
+          {
+            "selector": "CallExpression[callee.name='setTimeout']",
+            "message": "Avoid setTimeout sleeps in tests; use state-based waits instead."
+          }
+        ]
+      }
+    }
+  ]
 }

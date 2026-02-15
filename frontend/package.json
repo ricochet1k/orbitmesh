@@ -6,10 +6,15 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:ui": "vitest --ui",
+    "test:ui-mock": "playwright test -c playwright.config.ts",
     "lint": "eslint src --ext .ts,.tsx",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test -c playwright.e2e.config.ts --grep @smoke",
+    "test:e2e:full": "playwright test -c playwright.e2e.config.ts",
+    "e2e:backend": "node ./scripts/e2e-backend.mjs",
+    "e2e:frontend": "vite --host 127.0.0.1 --port 4173"
   },
   "dependencies": {
     "d3": "^7.9.0",

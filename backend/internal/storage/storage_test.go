@@ -36,6 +36,14 @@ func TestDefaultBaseDir(t *testing.T) {
 	}
 }
 
+func TestDefaultBaseDir_EnvOverride(t *testing.T) {
+	baseDir := t.TempDir()
+	t.Setenv("ORBITMESH_BASE_DIR", baseDir)
+	if dir := DefaultBaseDir(); dir != baseDir {
+		t.Errorf("expected base dir %q, got %q", baseDir, dir)
+	}
+}
+
 func TestJSONFileStorage_SaveAndLoad(t *testing.T) {
 	tmpDir := t.TempDir()
 	storage, _ := NewJSONFileStorage(tmpDir)

@@ -2,74 +2,17 @@ import { render, screen, fireEvent } from "@solidjs/testing-library";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import Dashboard from "./Dashboard";
 import { apiClient } from "../api/client";
+import {
+  defaultGuardrails,
+  defaultPermissions,
+  makeSession,
+  permissionsWithRestrictions,
+} from "../test/fixtures";
 
 vi.mock("@tanstack/solid-router", () => ({
   createFileRoute: () => () => ({}),
 }));
 
-const defaultGuardrails = [
-  {
-    id: "session-inspection",
-    title: "Inspect sessions",
-    allowed: true,
-    detail: "Live telemetry stays read-only unless your guardrail allows inspection.",
-  },
-  {
-    id: "role-escalation",
-    title: "Role escalations",
-    allowed: false,
-    detail: "Role edits are hidden until an owner approves escalation.",
-  },
-  {
-    id: "template-authoring",
-    title: "Template authoring",
-    allowed: true,
-    detail: "Template workflows stay available for curated drafts.",
-  },
-  {
-    id: "bulk-operations",
-    title: "Bulk operations",
-    allowed: false,
-    detail: "Bulk commits require higher-level guardrails before they become active.",
-  },
-  {
-    id: "csrf-protection",
-    title: "CSRF validation",
-    allowed: true,
-    detail: "State-changing requests double-submit a SameSite cookie and header.",
-  },
-  {
-    id: "audit-integrity",
-    title: "Audit integrity",
-    allowed: true,
-    detail: "High-privilege changes generate immutable audit events and alerts.",
-  },
-];
-
-const defaultPermissions = {
-  role: "developer",
-  can_inspect_sessions: true,
-  can_manage_roles: false,
-  can_manage_templates: true,
-  can_initiate_bulk_actions: true, // Changed to true for easier testing of state-based restrictions
-  requires_owner_approval_for_role_changes: true,
-  guardrails: defaultGuardrails,
-};
-
-const permissionsWithRestrictions = {
-  ...defaultPermissions,
-  can_inspect_sessions: false,
-  can_initiate_bulk_actions: false,
-  guardrails: defaultGuardrails.map((g) => {
-    if (g.id === "session-inspection") {
-      return { ...g, allowed: false, detail: "Session inspection restricted by policy." };
-    }
-    if (g.id === "bulk-operations") {
-      return { ...g, allowed: false, detail: "Bulk actions restricted by policy." };
-    }
-    return g;
-  }),
-};
 
 vi.mock("../api/client", () => ({
   apiClient: {
@@ -101,7 +44,7 @@ describe("Dashboard", () => {
    it("renders sessions list when loaded", async () => {
      const mockSessions = {
        sessions: [
-         { id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" },
+         makeSession({ id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" }),
        ],
      };
      (apiClient.listSessions as any).mockResolvedValue(mockSessions);
@@ -140,11 +83,11 @@ describe("Dashboard", () => {
          },
        ],
      };
-     (apiClient.listSessions as any).mockResolvedValue({
-       sessions: [
-         { id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" },
-       ],
-     });
+    (apiClient.listSessions as any).mockResolvedValue({
+      sessions: [
+        makeSession({ id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" }),
+      ],
+    });
      (apiClient.getPermissions as any).mockResolvedValue(lockedPermissions);
      const onNavigate = vi.fn();
 
@@ -194,11 +137,11 @@ describe("Dashboard", () => {
        guardrails: permissiveGuardrails,
      };
 
-     (apiClient.listSessions as any).mockResolvedValue({
-       sessions: [
-         { id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" },
-       ],
-     });
+    (apiClient.listSessions as any).mockResolvedValue({
+      sessions: [
+        makeSession({ id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" }),
+      ],
+    });
      (apiClient.getPermissions as any).mockResolvedValue(permissivePermissions);
 
      render(() => <Dashboard />);
@@ -225,7 +168,7 @@ describe("Dashboard", () => {
     });
     (apiClient.listSessions as any).mockResolvedValue({
       sessions: [
-        { id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" },
+        makeSession({ id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" }),
       ],
     });
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
@@ -252,11 +195,11 @@ describe("Dashboard", () => {
        can_initiate_bulk_actions: true,
        guardrails: permissiveGuardrails,
      });
-     (apiClient.listSessions as any).mockResolvedValue({
-       sessions: [
-         { id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" },
-       ],
-     });
+    (apiClient.listSessions as any).mockResolvedValue({
+      sessions: [
+        makeSession({ id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" }),
+      ],
+    });
      (apiClient.pauseSession as any).mockRejectedValue(new Error("csrf token mismatch"));
      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
 
@@ -278,7 +221,7 @@ describe("Dashboard", () => {
     it("shows permission restriction tooltips for disabled inspect button", async () => {
       (apiClient.listSessions as any).mockResolvedValue({
         sessions: [
-          { id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" },
+          makeSession({ id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" }),
         ],
       });
       (apiClient.getPermissions as any).mockResolvedValue(permissionsWithRestrictions);
@@ -293,7 +236,7 @@ describe("Dashboard", () => {
     it("shows permission restriction tooltips for disabled bulk action buttons", async () => {
       (apiClient.listSessions as any).mockResolvedValue({
         sessions: [
-          { id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" },
+          makeSession({ id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" }),
         ],
       });
       (apiClient.getPermissions as any).mockResolvedValue(permissionsWithRestrictions);

@@ -5,7 +5,7 @@ import {
   setupCSRFCookie,
   setupCommonMocks,
   setupSessionMock,
-} from "../helpers/api-mocks";
+} from "../../../tests/helpers/api-mocks";
 
 const mockTaskTree = mockData.taskTree([
   {

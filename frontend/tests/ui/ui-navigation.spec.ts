@@ -228,16 +228,28 @@ test.describe("UI Navigation", () => {
   });
 
   test("Loading states display spinners", async ({ page }) => {
+    let releaseResponse!: () => void;
+    const responseGate = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+
     // Delay the response to see loading state
     await page.route("**/api/v1/tasks/tree", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await responseGate;
       await route.fulfill({ status: 200, json: mockTaskTree });
     });
 
-    await page.goto("/tasks");
+    const navigation = page.goto("/tasks", { waitUntil: "domcontentloaded" });
 
     // Loading spinner or skeleton should be visible briefly
     const spinner = page.locator(".spinner, .loading, [role='status']");
+    if (await spinner.count()) {
+      await expect(spinner.first()).toBeVisible({ timeout: 2000 });
+    }
+
+    releaseResponse();
+
+    await navigation;
     // Spinner might disappear quickly, so just verify page loads eventually
     await expect(page.locator(".task-tree").getByText("Root Task")).toBeVisible({ timeout: 5000 });
   });

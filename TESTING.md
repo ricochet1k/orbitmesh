@@ -37,6 +37,8 @@ It is intentionally forward-looking and describes how tests should be structured
 - `backend/**/_test.go`: unit + integration tests
 - `frontend/tests/ui/**`: UI tests with mocked APIs (fast)
 - `frontend/tests/e2e/**`: true E2E against real backend
+- `frontend/playwright.config.ts`: UI-mock Playwright config
+- `frontend/playwright.e2e.config.ts`: E2E Playwright config
 - `tests/fixtures/**`: shared JSON fixtures and seed scripts
 - `tests/helpers/**`: cross-test utilities and harnesses
 
@@ -48,6 +50,12 @@ It is intentionally forward-looking and describes how tests should be structured
 - Use deterministic seed data; never depend on production data.
 - Keep tests independent and order-agnostic.
 - Avoid `waitForTimeout` unless there is no better signal; prefer observable state.
+
+## Running Playwright Tests
+
+- UI-mock suite (mocked APIs): `cd frontend && npm run test:ui-mock`
+- E2E smoke suite (real backend, PR checks): `cd frontend && npm run test:e2e`
+- E2E full suite (real backend, scheduled/on-demand): `cd frontend && npm run test:e2e:full`
 
 ## Timeouts and Reliability
 

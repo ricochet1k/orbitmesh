@@ -2,6 +2,7 @@ import { render, screen, fireEvent } from "@solidjs/testing-library"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import SessionViewer from "./SessionViewer"
 import { apiClient } from "../api/client"
+import { baseSession, defaultPermissions, makeSession } from "../test/fixtures"
 
 vi.mock("@tanstack/solid-router", () => ({
   createFileRoute: () => () => ({ useParams: () => ({ sessionId: "session-1" }) }),
@@ -57,27 +58,6 @@ vi.mock("../components/TerminalView", () => ({
   ),
 }))
 
-const baseSession = {
-  id: "session-1",
-  provider_type: "native",
-  state: "running",
-  working_dir: "/tmp",
-  created_at: "2026-02-05T12:00:00Z",
-  updated_at: "2026-02-05T12:01:00Z",
-  current_task: "T1",
-  metrics: { tokens_in: 12, tokens_out: 9, request_count: 2 },
-}
-
-const defaultPermissions = {
-  role: "developer",
-  can_inspect_sessions: true,
-  can_manage_roles: false,
-  can_manage_templates: true,
-  can_initiate_bulk_actions: true,
-  requires_owner_approval_for_role_changes: false,
-  guardrails: [],
-}
-
 describe("SessionViewer", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -94,7 +74,7 @@ describe("SessionViewer", () => {
   })
 
   it("renders initial output and streams new transcript messages", async () => {
-    (apiClient.getSession as any).mockResolvedValue({ ...baseSession, output: "Initial output" })
+    (apiClient.getSession as any).mockResolvedValue(makeSession({ output: "Initial output" }))
 
     render(() => <SessionViewer sessionId="session-1" />)
 
@@ -161,7 +141,7 @@ describe("SessionViewer", () => {
   })
 
   it("renders terminal when session provider is PTY", async () => {
-    (apiClient.getSession as any).mockResolvedValue({ ...baseSession, provider_type: "pty" })
+    (apiClient.getSession as any).mockResolvedValue(makeSession({ provider_type: "pty" }))
 
     render(() => <SessionViewer sessionId="session-1" />)
 
@@ -170,7 +150,7 @@ describe("SessionViewer", () => {
   })
 
   it("does not render raw output for PTY sessions", async () => {
-    (apiClient.getSession as any).mockResolvedValue({ ...baseSession, provider_type: "pty" })
+    (apiClient.getSession as any).mockResolvedValue(makeSession({ provider_type: "pty" }))
 
     render(() => <SessionViewer sessionId="session-1" />)
 
@@ -218,7 +198,7 @@ describe("SessionViewer", () => {
 
   it("shows state-aware tooltips for disabled buttons", async () => {
     // Test with paused session
-    const pausedSession = { ...baseSession, state: "paused" as const }
+    const pausedSession = makeSession({ state: "paused" as const })
     ; (apiClient.getSession as any).mockResolvedValue(pausedSession)
 
     render(() => <SessionViewer sessionId="session-1" />)

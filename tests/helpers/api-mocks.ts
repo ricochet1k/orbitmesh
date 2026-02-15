@@ -35,6 +35,8 @@ export const mockData = {
 
   commits: (): CommitsPayload => ({ commits: [] }),
 
+  providers: (): ProvidersPayload => ({ providers: [] }),
+
   sessions: (sessions?: SessionPayload[]): SessionsPayload => ({
     sessions: sessions || [],
   }),
@@ -93,6 +95,7 @@ export async function setupCommonMocks(
     permissions?: PermissionsPayload;
     taskTree?: TaskTreePayload;
     commits?: CommitsPayload;
+    providers?: ProvidersPayload;
     sessions?: SessionsPayload;
   },
 ): Promise<void> {
@@ -114,6 +117,13 @@ export async function setupCommonMocks(
     await route.fulfill({
       status: 200,
       json: options?.commits || mockData.commits(),
+    });
+  });
+
+  await page.route("**/api/v1/providers", async (route) => {
+    await route.fulfill({
+      status: 200,
+      json: options?.providers || mockData.providers(),
     });
   });
 
@@ -240,6 +250,10 @@ export interface TaskTreePayload {
 
 export interface CommitsPayload {
   commits: Array<unknown>;
+}
+
+export interface ProvidersPayload {
+  providers: Array<unknown>;
 }
 
 export interface SessionPayload {

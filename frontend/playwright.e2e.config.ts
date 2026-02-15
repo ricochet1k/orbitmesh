@@ -1,10 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const port = 4173;
+const port = Number(process.env.E2E_FRONTEND_PORT ?? "4173");
 
 export default defineConfig({
-  testDir: "tests/ui",
-  outputDir: "test-results/ui-artifacts",
+  testDir: "tests/e2e",
+  globalSetup: "./tests/helpers/e2e-harness.ts",
+  outputDir: "test-results/e2e-artifacts",
   timeout: 10_000,
   fullyParallel: true,
   expect: {
@@ -22,10 +23,4 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
   ],
-  webServer: {
-    command: `npm run dev -- --host 127.0.0.1 --port ${port}`,
-    url: `http://127.0.0.1:${port}`,
-    reuseExistingServer: false,
-    timeout: 10_000,
-  },
 });

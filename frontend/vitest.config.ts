@@ -9,6 +9,8 @@ export default defineConfig({
     setupFiles: [],
     include: ['src/**/*.test.{ts,tsx}'],
     exclude: ['tests/**'],
+    testTimeout: 4000,
+    hookTimeout: 4000,
     server: {
       deps: {
         inline: [/^@tanstack\//],

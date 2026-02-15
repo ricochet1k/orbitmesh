@@ -19,8 +19,8 @@ import (
 	apiTypes "github.com/ricochet1k/orbitmesh/pkg/api"
 )
 
-// TestE2ESessionCreationAndEvents tests the full user workflow of creating a session and receiving events
-func TestE2ESessionCreationAndEvents(t *testing.T) {
+// TestSessionCreationAndEvents tests the workflow of creating a session and receiving events.
+func TestSessionCreationAndEvents(t *testing.T) {
 	// Setup
 	broadcaster := service.NewEventBroadcaster(100)
 	executor := service.NewAgentExecutor(service.ExecutorConfig{
