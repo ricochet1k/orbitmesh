@@ -3,8 +3,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import TaskTreeView from "./TaskTreeView";
 import { apiClient } from "../api/client";
 
+const mockNavigate = vi.fn();
+
 vi.mock("@tanstack/solid-router", () => ({
   createFileRoute: () => () => ({}),
+  useNavigate: () => mockNavigate,
+  Link: (props: any) => (
+    <a href={props.to} class={props.class} target={props.target} rel={props.rel}>
+      {props.children}
+    </a>
+  ),
 }));
 
 vi.mock("../api/client", () => ({

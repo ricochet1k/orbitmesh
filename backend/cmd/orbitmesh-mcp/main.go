@@ -1,14 +1,21 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	apiTypes "github.com/ricochet1k/orbitmesh/pkg/api"
 )
 
 const (
@@ -45,7 +52,13 @@ func main() {
 }
 
 func run() error {
-	tool := NewStrandTool()
+	mode := os.Getenv("ORBITMESH_MCP_MODE")
+	if len(os.Args) > 1 {
+		mode = os.Args[1]
+	}
+	if mode == "" {
+		mode = "strand"
+	}
 
 	impl := &mcp.Implementation{
 		Name:    serverName,
@@ -54,6 +67,23 @@ func run() error {
 
 	server := mcp.NewServer(impl, nil)
 
+	switch mode {
+	case "dock":
+		dockTool := NewDockTool()
+		registerDockTools(server, dockTool)
+	default:
+		tool := NewStrandTool()
+		registerStrandTools(server, tool)
+	}
+
+	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
+		return fmt.Errorf("server failed: %w", err)
+	}
+
+	return nil
+}
+
+func registerStrandTools(server *mcp.Server, tool *StrandTool) {
 	// Register list_tasks tool
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_tasks",
@@ -89,12 +119,23 @@ func run() error {
 		Name:        "claim_task",
 		Description: "Claim a task by marking it in progress",
 	}, tool.claimTask)
+}
 
-	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
-		return fmt.Errorf("server failed: %w", err)
-	}
+func registerDockTools(server *mcp.Server, tool *DockTool) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_ui_components",
+		Description: "List MCP-enabled UI components available on the live page",
+	}, tool.listComponents)
 
-	return nil
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "dispatch_ui_action",
+		Description: "Dispatch an MCP UI action to a component on the live page",
+	}, tool.dispatchAction)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "multi_edit_ui",
+		Description: "Edit multiple MCP input components on the live page",
+	}, tool.multiEdit)
 }
 
 type ListTasksArgs struct {
@@ -419,4 +460,127 @@ func isValidTaskID(s string) bool {
 		}
 	}
 	return hasDigit
+}
+
+type DockTool struct {
+	baseURL   string
+	sessionID string
+	client    *http.Client
+}
+
+func NewDockTool() *DockTool {
+	baseURL := os.Getenv("ORBITMESH_API_BASE_URL")
+	if baseURL == "" {
+		baseURL = "http://127.0.0.1:8080"
+	}
+	return &DockTool{
+		baseURL:   strings.TrimRight(baseURL, "/"),
+		sessionID: os.Getenv("ORBITMESH_DOCK_SESSION_ID"),
+		client:    &http.Client{Timeout: 45 * time.Second},
+	}
+}
+
+type DispatchUIArgs struct {
+	ComponentID string `json:"component_id" jsonschema:"description=Target MCP component ID,required"`
+	Action      string `json:"action" jsonschema:"description=Action type (click edit read focus select toggle),required"`
+	Payload     any    `json:"payload,omitempty" jsonschema:"description=Optional action payload"`
+}
+
+type MultiEditArgs struct {
+	Fields any `json:"fields" jsonschema:"description=Field map or list for multi-edit,required"`
+}
+
+func (d *DockTool) listComponents(ctx context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+	resp, err := d.request(ctx, apiTypes.DockMCPRequest{Kind: "list"})
+	return dockResult(resp, err)
+}
+
+func (d *DockTool) dispatchAction(ctx context.Context, req *mcp.CallToolRequest, args DispatchUIArgs) (*mcp.CallToolResult, any, error) {
+	if strings.TrimSpace(args.ComponentID) == "" || strings.TrimSpace(args.Action) == "" {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: "component_id and action are required"},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+	resp, err := d.request(ctx, apiTypes.DockMCPRequest{
+		Kind:     "dispatch",
+		TargetID: args.ComponentID,
+		Action:   args.Action,
+		Payload:  args.Payload,
+	})
+	return dockResult(resp, err)
+}
+
+func (d *DockTool) multiEdit(ctx context.Context, req *mcp.CallToolRequest, args MultiEditArgs) (*mcp.CallToolResult, any, error) {
+	resp, err := d.request(ctx, apiTypes.DockMCPRequest{
+		Kind:    "multi_edit",
+		Payload: args.Fields,
+	})
+	return dockResult(resp, err)
+}
+
+func (d *DockTool) request(ctx context.Context, request apiTypes.DockMCPRequest) (apiTypes.DockMCPResponse, error) {
+	if d.sessionID == "" {
+		return apiTypes.DockMCPResponse{}, fmt.Errorf("missing ORBITMESH_DOCK_SESSION_ID")
+	}
+	url := fmt.Sprintf("%s/api/sessions/%s/dock/mcp/request", d.baseURL, d.sessionID)
+
+	body, err := json.Marshal(request)
+	if err != nil {
+		return apiTypes.DockMCPResponse{}, err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
+	if err != nil {
+		return apiTypes.DockMCPResponse{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-Orbitmesh-Internal", "dock-mcp")
+
+	resp, err := d.client.Do(httpReq)
+	if err != nil {
+		return apiTypes.DockMCPResponse{}, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return apiTypes.DockMCPResponse{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return apiTypes.DockMCPResponse{}, fmt.Errorf("dock request failed: %s", strings.TrimSpace(string(respBody)))
+	}
+
+	var response apiTypes.DockMCPResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return apiTypes.DockMCPResponse{}, err
+	}
+	return response, nil
+}
+
+func dockResult(resp apiTypes.DockMCPResponse, err error) (*mcp.CallToolResult, any, error) {
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: fmt.Sprintf("Dock request failed: %v", err)},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+	if resp.Error != "" {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: resp.Error},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+	jsonBody, _ := json.Marshal(resp.Result)
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: string(jsonBody)},
+		},
+	}, nil, nil
 }

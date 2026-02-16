@@ -33,6 +33,7 @@ type Storage interface {
 type sessionData struct {
 	ID           string           `json:"id"`
 	ProviderType string           `json:"provider_type"`
+	Kind         string           `json:"kind,omitempty"`
 	State        string           `json:"state"`
 	WorkingDir   string           `json:"working_dir"`
 	CreatedAt    time.Time        `json:"created_at"`
@@ -73,12 +74,24 @@ func NewJSONFileStorage(baseDir string) (*JSONFileStorage, error) {
 		return nil, fmt.Errorf("failed to create sessions directory: %w", err)
 	}
 
+	terminalsDir := filepath.Join(baseDir, "terminals")
+	if err := os.MkdirAll(terminalsDir, 0o700); err != nil {
+		return nil, fmt.Errorf("failed to create terminals directory: %w", err)
+	}
+
 	// Verify permissions if it already existed
 	info, err := os.Stat(sessionsDir)
 	if err == nil {
 		if info.Mode().Perm()&0o077 != 0 {
 			// Directory is too permissive, try to fix it
 			_ = os.Chmod(sessionsDir, 0o700)
+		}
+	}
+
+	info, err = os.Stat(terminalsDir)
+	if err == nil {
+		if info.Mode().Perm()&0o077 != 0 {
+			_ = os.Chmod(terminalsDir, 0o700)
 		}
 	}
 
@@ -294,6 +307,7 @@ func snapshotToData(snap domain.SessionSnapshot) *sessionData {
 	return &sessionData{
 		ID:           snap.ID,
 		ProviderType: snap.ProviderType,
+		Kind:         snap.Kind,
 		State:        snap.State.String(),
 		WorkingDir:   snap.WorkingDir,
 		CreatedAt:    snap.CreatedAt,
@@ -332,6 +346,7 @@ func dataToSession(data *sessionData) (*domain.Session, error) {
 	return &domain.Session{
 		ID:           data.ID,
 		ProviderType: data.ProviderType,
+		Kind:         data.Kind,
 		State:        state,
 		WorkingDir:   data.WorkingDir,
 		CreatedAt:    data.CreatedAt,

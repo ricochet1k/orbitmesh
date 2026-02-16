@@ -3,6 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import AgentDock from "./AgentDock";
 import { apiClient } from "../api/client";
 
+const mockNavigate = vi.fn();
+
+vi.mock("@tanstack/solid-router", () => ({
+  useNavigate: () => mockNavigate,
+}));
+
 type EventListener = (event: MessageEvent) => void;
 
 const eventSources: MockEventSource[] = [];
@@ -46,10 +52,15 @@ vi.mock("../api/client", () => ({
   apiClient: {
     getSession: vi.fn(),
     getPermissions: vi.fn(),
+    listSessions: vi.fn(),
+    createDockSession: vi.fn(),
+    pollDockMcp: vi.fn(),
+    respondDockMcp: vi.fn(),
     getEventsUrl: vi.fn(),
     pauseSession: vi.fn(),
     resumeSession: vi.fn(),
     stopSession: vi.fn(),
+    sendSessionInput: vi.fn(),
   },
 }));
 
@@ -58,11 +69,206 @@ describe("AgentDock", () => {
     vi.clearAllMocks();
     eventSources.splice(0, eventSources.length);
     vi.stubGlobal("EventSource", MockEventSource as never);
+    vi.stubGlobal("crypto", {
+      randomUUID: () => "123e4567-e89b-12d3-a456-426614174000",
+    });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
       body: { cancel: vi.fn().mockResolvedValue(undefined) },
     }));
+    (apiClient.listSessions as any).mockResolvedValue({ sessions: [] });
+    (apiClient.createDockSession as any).mockResolvedValue({
+      id: "dock-session-1",
+      provider_type: "adk",
+      state: "running",
+      working_dir: "/tmp",
+      created_at: "2026-02-05T12:00:00Z",
+      updated_at: "2026-02-05T12:00:00Z",
+      session_kind: "dock",
+    });
+    (apiClient.pollDockMcp as any).mockResolvedValue(null);
+    (apiClient.respondDockMcp as any).mockResolvedValue(undefined);
+  });
+
+  it("shows empty state when no session is selected", async () => {
+    render(() => <AgentDock />);
+
+    screen.getByTestId("agent-dock-toggle").click();
+
+    expect(screen.getByText("No session selected")).toBeDefined();
+  });
+
+  it("shows loading state while session is fetching", async () => {
+    (apiClient.getSession as any).mockReturnValue(new Promise(() => undefined));
+    (apiClient.getPermissions as any).mockResolvedValue({
+      role: "developer",
+      can_initiate_bulk_actions: true,
+    });
+    (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1");
+
+    render(() => <AgentDock sessionId="session-1" />);
+
+    screen.getByTestId("agent-dock-toggle").click();
+
+    await waitFor(() => {
+      expect(screen.getByText("Connecting to session...")).toBeDefined();
+    });
+  });
+
+  it("disables quick actions when permissions are missing", async () => {
+    (apiClient.getSession as any).mockResolvedValue({
+      id: "session-1",
+      provider_type: "native",
+      state: "running",
+      working_dir: "/tmp",
+      created_at: "2026-02-05T12:00:00Z",
+      updated_at: "2026-02-05T12:00:00Z",
+      current_task: "T1",
+    });
+    (apiClient.getPermissions as any).mockResolvedValue({
+      role: "developer",
+      can_initiate_bulk_actions: false,
+    });
+    (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1");
+
+    render(() => <AgentDock sessionId="session-1" />);
+
+    await waitFor(() => expect(eventSources.length).toBe(1));
+    eventSources[0]?.emit("output", {
+      type: "output",
+      timestamp: "2026-02-05T12:00:05Z",
+      session_id: "session-1",
+      data: { content: "Ready" },
+    });
+
+    screen.getByTestId("agent-dock-toggle").click();
+
+    const actionButtons = screen.getAllByTitle(
+      "Bulk session controls are not permitted for your role.",
+    ) as HTMLButtonElement[];
+
+    expect(actionButtons.length).toBe(2);
+    actionButtons.forEach((button) => {
+      expect(button.disabled).toBe(true);
+    });
+  });
+
+  it("surfaces action errors when pausing fails", async () => {
+    (apiClient.getSession as any).mockResolvedValue({
+      id: "session-1",
+      provider_type: "native",
+      state: "running",
+      working_dir: "/tmp",
+      created_at: "2026-02-05T12:00:00Z",
+      updated_at: "2026-02-05T12:00:00Z",
+      current_task: "T1",
+    });
+    (apiClient.getPermissions as any).mockResolvedValue({
+      role: "developer",
+      can_initiate_bulk_actions: true,
+    });
+    (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1");
+    (apiClient.pauseSession as any).mockRejectedValue(new Error("Pause failed"));
+
+    render(() => <AgentDock sessionId="session-1" />);
+
+    await waitFor(() => expect(eventSources.length).toBe(1));
+    eventSources[0]?.emit("output", {
+      type: "output",
+      timestamp: "2026-02-05T12:00:05Z",
+      session_id: "session-1",
+      data: { content: "Ready" },
+    });
+
+    screen.getByTestId("agent-dock-toggle").click();
+
+    const pauseButton = screen.getByTitle("Pause session");
+    pauseButton.click();
+
+    await waitFor(() => {
+      expect(screen.getByText("Pause failed")).toBeDefined();
+    });
+  });
+
+  it("clears the composer input after sending", async () => {
+    (apiClient.getSession as any).mockResolvedValue({
+      id: "session-1",
+      provider_type: "native",
+      state: "running",
+      working_dir: "/tmp",
+      created_at: "2026-02-05T12:00:00Z",
+      updated_at: "2026-02-05T12:00:00Z",
+      current_task: "T1",
+    });
+    (apiClient.getPermissions as any).mockResolvedValue({
+      role: "developer",
+      can_initiate_bulk_actions: true,
+    });
+    (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1");
+
+    render(() => <AgentDock sessionId="session-1" />);
+
+    await waitFor(() => expect(eventSources.length).toBe(1));
+    eventSources[0]?.emit("output", {
+      type: "output",
+      timestamp: "2026-02-05T12:00:05Z",
+      session_id: "session-1",
+      data: { content: "Ready" },
+    });
+
+    screen.getByTestId("agent-dock-toggle").click();
+
+    const input = screen.getByPlaceholderText(
+      "Type a message... (Shift+Enter for newline)",
+    ) as HTMLTextAreaElement;
+    input.value = "hello";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+
+    screen.getByText("Send").click();
+
+    await waitFor(() => {
+      expect(input.value).toBe("");
+    });
+
+    expect(apiClient.sendSessionInput).toHaveBeenCalledWith("session-1", "hello");
+  });
+
+  it("creates a dock session before sending when empty", async () => {
+    (apiClient.getPermissions as any).mockResolvedValue({
+      role: "developer",
+      can_initiate_bulk_actions: true,
+    });
+    (apiClient.getSession as any).mockResolvedValue({
+      id: "dock-session-1",
+      provider_type: "adk",
+      state: "running",
+      working_dir: "/tmp",
+      created_at: "2026-02-05T12:00:00Z",
+      updated_at: "2026-02-05T12:00:00Z",
+      current_task: "Dock",
+    });
+    (apiClient.getEventsUrl as any).mockReturnValue("/events/dock-session-1");
+
+    render(() => <AgentDock />);
+
+    screen.getByTestId("agent-dock-toggle").click();
+
+    const input = screen.getByPlaceholderText(
+      "Type a message... (Shift+Enter for newline)",
+    ) as HTMLTextAreaElement;
+    input.value = "hello";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+
+    screen.getByText("Send").click();
+
+    await waitFor(() => {
+      expect(apiClient.createDockSession).toHaveBeenCalled();
+      expect(apiClient.sendSessionInput).toHaveBeenCalledWith(
+        "dock-session-1",
+        "hello",
+      );
+    });
   });
 
   it("surfaces stream disconnect errors safely", async () => {

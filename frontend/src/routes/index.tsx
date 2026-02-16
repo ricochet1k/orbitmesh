@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/solid-router'
+import { createFileRoute, useNavigate } from '@tanstack/solid-router'
 import { createResource, createSignal, createMemo, Show, For } from 'solid-js'
 import { apiClient } from '../api/client'
 import AgentGraph from '../graph/AgentGraph'
@@ -6,6 +6,8 @@ import { buildUnifiedGraph } from '../graph/graphData'
 import type { GraphNode } from '../graph/types'
 import EmptyState from '../components/EmptyState'
 import SkeletonLoader from '../components/SkeletonLoader'
+import { useSessionStore } from '../state/sessions'
+import { formatRelativeAge, getStreamStatus, isSessionStale } from '../utils/sessionStatus'
 
 export const Route = createFileRoute('/')({
   component: Dashboard,
@@ -16,13 +18,14 @@ interface DashboardProps {
 }
 
 export default function Dashboard(props: DashboardProps = {}) {
-  const [sessions] = createResource(apiClient.listSessions)
+  const navigate = useNavigate()
+  const { sessions, hasLoaded } = useSessionStore()
   const [permissions] = createResource(apiClient.getPermissions)
   const [taskTree] = createResource(apiClient.getTaskTree)
   const [commitList] = createResource(() => apiClient.listCommits(30))
   const [pendingAction, setPendingAction] = createSignal<{ id: string; action: string } | null>(null)
 
-  const sessionList = () => sessions()?.sessions ?? []
+  const sessionList = () => sessions()
   const activeCount = () => sessionList().length
   const countByState = (state: string) => sessionList().filter((item) => item.state === state).length
   const canInspect = () => permissions()?.can_inspect_sessions ?? false
@@ -38,7 +41,7 @@ export default function Dashboard(props: DashboardProps = {}) {
       props.onNavigate(path)
       return
     }
-    window.location.assign(path)
+    navigate({ to: path })
   }
 
   const runBulkAction = async (sessionId: string, action: "pause" | "resume" | "stop") => {
@@ -90,6 +93,13 @@ export default function Dashboard(props: DashboardProps = {}) {
     navigateTo(`/sessions/${sessionId}`)
   }
 
+  const streamLabel = (status: string) => {
+    if (status === "live") return "live"
+    if (status === "reconnecting") return "reconnecting"
+    if (status === "disconnected") return "disconnected"
+    return status
+  }
+
   return (
     <div class="dashboard" data-testid="dashboard-view">
       <header class="app-header">
@@ -109,7 +119,7 @@ export default function Dashboard(props: DashboardProps = {}) {
           </div>
           <div class="meta-card" data-testid="dashboard-meta-active-sessions">
             <p>Active sessions</p>
-            <Show when={!sessions.loading} fallback={<span>Loading...</span>}>
+            <Show when={hasLoaded()} fallback={<span>Loading...</span>}>
               <strong>{activeCount()}</strong>
             </Show>
           </div>
@@ -128,21 +138,21 @@ export default function Dashboard(props: DashboardProps = {}) {
           <div class="overview-grid">
             <div class="overview-card" data-testid="dashboard-overview-sessions">
               <p>Sessions in motion</p>
-              <Show when={!sessions.loading} fallback={<span>Calculating...</span>}>
+              <Show when={hasLoaded()} fallback={<span>Calculating...</span>}>
                 <strong>{activeCount()}</strong>
                 <span>{countByState("running")} running</span>
               </Show>
             </div>
             <div class="overview-card" data-testid="dashboard-overview-paused">
               <p>Paused or starting</p>
-              <Show when={!sessions.loading} fallback={<span>Calculating...</span>}>
+              <Show when={hasLoaded()} fallback={<span>Calculating...</span>}>
                 <strong>{countByState("paused") + countByState("starting")}</strong>
                 <span>{countByState("starting")} starting</span>
               </Show>
             </div>
             <div class="overview-card" data-testid="dashboard-overview-attention">
               <p>Attention needed</p>
-              <Show when={!sessions.loading} fallback={<span>Calculating...</span>}>
+              <Show when={hasLoaded()} fallback={<span>Calculating...</span>}>
                 <strong>{countByState("error")}</strong>
                 <span>{countByState("stopped")} stopped</span>
               </Show>
@@ -159,7 +169,7 @@ export default function Dashboard(props: DashboardProps = {}) {
             <span class="panel-pill neutral">Operators ready</span>
           </div>
           <Show 
-            when={!sessions.loading} 
+            when={hasLoaded()} 
             fallback={<SkeletonLoader variant="table" count={5} />}
           >
             <Show 
@@ -175,7 +185,9 @@ export default function Dashboard(props: DashboardProps = {}) {
                   }}
                   secondaryAction={{
                     label: "View Documentation",
-                    onClick: () => window.open("/docs", "_blank")
+                    href: "/docs",
+                    target: "_blank",
+                    rel: "noreferrer",
                   }}
                 />
               }
@@ -186,13 +198,19 @@ export default function Dashboard(props: DashboardProps = {}) {
                     <th>ID</th>
                     <th>Provider</th>
                     <th>State</th>
+                    <th>Streams</th>
+                    <th>Last update</th>
                     <th>Task</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <For each={sessions()?.sessions}>
-                    {(session) => (
+                  <For each={sessionList()}>
+                    {(session) => {
+                      const streamStatus = getStreamStatus(session)
+                      const stale = isSessionStale(session)
+                      const relativeAge = formatRelativeAge(session)
+                      return (
                     <tr data-session-id={session.id}>
                       <td>{session.id.substring(0, 8)}...</td>
                       <td>{session.provider_type}</td>
@@ -200,6 +218,26 @@ export default function Dashboard(props: DashboardProps = {}) {
                         <span class={`state-badge ${session.state}`}>
                           {session.state}
                         </span>
+                      </td>
+                      <td>
+                        <div class="stream-pill-group">
+                          <span class={`stream-pill ${streamStatus}`}>
+                            Activity {streamLabel(streamStatus)}
+                          </span>
+                          <Show when={session.provider_type === "pty"}>
+                            <span class={`stream-pill ${streamStatus}`}>
+                              Terminal {streamLabel(streamStatus)}
+                            </span>
+                          </Show>
+                        </div>
+                      </td>
+                      <td>
+                        <div class="update-cell">
+                          <Show when={stale}>
+                            <span class="stale-badge">Stale</span>
+                          </Show>
+                          <span class="updated-at">{relativeAge}</span>
+                        </div>
                       </td>
                       <td>{session.current_task || "None"}</td>
                       <td>
@@ -287,7 +325,7 @@ export default function Dashboard(props: DashboardProps = {}) {
                         </div>
                       </td>
                     </tr>
-                      )}
+                      )}}
                   </For>
                 </tbody>
               </table>

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -26,11 +27,13 @@ import (
 // ---------------------------------------------------------------------------
 
 type mockProvider struct {
-	mu       sync.Mutex
-	state    provider.State
-	events   chan domain.Event
-	startErr error
-	pauseErr error
+	mu        sync.Mutex
+	state     provider.State
+	events    chan domain.Event
+	startErr  error
+	pauseErr  error
+	sendErr   error
+	lastInput string
 }
 
 func newMockProvider() *mockProvider {
@@ -95,16 +98,28 @@ func (m *mockProvider) Status() provider.Status {
 
 func (m *mockProvider) Events() <-chan domain.Event { return m.events }
 
-func (m *mockProvider) SendInput(ctx context.Context, input string) error { return nil }
+func (m *mockProvider) SendInput(ctx context.Context, input string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.sendErr != nil {
+		return m.sendErr
+	}
+	m.lastInput = input
+	return nil
+}
 
 // inMemStore is an in-memory Storage for tests.
 type inMemStore struct {
-	mu       sync.RWMutex
-	sessions map[string]*domain.Session
+	mu        sync.RWMutex
+	sessions  map[string]*domain.Session
+	terminals map[string]*domain.Terminal
 }
 
 func newInMemStore() *inMemStore {
-	return &inMemStore{sessions: make(map[string]*domain.Session)}
+	return &inMemStore{
+		sessions:  make(map[string]*domain.Session),
+		terminals: make(map[string]*domain.Terminal),
+	}
 }
 
 func (s *inMemStore) Save(sess *domain.Session) error {
@@ -119,7 +134,7 @@ func (s *inMemStore) Load(id string) (*domain.Session, error) {
 	defer s.mu.RUnlock()
 	sess, ok := s.sessions[id]
 	if !ok {
-		return nil, fmt.Errorf("session %s not found", id)
+		return nil, storage.ErrSessionNotFound
 	}
 	return sess, nil
 }
@@ -141,6 +156,40 @@ func (s *inMemStore) List() ([]*domain.Session, error) {
 	return out, nil
 }
 
+func (s *inMemStore) SaveTerminal(term *domain.Terminal) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.terminals[term.ID] = term
+	return nil
+}
+
+func (s *inMemStore) LoadTerminal(id string) (*domain.Terminal, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	term, ok := s.terminals[id]
+	if !ok {
+		return nil, storage.ErrTerminalNotFound
+	}
+	return term, nil
+}
+
+func (s *inMemStore) DeleteTerminal(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.terminals, id)
+	return nil
+}
+
+func (s *inMemStore) ListTerminals() ([]*domain.Terminal, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*domain.Terminal, 0, len(s.terminals))
+	for _, term := range s.terminals {
+		out = append(out, term)
+	}
+	return out, nil
+}
+
 // ---------------------------------------------------------------------------
 // test environment
 // ---------------------------------------------------------------------------
@@ -157,9 +206,11 @@ func newTestEnv(t *testing.T) *testEnv {
 	env := &testEnv{
 		broadcaster: service.NewEventBroadcaster(100),
 	}
+	store := newInMemStore()
 	env.executor = service.NewAgentExecutor(service.ExecutorConfig{
-		Storage:     newInMemStore(),
-		Broadcaster: env.broadcaster,
+		Storage:         store,
+		TerminalStorage: store,
+		Broadcaster:     env.broadcaster,
 		ProviderFactory: func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
 			if providerType != "mock" {
 				return nil, fmt.Errorf("unsupported provider: %s", providerType)
@@ -383,6 +434,63 @@ func TestCreateSession_WithMCPServers(t *testing.T) {
 
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateSession_DockKind(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	body, _ := json.Marshal(apiTypes.SessionRequest{
+		ProviderType: "mock",
+		WorkingDir:   "/tmp",
+		SessionKind:  domain.SessionKindDock,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp apiTypes.SessionResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.SessionKind != domain.SessionKindDock {
+		t.Fatalf("SessionKind = %q, want %q", resp.SessionKind, domain.SessionKindDock)
+	}
+
+	sess, err := env.executor.GetSession(resp.ID)
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+	if sess.Snapshot().Kind != domain.SessionKindDock {
+		t.Fatalf("stored kind = %q, want %q", sess.Snapshot().Kind, domain.SessionKindDock)
+	}
+}
+
+func TestCreateSession_InvalidKind(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	body, _ := json.Marshal(apiTypes.SessionRequest{
+		ProviderType: "mock",
+		WorkingDir:   "/tmp",
+		SessionKind:  "mystery",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	var errResp apiTypes.ErrorResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &errResp)
+	if errResp.Error != "invalid session_kind" {
+		t.Fatalf("Error = %q, want %q", errResp.Error, "invalid session_kind")
 	}
 }
 
@@ -830,6 +938,100 @@ func TestResumeSession_NotFound(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/sessions/{id}/input
+// ---------------------------------------------------------------------------
+
+func TestSendSessionInput_OK(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	created := createSession(t, r, "mock", "/tmp")
+	waitForRunning(t, env.executor, created.ID)
+
+	body, _ := json.Marshal(apiTypes.SessionInputRequest{Input: "hello"})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/input", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+	if env.lastMock.lastInput != "hello" {
+		t.Fatalf("expected input to be stored, got %q", env.lastMock.lastInput)
+	}
+}
+
+func TestSendSessionInput_InvalidJSON(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	created := createSession(t, r, "mock", "/tmp")
+	waitForRunning(t, env.executor, created.ID)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/input", bytes.NewReader([]byte("{bad")))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSendSessionInput_Empty(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	created := createSession(t, r, "mock", "/tmp")
+	waitForRunning(t, env.executor, created.ID)
+
+	body, _ := json.Marshal(apiTypes.SessionInputRequest{Input: "  "})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/input", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSendSessionInput_NotFound(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	body, _ := json.Marshal(apiTypes.SessionInputRequest{Input: "hello"})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/does-not-exist/input", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSendSessionInput_Error(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	created := createSession(t, r, "mock", "/tmp")
+	waitForRunning(t, env.executor, created.ID)
+	env.lastMock.sendErr = errors.New("boom")
+
+	body, _ := json.Marshal(apiTypes.SessionInputRequest{Input: "hello"})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/input", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

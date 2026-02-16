@@ -24,6 +24,7 @@ type SessionRequest struct {
 	Custom       map[string]any    `json:"custom,omitempty"`
 	TaskID       string            `json:"task_id,omitempty"`
 	TaskTitle    string            `json:"task_title,omitempty"`
+	SessionKind  string            `json:"session_kind,omitempty"`
 }
 
 type SessionInputRequest struct {
@@ -40,6 +41,7 @@ type MCPServerConfig struct {
 type SessionResponse struct {
 	ID           string       `json:"id"`
 	ProviderType string       `json:"provider_type"`
+	SessionKind  string       `json:"session_kind,omitempty"`
 	State        SessionState `json:"state"`
 	WorkingDir   string       `json:"working_dir"`
 	CreatedAt    time.Time    `json:"created_at"`
@@ -108,10 +110,39 @@ type MetadataData struct {
 	Value any    `json:"value"`
 }
 
+type ActivityEntry struct {
+	ID        string         `json:"id"`
+	SessionID string         `json:"session_id"`
+	Kind      string         `json:"kind"`
+	TS        time.Time      `json:"ts"`
+	Rev       int            `json:"rev"`
+	Open      bool           `json:"open"`
+	Data      map[string]any `json:"data,omitempty"`
+}
+
+type ActivityHistoryResponse struct {
+	Entries    []ActivityEntry `json:"entries"`
+	NextCursor *string         `json:"next_cursor,omitempty"`
+}
+
 type ErrorResponse struct {
 	Error   string `json:"error"`
 	Code    string `json:"code,omitempty"`
 	Details any    `json:"details,omitempty"`
+}
+
+type DockMCPRequest struct {
+	ID       string `json:"id"`
+	Kind     string `json:"kind"`
+	TargetID string `json:"target_id,omitempty"`
+	Action   string `json:"action,omitempty"`
+	Payload  any    `json:"payload,omitempty"`
+}
+
+type DockMCPResponse struct {
+	ID     string `json:"id"`
+	Result any    `json:"result,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 type PermissionsResponse struct {
@@ -295,6 +326,27 @@ type TerminalSnapshot struct {
 	Rows  int      `json:"rows"`
 	Cols  int      `json:"cols"`
 	Lines []string `json:"lines"`
+}
+
+type TerminalKind string
+
+const (
+	TerminalKindPTY   TerminalKind = "pty"
+	TerminalKindAdHoc TerminalKind = "ad_hoc"
+)
+
+type TerminalResponse struct {
+	ID            string            `json:"id"`
+	SessionID     string            `json:"session_id,omitempty"`
+	TerminalKind  TerminalKind      `json:"terminal_kind"`
+	CreatedAt     time.Time         `json:"created_at"`
+	LastUpdatedAt time.Time         `json:"last_updated_at"`
+	LastSeq       int64             `json:"last_seq,omitempty"`
+	LastSnapshot  *TerminalSnapshot `json:"last_snapshot,omitempty"`
+}
+
+type TerminalListResponse struct {
+	Terminals []TerminalResponse `json:"terminals"`
 }
 
 type ProviderConfigRequest struct {

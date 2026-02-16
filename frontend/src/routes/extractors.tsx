@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/solid-router";
 import { createEffect, createMemo, createResource, createSignal, For, Show } from "solid-js";
 import { apiClient } from "../api/client";
+import { useSessionStore } from "../state/sessions";
 import type {
   ExtractorConfig,
   ExtractorProfile,
@@ -17,7 +18,7 @@ type NoticeTone = "error" | "success" | "neutral";
 
 function ExtractorRulesView() {
   const [configResponse, { refetch }] = createResource(apiClient.getExtractorConfig);
-  const [sessions] = createResource(apiClient.listSessions);
+  const { sessions } = useSessionStore();
   const [draft, setDraft] = createSignal<ExtractorConfig | null>(null);
   const [selectedProfileId, setSelectedProfileId] = createSignal("");
   const [selectedRuleId, setSelectedRuleId] = createSignal("");
@@ -48,7 +49,7 @@ function ExtractorRulesView() {
 
   createEffect(() => {
     if (selectedSessionId()) return;
-    const list = sessions()?.sessions ?? [];
+    const list = sessions();
     if (list.length > 0) {
       setSelectedSessionId(list[0].id);
     }

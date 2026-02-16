@@ -41,6 +41,7 @@ type AgentExecutor struct {
 	sessions        map[string]*sessionContext
 	mu              sync.RWMutex
 	storage         storage.Storage
+	terminalStorage storage.TerminalStorage
 	broadcaster     *EventBroadcaster
 	providerFactory ProviderFactory
 	healthInterval  time.Duration
@@ -54,6 +55,7 @@ type AgentExecutor struct {
 
 type ExecutorConfig struct {
 	Storage          storage.Storage
+	TerminalStorage  storage.TerminalStorage
 	Broadcaster      *EventBroadcaster
 	ProviderFactory  ProviderFactory
 	HealthInterval   time.Duration
@@ -76,6 +78,7 @@ func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
 	return &AgentExecutor{
 		sessions:        make(map[string]*sessionContext),
 		storage:         cfg.Storage,
+		terminalStorage: cfg.TerminalStorage,
 		broadcaster:     cfg.Broadcaster,
 		providerFactory: cfg.ProviderFactory,
 		healthInterval:  healthInterval,
@@ -106,6 +109,9 @@ func (e *AgentExecutor) StartSession(ctx context.Context, id string, config prov
 	}
 
 	session := domain.NewSession(id, config.ProviderType, config.WorkingDir)
+	if config.SessionKind != "" {
+		session.SetKind(config.SessionKind)
+	}
 	if taskRef := formatTaskReference(config.TaskID, config.TaskTitle); taskRef != "" {
 		session.SetCurrentTask(taskRef)
 	}
@@ -118,6 +124,9 @@ func (e *AgentExecutor) StartSession(ctx context.Context, id string, config prov
 		if err := e.storage.Save(session); err != nil {
 			return nil, fmt.Errorf("failed to save session: %w", err)
 		}
+	}
+	if _, ok := prov.(TerminalProvider); ok {
+		e.ensureTerminalRecord(session)
 	}
 
 	e.broadcastStateChange(session, domain.SessionStateCreated, domain.SessionStateStarting, "starting session")
@@ -159,6 +168,7 @@ func (e *AgentExecutor) runSessionLoop(ctx context.Context, sc *sessionContext, 
 	}
 
 	e.transitionWithSave(sc, domain.SessionStateRunning, "provider started")
+	e.ensureTerminalHubForPTY(sc)
 
 	e.wg.Add(2)
 	go e.handleEvents(ctx, sc)
@@ -334,14 +344,26 @@ func (e *AgentExecutor) KillSession(id string) error {
 
 func (e *AgentExecutor) GetSession(id string) (*domain.Session, error) {
 	e.mu.RLock()
-	defer e.mu.RUnlock()
-
 	sc, exists := e.sessions[id]
-	if !exists {
+	e.mu.RUnlock()
+
+	if exists {
+		return sc.session, nil
+	}
+
+	if e.storage == nil {
 		return nil, ErrSessionNotFound
 	}
 
-	return sc.session, nil
+	session, err := e.storage.Load(id)
+	if err != nil {
+		if errors.Is(err, storage.ErrSessionNotFound) {
+			return nil, ErrSessionNotFound
+		}
+		return nil, err
+	}
+
+	return session, nil
 }
 
 func (e *AgentExecutor) GetSessionStatus(id string) (provider.Status, error) {
@@ -358,12 +380,26 @@ func (e *AgentExecutor) GetSessionStatus(id string) (provider.Status, error) {
 
 func (e *AgentExecutor) ListSessions() []*domain.Session {
 	e.mu.RLock()
-	defer e.mu.RUnlock()
-
 	sessions := make([]*domain.Session, 0, len(e.sessions))
-	for _, sc := range e.sessions {
+	ids := make(map[string]struct{}, len(e.sessions))
+	for id, sc := range e.sessions {
+		ids[id] = struct{}{}
 		sessions = append(sessions, sc.session)
 	}
+	e.mu.RUnlock()
+
+	if e.storage == nil {
+		return sessions
+	}
+
+	stored, _ := e.storage.List()
+	for _, session := range stored {
+		if _, exists := ids[session.ID]; exists {
+			continue
+		}
+		sessions = append(sessions, session)
+	}
+
 	return sessions
 }
 
@@ -397,12 +433,21 @@ func (e *AgentExecutor) TerminalHub(id string) (*TerminalHub, error) {
 		return nil, ErrTerminalNotSupported
 	}
 
-	hub := NewTerminalHub(id, provider)
+	e.ensureTerminalRecord(sc.session)
+	hub := NewTerminalHub(id, provider, e.terminalObserver())
 	e.terminalHubs[id] = hub
 	return hub, nil
 }
 
 func (e *AgentExecutor) TerminalSnapshot(id string) (terminal.Snapshot, error) {
+	if e.terminalStorage != nil {
+		if term, err := e.terminalStorage.LoadTerminal(id); err == nil {
+			if term.LastSnapshot != nil {
+				return *term.LastSnapshot, nil
+			}
+		}
+	}
+
 	e.mu.RLock()
 	sc, exists := e.sessions[id]
 	e.mu.RUnlock()
@@ -512,6 +557,111 @@ func (e *AgentExecutor) handlePanic(sc *sessionContext, r any) {
 
 	event := domain.NewErrorEvent(sc.session.ID, errMsg, "PANIC")
 	e.broadcaster.Broadcast(event)
+}
+
+func (e *AgentExecutor) ListTerminals() []*domain.Terminal {
+	if e.terminalStorage == nil {
+		return []*domain.Terminal{}
+	}
+	terms, _ := e.terminalStorage.ListTerminals()
+	return terms
+}
+
+func (e *AgentExecutor) GetTerminal(id string) (*domain.Terminal, error) {
+	if e.terminalStorage == nil {
+		return nil, storage.ErrTerminalNotFound
+	}
+	term, err := e.terminalStorage.LoadTerminal(id)
+	if err != nil {
+		if errors.Is(err, storage.ErrTerminalNotFound) {
+			return nil, storage.ErrTerminalNotFound
+		}
+		return nil, err
+	}
+	return term, nil
+}
+
+func (e *AgentExecutor) terminalObserver() TerminalObserver {
+	if e.terminalStorage == nil {
+		return nil
+	}
+	return terminalObserver{executor: e}
+}
+
+func (e *AgentExecutor) ensureTerminalRecord(session *domain.Session) {
+	if e.terminalStorage == nil || session == nil {
+		return
+	}
+	if _, err := e.terminalStorage.LoadTerminal(session.ID); err == nil {
+		return
+	} else if !errors.Is(err, storage.ErrTerminalNotFound) {
+		return
+	}
+
+	term := domain.NewTerminal(session.ID, session.ID, terminalKindForSession(session))
+	_ = e.terminalStorage.SaveTerminal(term)
+}
+
+func (e *AgentExecutor) ensureTerminalHubForPTY(sc *sessionContext) {
+	if sc == nil || sc.session == nil || sc.provider == nil {
+		return
+	}
+	if sc.session.ProviderType != "pty" {
+		return
+	}
+	if _, ok := sc.provider.(TerminalProvider); !ok {
+		return
+	}
+	_, _ = e.TerminalHub(sc.session.ID)
+}
+
+func (e *AgentExecutor) updateTerminalFromEvent(sessionID string, event TerminalEvent) {
+	if e.terminalStorage == nil {
+		return
+	}
+
+	term, err := e.terminalStorage.LoadTerminal(sessionID)
+	if err != nil {
+		if !errors.Is(err, storage.ErrTerminalNotFound) {
+			return
+		}
+		kind := domain.TerminalKindAdHoc
+		e.mu.RLock()
+		if sc, ok := e.sessions[sessionID]; ok {
+			kind = terminalKindForSession(sc.session)
+		}
+		e.mu.RUnlock()
+		term = domain.NewTerminal(sessionID, sessionID, kind)
+	}
+
+	if event.Update.Kind == terminal.UpdateSnapshot && event.Update.Snapshot != nil {
+		snapshot := *event.Update.Snapshot
+		term.LastSnapshot = &snapshot
+		term.LastSeq = event.Seq
+		term.LastUpdatedAt = time.Now().UTC()
+		_ = e.terminalStorage.SaveTerminal(term)
+	}
+}
+
+func terminalKindForSession(session *domain.Session) domain.TerminalKind {
+	if session == nil {
+		return domain.TerminalKindAdHoc
+	}
+	if session.ProviderType == "pty" {
+		return domain.TerminalKindPTY
+	}
+	return domain.TerminalKindAdHoc
+}
+
+type terminalObserver struct {
+	executor *AgentExecutor
+}
+
+func (t terminalObserver) OnTerminalEvent(sessionID string, event TerminalEvent) {
+	if t.executor == nil {
+		return
+	}
+	t.executor.updateTerminalFromEvent(sessionID, event)
 }
 
 func formatTaskReference(id, title string) string {

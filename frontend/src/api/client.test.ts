@@ -14,6 +14,7 @@ describe("apiClient", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn());
     document.cookie = "orbitmesh-csrf-token=test-token";
+    window.localStorage.clear();
   });
 
   it("listSessions fetches sessions successfully", async () => {
@@ -31,6 +32,49 @@ describe("apiClient", () => {
     const result = await apiClient.listSessions();
     expect(fetch).toHaveBeenCalledWith("/api/sessions");
     expect(result).toEqual(mockResponse);
+    expect(window.localStorage.getItem("orbitmesh:sessions")).toEqual(JSON.stringify(mockResponse));
+  });
+
+  it("listSessions merges cached sessions", async () => {
+    const cached = {
+      sessions: [
+        { id: "cached", provider_type: "native", state: "stopped" }
+      ]
+    };
+    window.localStorage.setItem("orbitmesh:sessions", JSON.stringify(cached));
+
+    const mockResponse = {
+      sessions: [
+        { id: "live", provider_type: "native", state: "running" }
+      ]
+    };
+
+    (fetch as any).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockResponse)
+    });
+
+    const result = await apiClient.listSessions();
+    expect(result.sessions).toHaveLength(2);
+    expect(result.sessions[0].id).toBe("live");
+    expect(result.sessions[1].id).toBe("cached");
+  });
+
+  it("listSessions returns cached sessions on failure", async () => {
+    const cached = {
+      sessions: [
+        { id: "cached", provider_type: "native", state: "stopped" }
+      ]
+    };
+    window.localStorage.setItem("orbitmesh:sessions", JSON.stringify(cached));
+
+    (fetch as any).mockResolvedValue({
+      ok: false,
+      text: () => Promise.resolve("Error message")
+    });
+
+    const result = await apiClient.listSessions();
+    expect(result).toEqual(cached);
   });
 
   it("createSession sends POST request with CSRF token", async () => {
@@ -83,6 +127,30 @@ describe("apiClient", () => {
     expect(result).toEqual(mockResponse);
   });
 
+  it("createDockSession tags dock sessions", async () => {
+    const mockResponse = { id: "dock-1", provider_type: "adk", state: "created" };
+
+    (fetch as any).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockResponse)
+    });
+
+    const result = await apiClient.createDockSession();
+
+    expect(fetch).toHaveBeenCalledWith("/api/sessions", expect.objectContaining({
+      method: "POST",
+      headers: expect.objectContaining({
+        "Content-Type": "application/json",
+        "X-CSRF-Token": "test-token"
+      }),
+      body: JSON.stringify({
+        provider_type: "adk",
+        session_kind: "dock"
+      })
+    }));
+    expect(result).toEqual(mockResponse);
+  });
+
   it("getSession fetches single session", async () => {
     const mockResponse = { id: "1", state: "running", metrics: { tokens_in: 0, tokens_out: 0, request_count: 0 } };
 
@@ -96,6 +164,32 @@ describe("apiClient", () => {
     expect(result).toEqual(mockResponse);
   });
 
+  it("getTerminal fetches terminal by id", async () => {
+    const mockResponse = { id: "term-1", terminal_kind: "pty" };
+
+    (fetch as any).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockResponse)
+    });
+
+    const result = await apiClient.getTerminal("term-1");
+    expect(fetch).toHaveBeenCalledWith("/api/v1/terminals/term-1");
+    expect(result).toEqual(mockResponse);
+  });
+
+  it("getTerminalSnapshotById fetches terminal snapshot", async () => {
+    const mockResponse = { rows: 2, cols: 2, lines: ["hi", ""] };
+
+    (fetch as any).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockResponse)
+    });
+
+    const result = await apiClient.getTerminalSnapshotById("term-1");
+    expect(fetch).toHaveBeenCalledWith("/api/v1/terminals/term-1/snapshot");
+    expect(result).toEqual(mockResponse);
+  });
+
   it("stopSession sends DELETE request with CSRF token", async () => {
     (fetch as any).mockResolvedValue({ ok: true });
 
@@ -106,6 +200,24 @@ describe("apiClient", () => {
         "X-CSRF-Token": "test-token"
       }),
     }));
+  });
+
+  it("sendSessionInput sends POST request with CSRF token", async () => {
+    (fetch as any).mockResolvedValue({ ok: true });
+
+    await apiClient.sendSessionInput("1", "hello");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/1/input",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+          "X-CSRF-Token": "test-token",
+        }),
+        body: JSON.stringify({ input: "hello" }),
+      }),
+    );
   });
 
   it("getPermissions fetches permissions", async () => {

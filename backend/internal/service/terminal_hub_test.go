@@ -43,7 +43,7 @@ func (m *mockTerminalProvider) HandleTerminalInput(ctx context.Context, input te
 func TestTerminalHub_ResyncOnOverflow(t *testing.T) {
 	provider := newMockTerminalProvider()
 	defer close(provider.updates)
-	hub := NewTerminalHub("session-1", provider)
+	hub := NewTerminalHub("session-1", provider, nil)
 	updates, cancel := hub.Subscribe(1)
 	defer cancel()
 

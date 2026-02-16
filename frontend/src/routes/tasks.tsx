@@ -1,12 +1,13 @@
-import { createFileRoute } from '@tanstack/solid-router'
+import { createFileRoute, useNavigate } from '@tanstack/solid-router'
 import { createEffect, createMemo, createResource, createSignal, For, Show, onCleanup } from "solid-js"
 import { apiClient } from "../api/client"
 import type { ProviderConfigResponse, SessionResponse, TaskNode, TaskStatus } from "../types/api"
 import AgentGraph from "../graph/AgentGraph"
+import { McpButton, McpInputField } from "../mcp/components"
 import { buildTaskGraph } from "../graph/graphData"
 import EmptyState from "../components/EmptyState"
 import SkeletonLoader from "../components/SkeletonLoader"
-import { setDockSessionId } from "../state/agentDock"
+import { dockSessionId, setDockSessionId } from "../state/agentDock"
 
 export const Route = createFileRoute('/tasks')({
   component: TaskTreeView,
@@ -35,6 +36,7 @@ const typeOptions = [
 ]
 
 export default function TaskTreeView(props: TaskTreeViewProps = {}) {
+  const navigate = useNavigate()
   const [treeResponse] = createResource(apiClient.getTaskTree)
   const [providers] = createResource(apiClient.listProviders)
   const [treeData, setTreeData] = createSignal<TaskNode[]>([])
@@ -245,7 +247,9 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
         providerId: selectedProvider()?.providerId,
       })
       setSessionInfo({ taskId: task.id, session })
-      setDockSessionId(session.id)
+      if (!dockSessionId()) {
+        setDockSessionId(session.id)
+      }
       setStartState("success")
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to start session."
@@ -254,12 +258,16 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
     }
   }
 
-  const openSessionViewer = (id: string) => {
+  const navigateTo = (path: string) => {
     if (props.onNavigate) {
-      props.onNavigate(`/sessions/${id}`)
+      props.onNavigate(path)
       return
     }
-    window.location.assign(`/sessions/${id}`)
+    navigate({ to: path })
+  }
+
+  const openSessionViewer = (id: string) => {
+    navigateTo(`/sessions/${id}`)
   }
 
   const dismissSessionInfo = () => {
@@ -305,12 +313,15 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
           </div>
 
           <div class="task-tree-controls">
-            <input
+            <McpInputField
               type="search"
               placeholder="Search tasks"
               data-testid="tasks-search"
               value={search()}
               onInput={(event) => setSearch(event.currentTarget.value)}
+              mcpId="tasks-search"
+              mcpName="Task search"
+              mcpDescription="Search tasks by title or ID"
             />
             <select
               value={roleFilter()}
@@ -439,9 +450,16 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
                         </optgroup>
                       </select>
                     </label>
-                    <button type="button" onClick={startAgent} disabled={startState() === "starting"}>
+                    <McpButton
+                      type="button"
+                      onClick={startAgent}
+                      disabled={startState() === "starting"}
+                      mcpId="tasks-start-agent"
+                      mcpName="Start agent"
+                      mcpDescription="Start an agent session for the selected task"
+                    >
                       {startState() === "starting" ? "Starting..." : "Start agent"}
-                    </button>
+                    </McpButton>
                   </div>
                   <Show when={startError()}>
                     {(message) => <p class="notice-banner error">{message()}</p>}

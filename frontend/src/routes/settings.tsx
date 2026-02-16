@@ -175,6 +175,15 @@ function ProviderForm(props: ProviderFormProps) {
   const [command, setCommand] = createSignal(props.provider?.command?.join(' ') ?? '')
   const [apiKey, setApiKey] = createSignal(props.provider?.api_key ?? '')
   const [model, setModel] = createSignal((props.provider?.custom?.model as string | undefined) ?? '')
+  const [useVertexAI, setUseVertexAI] = createSignal(
+    (props.provider?.custom?.use_vertex_ai as boolean | undefined) ?? false,
+  )
+  const [vertexProjectId, setVertexProjectId] = createSignal(
+    (props.provider?.custom?.vertex_project_id as string | undefined) ?? '',
+  )
+  const [vertexLocation, setVertexLocation] = createSignal(
+    (props.provider?.custom?.vertex_location as string | undefined) ?? '',
+  )
   const [envEntries, setEnvEntries] = createSignal(
     props.provider?.env
       ? Object.entries(props.provider.env).map(([key, value]) => ({ key, value }))
@@ -231,6 +240,17 @@ function ProviderForm(props: ProviderFormProps) {
 
       if (model().trim()) {
         config.custom = { ...(config.custom ?? {}), model: model().trim() }
+      }
+
+      if (type() === 'adk') {
+        if (useVertexAI()) {
+          config.custom = {
+            ...(config.custom ?? {}),
+            use_vertex_ai: true,
+            vertex_project_id: vertexProjectId().trim(),
+            vertex_location: vertexLocation().trim(),
+          }
+        }
       }
 
       if (type() === 'pty') {
@@ -308,6 +328,41 @@ function ProviderForm(props: ProviderFormProps) {
             placeholder="Enter API key"
           />
         </div>
+        <Show when={type() === 'adk'}>
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input
+                type="checkbox"
+                checked={useVertexAI()}
+                onChange={(e) => setUseVertexAI(e.currentTarget.checked)}
+              />
+              <span>Use Vertex AI (OAuth)</span>
+            </label>
+            <p class="form-hint">Uses your Google Cloud credentials instead of API key.</p>
+          </div>
+          <Show when={useVertexAI()}>
+            <div class="form-group">
+              <label for="provider-vertex-project">Vertex Project ID</label>
+              <input
+                id="provider-vertex-project"
+                type="text"
+                value={vertexProjectId()}
+                onInput={(e) => setVertexProjectId(e.currentTarget.value)}
+                placeholder="e.g. my-gcp-project"
+              />
+            </div>
+            <div class="form-group">
+              <label for="provider-vertex-location">Vertex Location</label>
+              <input
+                id="provider-vertex-location"
+                type="text"
+                value={vertexLocation()}
+                onInput={(e) => setVertexLocation(e.currentTarget.value)}
+                placeholder="e.g. us-central1"
+              />
+            </div>
+          </Show>
+        </Show>
         <div class="form-group">
           <label for="provider-model">Model</label>
           <input

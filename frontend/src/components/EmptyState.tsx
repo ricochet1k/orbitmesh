@@ -1,17 +1,20 @@
 import { JSX } from 'solid-js'
+import { Link } from '@tanstack/solid-router'
+
+interface EmptyStateAction {
+  label: string
+  onClick?: () => void
+  href?: string
+  target?: string
+  rel?: string
+}
 
 export interface EmptyStateProps {
   icon?: string
   title: string
   description: string
-  action?: {
-    label: string
-    onClick: () => void
-  }
-  secondaryAction?: {
-    label: string
-    onClick: () => void
-  }
+  action?: EmptyStateAction
+  secondaryAction?: EmptyStateAction
   variant?: 'default' | 'info' | 'warning'
 }
 
@@ -24,6 +27,22 @@ export default function EmptyState(props: EmptyStateProps): JSX.Element {
     }
   }
 
+  const renderAction = (action: EmptyStateAction, className: string) => {
+    if (action.href) {
+      const rel = action.rel ?? (action.target === "_blank" ? "noreferrer" : undefined)
+      return (
+        <Link to={action.href} class={className} target={action.target} rel={rel}>
+          {action.label}
+        </Link>
+      )
+    }
+    return (
+      <button type="button" class={className} onClick={action.onClick}>
+        {action.label}
+      </button>
+    )
+  }
+
   return (
     <div class={`empty-state-container ${variantClass()}`}>
       {props.icon && <div class="empty-state-icon" role="presentation">{props.icon}</div>}
@@ -31,21 +50,9 @@ export default function EmptyState(props: EmptyStateProps): JSX.Element {
       <p class="empty-state-description">{props.description}</p>
       {props.action && (
         <div class="empty-state-actions">
-          <button 
-            type="button" 
-            class="empty-state-action-primary" 
-            onClick={props.action.onClick}
-          >
-            {props.action.label}
-          </button>
+          {renderAction(props.action, "empty-state-action-primary")}
           {props.secondaryAction && (
-            <button 
-              type="button" 
-              class="empty-state-action-secondary" 
-              onClick={props.secondaryAction.onClick}
-            >
-              {props.secondaryAction.label}
-            </button>
+            renderAction(props.secondaryAction, "empty-state-action-secondary")
           )}
         </div>
       )}

@@ -136,9 +136,11 @@ func newTerminalTestEnv(t *testing.T) *terminalTestEnv {
 	env := &terminalTestEnv{
 		broadcaster: service.NewEventBroadcaster(100),
 	}
+	store := newInMemStore()
 	env.executor = service.NewAgentExecutor(service.ExecutorConfig{
-		Storage:     newInMemStore(),
-		Broadcaster: env.broadcaster,
+		Storage:         store,
+		TerminalStorage: store,
+		Broadcaster:     env.broadcaster,
 		ProviderFactory: func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
 			if providerType != "terminal" {
 				return nil, context.Canceled

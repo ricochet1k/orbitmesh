@@ -2,20 +2,30 @@ import { render, screen, fireEvent } from "@solidjs/testing-library";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import Dashboard from "./Dashboard";
 import { apiClient } from "../api/client";
+import { resetSessionStore } from "../state/sessions";
 import {
   defaultPermissions,
   makeSession,
   restrictedPermissions,
 } from "../test/fixtures";
 
+const mockNavigate = vi.fn();
+
 vi.mock("@tanstack/solid-router", () => ({
   createFileRoute: () => () => ({}),
+  useNavigate: () => mockNavigate,
+  Link: (props: any) => (
+    <a href={props.to} class={props.class} target={props.target} rel={props.rel}>
+      {props.children}
+    </a>
+  ),
 }));
 
 
 vi.mock("../api/client", () => ({
   apiClient: {
     listSessions: vi.fn(),
+    getCachedSessions: vi.fn(),
     getPermissions: vi.fn(),
     getTaskTree: vi.fn(),
     listCommits: vi.fn(),
@@ -28,9 +38,11 @@ vi.mock("../api/client", () => ({
 describe("Dashboard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    (apiClient.getCachedSessions as any).mockReturnValue(undefined);
     (apiClient.getPermissions as any).mockResolvedValue(defaultPermissions);
     (apiClient.getTaskTree as any).mockResolvedValue({ tasks: [] });
     (apiClient.listCommits as any).mockResolvedValue({ commits: [] });
+    resetSessionStore();
   });
 
   it("renders loading state initially", async () => {

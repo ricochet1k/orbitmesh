@@ -1,15 +1,9 @@
-import { createFileRoute } from '@tanstack/solid-router'
-import {
-  createEffect,
-  createMemo,
-  createResource,
-  createSignal,
-  For,
-  Show,
-} from "solid-js"
-import { apiClient } from "../../api/client"
+import { createFileRoute, useNavigate } from '@tanstack/solid-router'
+import { createMemo, createSignal, For, Show } from "solid-js"
 import EmptyState from "../../components/EmptyState"
 import SkeletonLoader from "../../components/SkeletonLoader"
+import { useSessionStore } from "../../state/sessions"
+import { formatRelativeAge, getStreamStatus, isSessionStale } from "../../utils/sessionStatus"
 
 export const Route = createFileRoute('/sessions/')({
   component: SessionsView,
@@ -20,18 +14,23 @@ interface SessionsViewProps {
 }
 
 function SessionsView(props: SessionsViewProps) {
-  const [sessions] = createResource(apiClient.listSessions)
+  const navigate = useNavigate()
+  const { sessions, hasLoaded } = useSessionStore()
   const [selectedId, setSelectedId] = createSignal<string | null>(null)
-  const [hasLoaded, setHasLoaded] = createSignal(false)
-  const isLoading = () => !hasLoaded()
+  const [stateFilter, setStateFilter] = createSignal("all")
+  const [streamFilter, setStreamFilter] = createSignal("all")
 
-  const sessionList = () => sessions()?.sessions ?? []
+  const sessionList = () => sessions()
   const selectedSession = createMemo(() => sessionList().find((item) => item.id === selectedId()) ?? null)
 
-  createEffect(() => {
-    if (sessions() !== undefined) {
-      setHasLoaded(true)
-    }
+  const filteredSessions = createMemo(() => {
+    const state = stateFilter()
+    const stream = streamFilter()
+    return sessionList().filter((item) => {
+      if (state !== "all" && item.state !== state) return false
+      if (stream !== "all" && getStreamStatus(item) !== stream) return false
+      return true
+    })
   })
 
   const stateCounts = createMemo(() => {
@@ -47,7 +46,7 @@ function SessionsView(props: SessionsViewProps) {
       props.onNavigate(`/sessions/${id}`)
       return
     }
-    window.location.assign(`/sessions/${id}`)
+    navigate({ to: `/sessions/${id}` })
   }
 
   return (
@@ -63,19 +62,19 @@ function SessionsView(props: SessionsViewProps) {
         <div class="header-meta">
           <div class="meta-card" data-testid="sessions-meta-total">
             <p>Total sessions</p>
-            <Show when={!sessions.loading} fallback={<span>Loading...</span>}>
+            <Show when={hasLoaded()} fallback={<span>Loading...</span>}>
               <strong>{sessionList().length}</strong>
             </Show>
           </div>
           <div class="meta-card" data-testid="sessions-meta-running">
             <p>Running</p>
-            <Show when={!sessions.loading} fallback={<span>Loading...</span>}>
+            <Show when={hasLoaded()} fallback={<span>Loading...</span>}>
               <strong>{stateCounts().get("running") ?? 0}</strong>
             </Show>
           </div>
           <div class="meta-card" data-testid="sessions-meta-needs-attention">
             <p>Needs attention</p>
-            <Show when={!sessions.loading} fallback={<span>Loading...</span>}>
+            <Show when={hasLoaded()} fallback={<span>Loading...</span>}>
               <strong>{stateCounts().get("error") ?? 0}</strong>
             </Show>
           </div>
@@ -93,7 +92,7 @@ function SessionsView(props: SessionsViewProps) {
           </div>
 
           <Show 
-            when={!isLoading()} 
+            when={hasLoaded()} 
             fallback={<SkeletonLoader variant="list" count={5} />}
           >
             <Show
@@ -109,16 +108,44 @@ function SessionsView(props: SessionsViewProps) {
                       if (props.onNavigate) {
                         props.onNavigate("/tasks")
                       } else {
-                        window.location.assign("/tasks")
+                        navigate({ to: "/tasks" })
                       }
                     }
                   }}
                 />
               }
             >
-              <div class="session-list" data-testid="sessions-list">
-                <For each={sessionList()}>
-                  {(session) => (
+                <div class="session-filters">
+                  <label>
+                    State
+                    <select value={stateFilter()} onChange={(event) => setStateFilter(event.currentTarget.value)}>
+                      <option value="all">All</option>
+                      <option value="created">Created</option>
+                      <option value="running">Running</option>
+                      <option value="starting">Starting</option>
+                      <option value="paused">Paused</option>
+                      <option value="stopping">Stopping</option>
+                      <option value="stopped">Stopped</option>
+                      <option value="error">Error</option>
+                    </select>
+                  </label>
+                  <label>
+                    Stream
+                    <select value={streamFilter()} onChange={(event) => setStreamFilter(event.currentTarget.value)}>
+                      <option value="all">All</option>
+                      <option value="live">Live</option>
+                      <option value="reconnecting">Reconnecting</option>
+                      <option value="disconnected">Disconnected</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="session-list" data-testid="sessions-list">
+                <For each={filteredSessions()}>
+                  {(session) => {
+                    const streamStatus = getStreamStatus(session)
+                    const stale = isSessionStale(session)
+                    const relativeAge = formatRelativeAge(session)
+                    return (
                     <div
                       class={`session-card ${selectedId() === session.id ? "active" : ""}`}
                       data-session-id={session.id}
@@ -134,6 +161,22 @@ function SessionsView(props: SessionsViewProps) {
                         </div>
                         <div class="session-card-meta">
                           <span class={`state-badge ${session.state}`}>{session.state.replace("_", " ")}</span>
+                          <div class="stream-pill-group">
+                            <span class={`stream-pill ${streamStatus}`}>
+                              Activity {streamStatus}
+                            </span>
+                            <Show when={session.provider_type === "pty"}>
+                              <span class={`stream-pill ${streamStatus}`}>
+                                Terminal {streamStatus}
+                              </span>
+                            </Show>
+                          </div>
+                          <div class="update-cell">
+                            <Show when={stale}>
+                              <span class="stale-badge">Stale</span>
+                            </Show>
+                            <span class="updated-at">{relativeAge}</span>
+                          </div>
                           <span class="muted">{session.provider_type}</span>
                         </div>
                       </button>
@@ -143,7 +186,7 @@ function SessionsView(props: SessionsViewProps) {
                         </button>
                       </div>
                     </div>
-                  )}
+                  )}}
                 </For>
               </div>
             </Show>

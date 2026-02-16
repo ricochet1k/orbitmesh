@@ -2,6 +2,10 @@ import { defineConfig } from 'vite'
 import solid from 'vite-plugin-solid'
 import { tanstackRouter } from '@tanstack/router-plugin/vite'
 
+const disableWsProxy =
+  process.env.VITE_DISABLE_WS_PROXY === "1" ||
+  process.env.VITE_DISABLE_WS_PROXY === "true"
+
 export default defineConfig({
   plugins: [
     tanstackRouter({
@@ -17,7 +21,7 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,
-        ws: true,
+        ws: !disableWsProxy,
       },
     },
   },

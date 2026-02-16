@@ -30,13 +30,25 @@ This document defines the roles and task templates used in the OrbitMesh project
 
 ## Usage
 
-Agents should use the `strand` CLI to interact with these tasks:
+Agents should use the `strand` CLI to interact with tasks. Choose the command based on how the task is specified:
 
-- `strand next`: Get the next task assigned to your role.
-- `strand next --claim`: Get and immediately claim the next task assigned to your role.
+- `strand next`: Get the next task assigned to your role (only when the user asks for “the next task”).
+- `strand next --claim`: Get and immediately claim the next task assigned to your role (only when explicitly asked to claim the next task).
+- When the user provides a specific task ID, do not call `strand next`. Use `strand show <id>` to load the task, then `strand claim <id>` before starting work unless the user explicitly asks you not to claim it.
 - `strand complete <id> --todo <num> "report"`: Complete a specific todo.
 - `strand complete <id> "report"`: Complete the entire task.
 - `strand add <template> "title"`: Create a new task of a specific type.
+
+### Strand CLI guidance (from `strand agents`)
+
+- Use `strand next --claim` to select and claim work; respect role opt-in or ignore behavior.
+- When asked to work on the next thing, run `strand next --claim`, follow the returned instructions, and report a brief task summary.
+- Treat the role description returned by `strand next --claim` as canonical for how to execute the task.
+- When a task is done (including planning-only), run `strand complete <task-id> "report of what was done"`.
+- If blocked, record blockers with `strand block`.
+- Use `strand add` for new tasks or issues; avoid ad-hoc task creation outside strand.
+- Get the list of roles and task templates from `strand roles` and `strand templates`, add them to `AGENTS.md` and keep that part up to date as needed.
+- If bugs, usability issues, or missing features are found in `strand`, file an issue in the `strand` project via `strand add issue --project strand "Issue title"` with a detailed markdown body.
 
 ## Execution Guidelines
 

@@ -15,6 +15,7 @@ vi.mock("@tanstack/solid-router", () => ({
 vi.mock("solid-icons/bs", () => ({
   BsSliders: () => <span data-testid="icon-sliders" />,
   BsViewList: () => <span data-testid="icon-list" />,
+  BsTerminal: () => <span data-testid="icon-terminal" />,
 }));
 
 vi.mock("solid-icons/fa", () => ({
@@ -41,6 +42,7 @@ describe("Sidebar Navigation", () => {
     expect(screen.getByText("Dashboard")).toBeDefined();
     expect(screen.getByText("Tasks")).toBeDefined();
     expect(screen.getByText("Sessions")).toBeDefined();
+    expect(screen.getByText("Terminals")).toBeDefined();
     expect(screen.getByText("Extractors")).toBeDefined();
     expect(screen.getByText("Settings")).toBeDefined();
   });
@@ -51,6 +53,7 @@ describe("Sidebar Navigation", () => {
     expect(screen.getByTestId("icon-dashboard")).toBeDefined();
     expect(screen.getByTestId("icon-tasks")).toBeDefined();
     expect(screen.getByTestId("icon-list")).toBeDefined();
+    expect(screen.getByTestId("icon-terminal")).toBeDefined();
     expect(screen.getByTestId("icon-sliders")).toBeDefined();
     expect(screen.getByTestId("icon-settings")).toBeDefined();
   });
@@ -69,6 +72,9 @@ describe("Sidebar Navigation", () => {
 
     const extractorsLink = screen.getByTestId("link-/extractors") as HTMLAnchorElement;
     expect(extractorsLink.href).toContain("/extractors");
+
+    const terminalsLink = screen.getByTestId("link-/terminals") as HTMLAnchorElement;
+    expect(terminalsLink.href).toContain("/terminals");
 
     const settingsLink = screen.getByTestId("link-/settings") as HTMLAnchorElement;
     expect(settingsLink.href).toContain("/settings");
@@ -93,19 +99,20 @@ describe("Sidebar Navigation", () => {
     expect(navContainer).toBeDefined();
     
     const navItems = container.querySelectorAll(".nav-item");
-    expect(navItems.length).toBe(5);
+    expect(navItems.length).toBe(6);
   });
 
   it("displays nav labels for each navigation item", () => {
     const { container } = render(() => <Sidebar />);
     
     const navLabels = container.querySelectorAll(".nav-label");
-    expect(navLabels.length).toBe(5);
+    expect(navLabels.length).toBe(6);
     
     const labels = Array.from(navLabels).map(el => el.textContent);
     expect(labels).toContain("Dashboard");
     expect(labels).toContain("Tasks");
     expect(labels).toContain("Sessions");
+    expect(labels).toContain("Terminals");
     expect(labels).toContain("Extractors");
     expect(labels).toContain("Settings");
   });

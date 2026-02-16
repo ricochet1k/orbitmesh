@@ -56,6 +56,7 @@ type Config struct {
 	Custom       map[string]any
 	TaskID       string
 	TaskTitle    string
+	SessionKind  string
 }
 
 type Metrics struct {

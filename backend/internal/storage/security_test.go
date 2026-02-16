@@ -45,6 +45,11 @@ func TestSecurity_FilePermissions(t *testing.T) {
 	if info.Mode().Perm() != 0700 {
 		t.Errorf("expected directory permissions 0700, got %o", info.Mode().Perm())
 	}
+	terminalsDir := filepath.Join(tmpDir, "terminals")
+	info, _ = os.Stat(terminalsDir)
+	if info.Mode().Perm() != 0700 {
+		t.Errorf("expected terminals directory permissions 0700, got %o", info.Mode().Perm())
+	}
 
 	s := domain.NewSession("secure-perm", "test", "/tmp")
 	_ = store.Save(s)
@@ -53,6 +58,14 @@ func TestSecurity_FilePermissions(t *testing.T) {
 	info, _ = os.Stat(filePath)
 	if info.Mode().Perm() != 0600 {
 		t.Errorf("expected file permissions 0600, got %o", info.Mode().Perm())
+	}
+
+	term := domain.NewTerminal("secure-term", "session-1", domain.TerminalKindPTY)
+	_ = store.SaveTerminal(term)
+	termPath := filepath.Join(terminalsDir, "secure-term.json")
+	info, _ = os.Stat(termPath)
+	if info.Mode().Perm() != 0600 {
+		t.Errorf("expected terminal file permissions 0600, got %o", info.Mode().Perm())
 	}
 }
 

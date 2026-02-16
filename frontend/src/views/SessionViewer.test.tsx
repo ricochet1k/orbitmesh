@@ -4,8 +4,16 @@ import SessionViewer from "./SessionViewer"
 import { apiClient } from "../api/client"
 import { baseSession, defaultPermissions, makeSession } from "../test/fixtures"
 
+const mockNavigate = vi.fn()
+
 vi.mock("@tanstack/solid-router", () => ({
   createFileRoute: () => () => ({ useParams: () => ({ sessionId: "session-1" }) }),
+  useNavigate: () => mockNavigate,
+  Link: (props: any) => (
+    <a href={props.to} class={props.class} target={props.target} rel={props.rel}>
+      {props.children}
+    </a>
+  ),
 }))
 
 type EventListener = (event: MessageEvent) => void
@@ -51,11 +59,14 @@ vi.mock("../api/client", () => ({
 }))
 
 vi.mock("../components/TerminalView", () => ({
-  default: (props: { title?: string; sessionId: string }) => (
-    <div data-testid="terminal-view" data-session-id={props.sessionId}>
-      {props.title}
-    </div>
-  ),
+  default: (props: { title?: string; sessionId: string; onStatusChange?: (status: string) => void }) => {
+    props.onStatusChange?.("live")
+    return (
+      <div data-testid="terminal-view" data-session-id={props.sessionId}>
+        {props.title}
+      </div>
+    )
+  },
 }))
 
 describe("SessionViewer", () => {
@@ -147,6 +158,10 @@ describe("SessionViewer", () => {
 
     await screen.findByText("Session session-1 - pty - running")
     expect(await screen.findByTestId("terminal-view")).toBeDefined()
+    const activityStatus = await screen.findByTestId("activity-stream-status")
+    const terminalStatus = await screen.findByTestId("terminal-stream-status")
+    expect(activityStatus.textContent).toContain("Activity")
+    expect(terminalStatus.textContent).toContain("Terminal live")
   })
 
   it("does not render raw output for PTY sessions", async () => {
@@ -204,6 +219,8 @@ describe("SessionViewer", () => {
     render(() => <SessionViewer sessionId="session-1" />)
 
     await screen.findByText("Session session-1 - native - paused")
+    const stateBadge = await screen.findByTestId("session-state-badge")
+    expect(stateBadge.textContent).toContain("paused")
 
     // Pause button should be disabled with tooltip explaining state
     const pauseButton = screen.getByText("Pause") as HTMLButtonElement
@@ -236,5 +253,25 @@ describe("SessionViewer", () => {
     // Button should show in-progress tooltip
     expect(pauseButton.disabled).toBe(true)
     expect(pauseButton.getAttribute("title")).toBe("Pause action is in progress...")
+  })
+
+  it("updates state badge when status_change event arrives", async () => {
+    ; (apiClient.getSession as any).mockResolvedValue(baseSession)
+
+    render(() => <SessionViewer sessionId="session-1" />)
+
+    await screen.findByText("Session session-1 - native - running")
+    const stateBadge = await screen.findByTestId("session-state-badge")
+    expect(stateBadge.textContent).toContain("running")
+
+    eventSources[0]?.emit("status_change", {
+      type: "status_change",
+      timestamp: "2026-02-05T12:02:00Z",
+      session_id: "session-1",
+      data: { old_state: "running", new_state: "paused" },
+    })
+
+    const updatedBadge = await screen.findByTestId("session-state-badge")
+    expect(updatedBadge.textContent).toContain("paused")
   })
 })

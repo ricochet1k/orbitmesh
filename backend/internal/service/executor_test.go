@@ -9,6 +9,8 @@ import (
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
 	"github.com/ricochet1k/orbitmesh/internal/provider"
+	"github.com/ricochet1k/orbitmesh/internal/storage"
+	"github.com/ricochet1k/orbitmesh/internal/terminal"
 )
 
 type mockProvider struct {
@@ -137,7 +139,7 @@ func (s *mockStorage) Load(id string) (*domain.Session, error) {
 	if session, ok := s.sessions[id]; ok {
 		return session, nil
 	}
-	return nil, errors.New("not found")
+	return nil, storage.ErrSessionNotFound
 }
 
 func (s *mockStorage) Delete(id string) error {
@@ -432,6 +434,68 @@ func TestAgentExecutor_ListSessions(t *testing.T) {
 	sessions := executor.ListSessions()
 	if len(sessions) != 2 {
 		t.Errorf("expected 2 sessions, got %d", len(sessions))
+	}
+}
+
+func TestAgentExecutor_ListSessions_IncludesStoredSessions(t *testing.T) {
+	storage := newMockStorage()
+	broadcaster := NewEventBroadcaster(100)
+
+	factory := func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
+		return newMockProvider(), nil
+	}
+
+	executor := NewAgentExecutor(ExecutorConfig{
+		Storage:          storage,
+		Broadcaster:      broadcaster,
+		ProviderFactory:  factory,
+		HealthInterval:   100 * time.Millisecond,
+		OperationTimeout: 5 * time.Second,
+	})
+	defer executor.Shutdown(context.Background())
+
+	stored := domain.NewSession("stored-session", "test", "/tmp")
+	if err := storage.Save(stored); err != nil {
+		t.Fatalf("failed to save stored session: %v", err)
+	}
+
+	sessions := executor.ListSessions()
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].ID != "stored-session" {
+		t.Errorf("expected stored session to be listed, got %q", sessions[0].ID)
+	}
+}
+
+func TestAgentExecutor_GetSession_LoadsStoredSessions(t *testing.T) {
+	storage := newMockStorage()
+	broadcaster := NewEventBroadcaster(100)
+
+	factory := func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
+		return newMockProvider(), nil
+	}
+
+	executor := NewAgentExecutor(ExecutorConfig{
+		Storage:          storage,
+		Broadcaster:      broadcaster,
+		ProviderFactory:  factory,
+		HealthInterval:   100 * time.Millisecond,
+		OperationTimeout: 5 * time.Second,
+	})
+	defer executor.Shutdown(context.Background())
+
+	stored := domain.NewSession("stored-session", "test", "/tmp")
+	if err := storage.Save(stored); err != nil {
+		t.Fatalf("failed to save stored session: %v", err)
+	}
+
+	loaded, err := executor.GetSession("stored-session")
+	if err != nil {
+		t.Fatalf("expected stored session to load, got error: %v", err)
+	}
+	if loaded.ID != "stored-session" {
+		t.Errorf("expected stored session ID, got %q", loaded.ID)
 	}
 }
 
@@ -781,6 +845,74 @@ loop:
 
 	if !receivedOutput {
 		t.Error("expected to receive output event")
+	}
+}
+
+type mockPTYTerminalProvider struct {
+	*mockProvider
+	updates  chan terminal.Update
+	snapshot terminal.Snapshot
+}
+
+func newMockPTYTerminalProvider() *mockPTYTerminalProvider {
+	return &mockPTYTerminalProvider{
+		mockProvider: newMockProvider(),
+		updates:      make(chan terminal.Update, 8),
+		snapshot:     terminal.Snapshot{Rows: 1, Cols: 1, Lines: []string{"x"}},
+	}
+}
+
+func (m *mockPTYTerminalProvider) TerminalSnapshot() (terminal.Snapshot, error) {
+	return m.snapshot, nil
+}
+
+func (m *mockPTYTerminalProvider) SubscribeTerminalUpdates(buffer int) (<-chan terminal.Update, func()) {
+	return m.updates, func() {}
+}
+
+func (m *mockPTYTerminalProvider) HandleTerminalInput(ctx context.Context, input terminal.Input) error {
+	return nil
+}
+
+func TestAgentExecutor_PTYHubAutoCreated(t *testing.T) {
+	terminalProvider := newMockPTYTerminalProvider()
+	storage := newMockStorage()
+	broadcaster := NewEventBroadcaster(100)
+
+	executor := NewAgentExecutor(ExecutorConfig{
+		Storage:     storage,
+		Broadcaster: broadcaster,
+		ProviderFactory: func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
+			if providerType != "pty" {
+				return nil, errors.New("unexpected provider")
+			}
+			return terminalProvider, nil
+		},
+		HealthInterval:   100 * time.Millisecond,
+		OperationTimeout: 5 * time.Second,
+	})
+	defer executor.Shutdown(context.Background())
+
+	_, err := executor.StartSession(context.Background(), "pty-session", provider.Config{
+		ProviderType: "pty",
+		WorkingDir:   "/tmp/test",
+	})
+	if err != nil {
+		t.Fatalf("failed to start session: %v", err)
+	}
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		executor.mu.RLock()
+		_, ok := executor.terminalHubs["pty-session"]
+		executor.mu.RUnlock()
+		if ok {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, ok := executor.terminalHubs["pty-session"]; !ok {
+		t.Fatal("expected terminal hub to be created for PTY session")
 	}
 }
 

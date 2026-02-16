@@ -55,6 +55,10 @@ func PTYLogPath(sessionID string) string {
 	return filepath.Join(storage.DefaultBaseDir(), "sessions", sessionID, ptyRawLogFile)
 }
 
+func ActivityLogPath(sessionID string) string {
+	return filepath.Join(storage.DefaultBaseDir(), "sessions", sessionID, activityLogFile)
+}
+
 func TailActivityLog(path string, limit int) ([]string, error) {
 	if limit <= 0 {
 		return []string{}, nil

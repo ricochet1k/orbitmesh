@@ -115,6 +115,36 @@ test.describe("Sessions View", () => {
       await expect(needsAttentionCard.locator("strong")).toContainText("1");
   });
 
+  test("Sessions view shows stream status and stale markers", async ({ page }) => {
+    const now = Date.now()
+    const mockSessions = makeSessions(
+      makeSession({
+        id: "session-stream-live",
+        provider_type: "adk",
+        state: "running",
+        updated_at: new Date(now - 30_000).toISOString(),
+      }),
+      makeSession({
+        id: "session-stream-stale",
+        provider_type: "pty",
+        state: "running",
+        updated_at: new Date(now - 5 * 60 * 1000).toISOString(),
+      }),
+    )
+
+    await routeJson(page, "**/api/sessions", mockSessions)
+
+    await page.goto("/sessions")
+
+    const liveCard = page.locator("[data-session-id='session-stream-live']")
+    await expect(liveCard.getByText(/Activity live/i)).toBeVisible()
+
+    const staleCard = page.locator("[data-session-id='session-stream-stale']")
+    await expect(staleCard.getByText(/Activity disconnected/i)).toBeVisible()
+    await expect(staleCard.getByText(/Terminal disconnected/i)).toBeVisible()
+    await expect(staleCard.locator(".stale-badge")).toBeVisible()
+  })
+
   test("Selecting a session shows details panel", async ({ page }) => {
     const mockSessions = makeSessions(
       makeSession({

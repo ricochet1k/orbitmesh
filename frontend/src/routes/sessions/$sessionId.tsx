@@ -1,9 +1,9 @@
-import { createFileRoute } from '@tanstack/solid-router'
+import { createFileRoute, useNavigate } from '@tanstack/solid-router'
 import { createResource, createSignal, createEffect, createMemo, onCleanup, Show, For } from 'solid-js'
 import { apiClient } from '../../api/client'
 import TerminalView from '../../components/TerminalView'
 import type { ActivityEntry, ActivityEntryMutation, Event, SessionState } from '../../types/api'
-import { setDockSessionId } from '../../state/agentDock'
+import { dockSessionId, setDockSessionId } from '../../state/agentDock'
 import { startEventStream } from '../../utils/eventStream'
 
 export const Route = createFileRoute('/sessions/$sessionId')({
@@ -31,10 +31,11 @@ interface SessionViewerProps {
 const CODE_BLOCK_REGEX = /```(\w+)?\n([\s\S]*?)```/g
 
 export default function SessionViewer(props: SessionViewerProps = {}) {
+  const navigate = useNavigate()
   const routeParams = props.sessionId ? null : Route.useParams()
   const sessionId = () => props.sessionId ?? routeParams?.().sessionId ?? ""
 
-  const [session] = createResource(sessionId, apiClient.getSession)
+  const [session, { refetch: refetchSession }] = createResource(sessionId, apiClient.getSession)
   const [permissions] = createResource(apiClient.getPermissions)
   const [messages, setMessages] = createSignal<TranscriptMessage[]>([])
   const [activityCursor, setActivityCursor] = createSignal<string | null>(null)
@@ -47,6 +48,9 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   const [filter, setFilter] = createSignal("")
   const [autoScroll, setAutoScroll] = createSignal(true)
   const [streamStatus, setStreamStatus] = createSignal("connecting")
+  const [terminalStatus, setTerminalStatus] = createSignal<
+    "connecting" | "live" | "closed" | "error" | "resyncing"
+  >("connecting")
   const [initialized, setInitialized] = createSignal(false)
   const [lastHeartbeatAt, setLastHeartbeatAt] = createSignal<number | null>(null)
   const [actionNotice, setActionNotice] = createSignal<{ tone: "error" | "success"; message: string } | null>(
@@ -55,7 +59,8 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   const [pendingAction, setPendingAction] = createSignal<"pause" | "resume" | "stop" | null>(null)
   let transcriptRef: HTMLDivElement | undefined
 
-  const sessionState = () => session()?.state ?? "created"
+  const [sessionStateOverride, setSessionStateOverride] = createSignal<SessionState | null>(null)
+  const sessionState = () => sessionStateOverride() ?? session()?.state ?? "created"
   const providerType = () => session()?.provider_type ?? ""
   const canInspect = () => permissions()?.can_inspect_sessions ?? false
   const canManage = () => permissions()?.can_initiate_bulk_actions ?? false
@@ -159,6 +164,10 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
       }
       case "status_change": {
         const content = `State changed: ${payload.data?.old_state} -> ${payload.data?.new_state}`
+        if (payload.data?.new_state) {
+          setSessionStateOverride(payload.data.new_state as SessionState)
+        }
+        void refetchSession()
         pushMessage({
           id: crypto.randomUUID(),
           type: "system",
@@ -268,6 +277,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     const initial = session()
     if (!initial) return
     setInitialized(true)
+    setSessionStateOverride(initial.state)
     pushMessage({
       id: crypto.randomUUID(),
       type: "system",
@@ -303,6 +313,13 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   })
 
   createEffect(() => {
+    const data = session()
+    if (!data) return
+    setSessionStateOverride(data.state)
+  })
+
+
+  createEffect(() => {
     const id = sessionId()
     if (!id || permissions.loading) return
     if (!canInspect()) {
@@ -318,6 +335,9 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     if (permissions.loading) return
     if (!canInspect()) return
     const url = apiClient.getEventsUrl(sessionId())
+    const isTestEnv =
+      (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") ||
+      (typeof process !== "undefined" && Boolean(process.env?.VITEST))
     const connectionTimeoutMs = 10000
 
     const heartbeatTimeoutMs = 35000
@@ -374,6 +394,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
       },
       {
         connectionTimeoutMs,
+        preflight: !isTestEnv,
       },
     )
 
@@ -478,7 +499,9 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   createEffect(() => {
     const id = sessionId()
     if (!id) return
-    setDockSessionId(id)
+    if (!dockSessionId()) {
+      setDockSessionId(id)
+    }
     if (props.onDockSession) props.onDockSession(id)
   })
 
@@ -491,7 +514,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
       props.onNavigate("/sessions")
       return
     }
-    window.location.assign("/sessions")
+    navigate({ to: "/sessions" })
   }
 
   return (
@@ -503,9 +526,18 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
           <p class="dashboard-subtitle">Track the real-time transcript, monitor PTY output, and intervene fast.</p>
         </div>
         <div class="session-meta">
-          <div>
-            <span class={`state-badge ${sessionState()}`}>{stateLabel(sessionState())}</span>
-            <span class={`stream-pill ${streamStatus()}`}>{getStreamStatusLabel(streamStatus())}</span>
+          <div class="stream-pill-group">
+            <span class={`state-badge ${sessionState()}`} data-testid="session-state-badge">
+              {stateLabel(sessionState())}
+            </span>
+            <span class={`stream-pill ${streamStatus()}`} data-testid="activity-stream-status">
+              Activity {getStreamStatusLabel(streamStatus())}
+            </span>
+            <Show when={providerType() === "pty"}>
+              <span class={`stream-pill ${terminalStatus()}`} data-testid="terminal-stream-status">
+                Terminal {getTerminalStatusLabel(terminalStatus())}
+              </span>
+            </Show>
           </div>
           <div class="session-actions">
             <button type="button" class="neutral" onClick={() => exportTranscript("json")}>
@@ -687,13 +719,11 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
             when={providerType() === "pty"}
             fallback={
               <div class="empty-terminal">
-                <Show when={streamStatus() === "connection_timeout"} fallback={<span>PTY stream not detected.</span>}>
-                  <span>PTY stream connection timeout. The process may have exited or the connection failed.</span>
-                </Show>
+                <span>Terminal stream not available for this session.</span>
               </div>
             }
           >
-            <TerminalView sessionId={sessionId()} title="PTY Stream" />
+            <TerminalView sessionId={sessionId()} title="PTY Stream" onStatusChange={setTerminalStatus} />
           </Show>
         </section>
       </main>
@@ -757,6 +787,17 @@ function getStreamStatusLabel(status: string): string {
     disconnected: "disconnected",
     connection_timeout: "timeout",
     connection_failed: "failed",
+  }
+  return labels[status] || status
+}
+
+function getTerminalStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    connecting: "connecting...",
+    live: "live",
+    resyncing: "resyncing",
+    closed: "closed",
+    error: "error",
   }
   return labels[status] || status
 }

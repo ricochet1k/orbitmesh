@@ -19,6 +19,10 @@ const (
 	SessionStateError
 )
 
+const (
+	SessionKindDock = "dock"
+)
+
 func (s SessionState) String() string {
 	switch s {
 	case SessionStateCreated:
@@ -82,6 +86,7 @@ type StateTransition struct {
 type Session struct {
 	ID           string
 	ProviderType string
+	Kind         string
 	State        SessionState
 	WorkingDir   string
 	CreatedAt    time.Time
@@ -142,6 +147,13 @@ func (s *Session) SetCurrentTask(task string) {
 	s.UpdatedAt = time.Now()
 }
 
+func (s *Session) SetKind(kind string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Kind = kind
+	s.UpdatedAt = time.Now()
+}
+
 func (s *Session) SetOutput(output string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -160,6 +172,7 @@ func (s *Session) SetError(message string) {
 type SessionSnapshot struct {
 	ID           string
 	ProviderType string
+	Kind         string
 	State        SessionState
 	WorkingDir   string
 	CreatedAt    time.Time
@@ -181,6 +194,7 @@ func (s *Session) Snapshot() SessionSnapshot {
 	return SessionSnapshot{
 		ID:           s.ID,
 		ProviderType: s.ProviderType,
+		Kind:         s.Kind,
 		State:        s.State,
 		WorkingDir:   s.WorkingDir,
 		CreatedAt:    s.CreatedAt,

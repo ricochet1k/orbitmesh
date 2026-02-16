@@ -8,8 +8,10 @@ import (
 )
 
 const (
-	csrfCookieName = "orbitmesh-csrf-token"
-	csrfHeaderName = "X-CSRF-Token"
+	csrfCookieName       = "orbitmesh-csrf-token"
+	csrfHeaderName       = "X-CSRF-Token"
+	internalBypassHeader = "X-Orbitmesh-Internal"
+	internalBypassValue  = "dock-mcp"
 )
 
 func CSRFMiddleware(next http.Handler) http.Handler {
@@ -29,6 +31,10 @@ func CSRFMiddleware(next http.Handler) http.Handler {
 		}
 
 		if isStateChangingMethod(r.Method) {
+			if r.Header.Get(internalBypassHeader) == internalBypassValue {
+				next.ServeHTTP(w, r)
+				return
+			}
 			header := r.Header.Get(csrfHeaderName)
 			if header == "" || header != token.Value {
 				writeError(w, http.StatusForbidden, "invalid CSRF token", "csrf header mismatch")

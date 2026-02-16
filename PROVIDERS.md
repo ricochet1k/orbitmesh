@@ -90,6 +90,10 @@ curl -X POST http://localhost:8080/api/sessions \
 - `system_prompt`: Custom system prompt for the agent (optional)
 - `mcp_servers`: Array of MCP server configurations (optional)
 - `environment.GOOGLE_API_KEY`: API key (can be set as env var instead)
+- `custom.use_vertex_ai`: Enable Vertex AI auth via Google Cloud credentials (optional)
+- `custom.vertex_project_id`: Google Cloud project ID for Vertex AI (optional)
+- `custom.vertex_location`: Google Cloud location for Vertex AI (optional)
+- `custom.model`: Override default Gemini model (optional)
 
 **Best for**:
 - Production AI agent workloads

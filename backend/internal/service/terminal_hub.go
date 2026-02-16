@@ -28,6 +28,10 @@ type TerminalEvent struct {
 	Update terminal.Update
 }
 
+type TerminalObserver interface {
+	OnTerminalEvent(sessionID string, event TerminalEvent)
+}
+
 type TerminalHub struct {
 	sessionID string
 	provider  TerminalProvider
@@ -42,6 +46,7 @@ type TerminalHub struct {
 	lastSnapshotSet bool
 
 	updateCancel func()
+	observer     TerminalObserver
 }
 
 type terminalSubscriber struct {
@@ -52,11 +57,12 @@ type terminalSubscriber struct {
 	lastActivity time.Time
 }
 
-func NewTerminalHub(sessionID string, provider TerminalProvider) *TerminalHub {
+func NewTerminalHub(sessionID string, provider TerminalProvider, observer TerminalObserver) *TerminalHub {
 	h := &TerminalHub{
 		sessionID:   sessionID,
 		provider:    provider,
 		subscribers: make(map[int64]*terminalSubscriber),
+		observer:    observer,
 	}
 	updates, cancel := provider.SubscribeTerminalUpdates(terminalHubUpdateBuffer)
 	h.updateCancel = cancel
@@ -72,21 +78,41 @@ func (h *TerminalHub) run(updates <-chan terminal.Update) {
 }
 
 func (h *TerminalHub) Close() {
+	var (
+		finalEvent   *TerminalEvent
+		observer     TerminalObserver
+		updateCancel func()
+		subs         map[int64]*terminalSubscriber
+	)
+
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
 		return
 	}
-	h.closed = true
-	if h.updateCancel != nil {
-		h.updateCancel()
-		h.updateCancel = nil
+	observer = h.observer
+	if observer != nil {
+		if snap, err := h.snapshotLocked(); err == nil {
+			event := TerminalEvent{Seq: h.nextSeqLocked(), Update: terminal.Update{Kind: terminal.UpdateSnapshot, Snapshot: &snap}}
+			finalEvent = &event
+		}
 	}
-	for id, sub := range h.subscribers {
-		delete(h.subscribers, id)
+	h.closed = true
+	updateCancel = h.updateCancel
+	h.updateCancel = nil
+	subs = h.subscribers
+	h.subscribers = make(map[int64]*terminalSubscriber)
+	h.mu.Unlock()
+
+	if updateCancel != nil {
+		updateCancel()
+	}
+	for _, sub := range subs {
 		close(sub.updates)
 	}
-	h.mu.Unlock()
+	if finalEvent != nil && observer != nil {
+		observer.OnTerminalEvent(h.sessionID, *finalEvent)
+	}
 }
 
 func (h *TerminalHub) Subscribe(buffer int) (<-chan TerminalEvent, func()) {
@@ -109,12 +135,19 @@ func (h *TerminalHub) Subscribe(buffer int) (<-chan TerminalEvent, func()) {
 	}
 	h.subscribers[id] = sub
 	initial, err := h.snapshotLocked()
+	var initialEvent *TerminalEvent
 	if err == nil {
 		event := TerminalEvent{Seq: h.nextSeqLocked(), Update: terminal.Update{Kind: terminal.UpdateSnapshot, Snapshot: &initial}}
 		sub.pending = append(sub.pending, event)
+		initialEvent = &event
 	}
 	h.flushPendingLocked(sub)
+	observer := h.observer
 	h.mu.Unlock()
+
+	if initialEvent != nil && observer != nil {
+		observer.OnTerminalEvent(h.sessionID, *initialEvent)
+	}
 
 	return updates, func() {
 		h.mu.Lock()
@@ -160,7 +193,12 @@ func (h *TerminalHub) broadcast(update terminal.Update) {
 			h.markOverflowLocked(sub)
 		}
 	}
+	observer := h.observer
 	h.mu.Unlock()
+
+	if observer != nil {
+		observer.OnTerminalEvent(h.sessionID, event)
+	}
 }
 
 func (h *TerminalHub) markOverflowLocked(sub *terminalSubscriber) {

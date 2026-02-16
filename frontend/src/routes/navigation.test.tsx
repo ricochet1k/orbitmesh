@@ -49,6 +49,11 @@ describe("Navigation Integration Tests", () => {
       expect(mockUseLocation().pathname).toBe("/sessions");
     });
 
+    it("loads terminals route without blank state", () => {
+      mockUseLocation.mockReturnValue({ pathname: "/terminals" });
+      expect(mockUseLocation().pathname).toBe("/terminals");
+    });
+
     it("loads settings route without blank state", () => {
       mockUseLocation.mockReturnValue({ pathname: "/settings" });
       expect(mockUseLocation().pathname).toBe("/settings");
@@ -73,15 +78,16 @@ describe("Navigation Integration Tests", () => {
   describe("Keyboard Navigation", () => {
     it("allows tabbing through sidebar links in order", async () => {
       // Create a test component that simulates sidebar with tab order
-      const TestComponent = () => (
-        <nav>
-          <a href="/" data-testid="nav-dash">Dashboard</a>
-          <a href="/tasks" data-testid="nav-tasks">Tasks</a>
-          <a href="/sessions" data-testid="nav-sessions">Sessions</a>
-          <a href="/extractors" data-testid="nav-extractors">Extractors</a>
-          <a href="/settings" data-testid="nav-settings">Settings</a>
-        </nav>
-      );
+        const TestComponent = () => (
+          <nav>
+            <a href="/" data-testid="nav-dash">Dashboard</a>
+            <a href="/tasks" data-testid="nav-tasks">Tasks</a>
+            <a href="/sessions" data-testid="nav-sessions">Sessions</a>
+            <a href="/terminals" data-testid="nav-terminals">Terminals</a>
+            <a href="/extractors" data-testid="nav-extractors">Extractors</a>
+            <a href="/settings" data-testid="nav-settings">Settings</a>
+          </nav>
+        );
 
       const user = userEvent.setup();
       render(() => <TestComponent />);
@@ -144,6 +150,7 @@ describe("Navigation Integration Tests", () => {
           <a href="/" data-testid="link-1" tabIndex={0}>Link 1</a>
           <a href="/tasks" data-testid="link-2" tabIndex={0}>Link 2</a>
           <a href="/sessions" data-testid="link-3" tabIndex={0}>Link 3</a>
+          <a href="/terminals" data-testid="link-4" tabIndex={0}>Link 4</a>
         </nav>
       );
 
@@ -152,10 +159,12 @@ describe("Navigation Integration Tests", () => {
       const link1 = screen.getByTestId("link-1") as HTMLAnchorElement;
       const link2 = screen.getByTestId("link-2") as HTMLAnchorElement;
       const link3 = screen.getByTestId("link-3") as HTMLAnchorElement;
+      const link4 = screen.getByTestId("link-4") as HTMLAnchorElement;
 
       expect(link1.tabIndex).toBe(0);
       expect(link2.tabIndex).toBe(0);
       expect(link3.tabIndex).toBe(0);
+      expect(link4.tabIndex).toBe(0);
     });
   });
 
@@ -180,6 +189,9 @@ describe("Navigation Integration Tests", () => {
 
       mockUseLocation.mockReturnValue({ pathname: "/sessions" });
       expect(mockUseLocation().pathname).toBe("/sessions");
+
+      mockUseLocation.mockReturnValue({ pathname: "/terminals" });
+      expect(mockUseLocation().pathname).toBe("/terminals");
     });
   });
 
@@ -194,6 +206,12 @@ describe("Navigation Integration Tests", () => {
       mockUseLocation.mockReturnValue({ pathname: "/tasks" });
       const pathname = mockUseLocation().pathname;
       expect(pathname).toBe("/tasks");
+    });
+
+    it("generates correct breadcrumb for terminals", () => {
+      mockUseLocation.mockReturnValue({ pathname: "/terminals" });
+      const pathname = mockUseLocation().pathname;
+      expect(pathname).toBe("/terminals");
     });
 
     it("generates correct breadcrumb for nested session route", () => {

@@ -28,3 +28,17 @@ export const makeSession = (overrides: Partial<typeof baseSession> = {}) => ({
   ...baseSession,
   ...overrides,
 })
+
+export const baseTerminal = {
+  id: "terminal-1",
+  session_id: "session-1",
+  terminal_kind: "pty",
+  created_at: "2026-02-05T12:00:00Z",
+  last_updated_at: "2026-02-05T12:02:00Z",
+  last_seq: 2,
+}
+
+export const makeTerminal = (overrides: Partial<typeof baseTerminal> = {}) => ({
+  ...baseTerminal,
+  ...overrides,
+})

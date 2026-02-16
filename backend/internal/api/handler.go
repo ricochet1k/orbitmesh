@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -22,6 +23,7 @@ type Handler struct {
 	broadcaster     *service.EventBroadcaster
 	providerStorage *storage.ProviderConfigStorage
 	gitDir          string
+	dockBridge      *DockBridge
 }
 
 // NewHandler creates a Handler backed by the given executor and broadcaster.
@@ -31,6 +33,7 @@ func NewHandler(executor *service.AgentExecutor, broadcaster *service.EventBroad
 		broadcaster:     broadcaster,
 		providerStorage: providerStorage,
 		gitDir:          resolveGitDir(),
+		dockBridge:      NewDockBridge(),
 	}
 }
 
@@ -43,13 +46,21 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/v1/extractor/config", h.getExtractorConfig)
 	r.Put("/api/v1/extractor/config", h.putExtractorConfig)
 	r.Post("/api/v1/extractor/validate", h.validateExtractorConfig)
+	r.Get("/api/v1/terminals", h.listTerminals)
+	r.Get("/api/v1/terminals/{id}", h.getTerminal)
+	r.Get("/api/v1/terminals/{id}/snapshot", h.getTerminalSnapshotByID)
 	r.Get("/api/sessions", h.listSessions)
 	r.Post("/api/sessions", h.createSession)
 	r.Get("/api/sessions/{id}", h.getSession)
 	r.Delete("/api/sessions/{id}", h.stopSession)
+	r.Post("/api/sessions/{id}/input", h.sendSessionInput)
 	r.Post("/api/sessions/{id}/pause", h.pauseSession)
 	r.Post("/api/sessions/{id}/resume", h.resumeSession)
 	r.Get("/api/sessions/{id}/events", h.sseEvents)
+	r.Get("/api/sessions/{id}/activity", h.getSessionActivity)
+	r.Get("/api/sessions/{id}/dock/mcp/next", h.nextDockMCP)
+	r.Post("/api/sessions/{id}/dock/mcp/request", h.requestDockMCP)
+	r.Post("/api/sessions/{id}/dock/mcp/respond", h.respondDockMCP)
 	r.Get("/api/sessions/{id}/terminal/ws", h.terminalWebSocket)
 	r.Get("/api/v1/sessions/{id}/terminal/snapshot", h.getTerminalSnapshot)
 	r.Post("/api/v1/sessions/{id}/extractor/replay", h.replayExtractor)
@@ -60,10 +71,42 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Delete("/api/v1/providers/{id}", h.deleteProvider)
 }
 
+func (h *Handler) sendSessionInput(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var req apiTypes.SessionInputRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", err.Error())
+		return
+	}
+
+	if strings.TrimSpace(req.Input) == "" {
+		writeError(w, http.StatusBadRequest, "input is required", "")
+		return
+	}
+
+	if err := h.executor.SendInput(r.Context(), id, req.Input); err != nil {
+		if errors.Is(err, service.ErrSessionNotFound) {
+			writeError(w, http.StatusNotFound, "session not found", err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to send input", err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	var req apiTypes.SessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body", err.Error())
+		return
+	}
+
+	sessionKind := strings.TrimSpace(req.SessionKind)
+	if sessionKind != "" && sessionKind != domain.SessionKindDock {
+		writeError(w, http.StatusBadRequest, "invalid session_kind", "")
 		return
 	}
 
@@ -106,6 +149,7 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		Custom:       req.Custom,
 		TaskID:       req.TaskID,
 		TaskTitle:    req.TaskTitle,
+		SessionKind:  sessionKind,
 	}
 	if providerConfig != nil {
 		if len(providerConfig.Env) > 0 {
@@ -161,7 +205,9 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if len(req.MCPServers) > 0 {
+	if sessionKind == domain.SessionKindDock {
+		config.MCPServers = dockMCPServers(id)
+	} else if len(req.MCPServers) > 0 {
 		config.MCPServers = make([]provider.MCPServerConfig, len(req.MCPServers))
 		for i, s := range req.MCPServers {
 			config.MCPServers[i] = provider.MCPServerConfig{
@@ -232,6 +278,34 @@ func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) listTerminals(w http.ResponseWriter, r *http.Request) {
+	terminals := h.executor.ListTerminals()
+	responses := make([]apiTypes.TerminalResponse, len(terminals))
+	for i, term := range terminals {
+		responses[i] = terminalToResponse(term)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(apiTypes.TerminalListResponse{Terminals: responses})
+}
+
+func (h *Handler) getTerminal(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	term, err := h.executor.GetTerminal(id)
+	if err != nil {
+		if errors.Is(err, storage.ErrTerminalNotFound) {
+			writeError(w, http.StatusNotFound, "terminal not found", "")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get terminal", err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(terminalToResponse(term))
+}
+
 func (h *Handler) stopSession(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.executor.StopSession(r.Context(), id); err != nil {
@@ -281,6 +355,7 @@ func sessionToResponse(s domain.SessionSnapshot) apiTypes.SessionResponse {
 	return apiTypes.SessionResponse{
 		ID:           s.ID,
 		ProviderType: s.ProviderType,
+		SessionKind:  s.Kind,
 		State:        apiTypes.SessionState(s.State.String()),
 		WorkingDir:   s.WorkingDir,
 		CreatedAt:    s.CreatedAt,
@@ -291,6 +366,33 @@ func sessionToResponse(s domain.SessionSnapshot) apiTypes.SessionResponse {
 	}
 }
 
+func terminalToResponse(t *domain.Terminal) apiTypes.TerminalResponse {
+	terminalKind := t.Kind
+	if terminalKind == "" {
+		terminalKind = domain.TerminalKindAdHoc
+	}
+	sessionID := t.SessionID
+	if sessionID == "" {
+		sessionID = t.ID
+	}
+	resp := apiTypes.TerminalResponse{
+		ID:            t.ID,
+		SessionID:     sessionID,
+		TerminalKind:  apiTypes.TerminalKind(terminalKind),
+		CreatedAt:     t.CreatedAt,
+		LastUpdatedAt: t.LastUpdatedAt,
+		LastSeq:       t.LastSeq,
+	}
+	if t.LastSnapshot != nil {
+		resp.LastSnapshot = &apiTypes.TerminalSnapshot{
+			Rows:  t.LastSnapshot.Rows,
+			Cols:  t.LastSnapshot.Cols,
+			Lines: t.LastSnapshot.Lines,
+		}
+	}
+	return resp
+}
+
 func sessionToStatusResponse(s domain.SessionSnapshot, status provider.Status) apiTypes.SessionStatusResponse {
 	return apiTypes.SessionStatusResponse{
 		SessionResponse: sessionToResponse(s),
@@ -299,6 +401,19 @@ func sessionToStatusResponse(s domain.SessionSnapshot, status provider.Status) a
 			TokensOut:      status.Metrics.TokensOut,
 			RequestCount:   status.Metrics.RequestCount,
 			LastActivityAt: status.Metrics.LastActivityAt,
+		},
+	}
+}
+
+func dockMCPServers(sessionID string) []provider.MCPServerConfig {
+	return []provider.MCPServerConfig{
+		{
+			Name:    "orbitmesh-mcp",
+			Command: "orbitmesh-mcp",
+			Args:    []string{"dock"},
+			Env: map[string]string{
+				"ORBITMESH_DOCK_SESSION_ID": sessionID,
+			},
 		},
 	}
 }

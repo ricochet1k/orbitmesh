@@ -4,6 +4,7 @@ import { apiClient } from "../api/client";
 interface TerminalViewProps {
   sessionId: string;
   title?: string;
+  onStatusChange?: (status: TerminalStatus) => void;
 }
 
 type TerminalSpan = {
@@ -30,6 +31,8 @@ type TerminalSnapshotData = {
   cols: number;
   lines: unknown[];
 };
+
+type TerminalStatus = "connecting" | "live" | "closed" | "error" | "resyncing";
 
 type TerminalDiffData = {
   region?: { x: number; y: number; x2: number; y2: number };
@@ -65,12 +68,15 @@ export default function TerminalView(props: TerminalViewProps) {
   const [lines, setLines] = createSignal<TerminalLine[]>([]);
   const [dimensions, setDimensions] = createSignal({ rows: 0, cols: 0 });
   const [cursor, setCursor] = createSignal<TerminalCursorData | null>(null);
-  const [status, setStatus] = createSignal<"connecting" | "live" | "closed" | "error" | "resyncing">(
-    "connecting",
-  );
+  const [status, setStatus] = createSignal<TerminalStatus>("connecting");
   const [statusNote, setStatusNote] = createSignal<string | null>(null);
   const [bellActive, setBellActive] = createSignal(false);
   const [lastSeq, setLastSeq] = createSignal<number | null>(null);
+
+  const updateStatus = (next: TerminalStatus) => {
+    setStatus(next);
+    props.onStatusChange?.(next);
+  };
 
   const visibleLines = () => {
     const all = lines();
@@ -118,7 +124,7 @@ export default function TerminalView(props: TerminalViewProps) {
     if (!data || !Array.isArray(data.lines)) return;
     setDimensions({ rows: data.rows, cols: data.cols });
     setLines(normalizeLines(data.lines));
-    setStatus("live");
+    updateStatus("live");
     setStatusNote(null);
   };
 
@@ -140,16 +146,16 @@ export default function TerminalView(props: TerminalViewProps) {
       }
       return next;
     });
-    setStatus("live");
+    updateStatus("live");
   };
 
   const handleError = (data: TerminalErrorData) => {
     const message = data?.message || "Terminal stream error";
     setStatusNote(message);
     if (data?.resync) {
-      setStatus("resyncing");
+      updateStatus("resyncing");
     } else {
-      setStatus("error");
+      updateStatus("error");
     }
   };
 
@@ -164,20 +170,20 @@ export default function TerminalView(props: TerminalViewProps) {
   const connect = () => {
     const url = apiClient.getTerminalWsUrl(props.sessionId);
     if (!url) return;
-    setStatus("connecting");
+    updateStatus("connecting");
     setStatusNote(null);
     socket = new WebSocket(url);
 
     socket.onopen = () => {
-      setStatus("live");
+      updateStatus("live");
     };
 
     socket.onerror = () => {
-      setStatus("error");
+      updateStatus("error");
     };
 
     socket.onclose = () => {
-      setStatus("closed");
+      updateStatus("closed");
     };
 
     socket.onmessage = (event) => {

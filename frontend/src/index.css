@@ -1028,6 +1028,12 @@ tbody tr:hover {
   color: #475569;
 }
 
+.detached,
+.unknown {
+  background: rgba(100, 116, 139, 0.18);
+  color: #64748b;
+}
+
 .sessions-list button {
   border: none;
   background: linear-gradient(135deg, #2563eb, #0ea5e9);
@@ -1160,6 +1166,63 @@ tbody tr:hover {
   color: var(--warning);
 }
 
+.stream-pill.connection_failed,
+.stream-pill.error {
+  border-color: rgba(185, 28, 28, 0.35);
+  background: rgba(185, 28, 28, 0.12);
+  color: var(--danger);
+}
+
+.stream-pill.closed {
+  border-color: rgba(71, 85, 105, 0.3);
+  background: rgba(71, 85, 105, 0.12);
+  color: #475569;
+}
+
+.stream-pill.resyncing {
+  border-color: rgba(37, 99, 235, 0.3);
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+}
+
+.stream-pill.live {
+  border-color: rgba(15, 118, 110, 0.35);
+  background: rgba(15, 118, 110, 0.14);
+  color: var(--success);
+}
+
+.stream-pill-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
+}
+
+.update-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.updated-at {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-3);
+}
+
+.stale-badge {
+  padding: 2px 6px;
+  border-radius: var(--radius-pill);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  background: rgba(180, 83, 9, 0.18);
+  color: var(--warning);
+  border: 1px solid rgba(180, 83, 9, 0.35);
+}
+
 .session-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1210,13 +1273,22 @@ tbody tr:hover {
 }
 
 .sessions-view,
-.settings-view {
+.settings-view,
+.terminals-view {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
 }
 
 .sessions-layout {
+  display: grid;
+  grid-template-columns: minmax(420px, 1.2fr) minmax(320px, 0.8fr);
+  gap: 1.6rem;
+  padding: 2rem 2.75rem 3.5rem;
+  align-items: start;
+}
+
+.terminals-layout {
   display: grid;
   grid-template-columns: minmax(420px, 1.2fr) minmax(320px, 0.8fr);
   gap: 1.6rem;
@@ -1482,6 +1554,8 @@ tbody tr:hover {
 
 .session-list-panel,
 .session-detail-panel,
+.terminal-list-panel,
+.terminal-detail-panel,
 .placeholder-panel {
   border-radius: var(--radius-5);
   padding: 1.2rem;
@@ -1499,6 +1573,38 @@ tbody tr:hover {
   gap: 0.65rem;
 }
 
+.terminal-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.session-filters {
+  display: flex;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0.2rem;
+}
+
+.session-filters label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--ink-3);
+}
+
+.session-filters select {
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(15, 23, 42, 0.2);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  padding: 0.3rem 0.6rem;
+  font-size: 0.72rem;
+}
+
 .session-card {
   border-radius: var(--radius-3);
   border: 1px solid var(--border);
@@ -1509,6 +1615,20 @@ tbody tr:hover {
 }
 
 .session-card.active {
+  border-color: rgba(37, 99, 235, 0.35);
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.terminal-card {
+  border-radius: var(--radius-3);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.95);
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.75rem;
+}
+
+.terminal-card.active {
   border-color: rgba(37, 99, 235, 0.35);
   background: rgba(37, 99, 235, 0.08);
 }
@@ -1530,7 +1650,30 @@ tbody tr:hover {
   word-break: break-all;
 }
 
+.terminal-card-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+
+.terminal-card-id {
+  font-weight: 600;
+  word-break: break-all;
+}
+
 .session-card-meta {
+  display: grid;
+  justify-items: end;
+  gap: 0.2rem;
+}
+
+.terminal-card-meta {
   display: grid;
   justify-items: end;
   gap: 0.2rem;
@@ -1539,6 +1682,13 @@ tbody tr:hover {
 .session-card-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+.terminal-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .session-card-actions button {
@@ -1558,9 +1708,40 @@ tbody tr:hover {
   color: var(--ink-1);
 }
 
+.terminal-card-actions button,
+.terminal-preview-actions button {
+  border: 1px solid rgba(37, 99, 235, 0.35);
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.terminal-card-actions button.danger,
+.terminal-preview-actions button.danger {
+  border-color: rgba(185, 28, 28, 0.35);
+  background: rgba(185, 28, 28, 0.08);
+  color: var(--danger);
+}
+
 .session-preview {
   display: grid;
   gap: 0.6rem;
+}
+
+.terminal-preview {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.terminal-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .session-preview button {

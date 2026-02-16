@@ -14,7 +14,9 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ExtractorsRouteImport } from './routes/extractors'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as TerminalsIndexRouteImport } from './routes/terminals/index'
 import { Route as SessionsIndexRouteImport } from './routes/sessions/index'
+import { Route as TerminalsTerminalIdRouteImport } from './routes/terminals/$terminalId'
 import { Route as SessionsSessionIdRouteImport } from './routes/sessions/$sessionId'
 import { Route as HistoryCommitsRouteImport } from './routes/history/commits'
 
@@ -43,9 +45,19 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TerminalsIndexRoute = TerminalsIndexRouteImport.update({
+  id: '/terminals/',
+  path: '/terminals/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SessionsIndexRoute = SessionsIndexRouteImport.update({
   id: '/sessions/',
   path: '/sessions/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TerminalsTerminalIdRoute = TerminalsTerminalIdRouteImport.update({
+  id: '/terminals/$terminalId',
+  path: '/terminals/$terminalId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SessionsSessionIdRoute = SessionsSessionIdRouteImport.update({
@@ -67,7 +79,9 @@ export interface FileRoutesByFullPath {
   '/tasks': typeof TasksRoute
   '/history/commits': typeof HistoryCommitsRoute
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
+  '/terminals/$terminalId': typeof TerminalsTerminalIdRoute
   '/sessions/': typeof SessionsIndexRoute
+  '/terminals/': typeof TerminalsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -77,7 +91,9 @@ export interface FileRoutesByTo {
   '/tasks': typeof TasksRoute
   '/history/commits': typeof HistoryCommitsRoute
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
+  '/terminals/$terminalId': typeof TerminalsTerminalIdRoute
   '/sessions': typeof SessionsIndexRoute
+  '/terminals': typeof TerminalsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -88,7 +104,9 @@ export interface FileRoutesById {
   '/tasks': typeof TasksRoute
   '/history/commits': typeof HistoryCommitsRoute
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
+  '/terminals/$terminalId': typeof TerminalsTerminalIdRoute
   '/sessions/': typeof SessionsIndexRoute
+  '/terminals/': typeof TerminalsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -100,7 +118,9 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/history/commits'
     | '/sessions/$sessionId'
+    | '/terminals/$terminalId'
     | '/sessions/'
+    | '/terminals/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -110,7 +130,9 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/history/commits'
     | '/sessions/$sessionId'
+    | '/terminals/$terminalId'
     | '/sessions'
+    | '/terminals'
   id:
     | '__root__'
     | '/'
@@ -120,7 +142,9 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/history/commits'
     | '/sessions/$sessionId'
+    | '/terminals/$terminalId'
     | '/sessions/'
+    | '/terminals/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -131,7 +155,9 @@ export interface RootRouteChildren {
   TasksRoute: typeof TasksRoute
   HistoryCommitsRoute: typeof HistoryCommitsRoute
   SessionsSessionIdRoute: typeof SessionsSessionIdRoute
+  TerminalsTerminalIdRoute: typeof TerminalsTerminalIdRoute
   SessionsIndexRoute: typeof SessionsIndexRoute
+  TerminalsIndexRoute: typeof TerminalsIndexRoute
 }
 
 declare module '@tanstack/solid-router' {
@@ -171,11 +197,25 @@ declare module '@tanstack/solid-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/terminals/': {
+      id: '/terminals/'
+      path: '/terminals'
+      fullPath: '/terminals/'
+      preLoaderRoute: typeof TerminalsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sessions/': {
       id: '/sessions/'
       path: '/sessions'
       fullPath: '/sessions/'
       preLoaderRoute: typeof SessionsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terminals/$terminalId': {
+      id: '/terminals/$terminalId'
+      path: '/terminals/$terminalId'
+      fullPath: '/terminals/$terminalId'
+      preLoaderRoute: typeof TerminalsTerminalIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/sessions/$sessionId': {
@@ -203,7 +243,9 @@ const rootRouteChildren: RootRouteChildren = {
   TasksRoute: TasksRoute,
   HistoryCommitsRoute: HistoryCommitsRoute,
   SessionsSessionIdRoute: SessionsSessionIdRoute,
+  TerminalsTerminalIdRoute: TerminalsTerminalIdRoute,
   SessionsIndexRoute: SessionsIndexRoute,
+  TerminalsIndexRoute: TerminalsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

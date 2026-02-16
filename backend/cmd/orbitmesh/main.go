@@ -37,7 +37,7 @@ func main() {
 
 	factory := provider.NewDefaultFactory()
 	factory.Register("adk", func(sessionID string, config provider.Config) (provider.Provider, error) {
-		return native.NewADKProvider(sessionID, native.ADKConfig{}), nil
+		return native.NewADKProvider(sessionID, adkConfigFromProvider(config)), nil
 	})
 	factory.Register("pty", func(sessionID string, config provider.Config) (provider.Provider, error) {
 		return pty.NewClaudePTYProvider(sessionID), nil
@@ -46,8 +46,9 @@ func main() {
 	broadcaster := service.NewEventBroadcaster(100)
 
 	executor := service.NewAgentExecutor(service.ExecutorConfig{
-		Storage:     store,
-		Broadcaster: broadcaster,
+		Storage:         store,
+		TerminalStorage: store,
+		Broadcaster:     broadcaster,
 		ProviderFactory: func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
 			return factory.Create(providerType, sessionID, config)
 		},
@@ -91,4 +92,24 @@ func main() {
 	}
 
 	fmt.Println("OrbitMesh shut down cleanly")
+}
+
+func adkConfigFromProvider(config provider.Config) native.ADKConfig {
+	adkCfg := native.ADKConfig{}
+	if config.Custom == nil {
+		return adkCfg
+	}
+	if model, ok := config.Custom["model"].(string); ok && model != "" {
+		adkCfg.Model = model
+	}
+	if useVertex, ok := config.Custom["use_vertex_ai"].(bool); ok {
+		adkCfg.UseVertexAI = useVertex
+	}
+	if projectID, ok := config.Custom["vertex_project_id"].(string); ok && projectID != "" {
+		adkCfg.ProjectID = projectID
+	}
+	if location, ok := config.Custom["vertex_location"].(string); ok && location != "" {
+		adkCfg.Location = location
+	}
+	return adkCfg
 }

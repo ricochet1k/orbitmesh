@@ -7,10 +7,13 @@ import {
   onCleanup,
   Show,
 } from "solid-js"
+import { useNavigate } from "@tanstack/solid-router"
 import { apiClient } from "../api/client"
 import type { Event, SessionState } from "../types/api"
+import { mcpDispatch } from "../mcp/dispatch"
+import { mcpRegistry } from "../mcp/registry"
 import { startEventStream } from "../utils/eventStream"
-import { dockSessionId } from "../state/agentDock"
+import { dockSessionId, setDockSessionId } from "../state/agentDock"
 import "./AgentDock.css"
 
 interface DockState {
@@ -31,6 +34,7 @@ interface AgentDockProps {
 }
 
 export default function AgentDock(props: AgentDockProps) {
+  const navigate = useNavigate()
   const sessionId = () => props.sessionId ?? dockSessionId() ?? ""
   const [session] = createResource(
     () => sessionId(),
@@ -44,6 +48,9 @@ export default function AgentDock(props: AgentDockProps) {
   const [pendingAction, setPendingAction] = createSignal<string | null>(null)
   const [actionError, setActionError] = createSignal<string | null>(null)
   const [isExpanded, setIsExpanded] = createSignal(false)
+  const [rehydrationState, setRehydrationState] = createSignal<
+    "idle" | "loading" | "done"
+  >("idle")
   const [streamStatus, setStreamStatus] = createSignal<
     "idle" | "connecting" | "reconnecting" | "live" | "disconnected" | "error"
   >("idle")
@@ -53,6 +60,7 @@ export default function AgentDock(props: AgentDockProps) {
   >(null)
   let transcriptRef: HTMLDivElement | undefined
   let inputRef: HTMLTextAreaElement | undefined
+  let dockBootstrap: Promise<string | null> | null = null
 
   const canManage = () => permissions()?.can_initiate_bulk_actions ?? false
 
@@ -78,6 +86,106 @@ export default function AgentDock(props: AgentDockProps) {
   })
 
   const lastActionDetail = createMemo(() => lastAction()?.detail ?? "")
+
+  const hydrateDockSession = async () => {
+    const stored = dockSessionId()
+    try {
+      const list = await apiClient.listSessions()
+      const dock = list.sessions.find(
+        (entry) =>
+          entry.session_kind === "dock" &&
+          ["running", "starting", "paused"].includes(entry.state),
+      )
+      if (dock) {
+        try {
+          await apiClient.getSession(dock.id)
+          if (dock.id !== stored) {
+            setDockSessionId(dock.id)
+          }
+          return
+        } catch {
+          // continue to clear stored session
+        }
+      }
+      if (stored) {
+        try {
+          await apiClient.getSession(stored)
+        } catch {
+          setDockSessionId(null)
+        }
+      }
+    } catch {
+      // Ignore rehydration failures; fallback handled on send.
+    }
+  }
+
+  const ensureDockSessionId = async (): Promise<string | null> => {
+    const existing = sessionId()
+    if (existing) return existing
+    if (dockBootstrap) return dockBootstrap
+    dockBootstrap = (async () => {
+      const stored = dockSessionId()
+      if (stored) {
+        try {
+          await apiClient.getSession(stored)
+          return stored
+        } catch {
+          setDockSessionId(null)
+        }
+      }
+      try {
+        const list = await apiClient.listSessions()
+        const dock = list.sessions.find(
+          (entry) =>
+            entry.session_kind === "dock" &&
+            ["running", "starting", "paused"].includes(entry.state),
+        )
+        if (dock) {
+          try {
+            await apiClient.getSession(dock.id)
+            setDockSessionId(dock.id)
+            return dock.id
+          } catch {
+            // ignore stale dock session
+          }
+        }
+      } catch {
+        // Continue to create a new dock session.
+      }
+      try {
+        const created = await apiClient.createDockSession()
+        setDockSessionId(created.id)
+        return created.id
+      } catch {
+        return null
+      }
+    })()
+    const result = await dockBootstrap
+    dockBootstrap = null
+    return result
+  }
+
+  const isDockSession = () => session()?.session_kind === "dock" || (!props.sessionId && Boolean(dockSessionId()))
+
+  const handleDockRequest = async (request: { kind: string; target_id?: string; action?: string; payload?: any }) => {
+    if (request.kind === "list") {
+      const components = mcpRegistry
+        .list()
+        .map((entry) => ({ id: entry.id, name: entry.name, description: entry.description }))
+      return { ok: true, components }
+    }
+    if (request.kind === "multi_edit") {
+      return mcpDispatch.dispatchMultiFieldEdit(request.payload ?? {})
+    }
+    if (request.kind === "dispatch") {
+      return mcpDispatch.dispatchAction(
+        request.target_id ?? "",
+        request.action as any,
+        request.payload,
+      )
+    }
+    return { ok: false, error: "Unknown dock request" }
+  }
 
   const formatShort = (value: unknown, limit = 120) => {
     if (value === null || value === undefined) return ""
@@ -151,7 +259,7 @@ export default function AgentDock(props: AgentDockProps) {
     // Reset state for new session
     setMessages([])
     setAutoScroll(true)
-    setDockState({ type: "loading" })
+    setDockState({ type: "live" })
     setStreamStatus("connecting")
     setLastAction(null)
 
@@ -294,8 +402,8 @@ export default function AgentDock(props: AgentDockProps) {
         },
         onOpen: () => {
           setStreamStatus("live")
-          if (dockState().type === "error") {
-            setDockState({ type: "loading" })
+          if (dockState().type !== "live") {
+            setDockState({ type: "live" })
           }
         },
         onError: (status) => {
@@ -331,6 +439,48 @@ export default function AgentDock(props: AgentDockProps) {
     })
   })
 
+  // Restore dock session on load (dock-only)
+  createEffect(() => {
+    if (props.sessionId) return
+    if (rehydrationState() !== "idle") return
+    setRehydrationState("loading")
+    void hydrateDockSession().finally(() => setRehydrationState("done"))
+  })
+
+  // Dock MCP polling
+  createEffect(() => {
+    const activeSessionId = sessionId()
+    if (!activeSessionId || !isDockSession()) return
+    if (import.meta.env.MODE === "test") return
+
+    let cancelled = false
+    const controller = new AbortController()
+
+    const run = async () => {
+      while (!cancelled) {
+        try {
+          const req = await apiClient.pollDockMcp(activeSessionId, { timeoutMs: 20000 })
+          if (!req) continue
+          const result = await handleDockRequest(req)
+          await apiClient.respondDockMcp(activeSessionId, {
+            id: req.id,
+            result,
+          })
+        } catch (error) {
+          if (controller.signal.aborted) return
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+        }
+      }
+    }
+
+    void run()
+
+    onCleanup(() => {
+      cancelled = true
+      controller.abort()
+    })
+  })
+
   // Handle manual scroll detection
   const handleTranscriptScroll = () => {
     if (!transcriptRef) return
@@ -351,12 +501,44 @@ export default function AgentDock(props: AgentDockProps) {
 
   const handleSendMessage = async () => {
     const message = inputValue().trim()
-    if (!message || !sessionId()) return
+    if (!message) return
 
-    setInputValue("")
-    // TODO: Implement message sending to backend when API endpoint is ready
-    // For MVP, this is stubbed behind a feature flag (disabled)
-    console.log("Message sending stubbed:", message)
+    setPendingAction("send")
+    setActionError(null)
+
+    try {
+      let activeSessionId = sessionId()
+      if (!activeSessionId) {
+        setDockState({ type: "loading" })
+        setStreamStatus("connecting")
+        activeSessionId = await ensureDockSessionId()
+      }
+      if (!activeSessionId) {
+        throw new Error("Unable to start dock session.")
+      }
+      const providerType = session()?.provider_type
+      const payload = providerType === "pty" && !message.endsWith("\n")
+        ? `${message}\n`
+        : message
+      await apiClient.sendSessionInput(activeSessionId, payload)
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          type: "user",
+          timestamp: new Date().toISOString(),
+          content: message,
+        },
+      ])
+      setLastAction({ label: "Input", detail: formatShort(message) })
+      setInputValue("")
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "Failed to send input",
+      )
+    } finally {
+      setPendingAction(null)
+    }
   }
 
   const handlePauseResume = async () => {
@@ -411,7 +593,7 @@ export default function AgentDock(props: AgentDockProps) {
       props.onNavigate(`/sessions/${id}`)
       return
     }
-    window.location.assign(`/sessions/${id}`)
+    navigate({ to: `/sessions/${id}` })
   }
 
   const sessionState = () => session()?.state as SessionState | undefined
@@ -513,82 +695,84 @@ export default function AgentDock(props: AgentDockProps) {
                   </For>
                 </div>
               </div>
+            </div>
+          </Show>
 
-              {/* Composer */}
-              <div class="agent-dock-composer-area">
-                <Show when={actionError()}>
-                  <div class="agent-dock-error-banner">{actionError()}</div>
-                </Show>
-                <div class="agent-dock-composer">
-                  <textarea
-                    ref={inputRef}
-                    class="agent-dock-input"
-                    placeholder="Type a message... (Shift+Enter for newline)"
-                    value={inputValue()}
-                    onInput={(e) => setInputValue(e.currentTarget.value)}
-                    onKeyDown={handleInputKeyDown}
-                    disabled={pendingAction() !== null}
-                    rows={2}
-                  />
-                  <button
-                    type="button"
-                    class="agent-dock-send-btn"
-                    disabled={!inputValue().trim() || pendingAction() !== null}
-                    onClick={handleSendMessage}
-                    title="Send message (Enter)"
-                  >
-                    Send
-                  </button>
-                </div>
-              </div>
-
-              {/* Quick Actions */}
-              <div class="agent-dock-actions">
+          <Show when={dockState().type !== "error"}>
+            <div class="agent-dock-composer-area">
+              <Show when={actionError()}>
+                <div class="agent-dock-error-banner">{actionError()}</div>
+              </Show>
+              <div class="agent-dock-composer">
+                <textarea
+                  ref={inputRef}
+                  class="agent-dock-input"
+                  placeholder="Type a message... (Shift+Enter for newline)"
+                  value={inputValue()}
+                  onInput={(e) => setInputValue(e.currentTarget.value)}
+                  onKeyDown={handleInputKeyDown}
+                  disabled={pendingAction() !== null}
+                  rows={2}
+                />
                 <button
                   type="button"
-                  class="btn btn-icon btn-sm"
-                  onClick={handlePauseResume}
-                  disabled={!canManage() || !isSessionActive() || pendingAction() !== null}
-                  title={
-                    !canManage()
-                      ? "Bulk session controls are not permitted for your role."
-                      : pendingAction() !== null
-                      ? "Action is in progress..."
-                      : !isSessionActive()
-                      ? `Cannot control: session is ${sessionState()}`
-                      : sessionState() === "paused"
-                      ? "Resume session"
-                      : "Pause session"
-                  }
+                  class="agent-dock-send-btn"
+                  disabled={!inputValue().trim() || pendingAction() !== null}
+                  onClick={handleSendMessage}
+                  title="Send message (Enter)"
                 >
-                  {sessionState() === "paused" ? "▶" : "⏸"}
-                </button>
-                <button
-                  type="button"
-                  class="btn btn-icon btn-danger btn-sm"
-                  onClick={handleKillSession}
-                  disabled={!canManage() || sessionState() === "stopped" || pendingAction() !== null}
-                  title={
-                    !canManage()
-                      ? "Bulk session controls are not permitted for your role."
-                      : pendingAction() !== null
-                      ? "Action is in progress..."
-                      : sessionState() === "stopped"
-                      ? "Session is already stopped"
-                      : "Stop session"
-                  }
-                >
-                  ⊗
-                </button>
-                <button
-                  type="button"
-                  class="btn btn-secondary btn-sm"
-                  onClick={handleOpenFullViewer}
-                  title="Open full session viewer"
-                >
-                  View Full
+                  Send
                 </button>
               </div>
+            </div>
+          </Show>
+
+          <Show when={dockState().type === "live"}>
+            <div class="agent-dock-actions">
+              <button
+                type="button"
+                class="btn btn-icon btn-sm"
+                onClick={handlePauseResume}
+                disabled={!canManage() || !isSessionActive() || pendingAction() !== null}
+                title={
+                  !canManage()
+                    ? "Bulk session controls are not permitted for your role."
+                    : pendingAction() !== null
+                    ? "Action is in progress..."
+                    : !isSessionActive()
+                    ? `Cannot control: session is ${sessionState()}`
+                    : sessionState() === "paused"
+                    ? "Resume session"
+                    : "Pause session"
+                }
+              >
+                {sessionState() === "paused" ? "▶" : "⏸"}
+              </button>
+              <button
+                type="button"
+                class="btn btn-icon btn-danger btn-sm"
+                onClick={handleKillSession}
+                disabled={!canManage() || sessionState() === "stopped" || pendingAction() !== null}
+                title={
+                  !canManage()
+                    ? "Bulk session controls are not permitted for your role."
+                    : pendingAction() !== null
+                    ? "Action is in progress..."
+                    : sessionState() === "stopped"
+                    ? "Session is already stopped"
+                    : "Stop session"
+                }
+              >
+                ⊗
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                onClick={handleOpenFullViewer}
+                title="Open full session viewer"
+              >
+                View Full
+              </button>
             </div>
           </Show>
         </div>

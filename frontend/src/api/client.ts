@@ -3,6 +3,7 @@ import {
   SessionResponse,
   SessionListResponse,
   SessionStatusResponse,
+  SessionInputRequest,
   PermissionsResponse,
   TaskTreeResponse,
   CommitListResponse,
@@ -14,6 +15,10 @@ import {
   ExtractorValidateResponse,
   ExtractorReplayResponse,
   TerminalSnapshot,
+  TerminalListResponse,
+  TerminalResponse,
+  DockMcpRequest,
+  DockMcpResponse,
   ProviderConfigRequest,
   ProviderConfigResponse,
   ProviderConfigListResponse,
@@ -23,6 +28,42 @@ const BASE_URL = "/api";
 const CSRF_COOKIE_NAME = "orbitmesh-csrf-token";
 const CSRF_HEADER_NAME = "X-CSRF-Token";
 const DEFAULT_PROVIDER = "adk";
+const SESSION_CACHE_KEY = "orbitmesh:sessions";
+
+function readSessionCache(): SessionListResponse | undefined {
+  if (typeof window === "undefined" || !window.localStorage) return undefined;
+  try {
+    const raw = window.localStorage.getItem(SESSION_CACHE_KEY);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as SessionListResponse;
+    if (!parsed || !Array.isArray(parsed.sessions)) return undefined;
+    return { sessions: parsed.sessions };
+  } catch {
+    return undefined;
+  }
+}
+
+function writeSessionCache(list: SessionListResponse): void {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(list));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function mergeSessionLists(primary: SessionListResponse, fallback?: SessionListResponse): SessionListResponse {
+  const merged = [...primary.sessions];
+  if (!fallback) return { sessions: merged };
+  const seen = new Set(primary.sessions.map((session) => session.id));
+  fallback.sessions.forEach((session) => {
+    if (!seen.has(session.id)) {
+      merged.push(session);
+      seen.add(session.id);
+    }
+  });
+  return { sessions: merged };
+}
 
 function getWebSocketBaseUrl(): string {
   if (typeof window === "undefined") return "";
@@ -65,9 +106,29 @@ async function readErrorMessage(resp: Response): Promise<string> {
 
 export const apiClient = {
   async listSessions(): Promise<SessionListResponse> {
-    const resp = await fetch(`${BASE_URL}/sessions`);
-    if (!resp.ok) throw new Error(await readErrorMessage(resp));
-    return resp.json();
+    const cached = readSessionCache();
+    let resp: Response;
+
+    try {
+      resp = await fetch(`${BASE_URL}/sessions`);
+    } catch (error) {
+      if (cached) return cached;
+      throw error;
+    }
+
+    if (!resp.ok) {
+      if (cached) return cached;
+      throw new Error(await readErrorMessage(resp));
+    }
+
+    const payload = (await resp.json()) as SessionListResponse;
+    const merged = mergeSessionLists(payload, cached);
+    writeSessionCache(merged);
+    return merged;
+  },
+
+  getCachedSessions(): SessionListResponse | undefined {
+    return readSessionCache();
   },
 
   async createSession(req: SessionRequest): Promise<SessionResponse> {
@@ -94,6 +155,24 @@ export const apiClient = {
       working_dir: workingDir,
       task_id: taskId,
       task_title: taskTitle,
+    });
+  },
+
+  async createDockSession(params: {
+    providerType?: string;
+    providerId?: string;
+    workingDir?: string;
+    systemPrompt?: string;
+    environment?: Record<string, string>;
+  } = {}): Promise<SessionResponse> {
+    const { providerType, providerId, workingDir, systemPrompt, environment } = params;
+    return apiClient.createSession({
+      provider_type: providerType ?? DEFAULT_PROVIDER,
+      provider_id: providerId,
+      working_dir: workingDir,
+      system_prompt: systemPrompt,
+      environment,
+      session_kind: "dock",
     });
   },
 
@@ -131,6 +210,16 @@ export const apiClient = {
     const resp = await fetch(`${BASE_URL}/sessions/${id}/pause`, {
       method: "POST",
       headers: withCSRFHeaders(),
+    });
+    if (!resp.ok) throw new Error(await readErrorMessage(resp));
+  },
+
+  async sendSessionInput(id: string, input: string): Promise<void> {
+    const payload: SessionInputRequest = { input };
+    const resp = await fetch(`${BASE_URL}/sessions/${id}/input`, {
+      method: "POST",
+      headers: withCSRFHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload),
     });
     if (!resp.ok) throw new Error(await readErrorMessage(resp));
   },
@@ -218,6 +307,58 @@ export const apiClient = {
     const resp = await fetch(`${BASE_URL}/v1/sessions/${id}/terminal/snapshot`);
     if (!resp.ok) throw new Error(await readErrorMessage(resp));
     return resp.json();
+  },
+
+  async getTerminal(id: string): Promise<TerminalResponse> {
+    const resp = await fetch(`${BASE_URL}/v1/terminals/${id}`);
+    if (!resp.ok) throw new Error(await readErrorMessage(resp));
+    return resp.json();
+  },
+
+  async getTerminalSnapshotById(id: string): Promise<TerminalSnapshot> {
+    const resp = await fetch(`${BASE_URL}/v1/terminals/${id}/snapshot`);
+    if (!resp.ok) throw new Error(await readErrorMessage(resp));
+    return resp.json();
+  },
+
+  async listTerminals(): Promise<TerminalListResponse> {
+    const resp = await fetch(`${BASE_URL}/v1/terminals`);
+    if (!resp.ok) throw new Error(await readErrorMessage(resp));
+    return resp.json();
+  },
+
+  async deleteTerminal(id: string): Promise<void> {
+    const resp = await fetch(`${BASE_URL}/v1/terminals/${id}`, {
+      method: "DELETE",
+      headers: withCSRFHeaders(),
+    });
+    if (!resp.ok) throw new Error(await readErrorMessage(resp));
+  },
+
+  async pollDockMcp(
+    id: string,
+    options: {
+      timeoutMs?: number;
+    } = {},
+  ): Promise<DockMcpRequest | null> {
+    const search = new URLSearchParams();
+    if (options.timeoutMs) search.set("timeout_ms", String(options.timeoutMs));
+    const suffix = search.toString();
+    const resp = await fetch(
+      `${BASE_URL}/sessions/${id}/dock/mcp/next${suffix ? `?${suffix}` : ""}`,
+    );
+    if (resp.status === 204) return null;
+    if (!resp.ok) throw new Error(await readErrorMessage(resp));
+    return resp.json();
+  },
+
+  async respondDockMcp(id: string, response: DockMcpResponse): Promise<void> {
+    const resp = await fetch(`${BASE_URL}/sessions/${id}/dock/mcp/respond`, {
+      method: "POST",
+      headers: withCSRFHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(response),
+    });
+    if (!resp.ok) throw new Error(await readErrorMessage(resp));
   },
 
   getEventsUrl(id: string): string {

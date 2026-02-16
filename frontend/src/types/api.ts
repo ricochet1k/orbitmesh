@@ -24,11 +24,17 @@ export interface SessionRequest {
   custom?: Record<string, any>;
   task_id?: string;
   task_title?: string;
+  session_kind?: string;
+}
+
+export interface SessionInputRequest {
+  input: string;
 }
 
 export interface SessionResponse {
   id: string;
   provider_type: string;
+  session_kind?: string;
   state: SessionState;
   working_dir: string;
   created_at: string;
@@ -128,6 +134,20 @@ export interface ErrorResponse {
   error: string;
   code?: string;
   details?: any;
+}
+
+export interface DockMcpRequest {
+  id: string;
+  kind: string;
+  target_id?: string;
+  action?: string;
+  payload?: any;
+}
+
+export interface DockMcpResponse {
+  id: string;
+  result?: any;
+  error?: string;
 }
 
 export type TaskStatus = "pending" | "in_progress" | "completed";
@@ -286,6 +306,22 @@ export interface TerminalSnapshot {
   rows: number;
   cols: number;
   lines: string[];
+}
+
+export type TerminalKind = "pty" | "ad_hoc";
+
+export interface TerminalResponse {
+  id: string;
+  session_id?: string;
+  terminal_kind: TerminalKind;
+  created_at: string;
+  last_updated_at: string;
+  last_seq?: number;
+  last_snapshot?: TerminalSnapshot;
+}
+
+export interface TerminalListResponse {
+  terminals: TerminalResponse[];
 }
 
 export interface ProviderConfigRequest {
