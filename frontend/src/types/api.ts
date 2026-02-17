@@ -349,3 +349,18 @@ export interface ProviderConfigResponse {
 export interface ProviderConfigListResponse {
   providers: ProviderConfigResponse[];
 }
+
+export interface TranscriptMessage {
+  id: string;
+  type: "agent" | "user" | "system" | "error";
+  timestamp: string;
+  content: string;
+  /** Activity entry identifier (used in SessionViewer for merge dedup) */
+  entryId?: string;
+  /** Revision number for merge ordering */
+  revision?: number;
+  /** Whether the entry is still open/streaming */
+  open?: boolean;
+  /** Activity kind (e.g. "tool_use", "assistant") */
+  kind?: string;
+}

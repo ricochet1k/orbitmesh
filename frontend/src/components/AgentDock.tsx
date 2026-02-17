@@ -7,25 +7,22 @@ import {
   onCleanup,
   Show,
 } from "solid-js"
+
 import { useNavigate } from "@tanstack/solid-router"
 import { apiClient } from "../api/client"
-import type { Event, SessionState } from "../types/api"
+import type { Event, SessionState, TranscriptMessage } from "../types/api"
 import { mcpDispatch } from "../mcp/dispatch"
 import { mcpRegistry } from "../mcp/registry"
-import { startEventStream } from "../utils/eventStream"
 import { dockSessionId, setDockSessionId } from "../state/agentDock"
+import { formatActivityContent, normalizeActivityEntry } from "../utils/activityFormatting"
+import { isTestEnv } from "../utils/env"
+import { TIMEOUTS } from "../constants/timeouts"
+import { useSessionStream } from "../hooks/useSessionStream"
 import "./AgentDock.css"
 
 interface DockState {
   type: "empty" | "loading" | "error" | "live"
   message?: string
-}
-
-interface TranscriptMessage {
-  id: string
-  type: "agent" | "user" | "system" | "error"
-  timestamp: string
-  content: string
 }
 
 interface AgentDockProps {
@@ -194,31 +191,6 @@ export default function AgentDock(props: AgentDockProps) {
     return `${raw.slice(0, limit - 3)}...`
   }
 
-  const normalizeActivityEntry = (data: any) => {
-    if (!data) return null
-    if (Array.isArray(data.entries) && data.entries.length > 0) {
-      return data.entries[data.entries.length - 1]
-    }
-    if (data.entry) return data.entry
-    if (data.id && data.kind) return data
-    return null
-  }
-
-  const formatActivityContent = (entry: any) => {
-    const data = entry?.data ?? {}
-    if (typeof data.text === "string" && data.text.trim().length > 0) return data.text
-    if (typeof data.content === "string" && data.content.trim().length > 0) return data.content
-    if (typeof data.message === "string" && data.message.trim().length > 0) return data.message
-    if (typeof data.summary === "string" && data.summary.trim().length > 0) return data.summary
-    if (typeof data.tool === "string") {
-      if (typeof data.result === "string") {
-        return `Tool ${data.tool}: ${data.result}`
-      }
-      return `Tool ${data.tool}`
-    }
-    return `${entry?.kind ?? "activity"}`
-  }
-
   const markStreamActive = () => {
     if (streamStatus() !== "live") setStreamStatus("live")
   }
@@ -380,9 +352,11 @@ export default function AgentDock(props: AgentDockProps) {
       markStreamActive()
     }
 
-    const stream = startEventStream(
+    useSessionStream(
       apiClient.getEventsUrl(activeSessionId),
       {
+        onEvent: (type, event) => handleEvent(type as Event["type"], event),
+        onHeartbeat: handleHeartbeat,
         onStatus: (status) => {
           if (status === "connecting") {
             setStreamStatus("connecting")
@@ -417,26 +391,9 @@ export default function AgentDock(props: AgentDockProps) {
           }
           setStreamStatus("disconnected")
         },
-        onEventSource: (source) => {
-          const bind = (type: Event["type"]) =>
-            source.addEventListener(type, (event) => handleEvent(type, event as MessageEvent))
-          bind("output")
-          bind("status_change")
-          bind("metric")
-          bind("error")
-          bind("metadata")
-          bind("activity_entry")
-          source.addEventListener("heartbeat", handleHeartbeat)
-        },
       },
-      {
-        connectionTimeoutMs: 10000,
-      },
+      { connectionTimeoutMs: TIMEOUTS.STREAM_CONNECTION_MS },
     )
-
-    onCleanup(() => {
-      stream.close()
-    })
   })
 
   // Restore dock session on load (dock-only)
@@ -451,7 +408,7 @@ export default function AgentDock(props: AgentDockProps) {
   createEffect(() => {
     const activeSessionId = sessionId()
     if (!activeSessionId || !isDockSession()) return
-    if (import.meta.env.MODE === "test") return
+    if (isTestEnv()) return
 
     let cancelled = false
     const controller = new AbortController()
@@ -459,7 +416,7 @@ export default function AgentDock(props: AgentDockProps) {
     const run = async () => {
       while (!cancelled) {
         try {
-          const req = await apiClient.pollDockMcp(activeSessionId, { timeoutMs: 20000 })
+          const req = await apiClient.pollDockMcp(activeSessionId, { timeoutMs: TIMEOUTS.MCP_POLL_MS })
           if (!req) continue
           const result = await handleDockRequest(req)
           await apiClient.respondDockMcp(activeSessionId, {

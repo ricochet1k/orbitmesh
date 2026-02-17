@@ -1,25 +1,19 @@
 import { createFileRoute, useNavigate } from '@tanstack/solid-router'
-import { createResource, createSignal, createEffect, createMemo, onCleanup, Show, For } from 'solid-js'
+import { createResource, createSignal, createEffect, createMemo, Show, For } from 'solid-js'
 import { apiClient } from '../../api/client'
 import TerminalView from '../../components/TerminalView'
-import type { ActivityEntry, ActivityEntryMutation, Event, SessionState } from '../../types/api'
+import type { ActivityEntry, Event, SessionState, TranscriptMessage } from '../../types/api'
 import { dockSessionId, setDockSessionId } from '../../state/agentDock'
-import { startEventStream } from '../../utils/eventStream'
+import { formatActivityContent, normalizeActivityMutation } from '../../utils/activityFormatting'
+import { getStreamStatusLabel, getTerminalStatusLabel } from '../../utils/statusLabels'
+import { isTestEnv } from '../../utils/env'
+import { TIMEOUTS } from '../../constants/timeouts'
+import { useSessionActions } from '../../hooks/useSessionActions'
+import { useSessionStream } from '../../hooks/useSessionStream'
 
 export const Route = createFileRoute('/sessions/$sessionId')({
   component: SessionViewer,
 })
-
-interface TranscriptMessage {
-  id: string
-  type: "agent" | "user" | "system" | "error"
-  timestamp: string
-  content: string
-  entryId?: string
-  revision?: number
-  open?: boolean
-  kind?: string
-}
 
 interface SessionViewerProps {
   sessionId?: string
@@ -52,12 +46,21 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     "connecting" | "live" | "closed" | "error" | "resyncing"
   >("connecting")
   const [initialized, setInitialized] = createSignal(false)
-  const [lastHeartbeatAt, setLastHeartbeatAt] = createSignal<number | null>(null)
   const [actionNotice, setActionNotice] = createSignal<{ tone: "error" | "success"; message: string } | null>(
     null,
   )
-  const [pendingAction, setPendingAction] = createSignal<"pause" | "resume" | "stop" | null>(null)
   let transcriptRef: HTMLDivElement | undefined
+
+  const actions = useSessionActions(sessionId, {
+    onSuccess: (_action, message) => setActionNotice({ tone: "success", message }),
+    onError: (_action, msg) => {
+      const message = msg.toLowerCase().includes("csrf")
+        ? "Action blocked by CSRF protection. Refresh to re-establish the token."
+        : msg
+      setActionNotice({ tone: "error", message })
+    },
+  })
+  const pendingAction = actions.pendingAction
 
   const [sessionStateOverride, setSessionStateOverride] = createSignal<SessionState | null>(null)
   const sessionState = () => sessionStateOverride() ?? session()?.state ?? "created"
@@ -112,7 +115,6 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   }
 
   const markStreamActive = () => {
-    setLastHeartbeatAt(Date.now())
     if (streamStatus() !== "live") {
       setStreamStatus("live")
     }
@@ -334,25 +336,11 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   createEffect(() => {
     if (permissions.loading) return
     if (!canInspect()) return
-    const url = apiClient.getEventsUrl(sessionId())
-    const isTestEnv =
-      (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") ||
-      (typeof process !== "undefined" && Boolean(process.env?.VITEST))
-    const connectionTimeoutMs = 10000
-
-    const heartbeatTimeoutMs = 35000
-    const heartbeatCheckIntervalMs = 5000
-    const heartbeatInterval = window.setInterval(() => {
-      const lastHeartbeat = lastHeartbeatAt()
-      if (!lastHeartbeat) return
-      if (Date.now() - lastHeartbeat > heartbeatTimeoutMs) {
-        setStreamStatus("disconnected")
-      }
-    }, heartbeatCheckIntervalMs)
-
-    const stream = startEventStream(
-      url,
+    useSessionStream(
+      apiClient.getEventsUrl(sessionId()),
       {
+        onEvent: handleEvent,
+        onHeartbeat: handleHeartbeat,
         onStatus: (status) => {
           if (status === "connecting") {
             setStreamStatus("connecting")
@@ -380,28 +368,14 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
             setStreamStatus("disconnected")
           }
         },
-        onEventSource: (source) => {
-          const bind = (type: string) =>
-            source.addEventListener(type, (event) => handleEvent(type, event as MessageEvent))
-          bind("output")
-          bind("status_change")
-          bind("metric")
-          bind("error")
-          bind("metadata")
-          bind("activity_entry")
-          source.addEventListener("heartbeat", handleHeartbeat)
-        },
       },
       {
-        connectionTimeoutMs,
-        preflight: !isTestEnv,
+        connectionTimeoutMs: TIMEOUTS.STREAM_CONNECTION_MS,
+        preflight: !isTestEnv(),
+        trackHeartbeat: true,
+        onHeartbeatTimeout: () => setStreamStatus("disconnected"),
       },
     )
-
-    onCleanup(() => {
-      stream.close()
-      window.clearInterval(heartbeatInterval)
-    })
   })
 
   createEffect(() => {
@@ -421,65 +395,24 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     }
   }
 
-  const handlePause = async () => {
-    if (!canManage()) {
-      setActionNotice({
-        tone: "error",
-        message: "Bulk session controls are not permitted for your role.",
-      })
-      return
-    }
-    setPendingAction("pause")
+  const PERM_DENIED = "Bulk session controls are not permitted for your role."
+
+  const handlePause = () => {
+    if (!canManage()) { setActionNotice({ tone: "error", message: PERM_DENIED }); return }
     setActionNotice(null)
-    try {
-      await apiClient.pauseSession(sessionId())
-      setActionNotice({ tone: "success", message: "Pause request sent." })
-    } catch (error) {
-      setActionNotice({ tone: "error", message: formatActionError(error) })
-    } finally {
-      setPendingAction(null)
-    }
+    void actions.pause()
   }
 
-  const handleResume = async () => {
-    if (!canManage()) {
-      setActionNotice({
-        tone: "error",
-        message: "Bulk session controls are not permitted for your role.",
-      })
-      return
-    }
-    setPendingAction("resume")
+  const handleResume = () => {
+    if (!canManage()) { setActionNotice({ tone: "error", message: PERM_DENIED }); return }
     setActionNotice(null)
-    try {
-      await apiClient.resumeSession(sessionId())
-      setActionNotice({ tone: "success", message: "Resume request sent." })
-    } catch (error) {
-      setActionNotice({ tone: "error", message: formatActionError(error) })
-    } finally {
-      setPendingAction(null)
-    }
+    void actions.resume()
   }
 
-  const handleStop = async () => {
-    if (!canManage()) {
-      setActionNotice({
-        tone: "error",
-        message: "Bulk session controls are not permitted for your role.",
-      })
-      return
-    }
-    if (!window.confirm("Kill this session immediately?")) return
-    setPendingAction("stop")
+  const handleStop = () => {
+    if (!canManage()) { setActionNotice({ tone: "error", message: PERM_DENIED }); return }
     setActionNotice(null)
-    try {
-      await apiClient.stopSession(sessionId())
-      setActionNotice({ tone: "success", message: "Kill request sent." })
-    } catch (error) {
-      setActionNotice({ tone: "error", message: formatActionError(error) })
-    } finally {
-      setPendingAction(null)
-    }
+    void actions.stop("Kill this session immediately?")
   }
 
   const stateLabel = (state: SessionState) => state.replace("_", " ")
@@ -731,14 +664,6 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   )
 }
 
-function normalizeActivityMutation(data: ActivityEntryMutation | ActivityEntry | any): ActivityEntryMutation {
-  if (!data) return {}
-  if (Array.isArray(data.entries)) return { entries: data.entries }
-  if (data.entry) return data
-  if (data.id && data.kind) return { entry: data as ActivityEntry }
-  return {}
-}
-
 function toActivityMessageId(entry: ActivityEntry): string {
   return `activity:${entry.id}`
 }
@@ -762,55 +687,6 @@ function mapActivityKindToType(kind: string): TranscriptMessage["type"] {
   if (normalized.includes("user")) return "user"
   if (normalized.includes("agent") || normalized.includes("assistant")) return "agent"
   return "system"
-}
-
-function formatActivityContent(entry: ActivityEntry): string {
-  const data = entry.data ?? {}
-  if (typeof data.text === "string" && data.text.trim().length > 0) return data.text
-  if (typeof data.content === "string" && data.content.trim().length > 0) return data.content
-  if (typeof data.message === "string" && data.message.trim().length > 0) return data.message
-  if (typeof data.summary === "string" && data.summary.trim().length > 0) return data.summary
-  if (typeof data.tool === "string") {
-    if (typeof data.result === "string") {
-      return `Tool ${data.tool}: ${data.result}`
-    }
-    return `Tool ${data.tool}`
-  }
-  return `${entry.kind}`
-}
-
-function getStreamStatusLabel(status: string): string {
-  const labels: Record<string, string> = {
-    connecting: "connecting...",
-    live: "live",
-    reconnecting: "reconnecting...",
-    disconnected: "disconnected",
-    connection_timeout: "timeout",
-    connection_failed: "failed",
-  }
-  return labels[status] || status
-}
-
-function getTerminalStatusLabel(status: string): string {
-  const labels: Record<string, string> = {
-    connecting: "connecting...",
-    live: "live",
-    resyncing: "resyncing",
-    closed: "closed",
-    error: "error",
-  }
-  return labels[status] || status
-}
-
-function formatActionError(error: unknown) {
-  if (error instanceof Error) {
-    const message = error.message || "Action failed."
-    if (message.toLowerCase().includes("csrf")) {
-      return "Action blocked by CSRF protection. Refresh to re-establish the token."
-    }
-    return message
-  }
-  return "Action failed."
 }
 
 function splitIntoBlocks(content: string) {

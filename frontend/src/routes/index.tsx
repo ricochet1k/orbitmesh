@@ -8,6 +8,7 @@ import EmptyState from '../components/EmptyState'
 import SkeletonLoader from '../components/SkeletonLoader'
 import { useSessionStore } from '../state/sessions'
 import { formatRelativeAge, getStreamStatus, isSessionStale } from '../utils/sessionStatus'
+import { getStreamStatusLabel } from '../utils/statusLabels'
 
 export const Route = createFileRoute('/')({
   component: Dashboard,
@@ -91,13 +92,6 @@ export default function Dashboard(props: DashboardProps = {}) {
 
   const handleInspect = (sessionId: string) => {
     navigateTo(`/sessions/${sessionId}`)
-  }
-
-  const streamLabel = (status: string) => {
-    if (status === "live") return "live"
-    if (status === "reconnecting") return "reconnecting"
-    if (status === "disconnected") return "disconnected"
-    return status
   }
 
   return (
@@ -222,11 +216,11 @@ export default function Dashboard(props: DashboardProps = {}) {
                       <td>
                         <div class="stream-pill-group">
                           <span class={`stream-pill ${streamStatus}`}>
-                            Activity {streamLabel(streamStatus)}
+                            Activity {getStreamStatusLabel(streamStatus)}
                           </span>
                           <Show when={session.provider_type === "pty"}>
                             <span class={`stream-pill ${streamStatus}`}>
-                              Terminal {streamLabel(streamStatus)}
+                              Terminal {getStreamStatusLabel(streamStatus)}
                             </span>
                           </Show>
                         </div>
