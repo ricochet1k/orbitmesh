@@ -15,9 +15,11 @@ import (
 
 	"github.com/ricochet1k/orbitmesh/internal/api"
 	"github.com/ricochet1k/orbitmesh/internal/provider"
+	"github.com/ricochet1k/orbitmesh/internal/provider/common/claude"
 	"github.com/ricochet1k/orbitmesh/internal/provider/native"
 	"github.com/ricochet1k/orbitmesh/internal/provider/pty"
 	"github.com/ricochet1k/orbitmesh/internal/service"
+	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
 )
 
@@ -36,11 +38,14 @@ func main() {
 	providerStorage := storage.NewProviderConfigStorage(baseDir)
 
 	factory := provider.NewDefaultFactory()
-	factory.Register("adk", func(sessionID string, config provider.Config) (provider.Provider, error) {
-		return native.NewADKProvider(sessionID, adkConfigFromProvider(config)), nil
+	factory.Register("adk", func(sessionID string, config session.Config) (session.Session, error) {
+		return native.NewADKSession(sessionID, adkConfigFromProvider(config)), nil
 	})
-	factory.Register("pty", func(sessionID string, config provider.Config) (provider.Provider, error) {
-		return pty.NewClaudePTYProvider(sessionID), nil
+	factory.Register("pty", func(sessionID string, config session.Config) (session.Session, error) {
+		return pty.NewPTYProvider(sessionID), nil
+	})
+	factory.Register("claude", func(sessionID string, config session.Config) (session.Session, error) {
+		return claude.NewClaudeCodeProvider(sessionID), nil
 	})
 
 	broadcaster := service.NewEventBroadcaster(100)
@@ -49,8 +54,8 @@ func main() {
 		Storage:         store,
 		TerminalStorage: store,
 		Broadcaster:     broadcaster,
-		ProviderFactory: func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
-			return factory.Create(providerType, sessionID, config)
+		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
+			return factory.CreateSession(providerType, sessionID, config)
 		},
 	})
 
@@ -94,7 +99,7 @@ func main() {
 	fmt.Println("OrbitMesh shut down cleanly")
 }
 
-func adkConfigFromProvider(config provider.Config) native.ADKConfig {
+func adkConfigFromProvider(config session.Config) native.ADKConfig {
 	adkCfg := native.ADKConfig{}
 	if config.Custom == nil {
 		return adkCfg

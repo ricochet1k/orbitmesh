@@ -3,12 +3,14 @@ module github.com/ricochet1k/orbitmesh
 go 1.25
 
 require (
+	github.com/coder/acp-go-sdk v0.6.3
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/gorilla/websocket v1.5.3
 	github.com/modelcontextprotocol/go-sdk v1.2.0
+	github.com/openai/openai-go/v3 v3.22.0
 	github.com/ricochet1k/termemu v0.0.0-20260209182826-78fb158143ff
 	google.golang.org/adk v0.4.0
-	google.golang.org/genai v1.45.0
+	google.golang.org/genai v1.46.0
 )
 
 require (
@@ -45,6 +47,10 @@ require (
 	github.com/spf13/afero v1.14.0 // indirect
 	github.com/spf13/cast v1.9.2 // indirect
 	github.com/tdewolff/parse/v2 v2.8.3 // indirect
+	github.com/tidwall/gjson v1.18.0 // indirect
+	github.com/tidwall/match v1.1.1 // indirect
+	github.com/tidwall/pretty v1.2.1 // indirect
+	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.65.0 // indirect

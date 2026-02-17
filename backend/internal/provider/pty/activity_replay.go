@@ -70,8 +70,8 @@ func ReplayActivityFromPTYLog(path string, startOffset int64, extractor *ScreenD
 	})
 
 	backend := newReplayReaderBackend(payload.Bytes())
-	events := make(chan terminalEvent, terminalEventBufferSize)
-	frontend := newTerminalFrontend(events, backend.done)
+	events := make(chan terminal.Event, terminal.EventBufferSize)
+	frontend := terminal.NewFrontend(events, backend.done)
 	term := termemu.NewWithMode(frontend, backend, termemu.TextReadModeRune)
 	if term == nil {
 		return startOffset, PTYLogDiagnostics{}, errors.New("failed to initialize termemu terminal")
@@ -106,7 +106,7 @@ func ReplayActivityFromPTYLog(path string, startOffset int64, extractor *ScreenD
 	backend.waitDone(500 * time.Millisecond)
 	<-errCh
 	if !hadUpdates.Load() {
-		if snapshot, ok := snapshotFromTerminal(term); ok {
+		if snapshot, ok := terminal.SnapshotFromTerminal(term); ok {
 			_ = extractor.HandleUpdate(terminal.Update{Kind: terminal.UpdateSnapshot, Snapshot: &snapshot})
 		}
 	}
@@ -116,15 +116,15 @@ func ReplayActivityFromPTYLog(path string, startOffset int64, extractor *ScreenD
 	return offset, diag, nil
 }
 
-func handleReplayEvent(term termemu.Terminal, extractor *ScreenDiffExtractor, event terminalEvent) bool {
-	switch event.kind {
-	case terminalEventScrollLines:
-		if snapshot, ok := snapshotFromTerminal(term); ok {
+func handleReplayEvent(term termemu.Terminal, extractor *ScreenDiffExtractor, event terminal.Event) bool {
+	switch event.Kind {
+	case terminal.EventScrollLines:
+		if snapshot, ok := terminal.SnapshotFromTerminal(term); ok {
 			_ = extractor.HandleUpdate(terminal.Update{Kind: terminal.UpdateSnapshot, Snapshot: &snapshot})
 			return true
 		}
-	case terminalEventRegionChanged:
-		if diff, ok := buildTerminalDiffFrom(term, event.region, event.reason); ok {
+	case terminal.EventRegionChanged:
+		if diff, ok := terminal.BuildDiffFrom(term, event.Region, event.Reason); ok {
 			_ = extractor.HandleUpdate(terminal.Update{Kind: terminal.UpdateDiff, Diff: &diff})
 			return true
 		}

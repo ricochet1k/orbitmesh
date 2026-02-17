@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
-	"github.com/ricochet1k/orbitmesh/internal/provider"
+	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
 	"github.com/ricochet1k/orbitmesh/internal/terminal"
 )
@@ -27,11 +27,11 @@ const (
 	DefaultHealthInterval   = 30 * time.Second
 )
 
-type ProviderFactory func(providerType, sessionID string, config provider.Config) (provider.Provider, error)
+type ProviderFactory func(providerType, sessionID string, config session.Config) (session.Session, error)
 
 type sessionContext struct {
 	session    *domain.Session
-	provider   provider.Provider
+	provider   session.Session
 	cancel     context.CancelFunc
 	eventsDone chan struct{}
 	healthDone chan struct{}
@@ -89,7 +89,7 @@ func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
 	}
 }
 
-func (e *AgentExecutor) StartSession(ctx context.Context, id string, config provider.Config) (*domain.Session, error) {
+func (e *AgentExecutor) StartSession(ctx context.Context, id string, config session.Config) (*domain.Session, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -148,7 +148,7 @@ func (e *AgentExecutor) StartSession(ctx context.Context, id string, config prov
 	return session, nil
 }
 
-func (e *AgentExecutor) runSessionLoop(ctx context.Context, sc *sessionContext, config provider.Config) {
+func (e *AgentExecutor) runSessionLoop(ctx context.Context, sc *sessionContext, config session.Config) {
 	defer e.wg.Done()
 	defer func() {
 		if r := recover(); r != nil {
@@ -223,7 +223,7 @@ func (e *AgentExecutor) healthCheck(ctx context.Context, sc *sessionContext) {
 			return
 		case <-ticker.C:
 			status := sc.provider.Status()
-			if status.State == provider.StateError && sc.session.GetState() != domain.SessionStateError {
+			if status.State == session.StateError && sc.session.GetState() != domain.SessionStateError {
 				e.transitionWithSave(sc, domain.SessionStateError, "health check detected error")
 			}
 		}
@@ -366,13 +366,13 @@ func (e *AgentExecutor) GetSession(id string) (*domain.Session, error) {
 	return session, nil
 }
 
-func (e *AgentExecutor) GetSessionStatus(id string) (provider.Status, error) {
+func (e *AgentExecutor) GetSessionStatus(id string) (session.Status, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
 	sc, exists := e.sessions[id]
 	if !exists {
-		return provider.Status{}, ErrSessionNotFound
+		return session.Status{}, ErrSessionNotFound
 	}
 
 	return sc.provider.Status(), nil

@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ricochet1k/orbitmesh/internal/provider"
+	"github.com/ricochet1k/orbitmesh/internal/session"
 )
 
 func TestNewADKProvider(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 		Model:  "gemini-2.5-flash",
 	})
@@ -30,13 +30,13 @@ func TestNewADKProvider(t *testing.T) {
 	}
 
 	status := p.Status()
-	if status.State != provider.StateCreated {
+	if status.State != session.StateCreated {
 		t.Errorf("expected initial state to be StateCreated, got %v", status.State)
 	}
 }
 
 func TestNewADKProvider_DefaultModel(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
@@ -46,28 +46,28 @@ func TestNewADKProvider_DefaultModel(t *testing.T) {
 }
 
 func TestADKProvider_StartWithoutAPIKey(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{})
+	p := NewADKSession("test-session", ADKConfig{})
 
-	err := p.Start(context.Background(), provider.Config{})
+	err := p.Start(context.Background(), session.Config{})
 
 	if err != ErrAPIKey {
 		t.Errorf("expected ErrAPIKey, got %v", err)
 	}
 
 	status := p.Status()
-	if status.State != provider.StateError {
+	if status.State != session.StateError {
 		t.Errorf("expected state to be StateError, got %v", status.State)
 	}
 }
 
 func TestADKProvider_StartAlreadyStarted(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 
-	err := p.Start(context.Background(), provider.Config{})
+	err := p.Start(context.Background(), session.Config{})
 
 	if err != ErrAlreadyStarted {
 		t.Errorf("expected ErrAlreadyStarted, got %v", err)
@@ -75,11 +75,11 @@ func TestADKProvider_StartAlreadyStarted(t *testing.T) {
 }
 
 func TestADKProvider_Stop(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.runCtx, p.runCancel = context.WithCancel(p.ctx)
 
@@ -90,17 +90,17 @@ func TestADKProvider_Stop(t *testing.T) {
 	}
 
 	status := p.Status()
-	if status.State != provider.StateStopped {
+	if status.State != session.StateStopped {
 		t.Errorf("expected state to be StateStopped, got %v", status.State)
 	}
 }
 
 func TestADKProvider_StopAlreadyStopped(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StateStopped)
+	p.state.SetState(session.StateStopped)
 
 	err := p.Stop(context.Background())
 
@@ -110,11 +110,11 @@ func TestADKProvider_StopAlreadyStopped(t *testing.T) {
 }
 
 func TestADKProvider_Pause(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 
 	err := p.Pause(context.Background())
 
@@ -123,7 +123,7 @@ func TestADKProvider_Pause(t *testing.T) {
 	}
 
 	status := p.Status()
-	if status.State != provider.StatePaused {
+	if status.State != session.StatePaused {
 		t.Errorf("expected state to be StatePaused, got %v", status.State)
 	}
 
@@ -133,7 +133,7 @@ func TestADKProvider_Pause(t *testing.T) {
 }
 
 func TestADKProvider_PauseNotRunning(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
@@ -145,11 +145,11 @@ func TestADKProvider_PauseNotRunning(t *testing.T) {
 }
 
 func TestADKProvider_PauseAlreadyPaused(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 	p.paused = true
 
 	err := p.Pause(context.Background())
@@ -160,11 +160,11 @@ func TestADKProvider_PauseAlreadyPaused(t *testing.T) {
 }
 
 func TestADKProvider_Resume(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StatePaused)
+	p.state.SetState(session.StatePaused)
 	p.paused = true
 
 	err := p.Resume(context.Background())
@@ -174,7 +174,7 @@ func TestADKProvider_Resume(t *testing.T) {
 	}
 
 	status := p.Status()
-	if status.State != provider.StateRunning {
+	if status.State != session.StateRunning {
 		t.Errorf("expected state to be StateRunning, got %v", status.State)
 	}
 
@@ -184,11 +184,11 @@ func TestADKProvider_Resume(t *testing.T) {
 }
 
 func TestADKProvider_ResumeNotPaused(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 
 	err := p.Resume(context.Background())
 
@@ -198,11 +198,11 @@ func TestADKProvider_ResumeNotPaused(t *testing.T) {
 }
 
 func TestADKProvider_Kill(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.paused = true
 
@@ -213,7 +213,7 @@ func TestADKProvider_Kill(t *testing.T) {
 	}
 
 	status := p.Status()
-	if status.State != provider.StateStopped {
+	if status.State != session.StateStopped {
 		t.Errorf("expected state to be StateStopped, got %v", status.State)
 	}
 
@@ -223,7 +223,7 @@ func TestADKProvider_Kill(t *testing.T) {
 }
 
 func TestADKProvider_Events(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
@@ -234,7 +234,7 @@ func TestADKProvider_Events(t *testing.T) {
 }
 
 func TestADKProvider_CheckPaused(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
@@ -252,7 +252,7 @@ func TestADKProvider_CheckPaused(t *testing.T) {
 }
 
 func TestADKProvider_CheckPausedBlocks(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
@@ -285,7 +285,7 @@ func TestADKProvider_CheckPausedBlocks(t *testing.T) {
 }
 
 func TestADKProvider_RunPromptNotStarted(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
@@ -297,11 +297,11 @@ func TestADKProvider_RunPromptNotStarted(t *testing.T) {
 }
 
 func TestADKProvider_ConcurrentOperations(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.runCtx, p.runCancel = context.WithCancel(p.ctx)
 
@@ -389,14 +389,14 @@ func TestEnvMapToSlice(t *testing.T) {
 	}
 }
 
-func TestADKProvider_ImplementsProviderInterface(t *testing.T) {
-	var _ provider.Provider = (*ADKProvider)(nil)
+func TestADKProvider_ImplementsSessionInterface(t *testing.T) {
+	var _ session.Session = (*ADKSession)(nil)
 }
 
 func TestADKProvider_StartWithAPIKeyFromEnv(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{})
+	p := NewADKSession("test-session", ADKConfig{})
 
-	err := p.Start(context.Background(), provider.Config{
+	err := p.Start(context.Background(), session.Config{
 		Environment: map[string]string{
 			"GOOGLE_API_KEY": "env-api-key",
 		},
@@ -408,11 +408,11 @@ func TestADKProvider_StartWithAPIKeyFromEnv(t *testing.T) {
 }
 
 func TestADKProvider_StopWithContextTimeout(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.runCtx, p.runCancel = context.WithCancel(p.ctx)
 
@@ -432,17 +432,17 @@ func TestADKProvider_StopWithContextTimeout(t *testing.T) {
 	}
 
 	status := p.Status()
-	if status.State != provider.StateStopped {
+	if status.State != session.StateStopped {
 		t.Errorf("expected state to be StateStopped, got %v", status.State)
 	}
 }
 
 func TestADKProvider_StopWithMCPClients(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.runCtx, p.runCancel = context.WithCancel(p.ctx)
 
@@ -459,11 +459,11 @@ func TestADKProvider_StopWithMCPClients(t *testing.T) {
 }
 
 func TestADKProvider_KillWithMCPClients(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 
 	_, mcpCancel := context.WithCancel(context.Background())
@@ -497,7 +497,7 @@ func TestEnvMapToSlice_Format(t *testing.T) {
 }
 
 func TestADKProvider_StatusReflectsTokens(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
@@ -515,11 +515,11 @@ func TestADKProvider_StatusReflectsTokens(t *testing.T) {
 }
 
 func TestADKProvider_ConcurrentStateAccess(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.runCtx, p.runCancel = context.WithCancel(p.ctx)
 
@@ -551,11 +551,11 @@ func TestADKProvider_ConcurrentStateAccess(t *testing.T) {
 }
 
 func TestADKProvider_PauseResumeCycle(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 
 	if err := p.Pause(context.Background()); err != nil {
 		t.Fatalf("unexpected error on pause: %v", err)
@@ -565,17 +565,17 @@ func TestADKProvider_PauseResumeCycle(t *testing.T) {
 		t.Fatalf("unexpected error on resume: %v", err)
 	}
 
-	if p.Status().State != provider.StateRunning {
+	if p.Status().State != session.StateRunning {
 		t.Errorf("expected state Running after resume, got %v", p.Status().State)
 	}
 }
 
 func TestADKProvider_MultipleStops(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StateStopped)
+	p.state.SetState(session.StateStopped)
 
 	err := p.Stop(context.Background())
 	if err != nil {
@@ -589,7 +589,7 @@ func TestADKProvider_MultipleStops(t *testing.T) {
 }
 
 func TestADKProvider_EventsChannel(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
@@ -611,7 +611,7 @@ func TestADKProvider_EventsChannel(t *testing.T) {
 }
 
 func TestADKProvider_DefaultBufferSize(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
@@ -627,7 +627,7 @@ func TestADKConfig_Defaults(t *testing.T) {
 		t.Error("model should be empty by default in config")
 	}
 
-	p := NewADKProvider("test-session", cfg)
+	p := NewADKSession("test-session", cfg)
 
 	if p.config.Model != DefaultModel {
 		t.Errorf("expected default model %s, got %s", DefaultModel, p.config.Model)
@@ -640,7 +640,7 @@ func TestADKConfig_CustomModel(t *testing.T) {
 		Model:  "gemini-2.5-pro",
 	}
 
-	p := NewADKProvider("test-session", cfg)
+	p := NewADKSession("test-session", cfg)
 
 	if p.config.Model != "gemini-2.5-pro" {
 		t.Errorf("expected model 'gemini-2.5-pro', got %s", p.config.Model)
@@ -655,7 +655,7 @@ func TestADKConfig_VertexAI(t *testing.T) {
 		UseVertexAI: true,
 	}
 
-	p := NewADKProvider("test-session", cfg)
+	p := NewADKSession("test-session", cfg)
 
 	if !p.config.UseVertexAI {
 		t.Error("expected UseVertexAI to be true")
@@ -666,11 +666,11 @@ func TestADKConfig_VertexAI(t *testing.T) {
 }
 
 func TestADKProvider_KillUnpausesSessions(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.paused = true
 
@@ -699,11 +699,11 @@ func TestADKProvider_KillUnpausesSessions(t *testing.T) {
 }
 
 func TestADKProvider_StopInternalTimeout(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.runCtx, p.runCancel = context.WithCancel(p.ctx)
 
@@ -718,17 +718,17 @@ func TestADKProvider_StopInternalTimeout(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	if p.Status().State != provider.StateStopped {
+	if p.Status().State != session.StateStopped {
 		t.Errorf("expected stopped state, got %v", p.Status().State)
 	}
 }
 
 func TestADKProvider_StopImmediatelyIfNoGoroutines(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.runCtx, p.runCancel = context.WithCancel(p.ctx)
 
@@ -748,17 +748,17 @@ func TestADKProvider_StopImmediatelyIfNoGoroutines(t *testing.T) {
 func TestADKProvider_StopFromDifferentStates(t *testing.T) {
 	tests := []struct {
 		name         string
-		initialState provider.State
+		initialState session.State
 	}{
-		{"from running", provider.StateRunning},
-		{"from paused", provider.StatePaused},
-		{"from starting", provider.StateStarting},
-		{"from error", provider.StateError},
+		{"from running", session.StateRunning},
+		{"from paused", session.StatePaused},
+		{"from starting", session.StateStarting},
+		{"from error", session.StateError},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := NewADKProvider("test-session", ADKConfig{
+			p := NewADKSession("test-session", ADKConfig{
 				APIKey: "test-key",
 			})
 
@@ -771,7 +771,7 @@ func TestADKProvider_StopFromDifferentStates(t *testing.T) {
 				t.Errorf("unexpected error: %v", err)
 			}
 
-			if p.Status().State != provider.StateStopped {
+			if p.Status().State != session.StateStopped {
 				t.Errorf("expected stopped state, got %v", p.Status().State)
 			}
 		})
@@ -820,11 +820,11 @@ func TestADKProvider_DefaultConstants(t *testing.T) {
 }
 
 func TestADKProvider_ProviderConfigStored(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	cfg := provider.Config{
+	cfg := session.Config{
 		ProviderType: "gemini",
 		WorkingDir:   "/tmp/test",
 		SystemPrompt: "You are a helpful assistant.",
@@ -840,7 +840,7 @@ func TestADKProvider_ProviderConfigStored(t *testing.T) {
 }
 
 func TestADKProvider_StatusOutput(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
@@ -858,11 +858,11 @@ func TestADKProvider_StatusOutput(t *testing.T) {
 }
 
 func TestADKProvider_ConcurrentPauseResume(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.runCtx, p.runCancel = context.WithCancel(p.ctx)
 
@@ -893,24 +893,24 @@ func TestADKProvider_ConcurrentPauseResume(t *testing.T) {
 }
 
 func TestADKProvider_KillWithNilContexts(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 
 	err := p.Kill()
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	if p.Status().State != provider.StateStopped {
+	if p.Status().State != session.StateStopped {
 		t.Errorf("expected stopped state, got %v", p.Status().State)
 	}
 }
 
 func TestADKProvider_SanitizeError(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{})
+	p := NewADKSession("test-session", ADKConfig{})
 	apiKey := "secret-api-key-123"
 
 	tests := []struct {
@@ -953,7 +953,7 @@ func TestADKProvider_SanitizeError(t *testing.T) {
 
 func TestADKProvider_HandleFailureRedaction(t *testing.T) {
 	apiKey := "secret-key-to-redact"
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: apiKey,
 	})
 

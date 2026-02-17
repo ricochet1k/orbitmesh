@@ -7,18 +7,18 @@ import (
 	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
-	"github.com/ricochet1k/orbitmesh/internal/provider"
+	"github.com/ricochet1k/orbitmesh/internal/session"
 	"google.golang.org/adk/model"
-	"google.golang.org/adk/session"
+	adksession "google.golang.org/adk/session"
 	"google.golang.org/genai"
 )
 
 func TestProcessEvent_PartialContent(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	event := &session.Event{
+	event := &adksession.Event{
 		LLMResponse: model.LLMResponse{
 			Partial: true,
 			Content: &genai.Content{
@@ -54,11 +54,11 @@ func TestProcessEvent_PartialContent(t *testing.T) {
 }
 
 func TestProcessEvent_TurnComplete(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	event := &session.Event{
+	event := &adksession.Event{
 		LLMResponse: model.LLMResponse{
 			TurnComplete: true,
 		},
@@ -89,12 +89,12 @@ func TestProcessEvent_TurnComplete(t *testing.T) {
 }
 
 func TestProcessEvent_StateDelta(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	event := &session.Event{
-		Actions: session.EventActions{
+	event := &adksession.Event{
+		Actions: adksession.EventActions{
 			StateDelta: map[string]any{"key": "value"},
 		},
 	}
@@ -124,21 +124,21 @@ func TestProcessEvent_StateDelta(t *testing.T) {
 }
 
 func TestProcessEvent_EmptyEvent(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	event := &session.Event{}
+	event := &adksession.Event{}
 
 	p.processEvent(event)
 }
 
 func TestProcessEvent_NilContent(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	event := &session.Event{
+	event := &adksession.Event{
 		LLMResponse: model.LLMResponse{
 			Partial: true,
 			Content: nil,
@@ -149,11 +149,11 @@ func TestProcessEvent_NilContent(t *testing.T) {
 }
 
 func TestProcessEvent_EmptyTextParts(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	event := &session.Event{
+	event := &adksession.Event{
 		LLMResponse: model.LLMResponse{
 			Partial: true,
 			Content: &genai.Content{
@@ -168,7 +168,7 @@ func TestProcessEvent_EmptyTextParts(t *testing.T) {
 }
 
 func TestAfterModelCallback_NilResponse(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
@@ -183,7 +183,7 @@ func TestAfterModelCallback_NilResponse(t *testing.T) {
 }
 
 func TestAfterModelCallback_Error(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
@@ -214,7 +214,7 @@ func TestAfterModelCallback_Error(t *testing.T) {
 }
 
 func TestAfterModelCallback_WithUsageMetadata(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
@@ -249,7 +249,7 @@ func TestAfterModelCallback_WithUsageMetadata(t *testing.T) {
 }
 
 func TestAfterModelCallback_WithContent(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
@@ -282,7 +282,7 @@ func TestAfterModelCallback_WithContent(t *testing.T) {
 }
 
 func TestAfterModelCallback_WithEmptyParts(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
@@ -313,11 +313,11 @@ func TestConcurrentSessionLifecycle(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 
-			p := NewADKProvider("session-"+string(rune('0'+idx)), ADKConfig{
+			p := NewADKSession("session-"+string(rune('0'+idx)), ADKConfig{
 				APIKey: "test-key",
 			})
 
-			p.state.SetState(provider.StateRunning)
+			p.state.SetState(session.StateRunning)
 			p.ctx, p.cancel = context.WithCancel(context.Background())
 			p.runCtx, p.runCancel = context.WithCancel(p.ctx)
 
@@ -343,7 +343,7 @@ func TestConcurrentSessionLifecycle(t *testing.T) {
 }
 
 func TestConcurrentEventEmission(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 	defer p.events.Close()
@@ -398,11 +398,11 @@ loop:
 }
 
 func TestProviderStateRaceCondition(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.runCtx, p.runCancel = context.WithCancel(p.ctx)
 
@@ -430,11 +430,11 @@ func TestProviderStateRaceCondition(t *testing.T) {
 }
 
 func TestFullEventFlow(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.runCtx, p.runCancel = context.WithCancel(p.ctx)
 
@@ -488,11 +488,11 @@ func TestLoadTest_ConcurrentAgents(t *testing.T) {
 		go func(agentID int) {
 			defer wg.Done()
 
-			p := NewADKProvider("agent-"+string(rune('0'+agentID)), ADKConfig{
+			p := NewADKSession("agent-"+string(rune('0'+agentID)), ADKConfig{
 				APIKey: "test-key",
 			})
 
-			p.state.SetState(provider.StateRunning)
+			p.state.SetState(session.StateRunning)
 			p.ctx, p.cancel = context.WithCancel(context.Background())
 			p.runCtx, p.runCancel = context.WithCancel(p.ctx)
 
@@ -518,7 +518,7 @@ func TestLoadTest_ConcurrentAgents(t *testing.T) {
 			}
 
 			status := p.Status()
-			if status.State != provider.StateStopped {
+			if status.State != session.StateStopped {
 				errors <- ErrNotStarted
 			}
 		}(i)
@@ -539,13 +539,13 @@ func TestLoadTest_ConcurrentAgents(t *testing.T) {
 }
 
 func TestSetupMCPToolsets_EmptyConfig(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 
-	config := provider.Config{
+	config := session.Config{
 		MCPServers: nil,
 	}
 
@@ -561,14 +561,14 @@ func TestSetupMCPToolsets_EmptyConfig(t *testing.T) {
 }
 
 func TestSetupMCPToolsets_EmptyList(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 
-	config := provider.Config{
-		MCPServers: []provider.MCPServerConfig{},
+	config := session.Config{
+		MCPServers: []session.MCPServerConfig{},
 	}
 
 	toolsets, err := p.setupMCPToolsets(config)
@@ -583,11 +583,11 @@ func TestSetupMCPToolsets_EmptyList(t *testing.T) {
 }
 
 func TestProcessEvent_MultipleParts(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	event := &session.Event{
+	event := &adksession.Event{
 		LLMResponse: model.LLMResponse{
 			Partial: true,
 			Content: &genai.Content{
@@ -626,7 +626,7 @@ loop:
 }
 
 func TestAfterModelCallback_MultipleParts(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
@@ -659,7 +659,7 @@ func TestAfterModelCallback_MultipleParts(t *testing.T) {
 }
 
 func TestAfterModelCallback_EmptyContent(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
@@ -680,7 +680,7 @@ func TestAfterModelCallback_EmptyContent(t *testing.T) {
 }
 
 func TestAfterModelCallback_NilContent(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
@@ -699,7 +699,7 @@ func TestAfterModelCallback_NilContent(t *testing.T) {
 }
 
 func TestAfterModelCallback_NilUsageMetadata(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
@@ -729,15 +729,15 @@ func TestAfterModelCallback_NilUsageMetadata(t *testing.T) {
 }
 
 func TestCreateMCPToolset_CommandSetup(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 	p.ctx, p.cancel = context.WithCancel(context.Background())
-	p.providerCfg = provider.Config{
+	p.providerCfg = session.Config{
 		WorkingDir: "/tmp",
 	}
 
-	cfg := provider.MCPServerConfig{
+	cfg := session.MCPServerConfig{
 		Name:    "test-server",
 		Command: "echo",
 		Args:    []string{"hello"},
@@ -757,13 +757,13 @@ func TestCreateMCPToolset_CommandSetup(t *testing.T) {
 }
 
 func TestSetupMCPToolsets_WithConfig(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 
-	cfg := provider.Config{
-		MCPServers: []provider.MCPServerConfig{
+	cfg := session.Config{
+		MCPServers: []session.MCPServerConfig{
 			{
 				Name:    "test-server",
 				Command: "echo",
@@ -779,15 +779,15 @@ func TestSetupMCPToolsets_WithConfig(t *testing.T) {
 }
 
 func TestStartWithMCPServers(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
-	cfg := provider.Config{
+	cfg := session.Config{
 		Environment: map[string]string{
 			"GOOGLE_API_KEY": "test-key",
 		},
-		MCPServers: []provider.MCPServerConfig{
+		MCPServers: []session.MCPServerConfig{
 			{
 				Name:    "test",
 				Command: "echo",
@@ -802,7 +802,7 @@ func TestStartWithMCPServers(t *testing.T) {
 }
 
 func TestADKProvider_CheckPausedWithUnpause(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 
@@ -835,9 +835,9 @@ func TestADKProvider_CheckPausedWithUnpause(t *testing.T) {
 }
 
 func TestStartBranchAPIKeyFromEnvironment(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{})
+	p := NewADKSession("test-session", ADKConfig{})
 
-	cfg := provider.Config{
+	cfg := session.Config{
 		Environment: map[string]string{
 			"GOOGLE_API_KEY": "env-key",
 		},
@@ -855,7 +855,7 @@ func TestStartBranchAPIKeyFromEnvironment(t *testing.T) {
 }
 
 func TestCreateModelVertexAI(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey:      "test-key",
 		UseVertexAI: true,
 		ProjectID:   "my-project",
@@ -872,14 +872,14 @@ func TestCreateModelVertexAI(t *testing.T) {
 }
 
 func TestMCPProcessCancellation(t *testing.T) {
-	p := NewADKProvider("test-session", ADKConfig{
+	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
 	})
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	defer p.cancel()
 
 	// Use a command that will run for a while
-	cfg := provider.MCPServerConfig{
+	cfg := session.MCPServerConfig{
 		Name:    "test-server",
 		Command: "sleep",
 		Args:    []string{"10"},

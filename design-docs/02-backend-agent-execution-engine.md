@@ -308,7 +308,7 @@ To prevent corruption with concurrent writes:
 
 1. **Context Timeouts**: All provider operations have 5-minute timeout
 2. **Panic Recovery**: Goroutines recover from panics, log error, mark session as error state
-3. **Health Checks**: Periodic polling of provider.Status() every 30 seconds
+3. **Health Checks**: Periodic polling of session.Status() every 30 seconds
 4. **Circuit Breaker**: PTY providers stop retrying after 3 failures for 30 seconds
 5. **Graceful Shutdown**: SIGINT/SIGTERM triggers context cancellation
 6. **Atomic Writes**: Session storage uses temp file + rename pattern
@@ -331,7 +331,7 @@ func (e *AgentExecutor) runHealthChecks(ctx context.Context) {
     for range ticker.C {
         e.mu.RLock()
         for id, session := range e.sessions {
-            status := session.Provider.Status()
+            status := session.session.Status()
             if status.State == ProviderStateError {
                 // Mark session as error, stop attempting
                 e.mu.RUnlock()

@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
-	"github.com/ricochet1k/orbitmesh/internal/provider"
+	"github.com/ricochet1k/orbitmesh/internal/session"
 )
 
 type EventAdapter struct {
@@ -73,26 +73,26 @@ func (a *EventAdapter) Close() {
 
 type ProviderState struct {
 	mu      sync.RWMutex
-	state   provider.State
+	state   session.State
 	task    string
 	output  string
 	err     error
-	metrics provider.Metrics
+	metrics session.Metrics
 }
 
 func NewProviderState() *ProviderState {
 	return &ProviderState{
-		state: provider.StateCreated,
+		state: session.StateCreated,
 	}
 }
 
-func (s *ProviderState) GetState() provider.State {
+func (s *ProviderState) GetState() session.State {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.state
 }
 
-func (s *ProviderState) SetState(state provider.State) {
+func (s *ProviderState) SetState(state session.State) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.state = state
@@ -102,7 +102,7 @@ func (s *ProviderState) SetError(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.err = err
-	s.state = provider.StateError
+	s.state = session.StateError
 }
 
 func (s *ProviderState) SetOutput(output string) {
@@ -127,10 +127,10 @@ func (s *ProviderState) AddTokens(tokensIn, tokensOut int64) {
 	s.metrics.LastActivityAt = time.Now()
 }
 
-func (s *ProviderState) Status() provider.Status {
+func (s *ProviderState) Status() session.Status {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return provider.Status{
+	return session.Status{
 		State:       s.state,
 		CurrentTask: s.task,
 		Output:      s.output,

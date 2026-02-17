@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ricochet1k/orbitmesh/internal/provider"
+	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
 )
 
@@ -15,9 +15,9 @@ func TestPTYProvider_Lifecycle(t *testing.T) {
 	baseDir := t.TempDir()
 	t.Setenv("HOME", baseDir)
 
-	p := NewClaudePTYProvider("test-session")
+	p := NewPTYProvider("test-session")
 
-	config := provider.Config{
+	config := session.Config{
 		Custom: map[string]any{
 			"command": "sleep",
 			"args":    []string{"2"},
@@ -30,7 +30,7 @@ func TestPTYProvider_Lifecycle(t *testing.T) {
 		t.Fatalf("failed to start: %v", err)
 	}
 
-	if p.Status().State != provider.StateRunning {
+	if p.Status().State != session.StateRunning {
 		t.Errorf("expected state running, got %v", p.Status().State)
 	}
 
@@ -39,7 +39,7 @@ func TestPTYProvider_Lifecycle(t *testing.T) {
 	if err != nil {
 		t.Errorf("failed to pause: %v", err)
 	}
-	if p.Status().State != provider.StatePaused {
+	if p.Status().State != session.StatePaused {
 		t.Errorf("expected state paused, got %v", p.Status().State)
 	}
 
@@ -48,7 +48,7 @@ func TestPTYProvider_Lifecycle(t *testing.T) {
 	if err != nil {
 		t.Errorf("failed to resume: %v", err)
 	}
-	if p.Status().State != provider.StateRunning {
+	if p.Status().State != session.StateRunning {
 		t.Errorf("expected state running, got %v", p.Status().State)
 	}
 
@@ -64,7 +64,7 @@ func TestPTYProvider_Lifecycle(t *testing.T) {
 	if err != nil {
 		t.Errorf("failed to stop: %v", err)
 	}
-	if p.Status().State != provider.StateStopped {
+	if p.Status().State != session.StateStopped {
 		t.Errorf("expected state stopped, got %v", p.Status().State)
 	}
 

@@ -1,106 +1,43 @@
 package provider
 
 import (
-	"context"
-	"time"
+	"fmt"
 
-	"github.com/ricochet1k/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/session"
 )
 
-type State int
+type Provider interface {
+	CreateSession(sessionID string, config session.Config) (session.Session, error)
+}
 
-const (
-	StateCreated State = iota
-	StateStarting
-	StateRunning
-	StatePaused
-	StateStopping
-	StateStopped
-	StateError
-)
+type SessionCreateFunc func(sessionID string, config session.Config) (session.Session, error)
 
-func (s State) String() string {
-	switch s {
-	case StateCreated:
-		return "created"
-	case StateStarting:
-		return "starting"
-	case StateRunning:
-		return "running"
-	case StatePaused:
-		return "paused"
-	case StateStopping:
-		return "stopping"
-	case StateStopped:
-		return "stopped"
-	case StateError:
-		return "error"
-	default:
-		return "unknown"
+type DefaultFactory struct {
+	creators map[string]SessionCreateFunc
+}
+
+func NewDefaultFactory() *DefaultFactory {
+	return &DefaultFactory{
+		creators: make(map[string]SessionCreateFunc),
 	}
 }
 
-type MCPServerConfig struct {
-	Name    string
-	Command string
-	Args    []string
-	Env     map[string]string
+func (f *DefaultFactory) Register(providerType string, creator SessionCreateFunc) {
+	f.creators[providerType] = creator
 }
 
-type Config struct {
-	ProviderType string
-	WorkingDir   string
-	Environment  map[string]string
-	SystemPrompt string
-	MCPServers   []MCPServerConfig
-	Custom       map[string]any
-	TaskID       string
-	TaskTitle    string
-	SessionKind  string
+func (f *DefaultFactory) CreateSession(providerType, sessionID string, config session.Config) (session.Session, error) {
+	creator, ok := f.creators[providerType]
+	if !ok {
+		return nil, fmt.Errorf("unknown provider type: %s", providerType)
+	}
+	return creator(sessionID, config)
 }
 
-type Metrics struct {
-	TokensIn       int64
-	TokensOut      int64
-	RequestCount   int64
-	LastActivityAt time.Time
-}
-
-type Status struct {
-	State       State
-	CurrentTask string
-	Output      string
-	Error       error
-	Metrics     Metrics
-}
-
-type Provider interface {
-	// Start initializes the provider and begins agent execution.
-	Start(ctx context.Context, config Config) error
-
-	// Stop requests a graceful shutdown of the provider.
-	// It should be idempotent.
-	Stop(ctx context.Context) error
-
-	// Pause temporarily suspends agent execution.
-	Pause(ctx context.Context) error
-
-	// Resume continues previously paused agent execution.
-	Resume(ctx context.Context) error
-
-	// Kill immediately terminates the provider and all child processes.
-	// It should be idempotent and must not block.
-	Kill() error
-
-	// Status returns the current status of the provider.
-	// It must be thread-safe.
-	Status() Status
-
-	// Events returns a channel that streams real-time events from the provider.
-	// The provider is responsible for closing this channel when it terminates.
-	// Successive calls to Events() must return the same channel.
-	Events() <-chan domain.Event
-
-	// SendInput sends user input to the agent.
-	SendInput(ctx context.Context, input string) error
+func (f *DefaultFactory) SupportedTypes() []string {
+	types := make([]string, 0, len(f.creators))
+	for t := range f.creators {
+		types = append(types, t)
+	}
+	return types
 }

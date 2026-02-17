@@ -16,8 +16,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
-	"github.com/ricochet1k/orbitmesh/internal/provider"
 	"github.com/ricochet1k/orbitmesh/internal/service"
+	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
 	apiTypes "github.com/ricochet1k/orbitmesh/pkg/api"
 )
@@ -28,7 +28,7 @@ import (
 
 type mockProvider struct {
 	mu        sync.Mutex
-	state     provider.State
+	state     session.State
 	events    chan domain.Event
 	startErr  error
 	pauseErr  error
@@ -38,25 +38,25 @@ type mockProvider struct {
 
 func newMockProvider() *mockProvider {
 	return &mockProvider{
-		state:  provider.StateCreated,
+		state:  session.StateCreated,
 		events: make(chan domain.Event, 64),
 	}
 }
 
-func (m *mockProvider) Start(_ context.Context, _ provider.Config) error {
+func (m *mockProvider) Start(_ context.Context, _ session.Config) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.startErr != nil {
 		return m.startErr
 	}
-	m.state = provider.StateRunning
+	m.state = session.StateRunning
 	return nil
 }
 
 func (m *mockProvider) Stop(_ context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.state = provider.StateStopped
+	m.state = session.StateStopped
 	return nil
 }
 
@@ -66,30 +66,30 @@ func (m *mockProvider) Pause(_ context.Context) error {
 	if m.pauseErr != nil {
 		return m.pauseErr
 	}
-	m.state = provider.StatePaused
+	m.state = session.StatePaused
 	return nil
 }
 
 func (m *mockProvider) Resume(_ context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.state = provider.StateRunning
+	m.state = session.StateRunning
 	return nil
 }
 
 func (m *mockProvider) Kill() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.state = provider.StateStopped
+	m.state = session.StateStopped
 	return nil
 }
 
-func (m *mockProvider) Status() provider.Status {
+func (m *mockProvider) Status() session.Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return provider.Status{
+	return session.Status{
 		State: m.state,
-		Metrics: provider.Metrics{
+		Metrics: session.Metrics{
 			TokensIn:  10,
 			TokensOut: 5,
 		},
@@ -211,7 +211,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		Storage:         store,
 		TerminalStorage: store,
 		Broadcaster:     env.broadcaster,
-		ProviderFactory: func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
+		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
 			if providerType != "mock" {
 				return nil, fmt.Errorf("unsupported provider: %s", providerType)
 			}

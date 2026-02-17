@@ -13,8 +13,8 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
-	"github.com/ricochet1k/orbitmesh/internal/provider"
 	"github.com/ricochet1k/orbitmesh/internal/service"
+	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
 	"github.com/ricochet1k/orbitmesh/internal/terminal"
 )
@@ -28,7 +28,7 @@ type terminalTestEnv struct {
 
 type mockTerminalProvider struct {
 	mu       sync.Mutex
-	state    provider.State
+	state    session.State
 	events   chan domain.Event
 	subs     map[int64]chan terminal.Update
 	subSeq   int64
@@ -37,52 +37,52 @@ type mockTerminalProvider struct {
 
 func newMockTerminalProvider() *mockTerminalProvider {
 	return &mockTerminalProvider{
-		state:    provider.StateCreated,
+		state:    session.StateCreated,
 		events:   make(chan domain.Event, 8),
 		subs:     make(map[int64]chan terminal.Update),
 		snapshot: terminal.Snapshot{Rows: 1, Cols: 4, Lines: []string{"test"}},
 	}
 }
 
-func (m *mockTerminalProvider) Start(_ context.Context, _ provider.Config) error {
+func (m *mockTerminalProvider) Start(_ context.Context, _ session.Config) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.state = provider.StateRunning
+	m.state = session.StateRunning
 	return nil
 }
 
 func (m *mockTerminalProvider) Stop(_ context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.state = provider.StateStopped
+	m.state = session.StateStopped
 	return nil
 }
 
 func (m *mockTerminalProvider) Pause(_ context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.state = provider.StatePaused
+	m.state = session.StatePaused
 	return nil
 }
 
 func (m *mockTerminalProvider) Resume(_ context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.state = provider.StateRunning
+	m.state = session.StateRunning
 	return nil
 }
 
 func (m *mockTerminalProvider) Kill() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.state = provider.StateStopped
+	m.state = session.StateStopped
 	return nil
 }
 
-func (m *mockTerminalProvider) Status() provider.Status {
+func (m *mockTerminalProvider) Status() session.Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return provider.Status{State: m.state}
+	return session.Status{State: m.state}
 }
 
 func (m *mockTerminalProvider) Events() <-chan domain.Event { return m.events }
@@ -141,7 +141,7 @@ func newTerminalTestEnv(t *testing.T) *terminalTestEnv {
 		Storage:         store,
 		TerminalStorage: store,
 		Broadcaster:     env.broadcaster,
-		ProviderFactory: func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
+		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
 			if providerType != "terminal" {
 				return nil, context.Canceled
 			}
@@ -168,7 +168,7 @@ func (env *terminalTestEnv) router() *chi.Mux {
 
 func startTerminalSession(t *testing.T, env *terminalTestEnv) string {
 	t.Helper()
-	session, err := env.executor.StartSession(context.Background(), "session-1", provider.Config{
+	session, err := env.executor.StartSession(context.Background(), "session-1", session.Config{
 		ProviderType: "terminal",
 		WorkingDir:   "/tmp",
 	})

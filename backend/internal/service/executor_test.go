@@ -8,14 +8,14 @@ import (
 	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
-	"github.com/ricochet1k/orbitmesh/internal/provider"
+	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
 	"github.com/ricochet1k/orbitmesh/internal/terminal"
 )
 
 type mockProvider struct {
 	mu         sync.Mutex
-	state      provider.State
+	state      session.State
 	startErr   error
 	stopErr    error
 	pauseErr   error
@@ -27,12 +27,12 @@ type mockProvider struct {
 
 func newMockProvider() *mockProvider {
 	return &mockProvider{
-		state:  provider.StateCreated,
+		state:  session.StateCreated,
 		events: make(chan domain.Event, 10),
 	}
 }
 
-func (m *mockProvider) Start(ctx context.Context, config provider.Config) error {
+func (m *mockProvider) Start(ctx context.Context, config session.Config) error {
 	if m.startDelay > 0 {
 		select {
 		case <-time.After(m.startDelay):
@@ -42,12 +42,12 @@ func (m *mockProvider) Start(ctx context.Context, config provider.Config) error 
 	}
 	if m.startErr != nil {
 		m.mu.Lock()
-		m.state = provider.StateError
+		m.state = session.StateError
 		m.mu.Unlock()
 		return m.startErr
 	}
 	m.mu.Lock()
-	m.state = provider.StateRunning
+	m.state = session.StateRunning
 	m.mu.Unlock()
 	return nil
 }
@@ -57,7 +57,7 @@ func (m *mockProvider) Stop(ctx context.Context) error {
 		return m.stopErr
 	}
 	m.mu.Lock()
-	m.state = provider.StateStopped
+	m.state = session.StateStopped
 	m.mu.Unlock()
 	return nil
 }
@@ -67,7 +67,7 @@ func (m *mockProvider) Pause(ctx context.Context) error {
 		return m.pauseErr
 	}
 	m.mu.Lock()
-	m.state = provider.StatePaused
+	m.state = session.StatePaused
 	m.mu.Unlock()
 	return nil
 }
@@ -77,7 +77,7 @@ func (m *mockProvider) Resume(ctx context.Context) error {
 		return m.resumeErr
 	}
 	m.mu.Lock()
-	m.state = provider.StateRunning
+	m.state = session.StateRunning
 	m.mu.Unlock()
 	return nil
 }
@@ -87,16 +87,16 @@ func (m *mockProvider) Kill() error {
 		return m.killErr
 	}
 	m.mu.Lock()
-	m.state = provider.StateStopped
+	m.state = session.StateStopped
 	m.mu.Unlock()
 	close(m.events)
 	return nil
 }
 
-func (m *mockProvider) Status() provider.Status {
+func (m *mockProvider) Status() session.Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return provider.Status{State: m.state}
+	return session.Status{State: m.state}
 }
 
 func (m *mockProvider) Events() <-chan domain.Event {
@@ -163,7 +163,7 @@ func createTestExecutor(prov *mockProvider) (*AgentExecutor, *mockStorage) {
 	storage := newMockStorage()
 	broadcaster := NewEventBroadcaster(100)
 
-	factory := func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
+	factory := func(providerType, sessionID string, config session.Config) (session.Session, error) {
 		if providerType == "unknown" {
 			return nil, errors.New("unknown provider")
 		}
@@ -188,7 +188,7 @@ func TestAgentExecutor_StartSession(t *testing.T) {
 		executor, storage := createTestExecutor(prov)
 		defer executor.Shutdown(context.Background())
 
-		config := provider.Config{
+		config := session.Config{
 			ProviderType: "test",
 			WorkingDir:   "/tmp/test",
 		}
@@ -218,7 +218,7 @@ func TestAgentExecutor_StartSession(t *testing.T) {
 		executor, _ := createTestExecutor(prov)
 		defer executor.Shutdown(context.Background())
 
-		config := provider.Config{
+		config := session.Config{
 			ProviderType: "test",
 			WorkingDir:   "/tmp/test",
 		}
@@ -239,7 +239,7 @@ func TestAgentExecutor_StartSession(t *testing.T) {
 		executor, _ := createTestExecutor(prov)
 		defer executor.Shutdown(context.Background())
 
-		config := provider.Config{
+		config := session.Config{
 			ProviderType: "unknown",
 			WorkingDir:   "/tmp/test",
 		}
@@ -256,7 +256,7 @@ func TestAgentExecutor_StartSession(t *testing.T) {
 		executor, _ := createTestExecutor(prov)
 		defer executor.Shutdown(context.Background())
 
-		config := provider.Config{
+		config := session.Config{
 			ProviderType: "test",
 			WorkingDir:   "/tmp/test",
 		}
@@ -280,7 +280,7 @@ func TestAgentExecutor_StopSession(t *testing.T) {
 		executor, _ := createTestExecutor(prov)
 		defer executor.Shutdown(context.Background())
 
-		config := provider.Config{
+		config := session.Config{
 			ProviderType: "test",
 			WorkingDir:   "/tmp/test",
 		}
@@ -315,7 +315,7 @@ func TestAgentExecutor_PauseResumeSession(t *testing.T) {
 	executor, _ := createTestExecutor(prov)
 	defer executor.Shutdown(context.Background())
 
-	config := provider.Config{
+	config := session.Config{
 		ProviderType: "test",
 		WorkingDir:   "/tmp/test",
 	}
@@ -347,7 +347,7 @@ func TestAgentExecutor_KillSession(t *testing.T) {
 	executor, _ := createTestExecutor(prov)
 	defer executor.Shutdown(context.Background())
 
-	config := provider.Config{
+	config := session.Config{
 		ProviderType: "test",
 		WorkingDir:   "/tmp/test",
 	}
@@ -370,7 +370,7 @@ func TestAgentExecutor_GetSession(t *testing.T) {
 	executor, _ := createTestExecutor(prov)
 	defer executor.Shutdown(context.Background())
 
-	config := provider.Config{
+	config := session.Config{
 		ProviderType: "test",
 		WorkingDir:   "/tmp/test",
 	}
@@ -396,7 +396,7 @@ func TestAgentExecutor_GetSessionStatus(t *testing.T) {
 	executor, _ := createTestExecutor(prov)
 	defer executor.Shutdown(context.Background())
 
-	config := provider.Config{
+	config := session.Config{
 		ProviderType: "test",
 		WorkingDir:   "/tmp/test",
 	}
@@ -408,7 +408,7 @@ func TestAgentExecutor_GetSessionStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if status.State != provider.StateRunning {
+	if status.State != session.StateRunning {
 		t.Errorf("expected state Running, got %s", status.State)
 	}
 
@@ -423,7 +423,7 @@ func TestAgentExecutor_ListSessions(t *testing.T) {
 	executor, _ := createTestExecutor(prov)
 	defer executor.Shutdown(context.Background())
 
-	config := provider.Config{
+	config := session.Config{
 		ProviderType: "test",
 		WorkingDir:   "/tmp/test",
 	}
@@ -441,7 +441,7 @@ func TestAgentExecutor_ListSessions_IncludesStoredSessions(t *testing.T) {
 	storage := newMockStorage()
 	broadcaster := NewEventBroadcaster(100)
 
-	factory := func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
+	factory := func(providerType, sessionID string, config session.Config) (session.Session, error) {
 		return newMockProvider(), nil
 	}
 
@@ -472,7 +472,7 @@ func TestAgentExecutor_GetSession_LoadsStoredSessions(t *testing.T) {
 	storage := newMockStorage()
 	broadcaster := NewEventBroadcaster(100)
 
-	factory := func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
+	factory := func(providerType, sessionID string, config session.Config) (session.Session, error) {
 		return newMockProvider(), nil
 	}
 
@@ -504,7 +504,7 @@ func TestAgentExecutor_EventBroadcasting(t *testing.T) {
 	storage := newMockStorage()
 	broadcaster := NewEventBroadcaster(100)
 
-	factory := func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
+	factory := func(providerType, sessionID string, config session.Config) (session.Session, error) {
 		return prov, nil
 	}
 
@@ -521,7 +521,7 @@ func TestAgentExecutor_EventBroadcasting(t *testing.T) {
 
 	sub := broadcaster.Subscribe("test", "session1")
 
-	config := provider.Config{
+	config := session.Config{
 		ProviderType: "test",
 		WorkingDir:   "/tmp/test",
 	}
@@ -556,7 +556,7 @@ func TestAgentExecutor_Shutdown(t *testing.T) {
 	prov := newMockProvider()
 	executor, _ := createTestExecutor(prov)
 
-	config := provider.Config{
+	config := session.Config{
 		ProviderType: "test",
 		WorkingDir:   "/tmp/test",
 	}
@@ -590,7 +590,7 @@ func TestAgentExecutor_ShutdownPreventsNewSessions(t *testing.T) {
 
 	executor.Shutdown(ctx)
 
-	config := provider.Config{
+	config := session.Config{
 		ProviderType: "test",
 		WorkingDir:   "/tmp/test",
 	}
@@ -606,7 +606,7 @@ func TestAgentExecutor_InvalidStateTransitions(t *testing.T) {
 	executor, _ := createTestExecutor(prov)
 	defer executor.Shutdown(context.Background())
 
-	config := provider.Config{
+	config := session.Config{
 		ProviderType: "test",
 		WorkingDir:   "/tmp/test",
 	}
@@ -624,7 +624,7 @@ func TestAgentExecutor_FullLifecycleIntegration(t *testing.T) {
 	executor, storage := createTestExecutor(prov)
 	defer executor.Shutdown(context.Background())
 
-	config := provider.Config{
+	config := session.Config{
 		ProviderType: "test",
 		WorkingDir:   "/tmp/test",
 	}
@@ -673,7 +673,7 @@ func TestAgentExecutor_MultipleConcurrentSessions(t *testing.T) {
 	storage := newMockStorage()
 	broadcaster := NewEventBroadcaster(100)
 
-	factory := func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
+	factory := func(providerType, sessionID string, config session.Config) (session.Session, error) {
 		return newMockProvider(), nil
 	}
 
@@ -698,7 +698,7 @@ func TestAgentExecutor_MultipleConcurrentSessions(t *testing.T) {
 			defer wg.Done()
 
 			sessionID := "concurrent-session-" + string(rune('0'+idx))
-			config := provider.Config{
+			config := session.Config{
 				ProviderType: "test",
 				WorkingDir:   "/tmp/test",
 			}
@@ -752,7 +752,7 @@ func TestAgentExecutor_SessionPersistence(t *testing.T) {
 	storage := newMockStorage()
 	broadcaster := NewEventBroadcaster(100)
 
-	factory := func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
+	factory := func(providerType, sessionID string, config session.Config) (session.Session, error) {
 		return prov, nil
 	}
 
@@ -767,7 +767,7 @@ func TestAgentExecutor_SessionPersistence(t *testing.T) {
 	executor := NewAgentExecutor(cfg)
 	defer executor.Shutdown(context.Background())
 
-	config := provider.Config{
+	config := session.Config{
 		ProviderType: "test",
 		WorkingDir:   "/tmp/test",
 	}
@@ -797,7 +797,7 @@ func TestAgentExecutor_EventHandling(t *testing.T) {
 	storage := newMockStorage()
 	broadcaster := NewEventBroadcaster(100)
 
-	factory := func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
+	factory := func(providerType, sessionID string, config session.Config) (session.Session, error) {
 		return prov, nil
 	}
 
@@ -815,7 +815,7 @@ func TestAgentExecutor_EventHandling(t *testing.T) {
 	sub := broadcaster.Subscribe("test-sub", "event-test")
 	defer broadcaster.Unsubscribe("test-sub")
 
-	config := provider.Config{
+	config := session.Config{
 		ProviderType: "test",
 		WorkingDir:   "/tmp/test",
 	}
@@ -882,7 +882,7 @@ func TestAgentExecutor_PTYHubAutoCreated(t *testing.T) {
 	executor := NewAgentExecutor(ExecutorConfig{
 		Storage:     storage,
 		Broadcaster: broadcaster,
-		ProviderFactory: func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
+		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
 			if providerType != "pty" {
 				return nil, errors.New("unexpected provider")
 			}
@@ -893,7 +893,7 @@ func TestAgentExecutor_PTYHubAutoCreated(t *testing.T) {
 	})
 	defer executor.Shutdown(context.Background())
 
-	_, err := executor.StartSession(context.Background(), "pty-session", provider.Config{
+	_, err := executor.StartSession(context.Background(), "pty-session", session.Config{
 		ProviderType: "pty",
 		WorkingDir:   "/tmp/test",
 	})
@@ -921,22 +921,22 @@ func TestAgentExecutor_HealthCheckDetectsErrors(t *testing.T) {
 	executor, _ := createTestExecutor(prov)
 	defer executor.Shutdown(context.Background())
 
-	config := provider.Config{
+	config := session.Config{
 		ProviderType: "test",
 		WorkingDir:   "/tmp/test",
 	}
 
-	session, _ := executor.StartSession(context.Background(), "health-test", config)
+	sess, _ := executor.StartSession(context.Background(), "health-test", config)
 	time.Sleep(50 * time.Millisecond)
 
 	prov.mu.Lock()
-	prov.state = provider.StateError
+	prov.state = session.StateError
 	prov.mu.Unlock()
 
 	time.Sleep(150 * time.Millisecond)
 
-	if session.GetState() != domain.SessionStateError {
-		t.Logf("session state is %s (health check may sync states)", session.GetState())
+	if sess.GetState() != domain.SessionStateError {
+		t.Logf("session state is %s (health check may sync states)", sess.GetState())
 	}
 }
 
@@ -948,7 +948,7 @@ func TestAgentExecutor_LoadTest_TenConcurrentAgents(t *testing.T) {
 	storage := newMockStorage()
 	broadcaster := NewEventBroadcaster(1000)
 
-	factory := func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
+	factory := func(providerType, sessionID string, config session.Config) (session.Session, error) {
 		return newMockProvider(), nil
 	}
 
@@ -973,7 +973,7 @@ func TestAgentExecutor_LoadTest_TenConcurrentAgents(t *testing.T) {
 			defer wg.Done()
 
 			sessionID := "load-test-agent-" + string(rune('a'+agentID))
-			config := provider.Config{
+			config := session.Config{
 				ProviderType: "test",
 				WorkingDir:   "/tmp/test",
 			}
@@ -1037,7 +1037,7 @@ func TestAgentExecutor_ProviderErrors(t *testing.T) {
 		executor, _ := createTestExecutor(prov)
 		defer executor.Shutdown(context.Background())
 
-		config := provider.Config{
+		config := session.Config{
 			ProviderType: "test",
 			WorkingDir:   "/tmp/test",
 		}
@@ -1057,7 +1057,7 @@ func TestAgentExecutor_ProviderErrors(t *testing.T) {
 		executor, _ := createTestExecutor(prov)
 		defer executor.Shutdown(context.Background())
 
-		config := provider.Config{
+		config := session.Config{
 			ProviderType: "test",
 			WorkingDir:   "/tmp/test",
 		}
@@ -1079,7 +1079,7 @@ func TestAgentExecutor_ProviderErrors(t *testing.T) {
 		executor, _ := createTestExecutor(prov)
 		defer executor.Shutdown(context.Background())
 
-		config := provider.Config{
+		config := session.Config{
 			ProviderType: "test",
 			WorkingDir:   "/tmp/test",
 		}
@@ -1099,7 +1099,7 @@ func TestAgentExecutor_ProviderErrors(t *testing.T) {
 		executor, _ := createTestExecutor(prov)
 		defer executor.Shutdown(context.Background())
 
-		config := provider.Config{
+		config := session.Config{
 			ProviderType: "test",
 			WorkingDir:   "/tmp/test",
 		}
@@ -1120,7 +1120,7 @@ func TestAgentExecutor_ContextCancellation(t *testing.T) {
 	executor, _ := createTestExecutor(prov)
 	defer executor.Shutdown(context.Background())
 
-	config := provider.Config{
+	config := session.Config{
 		ProviderType: "test",
 		WorkingDir:   "/tmp/test",
 	}

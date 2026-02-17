@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
-	"github.com/ricochet1k/orbitmesh/internal/provider"
+	"github.com/ricochet1k/orbitmesh/internal/session"
 )
 
 func TestEventAdapter_EmitEvents(t *testing.T) {
@@ -135,29 +135,29 @@ func TestEventAdapter_ConcurrentEmit(t *testing.T) {
 func TestProviderState_StateTransitions(t *testing.T) {
 	state := NewProviderState()
 
-	if state.GetState() != provider.StateCreated {
+	if state.GetState() != session.StateCreated {
 		t.Errorf("expected initial state to be StateCreated, got %v", state.GetState())
 	}
 
-	state.SetState(provider.StateStarting)
-	if state.GetState() != provider.StateStarting {
+	state.SetState(session.StateStarting)
+	if state.GetState() != session.StateStarting {
 		t.Errorf("expected state to be StateStarting, got %v", state.GetState())
 	}
 
-	state.SetState(provider.StateRunning)
-	if state.GetState() != provider.StateRunning {
+	state.SetState(session.StateRunning)
+	if state.GetState() != session.StateRunning {
 		t.Errorf("expected state to be StateRunning, got %v", state.GetState())
 	}
 }
 
 func TestProviderState_SetError(t *testing.T) {
 	state := NewProviderState()
-	state.SetState(provider.StateRunning)
+	state.SetState(session.StateRunning)
 
 	testErr := ErrAPIKey
 	state.SetError(testErr)
 
-	if state.GetState() != provider.StateError {
+	if state.GetState() != session.StateError {
 		t.Errorf("expected state to be StateError, got %v", state.GetState())
 	}
 
@@ -219,7 +219,7 @@ func TestProviderState_ConcurrentAccess(t *testing.T) {
 		wg.Add(3)
 		go func() {
 			defer wg.Done()
-			state.SetState(provider.StateRunning)
+			state.SetState(session.StateRunning)
 		}()
 		go func() {
 			defer wg.Done()
@@ -293,14 +293,14 @@ func TestEventAdapter_EmitAfterDoneChannelClosed(t *testing.T) {
 func TestProviderState_StatusSnapshot(t *testing.T) {
 	state := NewProviderState()
 
-	state.SetState(provider.StateRunning)
+	state.SetState(session.StateRunning)
 	state.SetOutput("output text")
 	state.SetCurrentTask("task-123")
 	state.AddTokens(100, 50)
 
 	status := state.Status()
 
-	if status.State != provider.StateRunning {
+	if status.State != session.StateRunning {
 		t.Errorf("expected state Running, got %v", status.State)
 	}
 	if status.Output != "output text" {
@@ -319,13 +319,13 @@ func TestProviderState_ErrorClearsOnStateChange(t *testing.T) {
 
 	state.SetError(ErrAPIKey)
 
-	if state.GetState() != provider.StateError {
+	if state.GetState() != session.StateError {
 		t.Errorf("expected state Error, got %v", state.GetState())
 	}
 
-	state.SetState(provider.StateRunning)
+	state.SetState(session.StateRunning)
 
-	if state.GetState() != provider.StateRunning {
+	if state.GetState() != session.StateRunning {
 		t.Errorf("expected state Running after manual set, got %v", state.GetState())
 	}
 }

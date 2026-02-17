@@ -10,6 +10,9 @@ const (
 	EventTypeMetric
 	EventTypeError
 	EventTypeMetadata
+	EventTypeToolCall  // Structured tool call information
+	EventTypeThought   // Agent reasoning/thinking
+	EventTypePlan      // Agent execution plans
 )
 
 func (t EventType) String() string {
@@ -24,6 +27,12 @@ func (t EventType) String() string {
 		return "error"
 	case EventTypeMetadata:
 		return "metadata"
+	case EventTypeToolCall:
+		return "tool_call"
+	case EventTypeThought:
+		return "thought"
+	case EventTypePlan:
+		return "plan"
 	default:
 		return "unknown"
 	}
@@ -68,6 +77,21 @@ func (e Event) Metadata() (MetadataData, bool) {
 	return d, ok
 }
 
+func (e Event) ToolCall() (ToolCallData, bool) {
+	d, ok := e.Data.(ToolCallData)
+	return d, ok
+}
+
+func (e Event) Thought() (ThoughtData, bool) {
+	d, ok := e.Data.(ThoughtData)
+	return d, ok
+}
+
+func (e Event) Plan() (PlanData, bool) {
+	d, ok := e.Data.(PlanData)
+	return d, ok
+}
+
 func NewStatusChangeEvent(sessionID string, oldState, newState SessionState, reason string) Event {
 	return Event{
 		Type:      EventTypeStatusChange,
@@ -83,6 +107,7 @@ func NewStatusChangeEvent(sessionID string, oldState, newState SessionState, rea
 
 type OutputData struct {
 	Content string
+	IsDelta bool // If true, this content should be appended to the previous message in storage
 }
 
 type MetricData struct {
@@ -101,12 +126,46 @@ type MetadataData struct {
 	Value any
 }
 
+type ToolCallData struct {
+	ID     string
+	Name   string
+	Status string
+	Title  string
+	Input  any
+	Output any
+}
+
+type ThoughtData struct {
+	Content string
+}
+
+type PlanData struct {
+	Steps       []PlanStep
+	Description string
+}
+
+type PlanStep struct {
+	ID          string
+	Description string
+	Status      string
+}
+
 func NewOutputEvent(sessionID, content string) Event {
 	return Event{
 		Type:      EventTypeOutput,
 		Timestamp: time.Now(),
 		SessionID: sessionID,
-		Data:      OutputData{Content: content},
+		Data:      OutputData{Content: content, IsDelta: false},
+	}
+}
+
+// NewDeltaOutputEvent creates an output event marked as a delta (should be merged in storage).
+func NewDeltaOutputEvent(sessionID, content string) Event {
+	return Event{
+		Type:      EventTypeOutput,
+		Timestamp: time.Now(),
+		SessionID: sessionID,
+		Data:      OutputData{Content: content, IsDelta: true},
 	}
 }
 
@@ -144,5 +203,32 @@ func NewMetadataEvent(sessionID, key string, value any) Event {
 			Key:   key,
 			Value: value,
 		},
+	}
+}
+
+func NewToolCallEvent(sessionID string, data ToolCallData) Event {
+	return Event{
+		Type:      EventTypeToolCall,
+		Timestamp: time.Now(),
+		SessionID: sessionID,
+		Data:      data,
+	}
+}
+
+func NewThoughtEvent(sessionID, content string) Event {
+	return Event{
+		Type:      EventTypeThought,
+		Timestamp: time.Now(),
+		SessionID: sessionID,
+		Data:      ThoughtData{Content: content},
+	}
+}
+
+func NewPlanEvent(sessionID string, data PlanData) Event {
+	return Event{
+		Type:      EventTypePlan,
+		Timestamp: time.Now(),
+		SessionID: sessionID,
+		Data:      data,
 	}
 }

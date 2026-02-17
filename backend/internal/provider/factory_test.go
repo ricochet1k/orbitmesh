@@ -6,24 +6,14 @@ import (
 	"testing"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/session"
 )
-
-type mockProvider struct{}
-
-func (m *mockProvider) Start(ctx context.Context, config Config) error    { return nil }
-func (m *mockProvider) Stop(ctx context.Context) error                    { return nil }
-func (m *mockProvider) Pause(ctx context.Context) error                   { return nil }
-func (m *mockProvider) Resume(ctx context.Context) error                  { return nil }
-func (m *mockProvider) Kill() error                                       { return nil }
-func (m *mockProvider) Status() Status                                    { return Status{} }
-func (m *mockProvider) Events() <-chan domain.Event                       { return nil }
-func (m *mockProvider) SendInput(ctx context.Context, input string) error { return nil }
 
 func TestDefaultFactory_Register(t *testing.T) {
 	factory := NewDefaultFactory()
 
-	creator := func(sessionID string, config Config) (Provider, error) {
-		return &mockProvider{}, nil
+	creator := func(sessionID string, config session.Config) (session.Session, error) {
+		return &mockSession{}, nil
 	}
 
 	factory.Register("test-provider", creator)
@@ -37,46 +27,46 @@ func TestDefaultFactory_Register(t *testing.T) {
 	}
 }
 
-func TestDefaultFactory_Create(t *testing.T) {
+func TestDefaultFactory_CreateSession(t *testing.T) {
 	factory := NewDefaultFactory()
 
-	creator := func(sessionID string, config Config) (Provider, error) {
-		return &mockProvider{}, nil
+	creator := func(sessionID string, config session.Config) (session.Session, error) {
+		return &mockSession{}, nil
 	}
 
 	factory.Register("test-provider", creator)
 
-	provider, err := factory.Create("test-provider", "session-1", Config{})
+	sess, err := factory.CreateSession("test-provider", "session-1", session.Config{})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	if provider == nil {
-		t.Error("expected provider to be non-nil")
+	if sess == nil {
+		t.Error("expected session to be non-nil")
 	}
 }
 
-func TestDefaultFactory_CreateUnknownType(t *testing.T) {
+func TestDefaultFactory_CreateSessionUnknownType(t *testing.T) {
 	factory := NewDefaultFactory()
 
-	_, err := factory.Create("unknown-provider", "session-1", Config{})
+	_, err := factory.CreateSession("unknown-provider", "session-1", session.Config{})
 
 	if err == nil {
 		t.Error("expected error for unknown provider type")
 	}
 }
 
-func TestDefaultFactory_CreateWithError(t *testing.T) {
+func TestDefaultFactory_CreateSessionWithError(t *testing.T) {
 	factory := NewDefaultFactory()
 
 	expectedErr := errors.New("creation failed")
-	creator := func(sessionID string, config Config) (Provider, error) {
+	creator := func(sessionID string, config session.Config) (session.Session, error) {
 		return nil, expectedErr
 	}
 
 	factory.Register("failing-provider", creator)
 
-	_, err := factory.Create("failing-provider", "session-1", Config{})
+	_, err := factory.CreateSession("failing-provider", "session-1", session.Config{})
 
 	if err != expectedErr {
 		t.Errorf("expected error %v, got %v", expectedErr, err)
@@ -90,9 +80,9 @@ func TestDefaultFactory_SupportedTypes(t *testing.T) {
 		t.Error("expected no types initially")
 	}
 
-	factory.Register("type1", func(string, Config) (Provider, error) { return nil, nil })
-	factory.Register("type2", func(string, Config) (Provider, error) { return nil, nil })
-	factory.Register("type3", func(string, Config) (Provider, error) { return nil, nil })
+	factory.Register("type1", func(string, session.Config) (session.Session, error) { return nil, nil })
+	factory.Register("type2", func(string, session.Config) (session.Session, error) { return nil, nil })
+	factory.Register("type3", func(string, session.Config) (session.Session, error) { return nil, nil })
 
 	types := factory.SupportedTypes()
 	if len(types) != 3 {
@@ -102,17 +92,17 @@ func TestDefaultFactory_SupportedTypes(t *testing.T) {
 
 func TestState_String(t *testing.T) {
 	tests := []struct {
-		state    State
+		state    session.State
 		expected string
 	}{
-		{StateCreated, "created"},
-		{StateStarting, "starting"},
-		{StateRunning, "running"},
-		{StatePaused, "paused"},
-		{StateStopping, "stopping"},
-		{StateStopped, "stopped"},
-		{StateError, "error"},
-		{State(99), "unknown"},
+		{session.StateCreated, "created"},
+		{session.StateStarting, "starting"},
+		{session.StateRunning, "running"},
+		{session.StatePaused, "paused"},
+		{session.StateStopping, "stopping"},
+		{session.StateStopped, "stopped"},
+		{session.StateError, "error"},
+		{session.State(99), "unknown"},
 	}
 
 	for _, tt := range tests {
@@ -123,3 +113,15 @@ func TestState_String(t *testing.T) {
 		})
 	}
 }
+
+// mockSession is a minimal session.Session for testing the factory.
+type mockSession struct{}
+
+func (m *mockSession) Start(ctx context.Context, config session.Config) error { return nil }
+func (m *mockSession) Stop(ctx context.Context) error                         { return nil }
+func (m *mockSession) Pause(ctx context.Context) error                        { return nil }
+func (m *mockSession) Resume(ctx context.Context) error                       { return nil }
+func (m *mockSession) Kill() error                                            { return nil }
+func (m *mockSession) Status() session.Status                                 { return session.Status{} }
+func (m *mockSession) Events() <-chan domain.Event                            { return nil }
+func (m *mockSession) SendInput(ctx context.Context, input string) error      { return nil }

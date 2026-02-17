@@ -122,7 +122,7 @@ type Provider interface {
 **Configuration:**
 
 ```go
-config := provider.Config{
+config := session.Config{
     ProviderType: "gemini",
     WorkingDir:   "/path/to/project",
     Environment:  map[string]string{"GOOGLE_API_KEY": "..."},
@@ -143,7 +143,7 @@ config := provider.Config{
 **Status:**
 
 ```go
-status := provider.Status()
+status := session.Status()
 fmt.Printf("State: %s\n", status.State)
 fmt.Printf("Current task: %s\n", status.CurrentTask)
 fmt.Printf("Tokens used: %d in, %d out\n", status.Metrics.TokensIn, status.Metrics.TokensOut)
@@ -168,7 +168,7 @@ p := native.NewADKProvider("session-123", native.ADKConfig{
     Model:  "gemini-2.5-flash",
 })
 
-err := p.Start(ctx, provider.Config{
+err := p.Start(ctx, session.Config{
     WorkingDir:   "/path/to/project",
     SystemPrompt: "You are a helpful assistant.",
     MCPServers: []provider.MCPServerConfig{
@@ -207,7 +207,7 @@ import "github.com/ricochet1k/orbitmesh/internal/provider/pty"
 p := pty.NewClaudePTYProvider("session-123")
 
 // Start the provider with a CLI command
-err := p.Start(ctx, provider.Config{
+err := p.Start(ctx, session.Config{
 	WorkingDir: "/path/to/project",
 	Custom: map[string]any{
 		"command": "claude",

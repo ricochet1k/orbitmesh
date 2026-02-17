@@ -16,13 +16,13 @@ import (
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/model/gemini"
 	"google.golang.org/adk/runner"
-	"google.golang.org/adk/session"
+	adksession "google.golang.org/adk/session"
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/mcptoolset"
 	"google.golang.org/genai"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
-	"github.com/ricochet1k/orbitmesh/internal/provider"
+	"github.com/ricochet1k/orbitmesh/internal/session"
 )
 
 var (
@@ -51,18 +51,18 @@ type ADKConfig struct {
 	UseVertexAI bool
 }
 
-type ADKProvider struct {
+type ADKSession struct {
 	mu          sync.RWMutex
 	state       *ProviderState
 	events      *EventAdapter
 	config      ADKConfig
-	providerCfg provider.Config
+	providerCfg session.Config
 	sessionID   string
 
 	model      model.LLM
 	agent      agent.Agent
 	runner     *runner.Runner
-	sessionSvc session.Service
+	sessionSvc adksession.Service
 	adkUserID  string
 	adkSessID  string
 
@@ -86,12 +86,12 @@ type mcpClientHandle struct {
 	cancel context.CancelFunc
 }
 
-func NewADKProvider(sessionID string, cfg ADKConfig) *ADKProvider {
+func NewADKSession(sessionID string, cfg ADKConfig) *ADKSession {
 	if cfg.Model == "" {
 		cfg.Model = DefaultModel
 	}
 
-	p := &ADKProvider{
+	p := &ADKSession{
 		sessionID: sessionID,
 		config:    cfg,
 		state:     NewProviderState(),
@@ -101,11 +101,11 @@ func NewADKProvider(sessionID string, cfg ADKConfig) *ADKProvider {
 	return p
 }
 
-func (p *ADKProvider) Start(ctx context.Context, config provider.Config) error {
+func (p *ADKSession) Start(ctx context.Context, config session.Config) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.state.GetState() != provider.StateCreated {
+	if p.state.GetState() != session.StateCreated {
 		return ErrAlreadyStarted
 	}
 
@@ -125,7 +125,7 @@ func (p *ADKProvider) Start(ctx context.Context, config provider.Config) error {
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.runCtx, p.runCancel = context.WithCancel(p.ctx)
 
-	p.state.SetState(provider.StateStarting)
+	p.state.SetState(session.StateStarting)
 	p.events.EmitStatusChange(domain.SessionStateCreated, domain.SessionStateStarting, "initializing ADK provider")
 
 	llm, err := p.createModel(apiKey)
@@ -163,7 +163,7 @@ func (p *ADKProvider) Start(ctx context.Context, config provider.Config) error {
 	}
 	p.agent = a
 
-	p.sessionSvc = session.InMemoryService()
+	p.sessionSvc = adksession.InMemoryService()
 
 	r, err := runner.New(runner.Config{
 		AppName:        DefaultAppName,
@@ -177,7 +177,7 @@ func (p *ADKProvider) Start(ctx context.Context, config provider.Config) error {
 	}
 	p.runner = r
 
-	createResp, err := p.sessionSvc.Create(p.ctx, &session.CreateRequest{
+	createResp, err := p.sessionSvc.Create(p.ctx, &adksession.CreateRequest{
 		AppName: DefaultAppName,
 		UserID:  DefaultUserID,
 	})
@@ -189,14 +189,14 @@ func (p *ADKProvider) Start(ctx context.Context, config provider.Config) error {
 	p.adkUserID = DefaultUserID
 	p.adkSessID = createResp.Session.ID()
 
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 	p.events.EmitStatusChange(domain.SessionStateStarting, domain.SessionStateRunning, "ADK provider initialized")
 	p.events.EmitMetadata("model", p.config.Model)
 
 	return nil
 }
 
-func (p *ADKProvider) createModel(apiKey string) (model.LLM, error) {
+func (p *ADKSession) createModel(apiKey string) (model.LLM, error) {
 	clientCfg := &genai.ClientConfig{
 		APIKey: apiKey,
 	}
@@ -210,7 +210,7 @@ func (p *ADKProvider) createModel(apiKey string) (model.LLM, error) {
 	return gemini.NewModel(p.ctx, p.config.Model, clientCfg)
 }
 
-func (p *ADKProvider) setupMCPToolsets(config provider.Config) ([]tool.Toolset, error) {
+func (p *ADKSession) setupMCPToolsets(config session.Config) ([]tool.Toolset, error) {
 	var toolsets []tool.Toolset
 
 	for _, mcpCfg := range config.MCPServers {
@@ -227,7 +227,7 @@ func (p *ADKProvider) setupMCPToolsets(config provider.Config) ([]tool.Toolset, 
 	return toolsets, nil
 }
 
-func (p *ADKProvider) createMCPToolset(cfg provider.MCPServerConfig) (tool.Toolset, *mcpClientHandle, error) {
+func (p *ADKSession) createMCPToolset(cfg session.MCPServerConfig) (tool.Toolset, *mcpClientHandle, error) {
 	mcpCtx, mcpCancel := context.WithCancel(p.ctx)
 
 	cmd := exec.CommandContext(mcpCtx, cfg.Command, cfg.Args...)
@@ -259,7 +259,7 @@ func (p *ADKProvider) createMCPToolset(cfg provider.MCPServerConfig) (tool.Tools
 	return ts, handle, nil
 }
 
-func (p *ADKProvider) afterModelCallback(ctx agent.CallbackContext, resp *model.LLMResponse, err error) (*model.LLMResponse, error) {
+func (p *ADKSession) afterModelCallback(ctx agent.CallbackContext, resp *model.LLMResponse, err error) (*model.LLMResponse, error) {
 	if err != nil {
 		var apiKey string
 		p.mu.RLock()
@@ -297,9 +297,9 @@ func (p *ADKProvider) afterModelCallback(ctx agent.CallbackContext, resp *model.
 	return resp, err
 }
 
-func (p *ADKProvider) RunPrompt(ctx context.Context, prompt string) error {
+func (p *ADKSession) RunPrompt(ctx context.Context, prompt string) error {
 	p.mu.RLock()
-	if p.state.GetState() != provider.StateRunning {
+	if p.state.GetState() != session.StateRunning {
 		p.mu.RUnlock()
 		return ErrNotStarted
 	}
@@ -340,7 +340,7 @@ func (p *ADKProvider) RunPrompt(ctx context.Context, prompt string) error {
 	return nil
 }
 
-func (p *ADKProvider) processEvent(event *session.Event) {
+func (p *ADKSession) processEvent(event *adksession.Event) {
 	if event.Partial {
 		if event.Content != nil {
 			for _, part := range event.Content.Parts {
@@ -360,7 +360,7 @@ func (p *ADKProvider) processEvent(event *session.Event) {
 	}
 }
 
-func (p *ADKProvider) checkPaused() {
+func (p *ADKSession) checkPaused() {
 	p.pauseMu.Lock()
 	for p.paused {
 		p.pauseCond.Wait()
@@ -368,7 +368,7 @@ func (p *ADKProvider) checkPaused() {
 	p.pauseMu.Unlock()
 }
 
-func (p *ADKProvider) Stop(ctx context.Context) error {
+func (p *ADKSession) Stop(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -377,7 +377,7 @@ func (p *ADKProvider) Stop(ctx context.Context) error {
 		return nil
 	}
 
-	p.state.SetState(provider.StateStopping)
+	p.state.SetState(session.StateStopping)
 	p.events.EmitStatusChange(currentState, domain.SessionStateStopping, "stopping provider")
 
 	if p.runCancel != nil {
@@ -408,18 +408,18 @@ func (p *ADKProvider) Stop(ctx context.Context) error {
 		}
 	}
 
-	p.state.SetState(provider.StateStopped)
-	p.events.EmitStatusChange(domain.SessionStateStopping, domain.SessionStateStopped, "provider stopped")
+	p.state.SetState(session.StateStopped)
+	p.events.EmitStatusChange(domain.SessionStateStopping, domain.SessionStateStopped, "session stopped")
 	p.events.Close()
 
 	return nil
 }
 
-func (p *ADKProvider) Pause(ctx context.Context) error {
+func (p *ADKSession) Pause(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.state.GetState() != provider.StateRunning {
+	if p.state.GetState() != session.StateRunning {
 		return ErrNotStarted
 	}
 
@@ -431,17 +431,17 @@ func (p *ADKProvider) Pause(ctx context.Context) error {
 	p.paused = true
 	p.pauseMu.Unlock()
 
-	p.state.SetState(provider.StatePaused)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStatePaused, "provider paused")
+	p.state.SetState(session.StatePaused)
+	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStatePaused, "session paused")
 
 	return nil
 }
 
-func (p *ADKProvider) Resume(ctx context.Context) error {
+func (p *ADKSession) Resume(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.state.GetState() != provider.StatePaused {
+	if p.state.GetState() != session.StatePaused {
 		return ErrNotPaused
 	}
 
@@ -450,13 +450,13 @@ func (p *ADKProvider) Resume(ctx context.Context) error {
 	p.pauseCond.Broadcast()
 	p.pauseMu.Unlock()
 
-	p.state.SetState(provider.StateRunning)
-	p.events.EmitStatusChange(domain.SessionStatePaused, domain.SessionStateRunning, "provider resumed")
+	p.state.SetState(session.StateRunning)
+	p.events.EmitStatusChange(domain.SessionStatePaused, domain.SessionStateRunning, "session resumed")
 
 	return nil
 }
 
-func (p *ADKProvider) Kill() error {
+func (p *ADKSession) Kill() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -478,26 +478,26 @@ func (p *ADKProvider) Kill() error {
 	p.pauseCond.Broadcast()
 	p.pauseMu.Unlock()
 
-	p.state.SetState(provider.StateStopped)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateStopped, "provider killed")
+	p.state.SetState(session.StateStopped)
+	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateStopped, "session killed")
 	p.events.Close()
 
 	return nil
 }
 
-func (p *ADKProvider) Status() provider.Status {
+func (p *ADKSession) Status() session.Status {
 	return p.state.Status()
 }
 
-func (p *ADKProvider) Events() <-chan domain.Event {
+func (p *ADKSession) Events() <-chan domain.Event {
 	return p.events.Events()
 }
 
-func (p *ADKProvider) SendInput(ctx context.Context, input string) error {
+func (p *ADKSession) SendInput(ctx context.Context, input string) error {
 	return p.RunPrompt(ctx, input)
 }
 
-func (p *ADKProvider) sanitizeError(err error, apiKey string) error {
+func (p *ADKSession) sanitizeError(err error, apiKey string) error {
 	if err == nil || apiKey == "" {
 		return err
 	}
@@ -509,7 +509,7 @@ func (p *ADKProvider) sanitizeError(err error, apiKey string) error {
 	return err
 }
 
-func (p *ADKProvider) handleFailure(err error) {
+func (p *ADKSession) handleFailure(err error) {
 	p.failureCount++
 	if p.failureCount >= 3 {
 		p.cooldownUntil = time.Now().Add(30 * time.Second)
@@ -529,4 +529,4 @@ func (p *ADKProvider) handleFailure(err error) {
 	p.events.EmitError(sanitizedErr.Error(), "PTY_FAILURE")
 }
 
-var _ provider.Provider = (*ADKProvider)(nil)
+var _ session.Session = (*ADKSession)(nil)

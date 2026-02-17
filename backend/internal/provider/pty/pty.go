@@ -12,8 +12,9 @@ import (
 	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
-	"github.com/ricochet1k/orbitmesh/internal/provider"
+	"github.com/ricochet1k/orbitmesh/internal/provider/circuit"
 	"github.com/ricochet1k/orbitmesh/internal/provider/native"
+	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/terminal"
 	"github.com/ricochet1k/termemu"
 )
@@ -30,7 +31,7 @@ type PTYProvider struct {
 	sessionID string
 	state     *native.ProviderState
 	events    *native.EventAdapter
-	config    provider.Config
+	config    session.Config
 
 	cmd                 *exec.Cmd
 	backend             *termemu.PTYBackend
@@ -46,38 +47,39 @@ type PTYProvider struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	terminalEvents  chan terminalEvent
-	terminalUpdates *terminalUpdateBroadcaster
+	terminalEvents  chan terminal.Event
+	terminalUpdates *terminal.UpdateBroadcaster
 
-	failureCount  int
-	cooldownUntil time.Time
+	circuitBreaker *circuit.Breaker
 }
 
 func NewPTYProvider(sessionID string) *PTYProvider {
 	return &PTYProvider{
-		sessionID: sessionID,
-		state:     native.NewProviderState(),
-		events:    native.NewEventAdapter(sessionID, 100),
+		sessionID:      sessionID,
+		state:          native.NewProviderState(),
+		events:         native.NewEventAdapter(sessionID, 100),
+		circuitBreaker: circuit.NewBreaker(3, 30*time.Second),
 	}
 }
 
-func (p *PTYProvider) Start(ctx context.Context, config provider.Config) error {
+func (p *PTYProvider) Start(ctx context.Context, config session.Config) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.state.GetState() != provider.StateCreated {
+	if p.state.GetState() != session.StateCreated {
 		return ErrAlreadyStarted
 	}
 
 	p.config = config
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 
-	// Simple circuit breaker check
-	if time.Now().Before(p.cooldownUntil) {
-		return fmt.Errorf("provider in cooldown until %v", p.cooldownUntil)
+	// Circuit breaker check
+	if p.circuitBreaker.IsInCooldown() {
+		remaining := p.circuitBreaker.CooldownRemaining()
+		return fmt.Errorf("provider in cooldown for %v", remaining)
 	}
 
-	p.state.SetState(provider.StateStarting)
+	p.state.SetState(session.StateStarting)
 	p.events.EmitStatusChange(domain.SessionStateCreated, domain.SessionStateStarting, "starting pty provider")
 
 	command, args, err := resolvePTYCommand(config)
@@ -111,9 +113,9 @@ func (p *PTYProvider) Start(ctx context.Context, config provider.Config) error {
 	teeBackend := termemu.NewTeeBackend(backend)
 	teeBackend.SetTee(newPTYLogWriter(outputLog))
 
-	p.terminalEvents = make(chan terminalEvent, terminalEventBufferSize)
-	p.terminalUpdates = newTerminalUpdateBroadcaster()
-	frontend := newTerminalFrontend(p.terminalEvents, p.ctx.Done())
+	p.terminalEvents = make(chan terminal.Event, terminal.EventBufferSize)
+	p.terminalUpdates = terminal.NewUpdateBroadcaster()
+	frontend := terminal.NewFrontend(p.terminalEvents, p.ctx.Done())
 	terminal := termemu.NewWithMode(frontend, teeBackend, termemu.TextReadModeRune)
 	if terminal == nil {
 		err := errors.New("failed to initialize termemu terminal")
@@ -128,7 +130,7 @@ func (p *PTYProvider) Start(ctx context.Context, config provider.Config) error {
 	p.teeBackend = teeBackend
 	p.terminal = terminal
 	p.outputLog = outputLog
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 	p.events.EmitStatusChange(domain.SessionStateStarting, domain.SessionStateRunning, "pty provider running")
 
 	p.wg.Add(1)
@@ -140,7 +142,7 @@ func (p *PTYProvider) Start(ctx context.Context, config provider.Config) error {
 	return nil
 }
 
-func resolvePTYCommand(config provider.Config) (string, []string, error) {
+func resolvePTYCommand(config session.Config) (string, []string, error) {
 	command := "claude"
 	var args []string
 	if config.Custom != nil {
@@ -272,7 +274,7 @@ func (p *PTYProvider) startActivityExtractor(command string, args []string) erro
 	p.wg.Add(1)
 	go p.runActivityUpdates(updates)
 
-	if snapshot, ok := snapshotFromTerminal(p.terminal); ok {
+	if snapshot, ok := terminal.SnapshotFromTerminal(p.terminal); ok {
 		_ = p.activity.HandleUpdate(terminal.Update{Kind: terminal.UpdateSnapshot, Snapshot: &snapshot})
 	}
 	return nil
@@ -310,7 +312,7 @@ func (p *PTYProvider) Stop(ctx context.Context) error {
 		return nil
 	}
 
-	p.state.SetState(provider.StateStopping)
+	p.state.SetState(session.StateStopping)
 	p.cancel()
 
 	if p.cmd != nil && p.cmd.Process != nil {
@@ -335,7 +337,7 @@ func (p *PTYProvider) Stop(ctx context.Context) error {
 		p.terminalUpdates = nil
 	}
 
-	p.state.SetState(provider.StateStopped)
+	p.state.SetState(session.StateStopped)
 	p.events.EmitStatusChange(domain.SessionStateStopping, domain.SessionStateStopped, "pty provider stopped")
 	p.events.Close()
 
@@ -346,7 +348,7 @@ func (p *PTYProvider) Pause(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.state.GetState() != provider.StateRunning {
+	if p.state.GetState() != session.StateRunning {
 		return ErrNotStarted
 	}
 
@@ -356,7 +358,7 @@ func (p *PTYProvider) Pause(ctx context.Context) error {
 		}
 	}
 
-	p.state.SetState(provider.StatePaused)
+	p.state.SetState(session.StatePaused)
 	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStatePaused, "pty provider paused")
 	return nil
 }
@@ -365,7 +367,7 @@ func (p *PTYProvider) Resume(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.state.GetState() != provider.StatePaused {
+	if p.state.GetState() != session.StatePaused {
 		return ErrNotPaused
 	}
 
@@ -375,7 +377,7 @@ func (p *PTYProvider) Resume(ctx context.Context) error {
 		}
 	}
 
-	p.state.SetState(provider.StateRunning)
+	p.state.SetState(session.StateRunning)
 	p.events.EmitStatusChange(domain.SessionStatePaused, domain.SessionStateRunning, "pty provider resumed")
 	return nil
 }
@@ -403,13 +405,13 @@ func (p *PTYProvider) Kill() error {
 		p.activityUnsubscribe = nil
 	}
 
-	p.state.SetState(provider.StateStopped)
+	p.state.SetState(session.StateStopped)
 	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateStopped, "pty provider killed")
 	p.events.Close()
 	return nil
 }
 
-func (p *PTYProvider) Status() provider.Status {
+func (p *PTYProvider) Status() session.Status {
 	return p.state.Status()
 }
 
@@ -436,7 +438,7 @@ func (p *PTYProvider) TerminalSnapshot() (terminal.Snapshot, error) {
 		return terminal.Snapshot{}, ErrNotStarted
 	}
 
-	snapshot, ok := snapshotFromTerminal(term)
+	snapshot, ok := terminal.SnapshotFromTerminal(term)
 	if !ok {
 		return terminal.Snapshot{}, nil
 	}
@@ -459,116 +461,37 @@ func (p *PTYProvider) HandleTerminalInput(ctx context.Context, input terminal.In
 	if term == nil {
 		return ErrNotStarted
 	}
-
-	switch input.Kind {
-	case terminal.InputKey:
-		if input.Key == nil {
-			return errors.New("missing key input")
-		}
-		ev := termemu.KeyEvent{
-			Code:       input.Key.Code,
-			Rune:       input.Key.Rune,
-			Mod:        input.Key.Mod,
-			Event:      input.Key.Event,
-			Shifted:    input.Key.Shifted,
-			BaseLayout: input.Key.BaseLayout,
-			Text:       input.Key.Text,
-		}
-		_, err := term.SendKey(ev)
-		return err
-	case terminal.InputText:
-		if input.Text == nil {
-			return errors.New("missing text input")
-		}
-		_, err := term.Write([]byte(input.Text.Text))
-		return err
-	case terminal.InputMouse:
-		if input.Mouse == nil {
-			return errors.New("missing mouse input")
-		}
-		if mouseTerm, ok := term.(interface {
-			SendMouseRaw(btn termemu.MouseBtn, press bool, mods termemu.MouseFlag, x, y int) error
-		}); ok {
-			return mouseTerm.SendMouseRaw(input.Mouse.Button, input.Mouse.Press, input.Mouse.Mods, input.Mouse.X, input.Mouse.Y)
-		}
-		return errors.New("mouse input not supported")
-	case terminal.InputResize:
-		if input.Resize == nil {
-			return errors.New("missing resize input")
-		}
-		return term.Resize(input.Resize.Cols, input.Resize.Rows)
-	case terminal.InputControl:
-		if input.Control == nil {
-			return errors.New("missing control input")
-		}
-		var payload []byte
-		switch input.Control.Signal {
-		case terminal.ControlInterrupt:
-			payload = []byte{0x03}
-		case terminal.ControlEOF:
-			payload = []byte{0x04}
-		case terminal.ControlSuspend:
-			payload = []byte{0x1a}
-		default:
-			return errors.New("unknown control signal")
-		}
-		_, err := term.Write(payload)
-		return err
-	case terminal.InputRaw:
-		if input.Raw == nil {
-			return errors.New("missing raw input")
-		}
-		_, err := term.Write(input.Raw.Data)
-		return err
-	default:
-		return errors.New("unsupported input")
-	}
+	return terminal.SendInput(term, input)
 }
 
-func (p *PTYProvider) emitTerminalUpdate(event terminalEvent) {
+func (p *PTYProvider) emitTerminalUpdate(event terminal.Event) {
 	if p.terminalUpdates == nil {
 		return
 	}
 
-	switch event.kind {
-	case terminalEventBell:
+	switch event.Kind {
+	case terminal.EventBell:
 		p.terminalUpdates.Broadcast(terminal.Update{Kind: terminal.UpdateBell})
-	case terminalEventCursorMoved:
-		p.terminalUpdates.Broadcast(terminal.Update{Kind: terminal.UpdateCursor, Cursor: &terminal.Cursor{X: event.x, Y: event.y}})
-	case terminalEventScrollLines:
+	case terminal.EventCursorMoved:
+		p.terminalUpdates.Broadcast(terminal.Update{Kind: terminal.UpdateCursor, Cursor: &terminal.Cursor{X: event.X, Y: event.Y}})
+	case terminal.EventScrollLines:
 		snapshot, err := p.TerminalSnapshot()
 		if err == nil {
 			p.terminalUpdates.Broadcast(terminal.Update{Kind: terminal.UpdateSnapshot, Snapshot: &snapshot})
 		}
-	case terminalEventRegionChanged:
-		if diff, ok := buildTerminalDiffFrom(p.terminal, event.region, event.reason); ok {
+	case terminal.EventRegionChanged:
+		if diff, ok := terminal.BuildDiffFrom(p.terminal, event.Region, event.Reason); ok {
 			p.terminalUpdates.Broadcast(terminal.Update{Kind: terminal.UpdateDiff, Diff: &diff})
 		}
 	}
 }
 
-func changeReasonString(reason termemu.ChangeReason) string {
-	switch reason {
-	case termemu.CRText:
-		return "text"
-	case termemu.CRClear:
-		return "clear"
-	case termemu.CRScroll:
-		return "scroll"
-	case termemu.CRScreenSwitch:
-		return "screen_switch"
-	case termemu.CRRedraw:
-		return "redraw"
-	default:
-		return "unknown"
-	}
-}
-
 func (p *PTYProvider) handleFailure(err error) {
-	p.failureCount++
-	if p.failureCount >= 3 {
-		p.cooldownUntil = time.Now().Add(30 * time.Second)
-		p.failureCount = 0
+	if p.circuitBreaker.RecordFailure() {
+		remaining := p.circuitBreaker.CooldownRemaining()
+		p.events.EmitMetadata("circuit_breaker_cooldown", map[string]any{
+			"cooldown_duration": remaining.String(),
+		})
 	}
 	p.state.SetError(err)
 	p.events.EmitError(err.Error(), "PTY_FAILURE")

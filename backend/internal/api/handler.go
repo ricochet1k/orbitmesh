@@ -11,8 +11,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
-	"github.com/ricochet1k/orbitmesh/internal/provider"
 	"github.com/ricochet1k/orbitmesh/internal/service"
+	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
 	apiTypes "github.com/ricochet1k/orbitmesh/pkg/api"
 )
@@ -141,7 +141,7 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 
 	id := generateID()
 
-	config := provider.Config{
+	config := session.Config{
 		ProviderType: req.ProviderType,
 		WorkingDir:   workingDir,
 		Environment:  req.Environment,
@@ -208,9 +208,9 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	if sessionKind == domain.SessionKindDock {
 		config.MCPServers = dockMCPServers(id)
 	} else if len(req.MCPServers) > 0 {
-		config.MCPServers = make([]provider.MCPServerConfig, len(req.MCPServers))
+		config.MCPServers = make([]session.MCPServerConfig, len(req.MCPServers))
 		for i, s := range req.MCPServers {
-			config.MCPServers[i] = provider.MCPServerConfig{
+			config.MCPServers[i] = session.MCPServerConfig{
 				Name:    s.Name,
 				Command: s.Command,
 				Args:    s.Args,
@@ -393,7 +393,7 @@ func terminalToResponse(t *domain.Terminal) apiTypes.TerminalResponse {
 	return resp
 }
 
-func sessionToStatusResponse(s domain.SessionSnapshot, status provider.Status) apiTypes.SessionStatusResponse {
+func sessionToStatusResponse(s domain.SessionSnapshot, status session.Status) apiTypes.SessionStatusResponse {
 	return apiTypes.SessionStatusResponse{
 		SessionResponse: sessionToResponse(s),
 		Metrics: apiTypes.SessionMetrics{
@@ -405,8 +405,8 @@ func sessionToStatusResponse(s domain.SessionSnapshot, status provider.Status) a
 	}
 }
 
-func dockMCPServers(sessionID string) []provider.MCPServerConfig {
-	return []provider.MCPServerConfig{
+func dockMCPServers(sessionID string) []session.MCPServerConfig {
+	return []session.MCPServerConfig{
 		{
 			Name:    "orbitmesh-mcp",
 			Command: "orbitmesh-mcp",

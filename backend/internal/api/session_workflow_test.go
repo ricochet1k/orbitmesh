@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/ricochet1k/orbitmesh/internal/provider"
 	"github.com/ricochet1k/orbitmesh/internal/provider/pty"
 	"github.com/ricochet1k/orbitmesh/internal/service"
+	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
 	apiTypes "github.com/ricochet1k/orbitmesh/pkg/api"
 )
@@ -26,7 +26,7 @@ func TestSessionCreationAndEvents(t *testing.T) {
 	executor := service.NewAgentExecutor(service.ExecutorConfig{
 		Storage:     nil, // In-memory only
 		Broadcaster: broadcaster,
-		ProviderFactory: func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
+		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
 			if providerType == "pty" {
 				return pty.NewPTYProvider(sessionID), nil
 			}
@@ -218,7 +218,7 @@ func TestSessionErrorHandling(t *testing.T) {
 	executor := service.NewAgentExecutor(service.ExecutorConfig{
 		Storage:     nil,
 		Broadcaster: broadcaster,
-		ProviderFactory: func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
+		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
 			if providerType == "pty" {
 				return pty.NewPTYProvider(sessionID), nil
 			}
@@ -322,7 +322,7 @@ func TestSessionLifecycle(t *testing.T) {
 	executor := service.NewAgentExecutor(service.ExecutorConfig{
 		Storage:     nil,
 		Broadcaster: broadcaster,
-		ProviderFactory: func(providerType, sessionID string, config provider.Config) (provider.Provider, error) {
+		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
 			if providerType == "pty" {
 				return pty.NewPTYProvider(sessionID), nil
 			}
