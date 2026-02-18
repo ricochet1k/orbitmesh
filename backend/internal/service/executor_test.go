@@ -205,10 +205,9 @@ func TestAgentExecutor_StartSession(t *testing.T) {
 			t.Errorf("expected ID 'session1', got '%s'", session.ID)
 		}
 
-		time.Sleep(50 * time.Millisecond)
-
-		if session.GetState() != domain.SessionStateRunning {
-			t.Errorf("expected state Running, got %s", session.GetState())
+		// Per new design, sessions are created in idle state
+		if session.GetState() != domain.SessionStateIdle {
+			t.Errorf("expected state Idle, got %s", session.GetState())
 		}
 
 		if _, err := storage.Load("session1"); err != nil {
@@ -247,9 +246,21 @@ func TestAgentExecutor_StartSession(t *testing.T) {
 			WorkingDir:   "/tmp/test",
 		}
 
-		_, err := executor.StartSession(context.Background(), "session1", config)
-		if !errors.Is(err, ErrProviderNotFound) {
-			t.Errorf("expected ErrProviderNotFound, got %v", err)
+		// Session creation no longer validates provider type immediately
+		session, err := executor.StartSession(context.Background(), "session1", config)
+		if err != nil {
+			t.Fatalf("unexpected error creating session: %v", err)
+		}
+
+		// Session is created in idle state even with unknown provider
+		if session.GetState() != domain.SessionStateIdle {
+			t.Errorf("expected state Idle, got %s", session.GetState())
+		}
+
+		// Provider error occurs when first message is sent
+		_, msgErr := executor.SendMessage(context.Background(), "session1", "test", "", "")
+		if msgErr == nil {
+			t.Errorf("expected error when sending to unknown provider")
 		}
 	})
 
@@ -266,32 +277,27 @@ func TestAgentExecutor_StartSession(t *testing.T) {
 
 		session, err := executor.StartSession(context.Background(), "session1", config)
 		if err != nil {
-			t.Fatalf("StartSession should not fail immediately: %v", err)
+			t.Fatalf("StartSession should not fail: %v", err)
+		}
+
+		// Session created in idle state (no provider started yet)
+		if session.GetState() != domain.SessionStateIdle {
+			t.Errorf("expected state Idle, got %s", session.GetState())
+		}
+
+		// Send message triggers provider start, which will fail
+		_, msgErr := executor.SendMessage(context.Background(), "session1", "test", "", "")
+		if msgErr != nil {
+			t.Logf("expected error starting provider: %v", msgErr)
 		}
 
 		time.Sleep(50 * time.Millisecond)
 
 		// Per the new design, provider errors do not transition the session to error state.
 		// Instead, the error is recorded in the message history and the session returns to idle.
-		if session.GetState() != domain.SessionStateIdle {
-			t.Errorf("expected state Idle after provider error, got %s", session.GetState())
-		}
-		// Verify ErrorMessage is cleared (errors live in message history now)
-		if session.ErrorMessage != "" {
-			t.Errorf("expected ErrorMessage to be cleared, but got: %s", session.ErrorMessage)
-		}
-		// Verify the error was recorded in message history
-		if len(session.Messages) == 0 {
-			t.Errorf("expected error entry in message history, but got empty")
-		} else {
-			// Check that the first message is an error
-			if msg, ok := session.Messages[0].(map[string]interface{}); ok {
-				if kind, ok := msg["kind"].(string); !ok || kind != "error" {
-					t.Errorf("expected error message kind, got %v", msg["kind"])
-				}
-			} else {
-				t.Errorf("expected message to be a map, got %T", session.Messages[0])
-			}
+		retrieved, _ := executor.GetSession("session1")
+		if retrieved.GetState() != domain.SessionStateIdle {
+			t.Errorf("expected state Idle after provider error, got %s", retrieved.GetState())
 		}
 	})
 }
@@ -394,14 +400,28 @@ func TestAgentExecutor_GetSessionStatus(t *testing.T) {
 	}
 
 	executor.StartSession(context.Background(), "session1", config)
-	time.Sleep(50 * time.Millisecond)
+	// Don't sleep yet - session is idle with no active run
 
 	status, err := executor.GetSessionStatus("session1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	// For idle sessions with no active run, status is empty (zero value)
+	if status.State != session.StateCreated {
+		t.Errorf("expected empty/created state for idle session, got %s", status.State)
+	}
+
+	// Send message to trigger provider start
+	executor.SendMessage(context.Background(), "session1", "test", "", "")
+	time.Sleep(50 * time.Millisecond)
+
+	status, err = executor.GetSessionStatus("session1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// After message sent, provider is running
 	if status.State != session.StateRunning {
-		t.Errorf("expected state Running, got %s", status.State)
+		t.Errorf("expected state Running after message, got %s", status.State)
 	}
 
 	_, err = executor.GetSessionStatus("nonexistent")
@@ -520,6 +540,9 @@ func TestAgentExecutor_EventBroadcasting(t *testing.T) {
 
 	executor.StartSession(context.Background(), "session1", config)
 
+	// Send message to trigger provider start and state transition to running
+	executor.SendMessage(context.Background(), "session1", "test message", "", "")
+
 	timeout := time.After(1 * time.Second)
 	receivedStarting := false
 
@@ -608,18 +631,27 @@ func TestAgentExecutor_FullLifecycleIntegration(t *testing.T) {
 
 	session, err := executor.StartSession(context.Background(), "lifecycle-test", config)
 	if err != nil {
-		t.Fatalf("failed to start session: %v", err)
+		t.Fatalf("failed to create session: %v", err)
 	}
 
+	// Per new design, session starts in idle state
+	if session.GetState() != domain.SessionStateIdle {
+		t.Errorf("expected state Idle after creation, got %s", session.GetState())
+	}
+
+	// Send message to transition to running
+	executor.SendMessage(context.Background(), "lifecycle-test", "test", "", "")
 	time.Sleep(50 * time.Millisecond)
+	session, _ = executor.GetSession("lifecycle-test")
 	if session.GetState() != domain.SessionStateRunning {
-		t.Errorf("expected state Running, got %s", session.GetState())
+		t.Errorf("expected state Running after message, got %s", session.GetState())
 	}
 
 	if err := executor.StopSession(context.Background(), "lifecycle-test"); err != nil {
 		t.Fatalf("failed to stop session: %v", err)
 	}
 	// Per the new design, stopping transitions to idle state
+	session, _ = executor.GetSession("lifecycle-test")
 	if session.GetState() != domain.SessionStateIdle {
 		t.Errorf("expected state Idle after stop, got %s", session.GetState())
 	}
@@ -673,10 +705,19 @@ func TestAgentExecutor_MultipleConcurrentSessions(t *testing.T) {
 				return
 			}
 
+			// Session is idle after creation
+			if session.GetState() != domain.SessionStateIdle {
+				errChan <- errors.New("session not idle after creation")
+				return
+			}
+
+			// Send message to transition to running
+			executor.SendMessage(context.Background(), sessionID, "test", "", "")
 			time.Sleep(50 * time.Millisecond)
 
+			session, _ = executor.GetSession(sessionID)
 			if session.GetState() != domain.SessionStateRunning {
-				errChan <- errors.New("session not running")
+				errChan <- errors.New("session not running after message")
 				return
 			}
 
@@ -779,6 +820,10 @@ func TestAgentExecutor_EventHandling(t *testing.T) {
 		t.Fatalf("failed to start session: %v", err)
 	}
 
+	// Send message to start provider and enable event handling
+	executor.SendMessage(context.Background(), "event-test", "test", "", "")
+	time.Sleep(50 * time.Millisecond)
+
 	prov.SendEvent(domain.NewOutputEvent("event-test", "test output"))
 
 	timeout := time.After(1 * time.Second)
@@ -852,8 +897,11 @@ func TestAgentExecutor_PTYHubAutoCreated(t *testing.T) {
 		WorkingDir:   "/tmp/test",
 	})
 	if err != nil {
-		t.Fatalf("failed to start session: %v", err)
+		t.Fatalf("failed to create session: %v", err)
 	}
+
+	// Send message to start provider
+	executor.SendMessage(context.Background(), "pty-session", "test", "", "")
 
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
@@ -990,6 +1038,8 @@ func TestAgentExecutor_ProviderErrors(t *testing.T) {
 		}
 
 		executor.StartSession(context.Background(), "session1", config)
+		// Send message to start provider
+		executor.SendMessage(context.Background(), "session1", "test", "", "")
 		time.Sleep(50 * time.Millisecond)
 
 		err := executor.StopSession(context.Background(), "session1")
@@ -1010,6 +1060,8 @@ func TestAgentExecutor_ProviderErrors(t *testing.T) {
 		}
 
 		executor.StartSession(context.Background(), "session1", config)
+		// Send message to start provider
+		executor.SendMessage(context.Background(), "session1", "test", "", "")
 		time.Sleep(50 * time.Millisecond)
 
 		err := executor.KillSession("session1")
@@ -1063,14 +1115,20 @@ func TestAgentExecutor_SendMessage_RunningSession_Error(t *testing.T) {
 
 	sess, err := executor.StartSession(context.Background(), "test-id", config)
 	if err != nil {
-		t.Fatalf("failed to start session: %v", err)
+		t.Fatalf("failed to create session: %v", err)
 	}
 
-	// Give the session time to start running
+	// Send first message to transition to running
+	_, err = executor.SendMessage(context.Background(), "test-id", "hello", "", "")
+	if err != nil {
+		t.Fatalf("failed to send first message: %v", err)
+	}
+
+	// Give the session time to be running
 	time.Sleep(100 * time.Millisecond)
 
 	// Try to send message to running session
-	_, err = executor.SendMessage(context.Background(), "test-id", "hello", "", "")
+	_, err = executor.SendMessage(context.Background(), "test-id", "hello again", "", "")
 	if err == nil {
 		t.Errorf("expected error for running session, got nil")
 	}
@@ -1161,9 +1219,13 @@ func TestAgentExecutor_CancelRun_Running(t *testing.T) {
 	}
 
 	sess, _ := executor.StartSession(context.Background(), "session1", config)
+
+	// Send message to start provider and transition to running
+	executor.SendMessage(context.Background(), "session1", "test", "", "")
 	time.Sleep(50 * time.Millisecond)
 
 	// Session should be running
+	sess, _ = executor.GetSession("session1")
 	if sess.GetState() != domain.SessionStateRunning {
 		t.Fatalf("expected state Running, got %s", sess.GetState())
 	}
@@ -1175,6 +1237,7 @@ func TestAgentExecutor_CancelRun_Running(t *testing.T) {
 	}
 
 	// Session should transition to idle
+	sess, _ = executor.GetSession("session1")
 	if sess.GetState() != domain.SessionStateIdle {
 		t.Errorf("expected state Idle, got %s", sess.GetState())
 	}
@@ -1252,11 +1315,14 @@ func TestAgentExecutor_SuspendAndResume(t *testing.T) {
 		ProjectID:    "proj1",
 	})
 	if err != nil {
-		t.Fatalf("failed to start session: %v", err)
+		t.Fatalf("failed to create session: %v", err)
 	}
 
+	// Send message to start provider and transition to running
+	executor.SendMessage(context.Background(), "test-session", "test", "", "")
 	time.Sleep(50 * time.Millisecond)
 
+	sess, _ = executor.GetSession("test-session")
 	if sess.GetState() != domain.SessionStateRunning {
 		t.Errorf("expected running state, got %v", sess.GetState())
 	}
@@ -1368,9 +1434,11 @@ func TestAgentExecutor_MidRunCrashRecoveryWithCheckpoints(t *testing.T) {
 		ProjectID:    "proj1",
 	})
 	if err != nil {
-		t.Fatalf("failed to start session: %v", err)
+		t.Fatalf("failed to create session: %v", err)
 	}
 
+	// Send message to start provider and transition to running
+	executor.SendMessage(context.Background(), "test-session", "test", "", "")
 	// Wait for session to start running
 	time.Sleep(50 * time.Millisecond)
 

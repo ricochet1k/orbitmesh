@@ -95,7 +95,9 @@ func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
 	}
 }
 
-func (e *AgentExecutor) StartSession(ctx context.Context, id string, config session.Config) (*domain.Session, error) {
+// CreateSession creates a new session in idle state without starting a provider.
+// The session persists and waits for the first message to be sent before the provider starts.
+func (e *AgentExecutor) CreateSession(ctx context.Context, id string, config session.Config) (*domain.Session, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -109,11 +111,7 @@ func (e *AgentExecutor) StartSession(ctx context.Context, id string, config sess
 		return nil, ErrSessionExists
 	}
 
-	prov, err := e.providerFactory(config.ProviderType, id, config)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrProviderNotFound, config.ProviderType)
-	}
-
+	// Create session in idle state without instantiating a provider
 	session := domain.NewSession(id, config.ProviderType, config.WorkingDir)
 	session.ProjectID = config.ProjectID
 	if config.SessionKind != "" {
@@ -146,9 +144,6 @@ func (e *AgentExecutor) StartSession(ctx context.Context, id string, config sess
 			return nil, fmt.Errorf("failed to save session: %w", err)
 		}
 	}
-	if _, ok := prov.(TerminalProvider); ok {
-		e.ensureTerminalRecord(session)
-	}
 
 	// Note: Sessions are created in idle state. We don't broadcast the initial idle state
 	// since there's no state change. State changes will be broadcast when the session
@@ -156,14 +151,17 @@ func (e *AgentExecutor) StartSession(ctx context.Context, id string, config sess
 
 	sc := &sessionContext{
 		session: session,
-		run:     nil, // Will be set in runSessionLoop
+		run:     nil, // Will be set when first message is sent
 	}
 	e.sessions[id] = sc
 
-	e.wg.Add(1)
-	go e.runSessionLoop(e.ctx, sc, prov, config)
-
 	return session, nil
+}
+
+// StartSession is deprecated. Use CreateSession for new code.
+// This method is kept for backward compatibility but now delegates to CreateSession.
+func (e *AgentExecutor) StartSession(ctx context.Context, id string, config session.Config) (*domain.Session, error) {
+	return e.CreateSession(ctx, id, config)
 }
 
 func (e *AgentExecutor) runSessionLoop(ctx context.Context, sc *sessionContext, prov session.Session, config session.Config) {

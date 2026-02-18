@@ -224,9 +224,12 @@ func (env *testEnv) router() *chi.Mux {
 	return r
 }
 
-// waitForRunning polls the executor until the session is Running.
+// waitForRunning sends a message to transition an idle session to running, then polls until running.
 func waitForRunning(t *testing.T, executor *service.AgentExecutor, id string) {
 	t.Helper()
+	// Per new design, sessions start in idle. Send a message to trigger provider start.
+	executor.SendMessage(context.Background(), id, "test message", "", "")
+
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		sess, err := executor.GetSession(id)
@@ -319,19 +322,21 @@ func TestCreateSession_MissingProviderType(t *testing.T) {
 	env := newTestEnv(t)
 	r := env.router()
 
+	// Per new design, provider_type is optional at creation time
+	// Provider is determined when first message is sent
 	body, _ := json.Marshal(apiTypes.SessionRequest{WorkingDir: "/tmp"})
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", w.Code)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
-	var errResp apiTypes.ErrorResponse
-	_ = json.Unmarshal(w.Body.Bytes(), &errResp)
-	if errResp.Error != "provider_type is required" {
-		t.Errorf("Error = %q", errResp.Error)
+	var resp apiTypes.SessionResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.State != apiTypes.SessionStateIdle {
+		t.Errorf("expected state idle, got %s", resp.State)
 	}
 }
 
@@ -385,6 +390,8 @@ func TestCreateSession_UnknownProvider(t *testing.T) {
 	env := newTestEnv(t)
 	r := env.router()
 
+	// Per new design, session creation succeeds even with unknown provider
+	// Provider validation happens when first message is sent
 	body, _ := json.Marshal(apiTypes.SessionRequest{
 		ProviderType: "nonexistent",
 		WorkingDir:   "/tmp",
@@ -394,13 +401,13 @@ func TestCreateSession_UnknownProvider(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
-	var errResp apiTypes.ErrorResponse
-	_ = json.Unmarshal(w.Body.Bytes(), &errResp)
-	if errResp.Error != "unknown provider type" {
-		t.Errorf("Error = %q", errResp.Error)
+	var resp apiTypes.SessionResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.State != apiTypes.SessionStateIdle {
+		t.Errorf("expected state idle, got %s", resp.State)
 	}
 }
 
@@ -505,8 +512,8 @@ func TestCreateSession_ExecutorShutdown(t *testing.T) {
 	}
 	var errResp apiTypes.ErrorResponse
 	_ = json.Unmarshal(w.Body.Bytes(), &errResp)
-	if errResp.Error != "failed to start session" {
-		t.Errorf("Error = %q, want 'failed to start session'", errResp.Error)
+	if errResp.Error != "failed to create session" {
+		t.Errorf("Error = %q, want 'failed to create session'", errResp.Error)
 	}
 }
 
@@ -967,7 +974,7 @@ func TestWriteError_NoDetails(t *testing.T) {
 func TestSendMessage_RunningSession_Error(t *testing.T) {
 	env := newTestEnv(t)
 
-	// Create a session (which will be running)
+	// Create a session (which will be idle)
 	createReq := apiTypes.SessionRequest{
 		ProviderType: "mock",
 		WorkingDir:   "/tmp",
@@ -985,7 +992,19 @@ func TestSendMessage_RunningSession_Error(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &createResp)
 	sessionID := createResp.ID
 
-	// Session is now running, try to send a message (should return error)
+	// Send first message to transition to running
+	msgReq1 := apiTypes.SendMessageRequest{
+		Content: "first message",
+	}
+	body, _ = json.Marshal(msgReq1)
+	req = httptest.NewRequest("POST", fmt.Sprintf("/api/sessions/%s/messages", sessionID), bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	env.router().ServeHTTP(w, req)
+
+	// Give the session time to start running
+	time.Sleep(50 * time.Millisecond)
+
+	// Now session is running, try to send another message (should return error)
 	msgReq := apiTypes.SendMessageRequest{
 		Content: "hello, agent",
 	}
@@ -1109,6 +1128,18 @@ func TestSendMessage_RunningSessionWithOverride(t *testing.T) {
 	var createResp apiTypes.SessionResponse
 	_ = json.Unmarshal(w.Body.Bytes(), &createResp)
 	sessionID := createResp.ID
+
+	// Send first message to transition to running
+	msgReq1 := apiTypes.SendMessageRequest{
+		Content: "first message",
+	}
+	body, _ = json.Marshal(msgReq1)
+	req = httptest.NewRequest("POST", fmt.Sprintf("/api/sessions/%s/messages", sessionID), bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	env.router().ServeHTTP(w, req)
+
+	// Give the session time to start running
+	time.Sleep(50 * time.Millisecond)
 
 	// Send message with provider type override to a running session (should still error)
 	msgReq := apiTypes.SendMessageRequest{

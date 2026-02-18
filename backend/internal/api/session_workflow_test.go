@@ -251,6 +251,7 @@ func TestSessionErrorHandling(t *testing.T) {
 			}
 		}
 
+		// Per new design, provider_type is now optional at creation time
 		// Create session without provider_type
 		reqBody := apiTypes.SessionRequest{
 			WorkingDir: "/tmp",
@@ -265,11 +266,11 @@ func TestSessionErrorHandling(t *testing.T) {
 		resp, _ = http.DefaultClient.Do(req)
 		defer resp.Body.Close()
 
-		if resp.StatusCode != http.StatusBadRequest {
-			t.Fatalf("Expected 400, got %d", resp.StatusCode)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("Expected 201, got %d", resp.StatusCode)
 		}
 
-		t.Logf("✓ Missing provider_type properly rejected")
+		t.Logf("✓ Missing provider_type now accepted, session created in idle state")
 	})
 
 	t.Run("Unknown provider type should error", func(t *testing.T) {
@@ -284,6 +285,8 @@ func TestSessionErrorHandling(t *testing.T) {
 			}
 		}
 
+		// Per new design, session creation succeeds even with unknown provider
+		// Provider is validated when first message is sent
 		// Create session with unknown provider
 		reqBody := apiTypes.SessionRequest{
 			ProviderType: "unknown-provider",
@@ -299,11 +302,11 @@ func TestSessionErrorHandling(t *testing.T) {
 		resp, _ = http.DefaultClient.Do(req)
 		defer resp.Body.Close()
 
-		if resp.StatusCode != http.StatusBadRequest {
-			t.Fatalf("Expected 400, got %d", resp.StatusCode)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("Expected 201, got %d", resp.StatusCode)
 		}
 
-		t.Logf("✓ Unknown provider type properly rejected")
+		t.Logf("✓ Unknown provider type now accepted, session created in idle state")
 	})
 
 	t.Run("Non-existent session should return 404", func(t *testing.T) {
@@ -385,9 +388,23 @@ func TestSessionLifecycle(t *testing.T) {
 	})
 
 	t.Run("Session transitions to running state", func(t *testing.T) {
+		// Per new design, session starts idle. Send a message to transition to running
+		msgReq := apiTypes.SendMessageRequest{
+			Content: "test message",
+		}
+		msgBody, _ := json.Marshal(msgReq)
+		req, _ := http.NewRequest("POST", server.URL+"/api/sessions/"+sessionID+"/messages", strings.NewReader(string(msgBody)))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-CSRF-Token", csrfToken)
+		req.AddCookie(&http.Cookie{Name: "orbitmesh-csrf-token", Value: csrfToken})
+
+		resp, _ := http.DefaultClient.Do(req)
+		defer resp.Body.Close()
+
+		// Give provider time to start
 		time.Sleep(500 * time.Millisecond)
 
-		resp, _ := http.Get(server.URL + "/api/sessions/" + sessionID)
+		resp, _ = http.Get(server.URL + "/api/sessions/" + sessionID)
 		defer resp.Body.Close()
 
 		var statusResp apiTypes.SessionStatusResponse
@@ -396,7 +413,7 @@ func TestSessionLifecycle(t *testing.T) {
 		if statusResp.State != "running" {
 			t.Fatalf("Expected running, got %s", statusResp.State)
 		}
-		t.Logf("✓ Session transitioned to 'running' state")
+		t.Logf("✓ Session transitioned to 'running' state after message")
 	})
 
 	t.Run("Session can be stopped", func(t *testing.T) {

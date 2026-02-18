@@ -543,7 +543,20 @@ func TestIntegration_SessionLifecycle(t *testing.T) {
 	defer resp.Body.Close()
 	events := readSSEEvents(resp)
 
-	// Wait for the session to be running (the executor goroutine transitions it)
+	// Per new design, send a message to transition the session to running
+	msgReq := apiTypes.SendMessageRequest{
+		Content: "test message",
+	}
+	msgBody, _ := json.Marshal(msgReq)
+	msgHTTPReq, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/sessions/"+sessionID+"/messages", bytes.NewReader(msgBody))
+	msgHTTPReq.Header.Set("Content-Type", "application/json")
+	msgResp, err := http.DefaultClient.Do(msgHTTPReq)
+	if err != nil {
+		t.Fatalf("send message: %v", err)
+	}
+	msgResp.Body.Close()
+
+	// Wait for the session to be running after message sent
 	waitForStateHTTP(t, srv.URL, sessionID, "running")
 
 	// Stop

@@ -171,11 +171,6 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if req.ProviderType == "" {
-		writeError(w, http.StatusBadRequest, "provider_type is required", "")
-		return
-	}
-
 	// Resolve working directory: explicit > project path > git dir
 	workingDir := req.WorkingDir
 	projectID := req.ProjectID
@@ -279,7 +274,7 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	session, err := h.executor.StartSession(r.Context(), id, config)
+	session, err := h.executor.CreateSession(r.Context(), id, config)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrSessionExists):
@@ -287,7 +282,7 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, service.ErrProviderNotFound):
 			writeError(w, http.StatusBadRequest, "unknown provider type", err.Error())
 		default:
-			writeError(w, http.StatusInternalServerError, "failed to start session", err.Error())
+			writeError(w, http.StatusInternalServerError, "failed to create session", err.Error())
 		}
 		return
 	}

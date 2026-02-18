@@ -11,7 +11,7 @@ const (
 )
 
 type SessionRequest struct {
-	ProviderType string            `json:"provider_type"`
+	ProviderType string            `json:"provider_type,omitempty"`
 	ProviderID   string            `json:"provider_id,omitempty"`
 	WorkingDir   string            `json:"working_dir,omitempty"`
 	ProjectID    string            `json:"project_id,omitempty"`

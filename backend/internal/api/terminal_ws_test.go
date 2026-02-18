@@ -161,8 +161,12 @@ func startTerminalSession(t *testing.T, env *terminalTestEnv) string {
 		WorkingDir:   "/tmp",
 	})
 	if err != nil {
-		t.Fatalf("failed to start session: %v", err)
+		t.Fatalf("failed to create session: %v", err)
 	}
+
+	// Per new design, send a message to transition the session to running
+	env.executor.SendMessage(context.Background(), "session-1", "test", "", "")
+
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		if session.GetState() == domain.SessionStateRunning {
