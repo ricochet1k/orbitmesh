@@ -29,6 +29,7 @@ export interface SessionInputRequest {
 export interface SessionResponse {
   id: string;
   provider_type: string;
+  preferred_provider_id?: string;
   session_kind?: string;
   title?: string;
   state: SessionState;

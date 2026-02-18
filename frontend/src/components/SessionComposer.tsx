@@ -1,6 +1,6 @@
-import { createSignal, Show } from "solid-js"
+import { createSignal, Show, createEffect } from "solid-js"
 import type { Accessor } from "solid-js"
-import type { SessionState } from "../types/api"
+import type { SessionState, ProviderConfigResponse } from "../types/api"
 
 export interface SessionComposerProps {
   /** Session state (idle, running, or suspended) - determines labels and behavior */
@@ -11,18 +11,32 @@ export interface SessionComposerProps {
   isRunning: Accessor<boolean>
   /** Whether an action is pending (disables controls) */
   pendingAction: Accessor<string | null>
-  /** Called with the text to send */
-  onSend: (text: string) => void | Promise<void>
+  /** Called with the text to send and optional provider ID */
+  onSend: (text: string, providerId?: string) => void | Promise<void>
   /** Called when the user clicks Interrupt (sends \x03) */
   onInterrupt?: () => void | Promise<void>
   /** Error message to display above the composer */
   error?: Accessor<string | null>
   placeholder?: string
+  /** List of available providers */
+  providers?: Accessor<ProviderConfigResponse[]>
+  /** Default provider ID (from session preference) */
+  defaultProviderId?: string
 }
 
 export default function SessionComposer(props: SessionComposerProps) {
   const [value, setValue] = createSignal("")
+  const [selectedProviderId, setSelectedProviderId] = createSignal<string | undefined>(undefined)
   let inputRef: HTMLTextAreaElement | undefined
+
+  // Initialize provider selection after component mounts
+  createEffect(() => {
+    if (!selectedProviderId()) {
+      const preferred = props.defaultProviderId
+      const stored = localStorage.getItem("lastUsedProviderId")
+      setSelectedProviderId(preferred || stored || undefined)
+    }
+  })
 
   const placeholder = () => {
     if (props.placeholder) return props.placeholder
@@ -49,7 +63,14 @@ export default function SessionComposer(props: SessionComposerProps) {
   const handleSend = async () => {
     const text = value().trim()
     if (!text) return
-    await props.onSend(text)
+    const providerId = selectedProviderId()
+    // Only pass providerId if it's different from the default
+    const providerToSend = providerId !== props.defaultProviderId ? providerId : undefined
+    // Persist the selection to localStorage
+    if (providerId) {
+      localStorage.setItem("lastUsedProviderId", providerId)
+    }
+    await props.onSend(text, providerToSend)
     setValue("")
     inputRef?.focus()
   }
@@ -77,6 +98,21 @@ export default function SessionComposer(props: SessionComposerProps) {
           rows={2}
         />
         <div class="session-composer-actions">
+          <Show when={props.providers && props.providers().length > 0}>
+            <select
+              class="session-composer-provider-selector"
+              data-testid="session-composer-provider-selector"
+              value={selectedProviderId() || ""}
+              onChange={(e) => setSelectedProviderId(e.currentTarget.value || undefined)}
+              disabled={props.pendingAction() !== null}
+              title="Select provider for this message"
+            >
+              <option value="">Default Provider</option>
+              {props.providers?.().map((provider) => (
+                <option value={provider.id}>{provider.name}</option>
+              ))}
+            </select>
+          </Show>
           <Show when={props.isRunning() && props.onInterrupt}>
             <button
               type="button"

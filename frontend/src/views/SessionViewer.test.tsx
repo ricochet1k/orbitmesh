@@ -2,6 +2,7 @@ import { render, screen, fireEvent } from "@solidjs/testing-library"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import SessionViewer from "./SessionViewer"
 import { apiClient } from "../api/client"
+import { listProviders } from "../api/providers"
 import { baseSession, defaultPermissions, makeSession } from "../test/fixtures"
 
 const mockNavigate = vi.fn()
@@ -71,6 +72,10 @@ vi.mock("../components/TerminalView", () => ({
   },
 }))
 
+vi.mock("../api/providers", () => ({
+  listProviders: vi.fn(),
+}))
+
 describe("SessionViewer", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -81,11 +86,12 @@ describe("SessionViewer", () => {
     vi.stubGlobal("crypto", {
       randomUUID: () => "123e4567-e89b-12d3-a456-426614174000",
     })
-      ; (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1")
-      ; (apiClient.getActivityEntries as any).mockResolvedValue({ entries: [], next_cursor: null })
-      ; (apiClient.getPermissions as any).mockResolvedValue(defaultPermissions)
-      ; (apiClient.listTerminals as any).mockResolvedValue({ terminals: [] })
-      ; (apiClient.sendSessionInput as any).mockResolvedValue(undefined)
+       ; (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1")
+       ; (apiClient.getActivityEntries as any).mockResolvedValue({ entries: [], next_cursor: null })
+       ; (apiClient.getPermissions as any).mockResolvedValue(defaultPermissions)
+       ; (apiClient.listTerminals as any).mockResolvedValue({ terminals: [] })
+       ; (apiClient.sendSessionInput as any).mockResolvedValue(undefined)
+       ; (listProviders as any).mockResolvedValue({ providers: [] })
   })
 
   it("renders initial output and streams new transcript messages", async () => {

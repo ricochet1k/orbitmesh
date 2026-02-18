@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/solid-router'
 import { createResource, createSignal, createEffect, Show } from 'solid-js'
 import { apiClient } from '../../api/client'
+import { listProviders } from '../../api/providers'
 import type { SessionState } from '../../types/api'
 import { dockSessionId, setDockSessionId } from '../../state/agentDock'
 import { isTestEnv } from '../../utils/env'
@@ -32,6 +33,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
 
   const [session, { refetch: refetchSession }] = createResource(sessionId, apiClient.getSession)
   const [permissions] = createResource(apiClient.getPermissions)
+  const [providers] = createResource(listProviders)
   // Only relevant for PTY sessions; toolbar hides the terminal pill for non-PTY
   const [terminalStatus, setTerminalStatus] = createSignal<
     "connecting" | "live" | "closed" | "error" | "resyncing"
@@ -175,12 +177,12 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     void actions.stop("Kill this session immediately?")
   }
 
-  const handleSend = async (text: string) => {
+  const handleSend = async (text: string, providerId?: string) => {
     setComposerError(null)
     setComposerPending("send")
     try {
       // Use new /messages endpoint for all session states (idle, running, suspended)
-      await apiClient.sendMessage(sessionId(), text)
+      await apiClient.sendMessage(sessionId(), text, { providerId })
     } catch (err) {
       setComposerError(err instanceof Error ? err.message : "Failed to send message")
     } finally {
@@ -275,6 +277,8 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
             onSend={handleSend}
             onInterrupt={handleInterrupt}
             error={composerError}
+            providers={() => providers()?.providers ?? []}
+            defaultProviderId={session()?.preferred_provider_id}
           />
         </section>
 

@@ -94,7 +94,7 @@ describe("SessionComposer", () => {
     // Click send button
     sendButton.click();
 
-    expect(onSend).toHaveBeenCalledWith("test message");
+    expect(onSend).toHaveBeenCalledWith("test message", undefined);
   });
 
   it("disables send button when canSend is false", async () => {
@@ -187,5 +187,143 @@ describe("SessionComposer", () => {
 
     const errorDiv = screen.getByText("Connection failed");
     expect(errorDiv).toBeTruthy();
+  });
+
+  it("shows provider selector when providers are available", async () => {
+    const onSend = vi.fn();
+    const mockProviders = [
+      { id: "provider-1", name: "Claude", type: "anthropic", is_active: true },
+      { id: "provider-2", name: "OpenAI", type: "openai", is_active: true },
+    ];
+
+    render(() => (
+      <SessionComposer
+        sessionState={() => "idle"}
+        canSend={() => true}
+        isRunning={() => false}
+        pendingAction={() => null}
+        onSend={onSend}
+        providers={() => mockProviders}
+      />
+    ));
+
+    const selector = screen.getByTestId("session-composer-provider-selector");
+    expect(selector).toBeTruthy();
+
+    const options = selector.querySelectorAll("option");
+    expect(options.length).toBe(3); // Default + 2 providers
+    expect(options[0].textContent).toBe("Default Provider");
+    expect(options[1].textContent).toBe("Claude");
+    expect(options[2].textContent).toBe("OpenAI");
+  });
+
+  it("includes selected provider ID in send payload when different from default", async () => {
+    const onSend = vi.fn();
+    const mockProviders = [
+      { id: "provider-1", name: "Claude", type: "anthropic", is_active: true },
+      { id: "provider-2", name: "OpenAI", type: "openai", is_active: true },
+    ];
+
+    render(() => (
+      <SessionComposer
+        sessionState={() => "idle"}
+        canSend={() => true}
+        isRunning={() => false}
+        pendingAction={() => null}
+        onSend={onSend}
+        providers={() => mockProviders}
+        defaultProviderId="provider-1"
+      />
+    ));
+
+    const input = screen.getByTestId("session-composer-input") as HTMLTextAreaElement;
+    const selector = screen.getByTestId("session-composer-provider-selector") as HTMLSelectElement;
+    const sendButton = screen.getByTestId("session-composer-send") as HTMLButtonElement;
+
+    // Set input value
+    input.value = "test message";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+
+    // Select different provider
+    selector.value = "provider-2";
+    selector.dispatchEvent(new Event("change", { bubbles: true }));
+
+    // Click send button
+    sendButton.click();
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith("test message", "provider-2");
+    });
+  });
+
+  it("omits provider ID when selection matches default", async () => {
+    const onSend = vi.fn();
+    const mockProviders = [
+      { id: "provider-1", name: "Claude", type: "anthropic", is_active: true },
+    ];
+
+    render(() => (
+      <SessionComposer
+        sessionState={() => "idle"}
+        canSend={() => true}
+        isRunning={() => false}
+        pendingAction={() => null}
+        onSend={onSend}
+        providers={() => mockProviders}
+        defaultProviderId="provider-1"
+      />
+    ));
+
+    const input = screen.getByTestId("session-composer-input") as HTMLTextAreaElement;
+    const sendButton = screen.getByTestId("session-composer-send") as HTMLButtonElement;
+
+    // Set input value
+    input.value = "test message";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+
+    // Send with default selection (should not include provider ID)
+    sendButton.click();
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith("test message", undefined);
+    });
+  });
+
+  it("persists last-used provider to localStorage", async () => {
+    const onSend = vi.fn();
+    const mockProviders = [
+      { id: "provider-1", name: "Claude", type: "anthropic", is_active: true },
+      { id: "provider-2", name: "OpenAI", type: "openai", is_active: true },
+    ];
+
+    localStorage.clear();
+
+    render(() => (
+      <SessionComposer
+        sessionState={() => "idle"}
+        canSend={() => true}
+        isRunning={() => false}
+        pendingAction={() => null}
+        onSend={onSend}
+        providers={() => mockProviders}
+      />
+    ));
+
+    const input = screen.getByTestId("session-composer-input") as HTMLTextAreaElement;
+    const selector = screen.getByTestId("session-composer-provider-selector") as HTMLSelectElement;
+    const sendButton = screen.getByTestId("session-composer-send") as HTMLButtonElement;
+
+    // Select provider
+    selector.value = "provider-2";
+    selector.dispatchEvent(new Event("change", { bubbles: true }));
+
+    // Set input and send
+    input.value = "test message";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    sendButton.click();
+
+    await waitFor(() => {
+      expect(localStorage.getItem("lastUsedProviderId")).toBe("provider-2");
+    });
   });
 });
