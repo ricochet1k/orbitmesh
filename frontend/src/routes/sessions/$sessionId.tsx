@@ -68,7 +68,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   const canManage = () => permissions()?.can_initiate_bulk_actions ?? false
 
   const isRunning = () => sessionState() === "running"
-  const isActive = () => sessionState() === "running"
+  const canSendMessage = () => sessionState() === "idle" || sessionState() === "suspended"
 
   const markStreamActive = () => {
     if (streamStatus() !== "live") {
@@ -179,11 +179,10 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     setComposerError(null)
     setComposerPending("send")
     try {
-      const pType = providerType()
-      const payload = pType === "pty" && !text.endsWith("\n") ? `${text}\n` : text
-      await apiClient.sendSessionInput(sessionId(), payload)
+      // Use new /messages endpoint for all session states (idle, running, suspended)
+      await apiClient.sendMessage(sessionId(), text)
     } catch (err) {
-      setComposerError(err instanceof Error ? err.message : "Failed to send input")
+      setComposerError(err instanceof Error ? err.message : "Failed to send message")
     } finally {
       setComposerPending(null)
     }
@@ -268,16 +267,15 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
             onScroll={handleScroll}
           />
 
-          <Show when={isActive()}>
-            <SessionComposer
-              canSend={() => isActive()}
-              isRunning={isRunning}
-              pendingAction={composerPending}
-              onSend={handleSend}
-              onInterrupt={handleInterrupt}
-              error={composerError}
-            />
-          </Show>
+          <SessionComposer
+            sessionState={sessionState}
+            canSend={canSendMessage}
+            isRunning={isRunning}
+            pendingAction={composerPending}
+            onSend={handleSend}
+            onInterrupt={handleInterrupt}
+            error={composerError}
+          />
         </section>
 
         <div class="session-side-panels">

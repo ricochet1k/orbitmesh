@@ -161,6 +161,24 @@ export async function sendSessionInput(id: string, input: string): Promise<void>
   if (!resp.ok) throw new Error(await readErrorMessage(resp));
 }
 
+export async function sendMessage(
+  id: string,
+  content: string,
+  options?: { providerId?: string; providerType?: string },
+): Promise<void> {
+  const payload = {
+    content,
+    provider_id: options?.providerId,
+    provider_type: options?.providerType,
+  };
+  const resp = await fetch(`${BASE_URL}/sessions/${id}/messages`, {
+    method: "POST",
+    headers: withCSRFHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) throw new Error(await readErrorMessage(resp));
+}
+
 export function getEventsUrl(id: string): string {
   return `${BASE_URL}/sessions/${id}/events`;
 }

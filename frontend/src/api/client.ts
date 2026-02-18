@@ -25,6 +25,7 @@ export const apiClient = {
   pauseSession: sessionApi.pauseSession,
   resumeSession: sessionApi.resumeSession,
   sendSessionInput: sessionApi.sendSessionInput,
+  sendMessage: sessionApi.sendMessage,
   getEventsUrl: sessionApi.getEventsUrl,
   pollDockMcp: sessionApi.pollDockMcp,
   respondDockMcp: sessionApi.respondDockMcp,

@@ -258,12 +258,11 @@ export default function AgentDock(props: AgentDockProps) {
         activeSessionId = await ensureDockSessionId()
       }
       if (!activeSessionId) throw new Error("Unable to start dock session.")
-      const pType = session()?.provider_type
-      const payload = pType === "pty" && !text.endsWith("\n") ? `${text}\n` : text
-      await apiClient.sendSessionInput(activeSessionId!, payload)
+      // Use new /messages endpoint for all session states (idle, running, suspended)
+      await apiClient.sendMessage(activeSessionId!, text)
       setLastAction({ label: "Input", detail: text.slice(0, 80) })
     } catch (err) {
-      setComposerError(err instanceof Error ? err.message : "Failed to send input")
+      setComposerError(err instanceof Error ? err.message : "Failed to send message")
     } finally {
       setComposerPending(null)
     }
@@ -368,18 +367,18 @@ export default function AgentDock(props: AgentDockProps) {
             </div>
           </Show>
 
-          {/* Composer — shared component, shown unless errored */}
-          <Show when={dockLoadState() !== "error"}>
-            <SessionComposer
-              canSend={() => dockLoadState() === "live" || !sessionId()}
-              isRunning={isRunning}
-              pendingAction={composerPending}
-              onSend={handleSend}
-              onInterrupt={handleInterrupt}
-              error={composerError}
-              placeholder="Type a message… (Enter to send)"
-            />
-          </Show>
+           {/* Composer — shared component, shown unless errored */}
+           <Show when={dockLoadState() !== "error"}>
+             <SessionComposer
+               sessionState={() => sessionState() ?? "idle"}
+               canSend={() => dockLoadState() === "live" || !sessionId()}
+               isRunning={isRunning}
+               pendingAction={composerPending}
+               onSend={handleSend}
+               onInterrupt={handleInterrupt}
+               error={composerError}
+             />
+           </Show>
 
           {/* Action bar */}
           <Show when={dockLoadState() === "live"}>

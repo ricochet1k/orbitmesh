@@ -61,6 +61,7 @@ vi.mock("../api/client", () => ({
     resumeSession: vi.fn(),
     stopSession: vi.fn(),
     sendSessionInput: vi.fn(),
+    sendMessage: vi.fn(),
     getActivityEntries: vi.fn(),
     listTerminals: vi.fn(),
   },
@@ -233,7 +234,7 @@ describe("AgentDock", () => {
       expect(input.value).toBe("");
     });
 
-    expect(apiClient.sendSessionInput).toHaveBeenCalledWith("session-1", "hello");
+    expect(apiClient.sendMessage).toHaveBeenCalledWith("session-1", "hello");
   });
 
   it("creates a dock session before sending when empty", async () => {
@@ -264,7 +265,7 @@ describe("AgentDock", () => {
 
     await waitFor(() => {
       expect(apiClient.createDockSession).toHaveBeenCalled();
-      expect(apiClient.sendSessionInput).toHaveBeenCalledWith(
+      expect(apiClient.sendMessage).toHaveBeenCalledWith(
         "dock-session-1",
         "hello",
       );

@@ -1,7 +1,10 @@
 import { createSignal, Show } from "solid-js"
 import type { Accessor } from "solid-js"
+import type { SessionState } from "../types/api"
 
 export interface SessionComposerProps {
+  /** Session state (idle, running, or suspended) - determines labels and behavior */
+  sessionState: Accessor<SessionState>
   /** Whether the session is in a state where input can be sent */
   canSend: Accessor<boolean>
   /** Whether the session is currently running (shows interrupt button) */
@@ -21,7 +24,20 @@ export default function SessionComposer(props: SessionComposerProps) {
   const [value, setValue] = createSignal("")
   let inputRef: HTMLTextAreaElement | undefined
 
-  const placeholder = () => props.placeholder ?? "Type a message… (Enter to send, Shift+Enter for newline)"
+  const placeholder = () => {
+    if (props.placeholder) return props.placeholder
+    const state = props.sessionState()
+    switch (state) {
+      case "idle":
+        return "Send a message to start…"
+      case "running":
+        return "Message queued until current run completes"
+      case "suspended":
+        return "Send a message (will be delivered after suspension resolves)…"
+      default:
+        return "Type a message… (Enter to send, Shift+Enter for newline)"
+    }
+  }
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
