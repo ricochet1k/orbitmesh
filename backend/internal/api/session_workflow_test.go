@@ -103,8 +103,8 @@ func TestSessionCreationAndEvents(t *testing.T) {
 		if sessionResp.ProviderType != "pty" {
 			t.Fatalf("Expected provider_type=pty, got %s", sessionResp.ProviderType)
 		}
-		if sessionResp.State != "starting" {
-			t.Fatalf("Expected state=starting, got %s", sessionResp.State)
+		if sessionResp.State != "idle" {
+			t.Fatalf("Expected state=idle, got %s", sessionResp.State)
 		}
 
 		t.Logf("✓ Session created with ID: %s (state: %s)", sessionResp.ID, sessionResp.State)
@@ -374,11 +374,11 @@ func TestSessionLifecycle(t *testing.T) {
 	json.NewDecoder(resp.Body).Decode(&sessionResp)
 	sessionID := sessionResp.ID
 
-	t.Run("Session starts in starting state", func(t *testing.T) {
-		if sessionResp.State != "starting" {
-			t.Fatalf("Expected starting, got %s", sessionResp.State)
+	t.Run("Session starts in idle state", func(t *testing.T) {
+		if sessionResp.State != "idle" {
+			t.Fatalf("Expected idle, got %s", sessionResp.State)
 		}
-		t.Logf("✓ Session created in 'starting' state")
+		t.Logf("✓ Session created in 'idle' state")
 	})
 
 	t.Run("Session transitions to running state", func(t *testing.T) {

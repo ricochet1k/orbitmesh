@@ -80,7 +80,7 @@ func (p *PTYProvider) Start(ctx context.Context, config session.Config) error {
 	}
 
 	p.state.SetState(session.StateStarting)
-	p.events.EmitStatusChange(domain.SessionStateCreated, domain.SessionStateStarting, "starting pty provider")
+	p.events.EmitStatusChange(domain.SessionStateIdle, domain.SessionStateRunning, "starting provider")
 
 	command, args, err := resolvePTYCommand(config)
 	if err != nil {
@@ -131,7 +131,7 @@ func (p *PTYProvider) Start(ctx context.Context, config session.Config) error {
 	p.terminal = terminal
 	p.outputLog = outputLog
 	p.state.SetState(session.StateRunning)
-	p.events.EmitStatusChange(domain.SessionStateStarting, domain.SessionStateRunning, "pty provider running")
+	// Already emitted idle->running at startup
 
 	p.wg.Add(1)
 	go p.processTerminalEvents()
@@ -307,8 +307,8 @@ func (p *PTYProvider) Stop(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	currentState := domain.SessionState(p.state.GetState())
-	if currentState == domain.SessionStateStopped {
+	providerState := p.state.GetState()
+	if providerState == session.StateStopped {
 		return nil
 	}
 
@@ -338,7 +338,7 @@ func (p *PTYProvider) Stop(ctx context.Context) error {
 	}
 
 	p.state.SetState(session.StateStopped)
-	p.events.EmitStatusChange(domain.SessionStateStopping, domain.SessionStateStopped, "pty provider stopped")
+	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateIdle, "pty provider stopped")
 	p.events.Close()
 
 	return nil
@@ -359,7 +359,7 @@ func (p *PTYProvider) Pause(ctx context.Context) error {
 	}
 
 	p.state.SetState(session.StatePaused)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStatePaused, "pty provider paused")
+	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateSuspended, "waiting for external response")
 	return nil
 }
 
@@ -378,7 +378,7 @@ func (p *PTYProvider) Resume(ctx context.Context) error {
 	}
 
 	p.state.SetState(session.StateRunning)
-	p.events.EmitStatusChange(domain.SessionStatePaused, domain.SessionStateRunning, "pty provider resumed")
+	p.events.EmitStatusChange(domain.SessionStateSuspended, domain.SessionStateRunning, "resuming from suspension")
 	return nil
 }
 
@@ -406,7 +406,7 @@ func (p *PTYProvider) Kill() error {
 	}
 
 	p.state.SetState(session.StateStopped)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateStopped, "pty provider killed")
+	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateIdle, "pty provider killed")
 	p.events.Close()
 	return nil
 }

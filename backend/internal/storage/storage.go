@@ -366,21 +366,20 @@ func dataToSession(data *sessionData) (*domain.Session, error) {
 
 func parseSessionState(s string) (domain.SessionState, error) {
 	switch s {
-	case "created":
-		return domain.SessionStateCreated, nil
-	case "starting":
-		return domain.SessionStateStarting, nil
+	case "idle":
+		return domain.SessionStateIdle, nil
 	case "running":
 		return domain.SessionStateRunning, nil
+	case "suspended":
+		return domain.SessionStateSuspended, nil
+	// Handle legacy state names for backward compatibility
+	case "created", "starting":
+		return domain.SessionStateIdle, nil
 	case "paused":
-		return domain.SessionStatePaused, nil
-	case "stopping":
-		return domain.SessionStateStopping, nil
-	case "stopped":
-		return domain.SessionStateStopped, nil
-	case "error":
-		return domain.SessionStateError, nil
+		return domain.SessionStateSuspended, nil
+	case "stopping", "stopped", "error":
+		return domain.SessionStateIdle, nil
 	default:
-		return domain.SessionStateCreated, fmt.Errorf("%w: %s", ErrInvalidSessionState, s)
+		return domain.SessionStateIdle, fmt.Errorf("%w: %s", ErrInvalidSessionState, s)
 	}
 }

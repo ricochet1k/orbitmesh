@@ -646,14 +646,13 @@ func TestListSessions_SessionPersistenceAfterCreation(t *testing.T) {
 			if s.ProviderType != "mock" {
 				t.Errorf("ProviderType = %q, want %q", s.ProviderType, "mock")
 			}
-			// Session should be in created, starting, or running state
+			// Session should be in idle or running state
 			validStates := map[apiTypes.SessionState]bool{
-				apiTypes.SessionStateCreated:  true,
-				apiTypes.SessionStateStarting: true,
-				apiTypes.SessionStateRunning:  true,
+				apiTypes.SessionStateIdle:    true,
+				apiTypes.SessionStateRunning: true,
 			}
 			if !validStates[s.State] {
-				t.Errorf("State = %q, expected one of: created, starting, running", s.State)
+				t.Errorf("State = %q, expected one of: idle, running", s.State)
 			}
 			break
 		}

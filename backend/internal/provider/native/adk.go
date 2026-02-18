@@ -126,7 +126,7 @@ func (p *ADKSession) Start(ctx context.Context, config session.Config) error {
 	p.runCtx, p.runCancel = context.WithCancel(p.ctx)
 
 	p.state.SetState(session.StateStarting)
-	p.events.EmitStatusChange(domain.SessionStateCreated, domain.SessionStateStarting, "initializing ADK provider")
+	p.events.EmitStatusChange(domain.SessionStateIdle, domain.SessionStateRunning, "starting provider")
 
 	llm, err := p.createModel(apiKey)
 	if err != nil {
@@ -190,7 +190,7 @@ func (p *ADKSession) Start(ctx context.Context, config session.Config) error {
 	p.adkSessID = createResp.Session.ID()
 
 	p.state.SetState(session.StateRunning)
-	p.events.EmitStatusChange(domain.SessionStateStarting, domain.SessionStateRunning, "ADK provider initialized")
+	// Provider is now running; we've already emitted idle->running at startup
 	p.events.EmitMetadata("model", p.config.Model)
 
 	return nil
@@ -372,13 +372,13 @@ func (p *ADKSession) Stop(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	currentState := domain.SessionState(p.state.GetState())
-	if currentState == domain.SessionStateStopped {
+	providerState := p.state.GetState()
+	if providerState == session.StateStopped {
 		return nil
 	}
 
 	p.state.SetState(session.StateStopping)
-	p.events.EmitStatusChange(currentState, domain.SessionStateStopping, "stopping provider")
+	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateIdle, "stopping provider")
 
 	if p.runCancel != nil {
 		p.runCancel()
@@ -409,7 +409,7 @@ func (p *ADKSession) Stop(ctx context.Context) error {
 	}
 
 	p.state.SetState(session.StateStopped)
-	p.events.EmitStatusChange(domain.SessionStateStopping, domain.SessionStateStopped, "session stopped")
+	// Session is now idle; already emitted running->idle above
 	p.events.Close()
 
 	return nil
@@ -432,7 +432,7 @@ func (p *ADKSession) Pause(ctx context.Context) error {
 	p.pauseMu.Unlock()
 
 	p.state.SetState(session.StatePaused)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStatePaused, "session paused")
+	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateSuspended, "waiting for external response")
 
 	return nil
 }
@@ -451,7 +451,7 @@ func (p *ADKSession) Resume(ctx context.Context) error {
 	p.pauseMu.Unlock()
 
 	p.state.SetState(session.StateRunning)
-	p.events.EmitStatusChange(domain.SessionStatePaused, domain.SessionStateRunning, "session resumed")
+	p.events.EmitStatusChange(domain.SessionStateSuspended, domain.SessionStateRunning, "resuming from suspension")
 
 	return nil
 }
@@ -479,7 +479,7 @@ func (p *ADKSession) Kill() error {
 	p.pauseMu.Unlock()
 
 	p.state.SetState(session.StateStopped)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateStopped, "session killed")
+	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateIdle, "session killed")
 	p.events.Close()
 
 	return nil

@@ -5,13 +5,9 @@ import "time"
 type SessionState string
 
 const (
-	SessionStateCreated  SessionState = "created"
-	SessionStateStarting SessionState = "starting"
-	SessionStateRunning  SessionState = "running"
-	SessionStatePaused   SessionState = "paused"
-	SessionStateStopping SessionState = "stopping"
-	SessionStateStopped  SessionState = "stopped"
-	SessionStateError    SessionState = "error"
+	SessionStateIdle      SessionState = "idle"
+	SessionStateRunning   SessionState = "running"
+	SessionStateSuspended SessionState = "suspended"
 )
 
 type SessionRequest struct {

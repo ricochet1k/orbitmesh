@@ -242,7 +242,7 @@ func TestSSE_StatusChangeEvent(t *testing.T) {
 
 	events := readSSEEvents(resp)
 
-	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionID, domain.SessionStateCreated, domain.SessionStateRunning, "started"))
+	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionID, domain.SessionStateIdle, domain.SessionStateRunning, "started"))
 
 	select {
 	case ev := <-events:
@@ -467,7 +467,7 @@ func TestConvertEventData_AllTypes(t *testing.T) {
 	}{
 		{
 			name:  "status_change",
-			event: domain.NewStatusChangeEvent("s1", domain.SessionStateCreated, domain.SessionStateRunning, "go"),
+			event: domain.NewStatusChangeEvent("s1", domain.SessionStateIdle, domain.SessionStateRunning, "go"),
 			want:  apiTypes.EventTypeStatusChange,
 		},
 		{
@@ -585,8 +585,8 @@ func TestIntegration_SessionLifecycle(t *testing.T) {
 	defer getResp.Body.Close()
 	var sess apiTypes.SessionStatusResponse
 	_ = json.NewDecoder(getResp.Body).Decode(&sess)
-	if sess.State != apiTypes.SessionStateStopped {
-		t.Errorf("final state = %q, want stopped", sess.State)
+	if sess.State != apiTypes.SessionStateIdle {
+		t.Errorf("final state = %q, want idle", sess.State)
 	}
 
 	// 7. Drain any buffered SSE events — we should have received state changes

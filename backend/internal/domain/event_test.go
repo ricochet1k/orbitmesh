@@ -27,7 +27,7 @@ func TestEventTypeString(t *testing.T) {
 
 func TestNewStatusChangeEvent(t *testing.T) {
 	before := time.Now()
-	e := NewStatusChangeEvent("session-123", SessionStateRunning, SessionStatePaused, "user request")
+	e := NewStatusChangeEvent("session-123", SessionStateRunning, SessionStateSuspended, "waiting for tool result")
 	after := time.Now()
 
 	if e.Type != EventTypeStatusChange {
@@ -47,11 +47,11 @@ func TestNewStatusChangeEvent(t *testing.T) {
 	if data.OldState != SessionStateRunning {
 		t.Errorf("expected OldState %v, got %v", SessionStateRunning, data.OldState)
 	}
-	if data.NewState != SessionStatePaused {
-		t.Errorf("expected NewState %v, got %v", SessionStatePaused, data.NewState)
+	if data.NewState != SessionStateSuspended {
+		t.Errorf("expected NewState %v, got %v", SessionStateSuspended, data.NewState)
 	}
-	if data.Reason != "user request" {
-		t.Errorf("expected Reason 'user request', got %q", data.Reason)
+	if data.Reason != "waiting for tool result" {
+		t.Errorf("expected Reason 'waiting for tool result', got %q", data.Reason)
 	}
 }
 

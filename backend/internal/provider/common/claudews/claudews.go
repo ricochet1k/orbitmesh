@@ -99,7 +99,7 @@ func (p *ClaudeWSProvider) Start(ctx context.Context, config session.Config) err
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 
 	p.state.SetState(session.StateStarting)
-	p.events.EmitStatusChange(domain.SessionStateCreated, domain.SessionStateStarting, "starting claudews provider")
+	p.events.EmitStatusChange(domain.SessionStateIdle, domain.SessionStateRunning, "starting claudews provider")
 
 	// ── 1. Start the WebSocket server ────────────────────────────────────────
 	srv, err := newWSServer(p.handleConnection)
@@ -159,7 +159,7 @@ func (p *ClaudeWSProvider) Start(ctx context.Context, config session.Config) err
 	go p.processInput()
 
 	p.state.SetState(session.StateRunning)
-	p.events.EmitStatusChange(domain.SessionStateStarting, domain.SessionStateRunning, "claudews provider running")
+	// Already emitted idle->running at startup
 
 	return nil
 }
@@ -169,12 +169,12 @@ func (p *ClaudeWSProvider) Stop(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if domain.SessionState(p.state.GetState()) == domain.SessionStateStopped {
+	if p.state.GetState() == session.StateStopped {
 		return nil
 	}
 
 	p.state.SetState(session.StateStopping)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateStopping, "stopping claudews provider")
+	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateIdle, "stopping claudews provider")
 
 	if p.cancel != nil {
 		p.cancel()
@@ -193,7 +193,7 @@ func (p *ClaudeWSProvider) Stop(ctx context.Context) error {
 	p.wg.Wait()
 
 	p.state.SetState(session.StateStopped)
-	p.events.EmitStatusChange(domain.SessionStateStopping, domain.SessionStateStopped, "claudews provider stopped")
+	// Already emitted running->idle at stopping
 	p.events.Close()
 
 	return nil
@@ -212,7 +212,7 @@ func (p *ClaudeWSProvider) Pause(ctx context.Context) error {
 	}
 	p.inputBuffer.Pause()
 	p.state.SetState(session.StatePaused)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStatePaused, "claudews provider paused")
+	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateSuspended, "claudews provider paused")
 	return nil
 }
 
@@ -226,7 +226,7 @@ func (p *ClaudeWSProvider) Resume(ctx context.Context) error {
 	}
 	p.inputBuffer.Resume()
 	p.state.SetState(session.StateRunning)
-	p.events.EmitStatusChange(domain.SessionStatePaused, domain.SessionStateRunning, "claudews provider resumed")
+	p.events.EmitStatusChange(domain.SessionStateSuspended, domain.SessionStateRunning, "claudews provider resumed")
 	return nil
 }
 
@@ -247,7 +247,7 @@ func (p *ClaudeWSProvider) Kill() error {
 	}
 
 	p.state.SetState(session.StateStopped)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateStopped, "claudews provider killed")
+	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateIdle, "claudews provider killed")
 	p.events.Close()
 	return nil
 }

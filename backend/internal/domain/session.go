@@ -10,13 +10,9 @@ import (
 type SessionState int
 
 const (
-	SessionStateCreated SessionState = iota
-	SessionStateStarting
+	SessionStateIdle SessionState = iota
 	SessionStateRunning
-	SessionStatePaused
-	SessionStateStopping
-	SessionStateStopped
-	SessionStateError
+	SessionStateSuspended
 )
 
 const (
@@ -25,20 +21,12 @@ const (
 
 func (s SessionState) String() string {
 	switch s {
-	case SessionStateCreated:
-		return "created"
-	case SessionStateStarting:
-		return "starting"
+	case SessionStateIdle:
+		return "idle"
 	case SessionStateRunning:
 		return "running"
-	case SessionStatePaused:
-		return "paused"
-	case SessionStateStopping:
-		return "stopping"
-	case SessionStateStopped:
-		return "stopped"
-	case SessionStateError:
-		return "error"
+	case SessionStateSuspended:
+		return "suspended"
 	default:
 		return "unknown"
 	}
@@ -54,13 +42,9 @@ func NewInvalidTransitionError(from, to SessionState) error {
 }
 
 var validTransitions = map[SessionState][]SessionState{
-	SessionStateCreated:  {SessionStateStarting},
-	SessionStateStarting: {SessionStateRunning, SessionStateError},
-	SessionStateRunning:  {SessionStatePaused, SessionStateStopping, SessionStateError},
-	SessionStatePaused:   {SessionStateRunning, SessionStateStopping},
-	SessionStateStopping: {SessionStateStopped, SessionStateError},
-	SessionStateStopped:  {},
-	SessionStateError:    {SessionStateStopping},
+	SessionStateIdle:      {SessionStateRunning},
+	SessionStateRunning:   {SessionStateSuspended, SessionStateIdle},
+	SessionStateSuspended: {SessionStateRunning, SessionStateIdle},
 }
 
 func CanTransition(from, to SessionState) bool {
@@ -106,7 +90,7 @@ func NewSession(id, providerType, workingDir string) *Session {
 	return &Session{
 		ID:           id,
 		ProviderType: providerType,
-		State:        SessionStateCreated,
+		State:        SessionStateIdle,
 		WorkingDir:   workingDir,
 		CreatedAt:    now,
 		UpdatedAt:    now,
@@ -217,10 +201,4 @@ func (s *Session) Snapshot() SessionSnapshot {
 		ErrorMessage: s.ErrorMessage,
 		Transitions:  transitions,
 	}
-}
-
-func (s *Session) IsTerminal() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.State == SessionStateStopped || s.State == SessionStateError
 }

@@ -30,11 +30,8 @@ const (
 type ProviderFactory func(providerType, sessionID string, config session.Config) (session.Session, error)
 
 type sessionContext struct {
-	session    *domain.Session
-	provider   session.Session
-	cancel     context.CancelFunc
-	eventsDone chan struct{}
-	healthDone chan struct{}
+	session *domain.Session
+	run     *session.ProviderRun // The active provider run (nil if idle)
 }
 
 type AgentExecutor struct {
@@ -120,9 +117,7 @@ func (e *AgentExecutor) StartSession(ctx context.Context, id string, config sess
 		session.SetCurrentTask(taskRef)
 	}
 
-	if err := session.TransitionTo(domain.SessionStateStarting, "starting session"); err != nil {
-		return nil, fmt.Errorf("failed to transition to starting: %w", err)
-	}
+	// Session is created in idle state by NewSession(), no need to transition
 
 	if e.storage != nil {
 		if err := e.storage.Save(session); err != nil {
@@ -133,26 +128,23 @@ func (e *AgentExecutor) StartSession(ctx context.Context, id string, config sess
 		e.ensureTerminalRecord(session)
 	}
 
-	e.broadcastStateChange(session, domain.SessionStateCreated, domain.SessionStateStarting, "starting session")
-
-	sessionCtx, sessionCancel := context.WithCancel(e.ctx)
+	// Note: Sessions are created in idle state. We don't broadcast the initial idle state
+	// since there's no state change. State changes will be broadcast when the session
+	// transitions to running or suspended.
 
 	sc := &sessionContext{
-		session:    session,
-		provider:   prov,
-		cancel:     sessionCancel,
-		eventsDone: make(chan struct{}),
-		healthDone: make(chan struct{}),
+		session: session,
+		run:     nil, // Will be set in runSessionLoop
 	}
 	e.sessions[id] = sc
 
 	e.wg.Add(1)
-	go e.runSessionLoop(sessionCtx, sc, config)
+	go e.runSessionLoop(e.ctx, sc, prov, config)
 
 	return session, nil
 }
 
-func (e *AgentExecutor) runSessionLoop(ctx context.Context, sc *sessionContext, config session.Config) {
+func (e *AgentExecutor) runSessionLoop(ctx context.Context, sc *sessionContext, prov session.Session, config session.Config) {
 	defer e.wg.Done()
 	defer func() {
 		if r := recover(); r != nil {
@@ -160,37 +152,65 @@ func (e *AgentExecutor) runSessionLoop(ctx context.Context, sc *sessionContext, 
 		}
 	}()
 
-	startCtx, startCancel := context.WithTimeout(ctx, e.opTimeout)
-	err := sc.provider.Start(startCtx, config)
+	// Create a new provider run for this execution
+	run := session.NewProviderRun(prov, ctx)
+
+	e.mu.Lock()
+	sc.run = run
+	e.mu.Unlock()
+
+	// Start the provider
+	startCtx, startCancel := context.WithTimeout(run.Ctx, e.opTimeout)
+	err := run.Provider.Start(startCtx, config)
 	startCancel()
 
 	if err != nil {
 		errMsg := fmt.Sprintf("start failed: %v", err)
 		sc.session.SetError(errMsg)
-		e.transitionWithSave(sc, domain.SessionStateError, errMsg)
+		run.SetError(err)
+		// On provider error, session stays idle (per design: errors are absorbed into message history)
+		// Session remains in idle state, ready to be retried or used again
+
+		// Clear the run
+		e.mu.Lock()
+		sc.run = nil
+		e.mu.Unlock()
 		return
 	}
 
+	run.MarkActive()
 	e.transitionWithSave(sc, domain.SessionStateRunning, "provider started")
 	e.ensureTerminalHubForPTY(sc)
 
 	e.wg.Add(2)
-	go e.handleEvents(ctx, sc)
-	go e.healthCheck(ctx, sc)
+	go e.handleEvents(run.Ctx, sc, run)
+	go e.healthCheck(run.Ctx, sc, run)
 
-	<-ctx.Done()
+	<-run.Ctx.Done()
+
+	// Wait for event handling to complete
+	<-run.EventsDone
+	<-run.HealthDone
+
+	// Run completed - return session to idle state
+	e.transitionWithSave(sc, domain.SessionStateIdle, "provider run completed")
+
+	// Clear the run
+	e.mu.Lock()
+	sc.run = nil
+	e.mu.Unlock()
 }
 
-func (e *AgentExecutor) handleEvents(ctx context.Context, sc *sessionContext) {
+func (e *AgentExecutor) handleEvents(ctx context.Context, sc *sessionContext, run *session.ProviderRun) {
 	defer e.wg.Done()
-	defer close(sc.eventsDone)
+	defer close(run.EventsDone)
 	defer func() {
 		if r := recover(); r != nil {
 			e.handlePanic(sc, r)
 		}
 	}()
 
-	events := sc.provider.Events()
+	events := run.Provider.Events()
 	if events == nil {
 		return
 	}
@@ -209,9 +229,9 @@ func (e *AgentExecutor) handleEvents(ctx context.Context, sc *sessionContext) {
 	}
 }
 
-func (e *AgentExecutor) healthCheck(ctx context.Context, sc *sessionContext) {
+func (e *AgentExecutor) healthCheck(ctx context.Context, sc *sessionContext, run *session.ProviderRun) {
 	defer e.wg.Done()
-	defer close(sc.healthDone)
+	defer close(run.HealthDone)
 	defer func() {
 		if r := recover(); r != nil {
 			e.handlePanic(sc, r)
@@ -226,9 +246,13 @@ func (e *AgentExecutor) healthCheck(ctx context.Context, sc *sessionContext) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			status := sc.provider.Status()
-			if status.State == session.StateError && sc.session.GetState() != domain.SessionStateError {
-				e.transitionWithSave(sc, domain.SessionStateError, "health check detected error")
+			status := run.Provider.Status()
+			if status.State == session.StateError {
+				// Provider error: record it but don't change session state
+				// The session will return to idle when the run completes
+				run.SetError(status.Error)
+				run.Cancel() // Cancel the run context to trigger cleanup
+				return
 			}
 		}
 	}
@@ -244,27 +268,29 @@ func (e *AgentExecutor) StopSession(ctx context.Context, id string) error {
 	}
 
 	currentState := sc.session.GetState()
-	if currentState == domain.SessionStateStopped || currentState == domain.SessionStateStopping {
+
+	// If already idle, nothing to stop
+	if currentState == domain.SessionStateIdle {
 		return nil
 	}
 
-	if !domain.CanTransition(currentState, domain.SessionStateStopping) {
-		return fmt.Errorf("%w: cannot stop from state %s", ErrInvalidState, currentState)
+	// Cancel the active run if any
+	if currentState == domain.SessionStateRunning || currentState == domain.SessionStateSuspended {
+		run := sc.run
+		if run != nil {
+			stopCtx, cancel := context.WithTimeout(ctx, e.opTimeout)
+			defer cancel()
+
+			_ = run.Provider.Stop(stopCtx)
+			run.Cancel()
+		}
+		e.closeTerminalHub(id)
+
+		// Transition to idle
+		e.transitionWithSave(sc, domain.SessionStateIdle, "session stopped")
 	}
 
-	e.transitionWithSave(sc, domain.SessionStateStopping, "stop requested")
-
-	stopCtx, cancel := context.WithTimeout(ctx, e.opTimeout)
-	defer cancel()
-
-	err := sc.provider.Stop(stopCtx)
-
-	sc.cancel()
-	e.closeTerminalHub(id)
-
-	e.transitionWithSave(sc, domain.SessionStateStopped, "session stopped")
-
-	return err
+	return nil
 }
 
 func (e *AgentExecutor) PauseSession(ctx context.Context, id string) error {
@@ -277,18 +303,26 @@ func (e *AgentExecutor) PauseSession(ctx context.Context, id string) error {
 	}
 
 	currentState := sc.session.GetState()
-	if !domain.CanTransition(currentState, domain.SessionStatePaused) {
-		return fmt.Errorf("%w: cannot pause from state %s", ErrInvalidState, currentState)
+
+	// Pause is only valid when running
+	if currentState != domain.SessionStateRunning {
+		return fmt.Errorf("%w: can only pause running session, current state: %s", ErrInvalidState, currentState)
+	}
+
+	run := sc.run
+	if run == nil {
+		return fmt.Errorf("no active run to pause")
 	}
 
 	pauseCtx, cancel := context.WithTimeout(ctx, e.opTimeout)
 	defer cancel()
 
-	if err := sc.provider.Pause(pauseCtx); err != nil {
+	if err := run.Provider.Pause(pauseCtx); err != nil {
 		return fmt.Errorf("failed to pause provider: %w", err)
 	}
 
-	e.transitionWithSave(sc, domain.SessionStatePaused, "session paused")
+	// Transition to suspended while waiting
+	e.transitionWithSave(sc, domain.SessionStateSuspended, "session paused, awaiting response")
 	return nil
 }
 
@@ -302,14 +336,21 @@ func (e *AgentExecutor) ResumeSession(ctx context.Context, id string) error {
 	}
 
 	currentState := sc.session.GetState()
-	if currentState != domain.SessionStatePaused {
-		return fmt.Errorf("%w: can only resume from paused state, current: %s", ErrInvalidState, currentState)
+
+	// Resume is only valid when suspended
+	if currentState != domain.SessionStateSuspended {
+		return fmt.Errorf("%w: can only resume suspended session, current state: %s", ErrInvalidState, currentState)
+	}
+
+	run := sc.run
+	if run == nil {
+		return fmt.Errorf("no active run to resume")
 	}
 
 	resumeCtx, cancel := context.WithTimeout(ctx, e.opTimeout)
 	defer cancel()
 
-	if err := sc.provider.Resume(resumeCtx); err != nil {
+	if err := run.Provider.Resume(resumeCtx); err != nil {
 		return fmt.Errorf("failed to resume provider: %w", err)
 	}
 
@@ -327,22 +368,25 @@ func (e *AgentExecutor) KillSession(id string) error {
 	}
 
 	currentState := sc.session.GetState()
-	if currentState == domain.SessionStateStopped {
+
+	// If already idle, nothing to kill
+	if currentState == domain.SessionStateIdle {
 		return nil
 	}
 
-	if domain.CanTransition(currentState, domain.SessionStateStopping) {
-		e.transitionWithSave(sc, domain.SessionStateStopping, "killing session")
+	// Kill the active provider run
+	run := sc.run
+	if run != nil {
+		if err := run.Provider.Kill(); err != nil {
+			return fmt.Errorf("failed to kill provider: %w", err)
+		}
+		run.Cancel()
 	}
 
-	if err := sc.provider.Kill(); err != nil {
-		return fmt.Errorf("failed to kill provider: %w", err)
-	}
-
-	sc.cancel()
 	e.closeTerminalHub(id)
 
-	e.transitionWithSave(sc, domain.SessionStateStopped, "session killed")
+	// Transition to idle
+	e.transitionWithSave(sc, domain.SessionStateIdle, "session killed")
 	return nil
 }
 
@@ -372,14 +416,20 @@ func (e *AgentExecutor) GetSession(id string) (*domain.Session, error) {
 
 func (e *AgentExecutor) GetSessionStatus(id string) (session.Status, error) {
 	e.mu.RLock()
-	defer e.mu.RUnlock()
-
 	sc, exists := e.sessions[id]
+	e.mu.RUnlock()
+
 	if !exists {
 		return session.Status{}, ErrSessionNotFound
 	}
 
-	return sc.provider.Status(), nil
+	// If there's no active run, return a default status
+	run := sc.run
+	if run == nil {
+		return session.Status{}, nil
+	}
+
+	return run.Provider.Status(), nil
 }
 
 func (e *AgentExecutor) ListSessions() []*domain.Session {
@@ -461,7 +511,12 @@ func (e *AgentExecutor) SendInput(ctx context.Context, id string, input string) 
 		return ErrSessionNotFound
 	}
 
-	return sc.provider.SendInput(ctx, input)
+	run := sc.run
+	if run == nil {
+		return fmt.Errorf("no active provider run for session %s", id)
+	}
+
+	return run.Provider.SendInput(ctx, input)
 }
 
 func (e *AgentExecutor) TerminalHub(id string) (*TerminalHub, error) {
@@ -477,7 +532,12 @@ func (e *AgentExecutor) TerminalHub(id string) (*TerminalHub, error) {
 		return hub, nil
 	}
 
-	provider, ok := sc.provider.(TerminalProvider)
+	run := sc.run
+	if run == nil {
+		return nil, fmt.Errorf("no active provider run for session %s", id)
+	}
+
+	provider, ok := run.Provider.(TerminalProvider)
 	if !ok {
 		return nil, ErrTerminalNotSupported
 	}
@@ -505,7 +565,12 @@ func (e *AgentExecutor) TerminalSnapshot(id string) (terminal.Snapshot, error) {
 		return terminal.Snapshot{}, ErrSessionNotFound
 	}
 
-	provider, ok := sc.provider.(TerminalProvider)
+	run := sc.run
+	if run == nil {
+		return terminal.Snapshot{}, fmt.Errorf("no active provider run for session %s", id)
+	}
+
+	provider, ok := run.Provider.(TerminalProvider)
 	if !ok {
 		return terminal.Snapshot{}, ErrTerminalNotSupported
 	}
@@ -598,7 +663,9 @@ func (e *AgentExecutor) handlePanic(sc *sessionContext, r any) {
 	errMsg := fmt.Sprintf("panic recovered: %v", r)
 	sc.session.SetError(errMsg)
 
-	_ = sc.session.TransitionTo(domain.SessionStateError, errMsg)
+	// On panic, transition to idle state (per design: errors don't block session)
+	// The panic is recorded in the error message and session becomes idle again
+	_ = sc.session.TransitionTo(domain.SessionStateIdle, errMsg)
 
 	if e.storage != nil {
 		_ = e.storage.Save(sc.session)
@@ -652,13 +719,19 @@ func (e *AgentExecutor) ensureTerminalRecord(session *domain.Session) {
 }
 
 func (e *AgentExecutor) ensureTerminalHubForPTY(sc *sessionContext) {
-	if sc == nil || sc.session == nil || sc.provider == nil {
+	if sc == nil || sc.session == nil {
 		return
 	}
 	if sc.session.ProviderType != "pty" {
 		return
 	}
-	if _, ok := sc.provider.(TerminalProvider); !ok {
+
+	run := sc.run
+	if run == nil {
+		return
+	}
+
+	if _, ok := run.Provider.(TerminalProvider); !ok {
 		return
 	}
 	_, _ = e.TerminalHub(sc.session.ID)

@@ -39,16 +39,28 @@ Agents should use the `strand` CLI to interact with tasks. Choose the command ba
 - `strand complete <id> "report"`: Complete the entire task.
 - `strand add <template> "title"`: Create a new task of a specific type.
 
-### Strand CLI guidance (from `strand agents`)
+## Strand Agent Instructions
+`strand` is a task management CLI for humans and agents. This repository uses `strand` to manage tasks
+so you should use it to track work that needs to be done.
 
-- Use `strand next --claim` to select and claim work; respect role opt-in or ignore behavior.
-- When asked to work on the next thing, run `strand next --claim`, follow the returned instructions, and report a brief task summary.
-- Treat the role description returned by `strand next --claim` as canonical for how to execute the task.
-- When a task is done (including planning-only), run `strand complete <task-id> "report of what was done"`.
-- If blocked, record blockers with `strand block`.
-- Use `strand add` for new tasks or issues; avoid ad-hoc task creation outside strand.
-- Get the list of roles and task templates from `strand roles` and `strand templates`, add them to `AGENTS.md` and keep that part up to date as needed.
-- If bugs, usability issues, or missing features are found in `strand`, file an issue in the `strand` project via `strand add issue --project strand "Issue title"` with a detailed markdown body.
+### Core workflow
+- Pull the next task and claim it in one step with `strand next --claim`.
+- If you already know the task ID, claim it directly with `strand claim <task-id>`.
+- Treat the role document printed by `strand next` as part of the assignment context.
+- Finish work with `strand complete <task-id> "report of what was done"`.
+
+### Common commands
+- Create work: `strand add <type> "title" <<EOF \n Description \n EOF` (or `strand add issue "title"`).
+- Update metadata/content: `strand edit <task-id> <<EOF \n Description \n EOF`.
+- Reassign role: `strand assign <task-id> <role>`.
+- Inspect tasks: `strand list`, `strand search <query>`, `strand show <task-id>`.
+- Manage status: `strand claim <task-id>`, `strand cancel <task-id> [reason]`, `strand mark-duplicate <task-id> <duplicate-of>`.
+- Explore templates and roles: `strand templates`, `strand roles`.
+
+### Rules for agents
+- Prefer `strand` commands over manual task file edits whenever possible.
+- Use short IDs or full IDs; both are accepted by task-ID commands.
+- If CLI of `strand` behavior is missing, awkward or otherwise doesn't work the way you expect the first time, file an issue task via `strand add issue --project strandyard` before working around it.
 
 ## Execution Guidelines
 

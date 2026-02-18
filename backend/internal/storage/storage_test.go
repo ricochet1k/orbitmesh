@@ -52,8 +52,7 @@ func TestJSONFileStorage_SaveAndLoad(t *testing.T) {
 	session.CurrentTask = "task-123"
 	session.Output = "some output"
 
-	_ = session.TransitionTo(domain.SessionStateStarting, "starting up")
-	_ = session.TransitionTo(domain.SessionStateRunning, "ready")
+	_ = session.TransitionTo(domain.SessionStateRunning, "started")
 
 	if err := storage.Save(session); err != nil {
 		t.Fatalf("Save failed: %v", err)
@@ -218,13 +217,9 @@ func TestJSONFileStorage_AllStatesPersist(t *testing.T) {
 	storage, _ := NewJSONFileStorage(tmpDir)
 
 	states := []domain.SessionState{
-		domain.SessionStateCreated,
-		domain.SessionStateStarting,
+		domain.SessionStateIdle,
 		domain.SessionStateRunning,
-		domain.SessionStatePaused,
-		domain.SessionStateStopping,
-		domain.SessionStateStopped,
-		domain.SessionStateError,
+		domain.SessionStateSuspended,
 	}
 
 	for _, state := range states {
@@ -252,10 +247,10 @@ func TestJSONFileStorage_TransitionsPersist(t *testing.T) {
 	storage, _ := NewJSONFileStorage(tmpDir)
 
 	session := domain.NewSession("transition-test", "claude", "/work")
-	_ = session.TransitionTo(domain.SessionStateStarting, "init")
-	_ = session.TransitionTo(domain.SessionStateRunning, "ready")
-	_ = session.TransitionTo(domain.SessionStatePaused, "paused by user")
+	_ = session.TransitionTo(domain.SessionStateRunning, "started")
+	_ = session.TransitionTo(domain.SessionStateSuspended, "waiting for tool")
 	_ = session.TransitionTo(domain.SessionStateRunning, "resumed")
+	_ = session.TransitionTo(domain.SessionStateIdle, "completed")
 
 	_ = storage.Save(session)
 	loaded, _ := storage.Load("transition-test")
@@ -264,14 +259,14 @@ func TestJSONFileStorage_TransitionsPersist(t *testing.T) {
 		t.Fatalf("expected 4 transitions, got %d", len(loaded.Transitions))
 	}
 
-	tr := loaded.Transitions[2]
+	tr := loaded.Transitions[1]
 	if tr.From != domain.SessionStateRunning {
 		t.Errorf("expected From Running, got %v", tr.From)
 	}
-	if tr.To != domain.SessionStatePaused {
-		t.Errorf("expected To Paused, got %v", tr.To)
+	if tr.To != domain.SessionStateSuspended {
+		t.Errorf("expected To Suspended, got %v", tr.To)
 	}
-	if tr.Reason != "paused by user" {
-		t.Errorf("expected reason 'paused by user', got %q", tr.Reason)
+	if tr.Reason != "waiting for tool" {
+		t.Errorf("expected reason 'waiting for tool', got %q", tr.Reason)
 	}
 }

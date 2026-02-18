@@ -8,16 +8,12 @@ import (
 
 func TestSessionState_Values(t *testing.T) {
 	states := []SessionState{
-		SessionStateCreated,
-		SessionStateStarting,
+		SessionStateIdle,
 		SessionStateRunning,
-		SessionStatePaused,
-		SessionStateStopping,
-		SessionStateStopped,
-		SessionStateError,
+		SessionStateSuspended,
 	}
 
-	expected := []string{"created", "starting", "running", "paused", "stopping", "stopped", "error"}
+	expected := []string{"idle", "running", "suspended"}
 
 	for i, state := range states {
 		if string(state) != expected[i] {
@@ -130,7 +126,7 @@ func TestSessionListResponse_JSONMarshal(t *testing.T) {
 	resp := SessionListResponse{
 		Sessions: []SessionResponse{
 			{ID: "session-1", State: SessionStateRunning},
-			{ID: "session-2", State: SessionStatePaused},
+			{ID: "session-2", State: SessionStateSuspended},
 		},
 	}
 

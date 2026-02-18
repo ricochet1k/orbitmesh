@@ -75,7 +75,7 @@ func (p *ClaudeCodeProvider) Start(ctx context.Context, config session.Config) e
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 
 	p.state.SetState(session.StateStarting)
-	p.events.EmitStatusChange(domain.SessionStateCreated, domain.SessionStateStarting, "starting claude provider")
+	p.events.EmitStatusChange(domain.SessionStateIdle, domain.SessionStateRunning, "starting claude provider")
 
 	// Build command arguments from config
 	args, err := buildCommandArgs(config)
@@ -119,7 +119,7 @@ func (p *ClaudeCodeProvider) Start(ctx context.Context, config session.Config) e
 
 	// Transition to running state
 	p.state.SetState(session.StateRunning)
-	p.events.EmitStatusChange(domain.SessionStateStarting, domain.SessionStateRunning, "claude provider running")
+	// Already emitted idle->running at startup
 
 	return nil
 }
@@ -129,13 +129,13 @@ func (p *ClaudeCodeProvider) Stop(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	currentState := domain.SessionState(p.state.GetState())
-	if currentState == domain.SessionStateStopped {
+	providerState := p.state.GetState()
+	if providerState == session.StateStopped {
 		return nil
 	}
 
 	p.state.SetState(session.StateStopping)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateStopping, "stopping claude provider")
+	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateIdle, "stopping claude provider")
 
 	// Cancel context to signal goroutines to stop
 	if p.cancel != nil {
@@ -152,7 +152,7 @@ func (p *ClaudeCodeProvider) Stop(ctx context.Context) error {
 	p.wg.Wait()
 
 	p.state.SetState(session.StateStopped)
-	p.events.EmitStatusChange(domain.SessionStateStopping, domain.SessionStateStopped, "claude provider stopped")
+	// Already emitted running->idle at stopping
 	p.events.Close()
 
 	return nil
@@ -173,7 +173,7 @@ func (p *ClaudeCodeProvider) Pause(ctx context.Context) error {
 
 	p.inputBuffer.Pause()
 	p.state.SetState(session.StatePaused)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStatePaused, "claude provider paused")
+	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateSuspended, "claude provider paused")
 
 	return nil
 }
@@ -189,7 +189,7 @@ func (p *ClaudeCodeProvider) Resume(ctx context.Context) error {
 
 	p.inputBuffer.Resume()
 	p.state.SetState(session.StateRunning)
-	p.events.EmitStatusChange(domain.SessionStatePaused, domain.SessionStateRunning, "claude provider resumed")
+	p.events.EmitStatusChange(domain.SessionStateSuspended, domain.SessionStateRunning, "claude provider resumed")
 
 	return nil
 }
@@ -209,7 +209,7 @@ func (p *ClaudeCodeProvider) Kill() error {
 	}
 
 	p.state.SetState(session.StateStopped)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateStopped, "claude provider killed")
+	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateIdle, "claude provider killed")
 	p.events.Close()
 
 	return nil

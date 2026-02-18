@@ -268,8 +268,14 @@ func TestAgentExecutor_StartSession(t *testing.T) {
 
 		time.Sleep(50 * time.Millisecond)
 
-		if session.GetState() != domain.SessionStateError {
-			t.Errorf("expected state Error, got %s", session.GetState())
+		// Per the new design, provider errors do not transition the session to error state.
+		// Instead, the error is recorded and the session returns to idle.
+		if session.GetState() != domain.SessionStateIdle {
+			t.Errorf("expected state Idle after provider error, got %s", session.GetState())
+		}
+		// Verify the error was recorded
+		if session.ErrorMessage == "" {
+			t.Errorf("expected error message to be set, but got empty")
 		}
 	})
 }
@@ -293,8 +299,9 @@ func TestAgentExecutor_StopSession(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if session.GetState() != domain.SessionStateStopped {
-			t.Errorf("expected state Stopped, got %s", session.GetState())
+		// Per the new design, stopping a session returns it to idle state
+		if session.GetState() != domain.SessionStateIdle {
+			t.Errorf("expected state Idle after stop, got %s", session.GetState())
 		}
 	})
 
@@ -328,8 +335,9 @@ func TestAgentExecutor_PauseResumeSession(t *testing.T) {
 		t.Fatalf("unexpected error on pause: %v", err)
 	}
 
-	if session.GetState() != domain.SessionStatePaused {
-		t.Errorf("expected state Paused, got %s", session.GetState())
+	// Per the new design, pausing a running session transitions it to suspended state
+	if session.GetState() != domain.SessionStateSuspended {
+		t.Errorf("expected state Suspended, got %s", session.GetState())
 	}
 
 	err = executor.ResumeSession(context.Background(), "session1")
@@ -360,8 +368,9 @@ func TestAgentExecutor_KillSession(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if session.GetState() != domain.SessionStateStopped {
-		t.Errorf("expected state Stopped, got %s", session.GetState())
+	// Per the new design, killing a session returns it to idle state
+	if session.GetState() != domain.SessionStateIdle {
+		t.Errorf("expected state Idle after kill, got %s", session.GetState())
 	}
 }
 
@@ -537,7 +546,9 @@ loop:
 		case event := <-sub.Events:
 			if event.Type == domain.EventTypeStatusChange {
 				data, ok := event.Data.(domain.StatusChangeData)
-				if ok && data.NewState == domain.SessionStateStarting {
+				// Per the new design, sessions transition directly from idle to running
+				// (no starting state at the session level)
+				if ok && data.NewState == domain.SessionStateRunning {
 					receivedStarting = true
 					break loop
 				}
@@ -548,7 +559,7 @@ loop:
 	}
 
 	if !receivedStarting {
-		t.Error("expected to receive starting state change event")
+		t.Error("expected to receive running state change event")
 	}
 }
 
@@ -575,8 +586,9 @@ func TestAgentExecutor_Shutdown(t *testing.T) {
 
 	sessions := executor.ListSessions()
 	for _, s := range sessions {
-		if s.GetState() != domain.SessionStateStopped {
-			t.Errorf("session %s should be stopped, got %s", s.ID, s.GetState())
+		// Per the new design, shutdown returns sessions to idle state
+		if s.GetState() != domain.SessionStateIdle {
+			t.Errorf("session %s should be idle after shutdown, got %s", s.ID, s.GetState())
 		}
 	}
 }
@@ -642,8 +654,9 @@ func TestAgentExecutor_FullLifecycleIntegration(t *testing.T) {
 	if err := executor.PauseSession(context.Background(), "lifecycle-test"); err != nil {
 		t.Fatalf("failed to pause session: %v", err)
 	}
-	if session.GetState() != domain.SessionStatePaused {
-		t.Errorf("expected state Paused, got %s", session.GetState())
+	// Per the new design, pausing transitions to suspended state
+	if session.GetState() != domain.SessionStateSuspended {
+		t.Errorf("expected state Suspended, got %s", session.GetState())
 	}
 
 	if err := executor.ResumeSession(context.Background(), "lifecycle-test"); err != nil {
@@ -656,8 +669,9 @@ func TestAgentExecutor_FullLifecycleIntegration(t *testing.T) {
 	if err := executor.StopSession(context.Background(), "lifecycle-test"); err != nil {
 		t.Fatalf("failed to stop session: %v", err)
 	}
-	if session.GetState() != domain.SessionStateStopped {
-		t.Errorf("expected state Stopped, got %s", session.GetState())
+	// Per the new design, stopping transitions to idle state
+	if session.GetState() != domain.SessionStateIdle {
+		t.Errorf("expected state Idle after stop, got %s", session.GetState())
 	}
 
 	saved, err := storage.Load("lifecycle-test")
@@ -935,8 +949,11 @@ func TestAgentExecutor_HealthCheckDetectsErrors(t *testing.T) {
 
 	time.Sleep(150 * time.Millisecond)
 
-	if sess.GetState() != domain.SessionStateError {
-		t.Logf("session state is %s (health check may sync states)", sess.GetState())
+	// Per the new design, provider errors don't transition the session to error state.
+	// Instead, the run is terminated and the session returns to idle.
+	// The error is recorded but doesn't change the session's state machine.
+	if sess.GetState() != domain.SessionStateIdle {
+		t.Logf("session state is %s (expected idle after provider error)", sess.GetState())
 	}
 }
 
@@ -1003,8 +1020,9 @@ func TestAgentExecutor_LoadTest_TenConcurrentAgents(t *testing.T) {
 				return
 			}
 
-			if session.GetState() != domain.SessionStateStopped {
-				errChan <- errors.New("session not stopped after test")
+			// Per the new design, after stopping, session returns to idle state
+			if session.GetState() != domain.SessionStateIdle {
+				errChan <- errors.New("session not idle after test")
 			}
 		}(i)
 	}
@@ -1024,8 +1042,9 @@ func TestAgentExecutor_LoadTest_TenConcurrentAgents(t *testing.T) {
 
 	sessions := executor.ListSessions()
 	for _, s := range sessions {
-		if s.GetState() != domain.SessionStateStopped {
-			t.Errorf("session %s not stopped, state: %s", s.ID, s.GetState())
+		// Per the new design, after stopping, sessions are idle
+		if s.GetState() != domain.SessionStateIdle {
+			t.Errorf("session %s not idle after test, state: %s", s.ID, s.GetState())
 		}
 	}
 }

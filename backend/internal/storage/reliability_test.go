@@ -81,7 +81,7 @@ func TestParseSessionState_Error(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for unknown state, got nil")
 	}
-	if state != domain.SessionStateCreated {
-		t.Errorf("expected SessionStateCreated on error, got %v", state)
+	if state != domain.SessionStateIdle {
+		t.Errorf("expected SessionStateIdle on error, got %v", state)
 	}
 }

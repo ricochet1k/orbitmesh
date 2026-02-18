@@ -106,7 +106,7 @@ func (s *Session) Start(ctx context.Context, config session.Config) error {
 	}
 
 	s.state.SetState(session.StateStarting)
-	s.events.EmitStatusChange(domain.SessionStateCreated, domain.SessionStateStarting, "starting acp provider")
+	s.events.EmitStatusChange(domain.SessionStateIdle, domain.SessionStateRunning, "starting acp provider")
 
 	// Determine command and args
 	command := s.providerConfig.Command
@@ -182,7 +182,7 @@ func (s *Session) Start(ctx context.Context, config session.Config) error {
 
 	// Transition to running state
 	s.state.SetState(session.StateRunning)
-	s.events.EmitStatusChange(domain.SessionStateStarting, domain.SessionStateRunning, "acp provider running")
+	// Already emitted idle->running at startup
 
 	// Start auto-snapshot if enabled and snapshot manager is set
 	if s.snapshotManager != nil && config.Custom != nil {
@@ -267,13 +267,13 @@ func (s *Session) Stop(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	currentState := domain.SessionState(s.state.GetState())
-	if currentState == domain.SessionStateStopped {
+	providerState := s.state.GetState()
+	if providerState == session.StateStopped {
 		return nil
 	}
 
 	s.state.SetState(session.StateStopping)
-	s.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateStopping, "stopping acp provider")
+	s.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateIdle, "stopping acp provider")
 
 	// Cancel context to signal goroutines to stop
 	if s.cancel != nil {
@@ -301,7 +301,7 @@ func (s *Session) Stop(ctx context.Context) error {
 	s.wg.Wait()
 
 	s.state.SetState(session.StateStopped)
-	s.events.EmitStatusChange(domain.SessionStateStopping, domain.SessionStateStopped, "acp provider stopped")
+	// Already emitted running->idle at stopping
 	s.events.Close()
 
 	return nil
@@ -322,7 +322,7 @@ func (s *Session) Pause(ctx context.Context) error {
 
 	s.inputBuffer.Pause()
 	s.state.SetState(session.StatePaused)
-	s.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStatePaused, "acp provider paused")
+	s.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateSuspended, "acp provider paused")
 
 	return nil
 }
@@ -338,7 +338,7 @@ func (s *Session) Resume(ctx context.Context) error {
 
 	s.inputBuffer.Resume()
 	s.state.SetState(session.StateRunning)
-	s.events.EmitStatusChange(domain.SessionStatePaused, domain.SessionStateRunning, "acp provider resumed")
+	s.events.EmitStatusChange(domain.SessionStateSuspended, domain.SessionStateRunning, "acp provider resumed")
 
 	return nil
 }
@@ -358,7 +358,7 @@ func (s *Session) Kill() error {
 	}
 
 	s.state.SetState(session.StateStopped)
-	s.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateStopped, "acp provider killed")
+	s.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateIdle, "acp provider killed")
 	s.events.Close()
 
 	return nil

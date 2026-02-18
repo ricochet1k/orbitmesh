@@ -17,8 +17,8 @@ func TestNewSession(t *testing.T) {
 	if s.WorkingDir != "/path/to/work" {
 		t.Errorf("expected WorkingDir '/path/to/work', got %q", s.WorkingDir)
 	}
-	if s.State != SessionStateCreated {
-		t.Errorf("expected state Created, got %v", s.State)
+	if s.State != SessionStateIdle {
+		t.Errorf("expected state Idle, got %v", s.State)
 	}
 	if s.CreatedAt.IsZero() {
 		t.Error("expected CreatedAt to be set")
@@ -33,13 +33,9 @@ func TestSessionStateString(t *testing.T) {
 		state    SessionState
 		expected string
 	}{
-		{SessionStateCreated, "created"},
-		{SessionStateStarting, "starting"},
+		{SessionStateIdle, "idle"},
 		{SessionStateRunning, "running"},
-		{SessionStatePaused, "paused"},
-		{SessionStateStopping, "stopping"},
-		{SessionStateStopped, "stopped"},
-		{SessionStateError, "error"},
+		{SessionStateSuspended, "suspended"},
 		{SessionState(999), "unknown"},
 	}
 
@@ -56,24 +52,18 @@ func TestCanTransition(t *testing.T) {
 		to       SessionState
 		expected bool
 	}{
-		{SessionStateCreated, SessionStateStarting, true},
-		{SessionStateCreated, SessionStateRunning, false},
-		{SessionStateStarting, SessionStateRunning, true},
-		{SessionStateStarting, SessionStateError, true},
-		{SessionStateStarting, SessionStatePaused, false},
-		{SessionStateRunning, SessionStatePaused, true},
-		{SessionStateRunning, SessionStateStopping, true},
-		{SessionStateRunning, SessionStateError, true},
-		{SessionStateRunning, SessionStateCreated, false},
-		{SessionStatePaused, SessionStateRunning, true},
-		{SessionStatePaused, SessionStateStopping, true},
-		{SessionStatePaused, SessionStateError, false},
-		{SessionStateStopping, SessionStateStopped, true},
-		{SessionStateStopping, SessionStateError, true},
-		{SessionStateStopped, SessionStateRunning, false},
-		{SessionStateStopped, SessionStateStopped, false},
-		{SessionStateError, SessionStateStopping, true},
-		{SessionStateError, SessionStateRunning, false},
+		// Idle transitions
+		{SessionStateIdle, SessionStateRunning, true},
+		{SessionStateIdle, SessionStateSuspended, false},
+		{SessionStateIdle, SessionStateIdle, false},
+		// Running transitions
+		{SessionStateRunning, SessionStateSuspended, true},
+		{SessionStateRunning, SessionStateIdle, true},
+		{SessionStateRunning, SessionStateRunning, false},
+		// Suspended transitions
+		{SessionStateSuspended, SessionStateRunning, true},
+		{SessionStateSuspended, SessionStateIdle, true},
+		{SessionStateSuspended, SessionStateSuspended, false},
 	}
 
 	for _, tt := range tests {
@@ -87,23 +77,23 @@ func TestCanTransition(t *testing.T) {
 func TestSessionTransitionTo_Valid(t *testing.T) {
 	s := NewSession("test-id", "claude", "/work")
 
-	err := s.TransitionTo(SessionStateStarting, "user initiated")
+	err := s.TransitionTo(SessionStateRunning, "user initiated")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if s.State != SessionStateStarting {
-		t.Errorf("expected state Starting, got %v", s.State)
+	if s.State != SessionStateRunning {
+		t.Errorf("expected state Running, got %v", s.State)
 	}
 	if len(s.Transitions) != 1 {
 		t.Fatalf("expected 1 transition, got %d", len(s.Transitions))
 	}
 
 	tr := s.Transitions[0]
-	if tr.From != SessionStateCreated {
-		t.Errorf("expected transition from Created, got %v", tr.From)
+	if tr.From != SessionStateIdle {
+		t.Errorf("expected transition from Idle, got %v", tr.From)
 	}
-	if tr.To != SessionStateStarting {
-		t.Errorf("expected transition to Starting, got %v", tr.To)
+	if tr.To != SessionStateRunning {
+		t.Errorf("expected transition to Running, got %v", tr.To)
 	}
 	if tr.Reason != "user initiated" {
 		t.Errorf("expected reason 'user initiated', got %q", tr.Reason)
@@ -113,12 +103,12 @@ func TestSessionTransitionTo_Valid(t *testing.T) {
 func TestSessionTransitionTo_Invalid(t *testing.T) {
 	s := NewSession("test-id", "claude", "/work")
 
-	err := s.TransitionTo(SessionStateRunning, "invalid")
+	err := s.TransitionTo(SessionStateSuspended, "invalid")
 	if !errors.Is(err, ErrInvalidTransition) {
 		t.Errorf("expected ErrInvalidTransition, got %v", err)
 	}
-	if s.State != SessionStateCreated {
-		t.Errorf("expected state to remain Created, got %v", s.State)
+	if s.State != SessionStateIdle {
+		t.Errorf("expected state to remain Idle, got %v", s.State)
 	}
 	if len(s.Transitions) != 0 {
 		t.Errorf("expected no transitions, got %d", len(s.Transitions))
@@ -132,12 +122,10 @@ func TestSessionTransitionTo_FullLifecycle(t *testing.T) {
 		to     SessionState
 		reason string
 	}{
-		{SessionStateStarting, "starting provider"},
-		{SessionStateRunning, "provider ready"},
-		{SessionStatePaused, "user paused"},
-		{SessionStateRunning, "user resumed"},
-		{SessionStateStopping, "user stopped"},
-		{SessionStateStopped, "provider terminated"},
+		{SessionStateRunning, "message received, starting run"},
+		{SessionStateSuspended, "waiting for tool result"},
+		{SessionStateRunning, "tool result received, resuming"},
+		{SessionStateIdle, "run completed normally"},
 	}
 
 	for _, tt := range transitions {
@@ -146,8 +134,8 @@ func TestSessionTransitionTo_FullLifecycle(t *testing.T) {
 		}
 	}
 
-	if s.State != SessionStateStopped {
-		t.Errorf("expected final state Stopped, got %v", s.State)
+	if s.State != SessionStateIdle {
+		t.Errorf("expected final state Idle, got %v", s.State)
 	}
 	if len(s.Transitions) != len(transitions) {
 		t.Errorf("expected %d transitions, got %d", len(transitions), len(s.Transitions))
@@ -157,36 +145,35 @@ func TestSessionTransitionTo_FullLifecycle(t *testing.T) {
 func TestSessionTransitionTo_ErrorRecovery(t *testing.T) {
 	s := NewSession("test-id", "claude", "/work")
 
-	_ = s.TransitionTo(SessionStateStarting, "starting")
-	_ = s.TransitionTo(SessionStateRunning, "running")
-	_ = s.TransitionTo(SessionStateError, "provider crashed")
+	_ = s.TransitionTo(SessionStateRunning, "starting run")
+	_ = s.TransitionTo(SessionStateSuspended, "waiting for response")
 
-	if s.State != SessionStateError {
-		t.Errorf("expected state Error, got %v", s.State)
+	if s.State != SessionStateSuspended {
+		t.Errorf("expected state Suspended, got %v", s.State)
 	}
 
-	err := s.TransitionTo(SessionStateStopping, "cleanup")
+	// From suspended, can return to idle directly (e.g., user cancels)
+	err := s.TransitionTo(SessionStateIdle, "user cancelled")
 	if err != nil {
-		t.Fatalf("TransitionTo(Stopping) from Error failed: %v", err)
+		t.Fatalf("TransitionTo(Idle) from Suspended failed: %v", err)
 	}
 
-	err = s.TransitionTo(SessionStateStopped, "terminated")
-	if err != nil {
-		t.Fatalf("TransitionTo(Stopped) failed: %v", err)
+	if s.State != SessionStateIdle {
+		t.Errorf("expected final state Idle, got %v", s.State)
 	}
 }
 
 func TestSessionGetState(t *testing.T) {
 	s := NewSession("test-id", "claude", "/work")
 
-	if s.GetState() != SessionStateCreated {
-		t.Errorf("expected Created, got %v", s.GetState())
+	if s.GetState() != SessionStateIdle {
+		t.Errorf("expected Idle, got %v", s.GetState())
 	}
 
-	_ = s.TransitionTo(SessionStateStarting, "starting")
+	_ = s.TransitionTo(SessionStateRunning, "starting run")
 
-	if s.GetState() != SessionStateStarting {
-		t.Errorf("expected Starting, got %v", s.GetState())
+	if s.GetState() != SessionStateRunning {
+		t.Errorf("expected Running, got %v", s.GetState())
 	}
 }
 
@@ -221,27 +208,5 @@ func TestSessionSetError(t *testing.T) {
 
 	if s.ErrorMessage != "something went wrong" {
 		t.Errorf("expected ErrorMessage 'something went wrong', got %q", s.ErrorMessage)
-	}
-}
-
-func TestSessionIsTerminal(t *testing.T) {
-	tests := []struct {
-		state    SessionState
-		terminal bool
-	}{
-		{SessionStateCreated, false},
-		{SessionStateStarting, false},
-		{SessionStateRunning, false},
-		{SessionStatePaused, false},
-		{SessionStateStopping, false},
-		{SessionStateStopped, true},
-		{SessionStateError, true},
-	}
-
-	for _, tt := range tests {
-		s := &Session{State: tt.state}
-		if got := s.IsTerminal(); got != tt.terminal {
-			t.Errorf("Session{State: %v}.IsTerminal() = %v, want %v", tt.state, got, tt.terminal)
-		}
 	}
 }
