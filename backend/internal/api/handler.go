@@ -92,7 +92,7 @@ func (h *Handler) sendSessionInput(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.executor.SendInput(r.Context(), id, req.Input); err != nil {
+	if err := h.executor.SendInput(r.Context(), id, req.Input, req.ProviderID, req.ProviderType); err != nil {
 		if errors.Is(err, service.ErrSessionNotFound) {
 			writeError(w, http.StatusNotFound, "session not found", err.Error())
 			return
@@ -390,18 +390,19 @@ func generateID() string {
 
 func sessionToResponse(s domain.SessionSnapshot) apiTypes.SessionResponse {
 	return apiTypes.SessionResponse{
-		ID:           s.ID,
-		ProviderType: s.ProviderType,
-		SessionKind:  s.Kind,
-		Title:        s.Title,
-		State:        apiTypes.SessionState(s.State.String()),
-		WorkingDir:   s.WorkingDir,
-		ProjectID:    s.ProjectID,
-		CreatedAt:    s.CreatedAt,
-		UpdatedAt:    s.UpdatedAt,
-		CurrentTask:  s.CurrentTask,
-		Output:       s.Output,
-		ErrorMessage: s.ErrorMessage,
+		ID:                  s.ID,
+		ProviderType:        s.ProviderType,
+		PreferredProviderID: s.PreferredProviderID,
+		SessionKind:         s.Kind,
+		Title:               s.Title,
+		State:               apiTypes.SessionState(s.State.String()),
+		WorkingDir:          s.WorkingDir,
+		ProjectID:           s.ProjectID,
+		CreatedAt:           s.CreatedAt,
+		UpdatedAt:           s.UpdatedAt,
+		CurrentTask:         s.CurrentTask,
+		Output:              s.Output,
+		ErrorMessage:        s.ErrorMessage,
 	}
 }
 

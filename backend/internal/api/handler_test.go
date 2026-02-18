@@ -1046,6 +1046,34 @@ func TestSendSessionInput_Error(t *testing.T) {
 	}
 }
 
+func TestSendSessionInput_WithProviderOverride(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	created := createSession(t, r, "mock", "/tmp")
+	waitForRunning(t, env.executor, created.ID)
+
+	// Send input with provider ID override
+	body, _ := json.Marshal(apiTypes.SessionInputRequest{
+		Input:      "hello",
+		ProviderID: "test-provider-id",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/input", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify the session stored the provider preference
+	sess, _ := env.executor.GetSession(created.ID)
+	if sess.PreferredProviderID != "test-provider-id" {
+		t.Fatalf("expected preferred_provider_id to be 'test-provider-id', got %q", sess.PreferredProviderID)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------

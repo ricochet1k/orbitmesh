@@ -518,13 +518,23 @@ func (e *AgentExecutor) DeleteProjectSessions(ctx context.Context, projectID str
 	return firstErr
 }
 
-func (e *AgentExecutor) SendInput(ctx context.Context, id string, input string) error {
+func (e *AgentExecutor) SendInput(ctx context.Context, id string, input string, providerID string, providerType string) error {
 	e.mu.RLock()
 	sc, exists := e.sessions[id]
 	e.mu.RUnlock()
 
 	if !exists {
 		return ErrSessionNotFound
+	}
+
+	// Store the provider preference if specified
+	if providerID != "" {
+		sc.session.SetPreferredProviderID(providerID)
+		if e.storage != nil {
+			if err := e.storage.Save(sc.session); err != nil {
+				return fmt.Errorf("failed to save session with provider preference: %w", err)
+			}
+		}
 	}
 
 	run := sc.run

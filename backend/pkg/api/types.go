@@ -26,7 +26,9 @@ type SessionRequest struct {
 }
 
 type SessionInputRequest struct {
-	Input string `json:"input"`
+	Input        string `json:"input"`
+	ProviderID   string `json:"provider_id,omitempty"`
+	ProviderType string `json:"provider_type,omitempty"`
 }
 
 type MCPServerConfig struct {
@@ -37,18 +39,19 @@ type MCPServerConfig struct {
 }
 
 type SessionResponse struct {
-	ID           string       `json:"id"`
-	ProviderType string       `json:"provider_type"`
-	SessionKind  string       `json:"session_kind,omitempty"`
-	Title        string       `json:"title,omitempty"`
-	State        SessionState `json:"state"`
-	WorkingDir   string       `json:"working_dir"`
-	ProjectID    string       `json:"project_id,omitempty"`
-	CreatedAt    time.Time    `json:"created_at"`
-	UpdatedAt    time.Time    `json:"updated_at"`
-	CurrentTask  string       `json:"current_task,omitempty"`
-	Output       string       `json:"output,omitempty"`
-	ErrorMessage string       `json:"error_message,omitempty"`
+	ID                  string       `json:"id"`
+	ProviderType        string       `json:"provider_type"`
+	PreferredProviderID string       `json:"preferred_provider_id,omitempty"`
+	SessionKind         string       `json:"session_kind,omitempty"`
+	Title               string       `json:"title,omitempty"`
+	State               SessionState `json:"state"`
+	WorkingDir          string       `json:"working_dir"`
+	ProjectID           string       `json:"project_id,omitempty"`
+	CreatedAt           time.Time    `json:"created_at"`
+	UpdatedAt           time.Time    `json:"updated_at"`
+	CurrentTask         string       `json:"current_task,omitempty"`
+	Output              string       `json:"output,omitempty"`
+	ErrorMessage        string       `json:"error_message,omitempty"`
 }
 
 // ProjectRequest is the body for create/update project endpoints.

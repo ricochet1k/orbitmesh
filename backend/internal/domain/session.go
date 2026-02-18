@@ -68,20 +68,21 @@ type StateTransition struct {
 }
 
 type Session struct {
-	ID           string
-	ProviderType string
-	Kind         string
-	Title        string
-	State        SessionState
-	WorkingDir   string
-	ProjectID    string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	CurrentTask  string
-	Output       string
-	ErrorMessage string
-	Transitions  []StateTransition
-	Messages     []any // []session.Message
+	ID                  string
+	ProviderType        string
+	PreferredProviderID string
+	Kind                string
+	Title               string
+	State               SessionState
+	WorkingDir          string
+	ProjectID           string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	CurrentTask         string
+	Output              string
+	ErrorMessage        string
+	Transitions         []StateTransition
+	Messages            []any // []session.Message
 
 	mu sync.RWMutex
 }
@@ -174,22 +175,30 @@ func (s *Session) SetMessages(messages []any) {
 	s.UpdatedAt = time.Now()
 }
 
+func (s *Session) SetPreferredProviderID(providerID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.PreferredProviderID = providerID
+	s.UpdatedAt = time.Now()
+}
+
 // SessionSnapshot is a point-in-time, lock-free copy of a Session's fields.
 type SessionSnapshot struct {
-	ID           string
-	ProviderType string
-	Kind         string
-	Title        string
-	State        SessionState
-	WorkingDir   string
-	ProjectID    string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	CurrentTask  string
-	Output       string
-	ErrorMessage string
-	Transitions  []StateTransition
-	Messages     []any // []session.Message
+	ID                  string
+	ProviderType        string
+	PreferredProviderID string
+	Kind                string
+	Title               string
+	State               SessionState
+	WorkingDir          string
+	ProjectID           string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	CurrentTask         string
+	Output              string
+	ErrorMessage        string
+	Transitions         []StateTransition
+	Messages            []any // []session.Message
 }
 
 // Snapshot returns an atomic copy of the session under its read lock.
@@ -204,19 +213,20 @@ func (s *Session) Snapshot() SessionSnapshot {
 	copy(messages, s.Messages)
 
 	return SessionSnapshot{
-		ID:           s.ID,
-		ProviderType: s.ProviderType,
-		Kind:         s.Kind,
-		Title:        s.Title,
-		State:        s.State,
-		WorkingDir:   s.WorkingDir,
-		ProjectID:    s.ProjectID,
-		CreatedAt:    s.CreatedAt,
-		UpdatedAt:    s.UpdatedAt,
-		CurrentTask:  s.CurrentTask,
-		Output:       s.Output,
-		ErrorMessage: s.ErrorMessage,
-		Transitions:  transitions,
-		Messages:     messages,
+		ID:                  s.ID,
+		ProviderType:        s.ProviderType,
+		PreferredProviderID: s.PreferredProviderID,
+		Kind:                s.Kind,
+		Title:               s.Title,
+		State:               s.State,
+		WorkingDir:          s.WorkingDir,
+		ProjectID:           s.ProjectID,
+		CreatedAt:           s.CreatedAt,
+		UpdatedAt:           s.UpdatedAt,
+		CurrentTask:         s.CurrentTask,
+		Output:              s.Output,
+		ErrorMessage:        s.ErrorMessage,
+		Transitions:         transitions,
+		Messages:            messages,
 	}
 }
