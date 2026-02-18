@@ -1,11 +1,4 @@
-export type SessionState =
-  | "created"
-  | "starting"
-  | "running"
-  | "paused"
-  | "stopping"
-  | "stopped"
-  | "error";
+export type SessionState = "idle" | "running" | "suspended";
 
 export interface MCPServerConfig {
   name: string;

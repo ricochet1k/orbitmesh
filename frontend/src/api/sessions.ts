@@ -17,6 +17,27 @@ import {
   withCSRFHeaders,
   readErrorMessage,
 } from "./_base";
+import { normalizeSessionState } from "./normalize";
+
+/**
+ * Normalize a SessionResponse by mapping its state to the new three-state model
+ */
+function normalizeSessionResponse(session: SessionResponse): SessionResponse {
+  return {
+    ...session,
+    state: normalizeSessionState(session.state),
+  };
+}
+
+/**
+ * Normalize all sessions in a list response
+ */
+function normalizeSessionListResponse(response: SessionListResponse): SessionListResponse {
+  return {
+    ...response,
+    sessions: response.sessions.map(normalizeSessionResponse),
+  };
+}
 
 export async function listSessions(projectId?: string | null): Promise<SessionListResponse> {
   const cached = readSessionCache();
@@ -40,7 +61,8 @@ export async function listSessions(projectId?: string | null): Promise<SessionLi
   }
 
   const payload = (await resp.json()) as SessionListResponse;
-  const merged = mergeSessionLists(payload, cached);
+  const normalized = normalizeSessionListResponse(payload);
+  const merged = mergeSessionLists(normalized, cached);
   writeSessionCache(merged);
   return merged;
 }
@@ -56,7 +78,8 @@ export async function createSession(req: SessionRequest): Promise<SessionRespons
     body: JSON.stringify(req),
   });
   if (!resp.ok) throw new Error(await readErrorMessage(resp));
-  return resp.json();
+  const session = await resp.json();
+  return normalizeSessionResponse(session);
 }
 
 export async function createTaskSession(params: {
@@ -99,7 +122,8 @@ export async function createDockSession(
 export async function getSession(id: string): Promise<SessionStatusResponse> {
   const resp = await fetch(`${BASE_URL}/sessions/${id}`);
   if (!resp.ok) throw new Error(await readErrorMessage(resp));
-  return resp.json();
+  const session = await resp.json();
+  return normalizeSessionResponse(session);
 }
 
 export async function getActivityEntries(

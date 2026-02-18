@@ -216,25 +216,25 @@ describe("SessionViewer", () => {
   })
 
   it("shows state-aware tooltips for disabled buttons", async () => {
-    // Test with paused session
-    const pausedSession = makeSession({ state: "paused" as const })
-    ; (apiClient.getSession as any).mockResolvedValue(pausedSession)
+    // Test with suspended session
+    const suspendedSession = makeSession({ state: "suspended" as const })
+    ; (apiClient.getSession as any).mockResolvedValue(suspendedSession)
 
     render(() => <SessionViewer sessionId="session-1" />)
 
-    await screen.findByText("Session session-1 - native - paused")
+    await screen.findByText("Session session-1 - native - suspended")
     const stateBadge = await screen.findByTestId("session-state-badge")
-    expect(stateBadge.textContent).toContain("paused")
+    expect(stateBadge.textContent).toContain("suspended")
 
     // Pause button should be disabled with tooltip explaining state
     const pauseButton = screen.getByText("Pause") as HTMLButtonElement
     expect(pauseButton.disabled).toBe(true)
-    expect(pauseButton.getAttribute("title")).toBe("Cannot pause: session is paused")
+    expect(pauseButton.getAttribute("title")).toBe("Cannot pause: session is suspended")
 
     // Resume button should be enabled with action tooltip
     const resumeButton = screen.getByText("Resume") as HTMLButtonElement
     expect(resumeButton.disabled).toBe(false)
-    expect(resumeButton.getAttribute("title")).toBe("Resume the paused session")
+    expect(resumeButton.getAttribute("title")).toBe("Resume the suspended session")
 
     // Kill button should be enabled
     const killButton = screen.getByText("Kill") as HTMLButtonElement
@@ -272,10 +272,10 @@ describe("SessionViewer", () => {
       type: "status_change",
       timestamp: "2026-02-05T12:02:00Z",
       session_id: "session-1",
-      data: { old_state: "running", new_state: "paused" },
+      data: { old_state: "running", new_state: "suspended" },
     })
 
     const updatedBadge = await screen.findByTestId("session-state-badge")
-    expect(updatedBadge.textContent).toContain("paused")
+    expect(updatedBadge.textContent).toContain("suspended")
   })
 })

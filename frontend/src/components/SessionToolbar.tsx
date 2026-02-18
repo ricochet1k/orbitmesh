@@ -73,15 +73,15 @@ export default function SessionToolbar(props: SessionToolbarProps) {
             <button
               type="button"
               onClick={props.onResume}
-              disabled={!props.canManage() || props.sessionState() !== "paused" || props.pendingAction() === "resume"}
+              disabled={!props.canManage() || props.sessionState() !== "suspended" || props.pendingAction() === "resume"}
               title={
                 !props.canManage()
                   ? PERM_DENIED
                   : props.pendingAction() === "resume"
                   ? "Resume action is in progress..."
-                  : props.sessionState() !== "paused"
+                  : props.sessionState() !== "suspended"
                   ? `Cannot resume: session is ${props.sessionState()}`
-                  : "Resume the paused session"
+                  : "Resume the suspended session"
               }
             >
               Resume

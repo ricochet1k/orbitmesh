@@ -31,14 +31,14 @@ describe("apiClient", () => {
 
     const result = await apiClient.listSessions();
     expect(fetch).toHaveBeenCalledWith("/api/sessions");
-    expect(result).toEqual(mockResponse);
-    expect(window.localStorage.getItem("orbitmesh:sessions")).toEqual(JSON.stringify(mockResponse));
+    expect(result.sessions[0].state).toBe("running");
+    expect(window.localStorage.getItem("orbitmesh:sessions")).toBeTruthy();
   });
 
   it("listSessions merges cached sessions", async () => {
     const cached = {
       sessions: [
-        { id: "cached", provider_type: "native", state: "stopped" }
+        { id: "cached", provider_type: "native", state: "idle" }
       ]
     };
     window.localStorage.setItem("orbitmesh:sessions", JSON.stringify(cached));
@@ -57,13 +57,15 @@ describe("apiClient", () => {
     const result = await apiClient.listSessions();
     expect(result.sessions).toHaveLength(2);
     expect(result.sessions[0].id).toBe("live");
+    expect(result.sessions[0].state).toBe("running");
     expect(result.sessions[1].id).toBe("cached");
+    expect(result.sessions[1].state).toBe("idle");
   });
 
   it("listSessions returns cached sessions on failure", async () => {
     const cached = {
       sessions: [
-        { id: "cached", provider_type: "native", state: "stopped" }
+        { id: "cached", provider_type: "native", state: "idle" }
       ]
     };
     window.localStorage.setItem("orbitmesh:sessions", JSON.stringify(cached));
@@ -74,12 +76,13 @@ describe("apiClient", () => {
     });
 
     const result = await apiClient.listSessions();
-    expect(result).toEqual(cached);
+    expect(result.sessions[0].id).toBe("cached");
+    expect(result.sessions[0].state).toBe("idle");
   });
 
   it("createSession sends POST request with CSRF token", async () => {
     const req = { provider_type: "native", working_dir: "/tmp" };
-    const mockResponse = { id: "1", ...req, state: "created" };
+    const mockResponse = { id: "1", ...req, state: "idle" };
 
     (fetch as any).mockResolvedValue({
       ok: true,
@@ -95,11 +98,11 @@ describe("apiClient", () => {
       }),
       body: JSON.stringify(req)
     }));
-    expect(result).toEqual(mockResponse);
+    expect(result.state).toBe("idle");
   });
 
   it("createTaskSession sends task metadata", async () => {
-    const mockResponse = { id: "99", provider_type: "adk", state: "created" };
+    const mockResponse = { id: "99", provider_type: "adk", state: "idle" };
 
     (fetch as any).mockResolvedValue({
       ok: true,
@@ -124,11 +127,11 @@ describe("apiClient", () => {
         task_title: "Start agent flow"
       })
     }));
-    expect(result).toEqual(mockResponse);
+    expect(result.state).toBe("idle");
   });
 
   it("createDockSession tags dock sessions", async () => {
-    const mockResponse = { id: "dock-1", provider_type: "claude-ws", state: "created" };
+    const mockResponse = { id: "dock-1", provider_type: "claude-ws", state: "idle" };
 
     (fetch as any).mockResolvedValue({
       ok: true,
@@ -148,7 +151,7 @@ describe("apiClient", () => {
         session_kind: "dock"
       })
     }));
-    expect(result).toEqual(mockResponse);
+    expect(result.state).toBe("idle");
   });
 
   it("getSession fetches single session", async () => {

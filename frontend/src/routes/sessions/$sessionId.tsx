@@ -62,13 +62,13 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   })
   const pendingAction = actions.pendingAction
 
-  const sessionState = () => sessionStateOverride() ?? session()?.state ?? "created"
+  const sessionState = () => sessionStateOverride() ?? session()?.state ?? "idle"
   const providerType = () => session()?.provider_type ?? ""
   const canInspect = () => permissions()?.can_inspect_sessions ?? false
   const canManage = () => permissions()?.can_initiate_bulk_actions ?? false
 
   const isRunning = () => sessionState() === "running"
-  const isActive = () => ["running", "paused"].includes(sessionState())
+  const isActive = () => sessionState() === "running"
 
   const markStreamActive = () => {
     if (streamStatus() !== "live") {
