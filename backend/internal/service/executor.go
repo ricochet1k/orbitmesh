@@ -277,17 +277,20 @@ func (e *AgentExecutor) StopSession(ctx context.Context, id string) error {
 	// Cancel the active run if any
 	if currentState == domain.SessionStateRunning || currentState == domain.SessionStateSuspended {
 		run := sc.run
+		var stopErr error
 		if run != nil {
 			stopCtx, cancel := context.WithTimeout(ctx, e.opTimeout)
 			defer cancel()
 
-			_ = run.Provider.Stop(stopCtx)
+			stopErr = run.Provider.Stop(stopCtx)
 			run.Cancel()
 		}
 		e.closeTerminalHub(id)
 
 		// Transition to idle
 		e.transitionWithSave(sc, domain.SessionStateIdle, "session stopped")
+
+		return stopErr
 	}
 
 	return nil
