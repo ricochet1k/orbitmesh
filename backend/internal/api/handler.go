@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -56,6 +57,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/sessions/{id}", h.getSession)
 	r.Delete("/api/sessions/{id}", h.stopSession)
 	r.Post("/api/sessions/{id}/input", h.sendSessionInput)
+	r.Post("/api/sessions/{id}/messages", h.sendSessionMessage)
 	r.Post("/api/sessions/{id}/pause", h.pauseSession)
 	r.Post("/api/sessions/{id}/resume", h.resumeSession)
 	r.Get("/api/sessions/{id}/events", h.sseEvents)
@@ -102,6 +104,38 @@ func (h *Handler) sendSessionInput(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) sendSessionMessage(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var req apiTypes.SendMessageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", err.Error())
+		return
+	}
+
+	if strings.TrimSpace(req.Content) == "" {
+		writeError(w, http.StatusBadRequest, "content is required", "")
+		return
+	}
+
+	sess, err := h.executor.SendMessage(r.Context(), id, req.Content, req.ProviderID, req.ProviderType)
+	if err != nil {
+		if errors.Is(err, service.ErrSessionNotFound) {
+			writeError(w, http.StatusNotFound, "session not found", err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to send message", err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	snap := sess.Snapshot()
+	if err := json.NewEncoder(w).Encode(sessionToResponse(snap)); err != nil {
+		fmt.Fprintf(w, `{"error":"failed to encode response"}`)
+	}
 }
 
 func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {

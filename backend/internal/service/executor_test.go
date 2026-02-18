@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1191,6 +1192,107 @@ func TestAgentExecutor_NonExistentSessionOperations(t *testing.T) {
 	}
 
 	if err := executor.KillSession("nonexistent"); !errors.Is(err, ErrSessionNotFound) {
+		t.Errorf("expected ErrSessionNotFound, got %v", err)
+	}
+}
+
+// Tests for SendMessage method
+
+func TestAgentExecutor_SendMessage_RunningSession_Error(t *testing.T) {
+	prov := newMockProvider()
+	executor, _ := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	config := session.Config{
+		ProviderType: "mock",
+		WorkingDir:   "/tmp/test",
+	}
+
+	sess, err := executor.StartSession(context.Background(), "test-id", config)
+	if err != nil {
+		t.Fatalf("failed to start session: %v", err)
+	}
+
+	// Give the session time to start running
+	time.Sleep(100 * time.Millisecond)
+
+	// Try to send message to running session
+	_, err = executor.SendMessage(context.Background(), "test-id", "hello", "", "")
+	if err == nil {
+		t.Errorf("expected error for running session, got nil")
+	}
+	if !strings.Contains(err.Error(), "running session") {
+		t.Errorf("expected 'running session' error, got: %v", err)
+	}
+
+	// Session should still exist and be in running state
+	retrieved, _ := executor.GetSession("test-id")
+	if retrieved.ID != sess.ID {
+		t.Errorf("session ID mismatch")
+	}
+}
+
+func TestAgentExecutor_SendMessage_IdleSession_OK(t *testing.T) {
+	prov := newMockProvider()
+	executor, store := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	// Create an idle session directly in storage
+	idleSess := domain.NewSession("idle-test", "mock", "/tmp/idle")
+	idleSess.State = domain.SessionStateIdle
+	_ = store.Save(idleSess)
+
+	// Send message to idle session (should start a new run)
+	sess, err := executor.SendMessage(context.Background(), "idle-test", "hello agent", "", "")
+	if err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+
+	if sess.ID != "idle-test" {
+		t.Errorf("session ID mismatch: got %s, want idle-test", sess.ID)
+	}
+
+	// Give async run time to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Session should now be running (or transitioning)
+	retrieved, _ := executor.GetSession("idle-test")
+	if retrieved == nil {
+		t.Errorf("failed to retrieve session")
+	}
+}
+
+func TestAgentExecutor_SendMessage_SuspendedSession_Error(t *testing.T) {
+	prov := newMockProvider()
+	executor, store := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	// Create a suspended session
+	suspSess := domain.NewSession("susp-test", "mock", "/tmp/susp")
+	suspSess.State = domain.SessionStateSuspended
+	_ = store.Save(suspSess)
+
+	// Try to send message to suspended session (should error for now)
+	_, err := executor.SendMessage(context.Background(), "susp-test", "hello", "", "")
+	if err == nil {
+		t.Errorf("expected error for suspended session, got nil")
+	}
+	if !strings.Contains(err.Error(), "suspended") {
+		t.Errorf("expected 'suspended' error, got: %v", err)
+	}
+}
+
+func TestAgentExecutor_SendMessage_SessionNotFound(t *testing.T) {
+	prov := newMockProvider()
+	executor, _ := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	// Try to send message to non-existent session
+	_, err := executor.SendMessage(context.Background(), "nonexistent", "hello", "", "")
+	if err == nil {
+		t.Errorf("expected ErrSessionNotFound, got nil")
+	}
+	if !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("expected ErrSessionNotFound, got %v", err)
 	}
 }

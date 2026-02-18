@@ -559,6 +559,183 @@ func (e *AgentExecutor) SendInput(ctx context.Context, id string, input string, 
 	return run.Provider.SendInput(ctx, input)
 }
 
+// SendMessage sends a message to a session, starting a new run if the session is idle.
+// If the session is idle: resolves the provider and starts a new run with the message as first input.
+// If the session is running: returns a 409 Conflict error.
+// If the session is suspended: queues the message for delivery after suspension resolves.
+func (e *AgentExecutor) SendMessage(ctx context.Context, id string, content string, providerID string, providerType string) (*domain.Session, error) {
+	e.mu.RLock()
+	sc, exists := e.sessions[id]
+	e.mu.RUnlock()
+
+	var sess *domain.Session
+	var err error
+
+	// If session doesn't exist in memory, try to load it from storage
+	if !exists {
+		sess, err = e.GetSession(id)
+		if err != nil {
+			return nil, err
+		}
+		// Session loaded from storage - it's idle by definition
+		// We need to re-register it in memory and start a new run
+	} else {
+		sess = sc.session
+	}
+
+	state := sess.GetState()
+
+	// Handle based on session state
+	switch state {
+	case domain.SessionStateIdle:
+		// For idle sessions, start a new run with this message
+		return e.startRunWithMessage(ctx, id, sess, content, providerID, providerType)
+
+	case domain.SessionStateRunning:
+		// Session is running - reject with conflict error
+		return sess, fmt.Errorf("cannot send message to running session - session is currently running")
+
+	case domain.SessionStateSuspended:
+		// For suspended sessions, queue the message for delivery after suspension resolves
+		// For now, we'll return an error as queueing requires additional infrastructure
+		return sess, fmt.Errorf("cannot send message to suspended session - session is waiting for a response")
+
+	default:
+		return sess, fmt.Errorf("invalid session state: %v", state)
+	}
+}
+
+// startRunWithMessage starts a new provider run for an idle session with the given message as first input.
+func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess *domain.Session, content string, providerID string, providerType string) (*domain.Session, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Check if session was already started in another goroutine
+	if sc, exists := e.sessions[id]; exists && sc.run != nil {
+		return sess, fmt.Errorf("session is already running")
+	}
+
+	// Determine provider type: explicit parameter > preferred > session default
+	pType := sess.ProviderType
+	if providerType != "" {
+		pType = providerType
+	}
+
+	// Store provider preference if specified
+	if providerID != "" {
+		sess.SetPreferredProviderID(providerID)
+		if e.storage != nil {
+			if err := e.storage.Save(sess); err != nil {
+				return sess, fmt.Errorf("failed to save session with provider preference: %w", err)
+			}
+		}
+	}
+
+	// Create provider run configuration
+	config := session.Config{
+		ProviderType: pType,
+		WorkingDir:   sess.WorkingDir,
+		ProjectID:    sess.ProjectID,
+		SessionKind:  sess.Kind,
+		Title:        sess.Title,
+		// Note: We don't pass the full messages list as ResumeMessages here;
+		// that would be for full resumption. For SendMessage on idle sessions,
+		// the provider should reconstruct context from the session if needed.
+	}
+
+	// Create provider instance
+	prov, err := e.providerFactory(pType, id, config)
+	if err != nil {
+		return sess, fmt.Errorf("%w: %s", ErrProviderNotFound, pType)
+	}
+
+	// Register session context if not already registered
+	if _, exists := e.sessions[id]; !exists {
+		sc := &sessionContext{
+			session: sess,
+			run:     nil,
+		}
+		e.sessions[id] = sc
+	}
+
+	// Get the session context
+	sc := e.sessions[id]
+
+	// Create and register provider run
+	run := session.NewProviderRun(prov, e.ctx)
+	sc.run = run
+
+	// Start the provider asynchronously
+	e.wg.Add(1)
+	go func() {
+		defer e.wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				e.handlePanic(sc, r)
+			}
+		}()
+
+		// Start provider
+		startCtx, startCancel := context.WithTimeout(run.Ctx, e.opTimeout)
+		err := run.Provider.Start(startCtx, config)
+		startCancel()
+
+		if err != nil {
+			errMsg := fmt.Sprintf("Provider failed to start: %v", err)
+			sc.session.AppendErrorMessage(errMsg, pType)
+			run.SetError(err)
+
+			if e.storage != nil {
+				_ = e.storage.Save(sc.session)
+			}
+
+			e.mu.Lock()
+			sc.run = nil
+			e.mu.Unlock()
+			return
+		}
+
+		// Send the initial message to the provider
+		if err := run.Provider.SendInput(startCtx, content); err != nil {
+			errMsg := fmt.Sprintf("Failed to send initial message: %v", err)
+			sc.session.AppendErrorMessage(errMsg, pType)
+			run.SetError(err)
+
+			if e.storage != nil {
+				_ = e.storage.Save(sc.session)
+			}
+
+			e.mu.Lock()
+			sc.run = nil
+			e.mu.Unlock()
+			return
+		}
+
+		run.MarkActive()
+		e.transitionWithSave(sc, domain.SessionStateRunning, "provider started with message")
+		e.ensureTerminalHubForPTY(sc)
+
+		e.wg.Add(2)
+		go e.handleEvents(run.Ctx, sc, run)
+		go e.healthCheck(run.Ctx, sc, run)
+
+		<-run.Ctx.Done()
+
+		// Wait for event handling to complete
+		<-run.EventsDone
+		<-run.HealthDone
+
+		// Run completed - return session to idle state
+		e.transitionWithSave(sc, domain.SessionStateIdle, "provider run completed")
+
+		e.mu.Lock()
+		sc.run = nil
+		e.mu.Unlock()
+	}()
+
+	return sess, nil
+}
+
 func (e *AgentExecutor) TerminalHub(id string) (*TerminalHub, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()

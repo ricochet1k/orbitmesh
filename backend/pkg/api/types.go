@@ -31,6 +31,12 @@ type SessionInputRequest struct {
 	ProviderType string `json:"provider_type,omitempty"`
 }
 
+type SendMessageRequest struct {
+	Content      string `json:"content"`
+	ProviderID   string `json:"provider_id,omitempty"`
+	ProviderType string `json:"provider_type,omitempty"`
+}
+
 type MCPServerConfig struct {
 	Name    string            `json:"name"`
 	Command string            `json:"command"`

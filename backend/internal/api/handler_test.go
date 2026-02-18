@@ -1123,3 +1123,167 @@ func TestWriteError_NoDetails(t *testing.T) {
 		t.Errorf("Details should be nil when empty, got %v", resp.Details)
 	}
 }
+
+// Tests for POST /api/sessions/{id}/messages endpoint
+
+func TestSendMessage_RunningSession_Error(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Create a session (which will be running)
+	createReq := apiTypes.SessionRequest{
+		ProviderType: "mock",
+		WorkingDir:   "/tmp",
+	}
+	body, _ := json.Marshal(createReq)
+	req := httptest.NewRequest("POST", "/api/sessions", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	env.router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create session status = %d, want 201", w.Code)
+	}
+
+	var createResp apiTypes.SessionResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &createResp)
+	sessionID := createResp.ID
+
+	// Session is now running, try to send a message (should return error)
+	msgReq := apiTypes.SendMessageRequest{
+		Content: "hello, agent",
+	}
+	body, _ = json.Marshal(msgReq)
+	req = httptest.NewRequest("POST", fmt.Sprintf("/api/sessions/%s/messages", sessionID), bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	env.router().ServeHTTP(w, req)
+
+	// Should return error since session is running
+	if w.Code != http.StatusInternalServerError {
+		t.Logf("response body: %s", w.Body.String())
+		t.Fatalf("send message status = %d, want 500 (or similar error)", w.Code)
+	}
+
+	var errResp apiTypes.ErrorResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &errResp)
+	if errResp.Error != "failed to send message" {
+		t.Errorf("Error = %q", errResp.Error)
+	}
+}
+
+func TestSendMessage_MissingContent(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Create a session
+	createReq := apiTypes.SessionRequest{
+		ProviderType: "mock",
+		WorkingDir:   "/tmp",
+	}
+	body, _ := json.Marshal(createReq)
+	req := httptest.NewRequest("POST", "/api/sessions", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	env.router().ServeHTTP(w, req)
+
+	var createResp apiTypes.SessionResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &createResp)
+	sessionID := createResp.ID
+
+	// Send message with empty content
+	msgReq := apiTypes.SendMessageRequest{
+		Content: "  ",
+	}
+	body, _ = json.Marshal(msgReq)
+	req = httptest.NewRequest("POST", fmt.Sprintf("/api/sessions/%s/messages", sessionID), bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	env.router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+
+	var errResp apiTypes.ErrorResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &errResp)
+	if errResp.Error != "content is required" {
+		t.Errorf("Error = %q, want 'content is required'", errResp.Error)
+	}
+}
+
+func TestSendMessage_SessionNotFound(t *testing.T) {
+	env := newTestEnv(t)
+
+	msgReq := apiTypes.SendMessageRequest{
+		Content: "hello",
+	}
+	body, _ := json.Marshal(msgReq)
+	req := httptest.NewRequest("POST", "/api/sessions/nonexistent/messages", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	env.router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
+	}
+
+	var errResp apiTypes.ErrorResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &errResp)
+	if errResp.Error != "session not found" {
+		t.Errorf("Error = %q", errResp.Error)
+	}
+}
+
+func TestSendMessage_InvalidJSON(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Create a session
+	createReq := apiTypes.SessionRequest{
+		ProviderType: "mock",
+		WorkingDir:   "/tmp",
+	}
+	body, _ := json.Marshal(createReq)
+	req := httptest.NewRequest("POST", "/api/sessions", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	env.router().ServeHTTP(w, req)
+
+	var createResp apiTypes.SessionResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &createResp)
+	sessionID := createResp.ID
+
+	// Send invalid JSON
+	req = httptest.NewRequest("POST", fmt.Sprintf("/api/sessions/%s/messages", sessionID), bytes.NewReader([]byte("invalid json")))
+	w = httptest.NewRecorder()
+	env.router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestSendMessage_RunningSessionWithOverride(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Create a session
+	createReq := apiTypes.SessionRequest{
+		ProviderType: "mock",
+		WorkingDir:   "/tmp",
+	}
+	body, _ := json.Marshal(createReq)
+	req := httptest.NewRequest("POST", "/api/sessions", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	env.router().ServeHTTP(w, req)
+
+	var createResp apiTypes.SessionResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &createResp)
+	sessionID := createResp.ID
+
+	// Send message with provider type override to a running session (should still error)
+	msgReq := apiTypes.SendMessageRequest{
+		Content:      "hello",
+		ProviderType: "mock",
+	}
+	body, _ = json.Marshal(msgReq)
+	req = httptest.NewRequest("POST", fmt.Sprintf("/api/sessions/%s/messages", sessionID), bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	env.router().ServeHTTP(w, req)
+
+	// Should still error because session is running
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", w.Code)
+	}
+}
