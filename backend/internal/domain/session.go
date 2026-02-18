@@ -200,6 +200,23 @@ func (s *Session) AppendErrorMessage(errorMsg string, providerType string) {
 	s.UpdatedAt = time.Now()
 }
 
+// AppendSystemMessage appends a system message to the session's message history.
+// The message is recorded with kind "system" and can be replayed in the transcript.
+func (s *Session) AppendSystemMessage(content string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	message := map[string]interface{}{
+		"id":        fmt.Sprintf("system_%d", time.Now().UnixNano()),
+		"kind":      "system",
+		"contents":  content,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	}
+
+	s.Messages = append(s.Messages, message)
+	s.UpdatedAt = time.Now()
+}
+
 // SessionSnapshot is a point-in-time, lock-free copy of a Session's fields.
 type SessionSnapshot struct {
 	ID                  string

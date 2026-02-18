@@ -420,6 +420,45 @@ func (e *AgentExecutor) KillSession(id string) error {
 	return nil
 }
 
+// CancelRun cancels the active run and returns the session to idle.
+// - If session is running: cancels the provider run, transitions to idle.
+// - If session is suspended: releases the suspension, transitions to idle.
+// - If session is already idle: returns 409 (nothing to cancel).
+func (e *AgentExecutor) CancelRun(ctx context.Context, id string) error {
+	e.mu.RLock()
+	sc, exists := e.sessions[id]
+	e.mu.RUnlock()
+
+	if !exists {
+		return ErrSessionNotFound
+	}
+
+	currentState := sc.session.GetState()
+
+	// If already idle, nothing to cancel
+	if currentState == domain.SessionStateIdle {
+		return fmt.Errorf("%w: session is already idle", ErrInvalidState)
+	}
+
+	// Cancel the active provider run context
+	run := sc.run
+	if run != nil {
+		run.Cancel()
+		if err := run.Provider.Kill(); err != nil {
+			return fmt.Errorf("failed to cancel provider: %w", err)
+		}
+	}
+
+	e.closeTerminalHub(id)
+
+	// Append system message indicating run was cancelled
+	sc.session.AppendSystemMessage("Run cancelled by user")
+
+	// Transition to idle
+	e.transitionWithSave(sc, domain.SessionStateIdle, "run cancelled by user")
+	return nil
+}
+
 func (e *AgentExecutor) GetSession(id string) (*domain.Session, error) {
 	e.mu.RLock()
 	sc, exists := e.sessions[id]

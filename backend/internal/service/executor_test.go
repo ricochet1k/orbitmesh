@@ -1296,3 +1296,126 @@ func TestAgentExecutor_SendMessage_SessionNotFound(t *testing.T) {
 		t.Errorf("expected ErrSessionNotFound, got %v", err)
 	}
 }
+
+func TestAgentExecutor_CancelRun_Running(t *testing.T) {
+	prov := newMockProvider()
+	executor, _ := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	config := session.Config{
+		ProviderType: "test",
+		WorkingDir:   "/tmp/test",
+	}
+
+	sess, _ := executor.StartSession(context.Background(), "session1", config)
+	time.Sleep(50 * time.Millisecond)
+
+	// Session should be running
+	if sess.GetState() != domain.SessionStateRunning {
+		t.Fatalf("expected state Running, got %s", sess.GetState())
+	}
+
+	// Cancel the running session
+	err := executor.CancelRun(context.Background(), "session1")
+	if err != nil {
+		t.Fatalf("unexpected error on cancel: %v", err)
+	}
+
+	// Session should transition to idle
+	if sess.GetState() != domain.SessionStateIdle {
+		t.Errorf("expected state Idle, got %s", sess.GetState())
+	}
+
+	// Check that a system message was appended
+	snapshot := sess.Snapshot()
+	if len(snapshot.Messages) == 0 {
+		t.Errorf("expected system message to be appended, got none")
+	} else {
+		msg := snapshot.Messages[0].(map[string]interface{})
+		if msg["kind"] != "system" {
+			t.Errorf("expected message kind 'system', got %v", msg["kind"])
+		}
+		if !strings.Contains(msg["contents"].(string), "cancelled") {
+			t.Errorf("expected message content to mention 'cancelled', got %v", msg["contents"])
+		}
+	}
+}
+
+func TestAgentExecutor_CancelRun_Suspended(t *testing.T) {
+	prov := newMockProvider()
+	executor, _ := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	config := session.Config{
+		ProviderType: "test",
+		WorkingDir:   "/tmp/test",
+	}
+
+	sess, _ := executor.StartSession(context.Background(), "session1", config)
+	time.Sleep(50 * time.Millisecond)
+
+	// Pause the session to suspend it
+	_ = executor.PauseSession(context.Background(), "session1")
+
+	// Session should be suspended
+	if sess.GetState() != domain.SessionStateSuspended {
+		t.Fatalf("expected state Suspended, got %s", sess.GetState())
+	}
+
+	// Cancel the suspended session
+	err := executor.CancelRun(context.Background(), "session1")
+	if err != nil {
+		t.Fatalf("unexpected error on cancel: %v", err)
+	}
+
+	// Session should transition to idle
+	if sess.GetState() != domain.SessionStateIdle {
+		t.Errorf("expected state Idle, got %s", sess.GetState())
+	}
+}
+
+func TestAgentExecutor_CancelRun_AlreadyIdle(t *testing.T) {
+	prov := newMockProvider()
+	executor, _ := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	config := session.Config{
+		ProviderType: "test",
+		WorkingDir:   "/tmp/test",
+	}
+
+	sess, _ := executor.StartSession(context.Background(), "session1", config)
+	time.Sleep(50 * time.Millisecond)
+
+	// Stop the session to put it in idle state
+	_ = executor.StopSession(context.Background(), "session1")
+
+	// Session should be idle
+	if sess.GetState() != domain.SessionStateIdle {
+		t.Fatalf("expected state Idle, got %s", sess.GetState())
+	}
+
+	// Try to cancel an already idle session
+	err := executor.CancelRun(context.Background(), "session1")
+	if err == nil {
+		t.Errorf("expected ErrInvalidState, got nil")
+	}
+	if !errors.Is(err, ErrInvalidState) {
+		t.Errorf("expected ErrInvalidState, got %v", err)
+	}
+}
+
+func TestAgentExecutor_CancelRun_NotFound(t *testing.T) {
+	prov := newMockProvider()
+	executor, _ := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	// Try to cancel a non-existent session
+	err := executor.CancelRun(context.Background(), "nonexistent")
+	if err == nil {
+		t.Errorf("expected ErrSessionNotFound, got nil")
+	}
+	if !errors.Is(err, ErrSessionNotFound) {
+		t.Errorf("expected ErrSessionNotFound, got %v", err)
+	}
+}
