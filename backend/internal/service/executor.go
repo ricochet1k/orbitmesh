@@ -394,6 +394,66 @@ func (e *AgentExecutor) CancelRun(ctx context.Context, id string) error {
 	return nil
 }
 
+// ResumeSession resumes a suspended session by calling the provider's Resume method.
+func (e *AgentExecutor) ResumeSession(ctx context.Context, id string) (*domain.Session, error) {
+	e.mu.RLock()
+	sc, exists := e.sessions[id]
+	e.mu.RUnlock()
+
+	if !exists {
+		return nil, ErrSessionNotFound
+	}
+
+	currentState := sc.session.GetState()
+
+	// Only suspended sessions can be resumed
+	if currentState != domain.SessionStateSuspended {
+		return nil, fmt.Errorf("%w: session is not suspended (current state: %s)", ErrInvalidState, currentState)
+	}
+
+	// Get the stored suspension context
+	suspensionCtx := sc.session.GetSuspensionContext()
+	if suspensionCtx == nil {
+		return nil, fmt.Errorf("no suspension context found for session %s", id)
+	}
+
+	// Cast the stored context back to the proper type
+	// Note: This uses interface{} to avoid circular imports
+	var providerSuspensionCtx *session.SuspensionContext
+	if ctx, ok := suspensionCtx.(*session.SuspensionContext); ok {
+		providerSuspensionCtx = ctx
+	} else {
+		return nil, fmt.Errorf("invalid suspension context type")
+	}
+
+	// If there's an active run, try to resume the provider
+	if sc.run != nil {
+		suspendable, ok := sc.run.Provider.(session.Suspendable)
+		if !ok {
+			return nil, fmt.Errorf("provider does not support resumption")
+		}
+
+		if err := suspendable.Resume(ctx, providerSuspensionCtx); err != nil {
+			return nil, fmt.Errorf("failed to resume provider: %w", err)
+		}
+	}
+
+	// Clear the suspension context and transition back to running
+	sc.session.SetSuspensionContext(nil)
+	if err := sc.session.TransitionTo(domain.SessionStateRunning, "resumed from suspension"); err != nil {
+		return nil, fmt.Errorf("failed to transition session state: %w", err)
+	}
+
+	// Persist the updated session
+	if e.storage != nil {
+		if err := e.storage.Save(sc.session); err != nil {
+			return nil, fmt.Errorf("failed to save session: %w", err)
+		}
+	}
+
+	return sc.session, nil
+}
+
 func (e *AgentExecutor) GetSession(id string) (*domain.Session, error) {
 	e.mu.RLock()
 	sc, exists := e.sessions[id]
@@ -843,10 +903,57 @@ func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.
 				sc.session.SetCurrentTask(task)
 			}
 		}
+	case domain.ToolCallData:
+		// Check if this tool call requires waiting for an external response
+		if data.Status == "pending" || data.Status == "waiting" {
+			// Suspend the session to await the tool result
+			e.suspendSession(sc, data.ID)
+		}
 	}
 
 	if e.storage != nil {
 		_ = e.storage.Save(sc.session)
+	}
+}
+
+func (e *AgentExecutor) suspendSession(sc *sessionContext, toolCallID string) {
+	if sc == nil || sc.session == nil || sc.run == nil {
+		return
+	}
+
+	// Check if provider implements Suspendable interface
+	suspendable, ok := sc.run.Provider.(session.Suspendable)
+	if !ok {
+		// Provider doesn't support suspension, cannot suspend
+		return
+	}
+
+	// Call Suspend on the provider to capture its state
+	suspensionCtx, err := suspendable.Suspend(context.Background())
+	if err != nil {
+		// Log error but don't fail; session stays running
+		return
+	}
+
+	// If we got a suspension context, set the tool call ID
+	if suspensionCtx != nil && toolCallID != "" {
+		suspensionCtx.ToolCallID = toolCallID
+	}
+
+	// Store the suspension context on the domain session
+	sc.session.SetSuspensionContext(suspensionCtx)
+
+	// Transition to suspended state
+	_ = sc.session.TransitionTo(domain.SessionStateSuspended, fmt.Sprintf("waiting for tool result: %s", toolCallID))
+
+	// Persist the session with suspension context
+	if e.storage != nil {
+		_ = e.storage.Save(sc.session)
+	}
+
+	// Cancel the current run to stop provider execution
+	if sc.run != nil {
+		sc.run.Cancel()
 	}
 }
 

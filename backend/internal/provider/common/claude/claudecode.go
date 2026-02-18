@@ -348,3 +348,25 @@ func (p *ClaudeCodeProvider) handleFailure(err error) {
 	p.state.SetError(err)
 	p.events.EmitError(err.Error(), "CLAUDE_FAILURE")
 }
+
+// Suspend captures the Claude provider state for persistence (minimal stub).
+func (p *ClaudeCodeProvider) Suspend(ctx context.Context) (*session.SuspensionContext, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	return &session.SuspensionContext{
+		Reason:    "awaiting external response",
+		Timestamp: time.Now(),
+		// Claude provider stores minimal state; just track pending input
+		PendingInput: []string{},
+	}, nil
+}
+
+// Resume restores a Claude provider session from suspended state (minimal stub).
+func (p *ClaudeCodeProvider) Resume(ctx context.Context, suspensionContext *session.SuspensionContext) error {
+	if suspensionContext == nil {
+		return fmt.Errorf("suspension context is nil")
+	}
+	// Claude provider has minimal state to restore
+	return nil
+}

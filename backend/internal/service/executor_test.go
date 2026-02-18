@@ -92,6 +92,17 @@ func (m *mockProvider) SendEvent(e domain.Event) {
 	m.events <- e
 }
 
+func (m *mockProvider) Suspend(ctx context.Context) (*session.SuspensionContext, error) {
+	return &session.SuspensionContext{
+		Reason:    "test suspension",
+		Timestamp: time.Now(),
+	}, nil
+}
+
+func (m *mockProvider) Resume(ctx context.Context, suspensionContext *session.SuspensionContext) error {
+	return nil
+}
+
 type mockStorage struct {
 	mu       sync.Mutex
 	sessions map[string]*domain.Session
@@ -1225,6 +1236,102 @@ func TestAgentExecutor_CancelRun_NotFound(t *testing.T) {
 		t.Errorf("expected ErrSessionNotFound, got nil")
 	}
 	if !errors.Is(err, ErrSessionNotFound) {
+		t.Errorf("expected ErrSessionNotFound, got %v", err)
+	}
+}
+
+func TestAgentExecutor_SuspendAndResume(t *testing.T) {
+	prov := newMockProvider()
+	executor, _ := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	// Start a session
+	sess, err := executor.StartSession(context.Background(), "test-session", session.Config{
+		ProviderType: "test",
+		WorkingDir:   "/tmp",
+		ProjectID:    "proj1",
+	})
+	if err != nil {
+		t.Fatalf("failed to start session: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	if sess.GetState() != domain.SessionStateRunning {
+		t.Errorf("expected running state, got %v", sess.GetState())
+	}
+
+	// Simulate a suspension by manually calling suspendSession
+	executor.mu.RLock()
+	sc := executor.sessions["test-session"]
+	executor.mu.RUnlock()
+
+	if sc == nil {
+		t.Fatal("session context not found")
+	}
+
+	// Call suspend on the session
+	executor.suspendSession(sc, "tool-call-123")
+
+	// Verify the session is now suspended
+	if sc.session.GetState() != domain.SessionStateSuspended {
+		t.Errorf("expected suspended state, got %v", sc.session.GetState())
+	}
+
+	// Verify the suspension context is stored
+	suspensionCtx := sc.session.GetSuspensionContext()
+	if suspensionCtx == nil {
+		t.Error("suspension context is nil")
+	}
+
+	// Resume the session
+	sess2, err := executor.ResumeSession(context.Background(), "test-session")
+	if err != nil {
+		t.Fatalf("failed to resume session: %v", err)
+	}
+
+	if sess2.GetState() != domain.SessionStateRunning {
+		t.Errorf("expected running state after resume, got %v", sess2.GetState())
+	}
+
+	// Verify the suspension context was cleared
+	if sess2.GetSuspensionContext() != nil {
+		t.Error("suspension context should be cleared after resume")
+	}
+}
+
+func TestAgentExecutor_ResumeNonSuspendedSession(t *testing.T) {
+	prov := newMockProvider()
+	executor, _ := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	// Start a session
+	_, err := executor.StartSession(context.Background(), "test-session", session.Config{
+		ProviderType: "test",
+		WorkingDir:   "/tmp",
+		ProjectID:    "proj1",
+	})
+	if err != nil {
+		t.Fatalf("failed to start session: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Try to resume a running session (should fail)
+	_, err = executor.ResumeSession(context.Background(), "test-session")
+	if err == nil {
+		t.Error("expected error when resuming non-suspended session")
+	}
+}
+
+func TestAgentExecutor_ResumeNonExistentSession(t *testing.T) {
+	prov := newMockProvider()
+	executor, _ := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	// Try to resume a non-existent session
+	_, err := executor.ResumeSession(context.Background(), "non-existent")
+	if err != ErrSessionNotFound {
 		t.Errorf("expected ErrSessionNotFound, got %v", err)
 	}
 }

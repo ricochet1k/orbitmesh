@@ -3,6 +3,7 @@ package acp
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -69,6 +70,7 @@ type SnapshotMessage struct {
 
 var _ session.Session = (*Session)(nil)
 var _ session.Snapshottable = (*Session)(nil)
+var _ session.Suspendable = (*Session)(nil)
 
 // NewSession creates a new ACP session.
 func NewSession(sessionID string, providerConfig Config, sessionConfig session.Config) (*Session, error) {
@@ -664,4 +666,101 @@ func LoadSession(sessionID string, providerConfig Config, snapshotMgr *session.S
 	}
 
 	return sess, nil
+}
+
+// Suspend captures the current state of the ACP session for suspension.
+func (s *Session) Suspend(ctx context.Context) (*session.SuspensionContext, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Capture the opaque provider state similar to snapshot
+	providerState := make(map[string]any)
+
+	// Save ACP session ID if we have one
+	if s.acpSessionID != nil {
+		providerState["acp_session_id"] = *s.acpSessionID
+	}
+
+	// Save message history
+	providerState["messages"] = s.messageHistory
+
+	// Save current task and metrics
+	status := s.state.Status()
+	providerState["current_task"] = status.CurrentTask
+	providerState["metrics"] = status.Metrics
+
+	// Marshal provider state to bytes (using basic JSON serialization)
+	// Note: In a production implementation, this should use JSON marshaling
+	suspensionCtx := &session.SuspensionContext{
+		Reason:    "awaiting external response",
+		Timestamp: time.Now(),
+	}
+
+	// For now, we store the provider state as JSON bytes
+	// This is a simplified approach; a more robust implementation would use
+	// a proper serialization format.
+	if data, err := json.Marshal(providerState); err == nil {
+		suspensionCtx.ProviderState = data
+	}
+
+	return suspensionCtx, nil
+}
+
+// Resume restores an ACP session from a suspended state.
+func (s *Session) Resume(ctx context.Context, suspensionContext *session.SuspensionContext) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if suspensionContext == nil {
+		return errors.New("suspension context is nil")
+	}
+
+	// Deserialize provider state
+	providerState := make(map[string]any)
+	if len(suspensionContext.ProviderState) > 0 {
+		if err := json.Unmarshal(suspensionContext.ProviderState, &providerState); err != nil {
+			return fmt.Errorf("failed to deserialize provider state: %w", err)
+		}
+	}
+
+	// Restore ACP session ID
+	if acpSessionID, ok := providerState["acp_session_id"].(string); ok {
+		s.acpSessionID = &acpSessionID
+	}
+
+	// Restore message history
+	if messagesRaw, ok := providerState["messages"]; ok && messagesRaw != nil {
+		s.messageHistory = make([]SnapshotMessage, 0)
+
+		// Try as []any first (JSON unmarshal format)
+		if messages, ok := messagesRaw.([]any); ok {
+			for _, msg := range messages {
+				if msgMap, ok := msg.(map[string]any); ok {
+					var sm SnapshotMessage
+					if role, ok := msgMap["role"].(string); ok {
+						sm.Role = role
+					}
+					if content, ok := msgMap["content"].(string); ok {
+						sm.Content = content
+					}
+					if timestamp, ok := msgMap["timestamp"].(string); ok {
+						if t, err := time.Parse(time.RFC3339, timestamp); err == nil {
+							sm.Timestamp = t
+						}
+					}
+					s.messageHistory = append(s.messageHistory, sm)
+				}
+			}
+		}
+	}
+
+	// Restore current task
+	if currentTask, ok := providerState["current_task"].(string); ok {
+		s.state.SetCurrentTask(currentTask)
+	}
+
+	// Restore metrics if present (note: this adds to existing, may need adjustment)
+	// For now we skip this to avoid double-counting
+
+	return nil
 }

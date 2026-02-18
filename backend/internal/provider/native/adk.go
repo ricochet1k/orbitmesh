@@ -489,3 +489,26 @@ func (p *ADKSession) handleFailure(err error) {
 }
 
 var _ session.Session = (*ADKSession)(nil)
+var _ session.Suspendable = (*ADKSession)(nil)
+
+// Suspend captures the ADK session state for persistence (minimal stub).
+func (s *ADKSession) Suspend(ctx context.Context) (*session.SuspensionContext, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return &session.SuspensionContext{
+		Reason:    "awaiting external response",
+		Timestamp: time.Now(),
+		// ADK provider stores minimal state; just track pending input
+		PendingInput: []string{},
+	}, nil
+}
+
+// Resume restores an ADK session from suspended state (minimal stub).
+func (s *ADKSession) Resume(ctx context.Context, suspensionContext *session.SuspensionContext) error {
+	if suspensionContext == nil {
+		return fmt.Errorf("suspension context is nil")
+	}
+	// ADK provider has minimal state to restore
+	return nil
+}

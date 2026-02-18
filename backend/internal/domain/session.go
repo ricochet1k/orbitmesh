@@ -83,6 +83,7 @@ type Session struct {
 	ErrorMessage        string
 	Transitions         []StateTransition
 	Messages            []any // []session.Message
+	SuspensionContext   any   // *session.SuspensionContext (to avoid circular import)
 
 	mu sync.RWMutex
 }
@@ -217,6 +218,21 @@ func (s *Session) AppendSystemMessage(content string) {
 	s.UpdatedAt = time.Now()
 }
 
+// SetSuspensionContext stores the suspension context for a suspended session.
+func (s *Session) SetSuspensionContext(ctx any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.SuspensionContext = ctx
+	s.UpdatedAt = time.Now()
+}
+
+// GetSuspensionContext retrieves the suspension context if the session is suspended.
+func (s *Session) GetSuspensionContext() any {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.SuspensionContext
+}
+
 // SessionSnapshot is a point-in-time, lock-free copy of a Session's fields.
 type SessionSnapshot struct {
 	ID                  string
@@ -234,6 +250,7 @@ type SessionSnapshot struct {
 	ErrorMessage        string
 	Transitions         []StateTransition
 	Messages            []any // []session.Message
+	SuspensionContext   any   // *session.SuspensionContext
 }
 
 // Snapshot returns an atomic copy of the session under its read lock.
@@ -263,5 +280,6 @@ func (s *Session) Snapshot() SessionSnapshot {
 		ErrorMessage:        s.ErrorMessage,
 		Transitions:         transitions,
 		Messages:            messages,
+		SuspensionContext:   s.SuspensionContext,
 	}
 }

@@ -63,6 +63,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/sessions/{id}/messages", h.getSessionMessages)
 	r.Post("/api/sessions/{id}/messages", h.sendSessionMessage)
 	r.Post("/api/sessions/{id}/cancel", h.cancelSession)
+	r.Post("/api/sessions/{id}/resume", h.resumeSession)
 	r.Get("/api/sessions/{id}/events", h.sseEvents)
 	r.Get("/api/sessions/{id}/activity", h.getSessionActivity)
 	r.Get("/api/sessions/{id}/dock/mcp/next", h.nextDockMCP)
@@ -467,6 +468,22 @@ func (h *Handler) cancelSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) resumeSession(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	// Resume a suspended session
+	// The suspension context should be stored on the session
+	sess, err := h.executor.ResumeSession(r.Context(), id)
+	if err != nil {
+		writeSessionError(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(sessionToResponse(sess.Snapshot()))
 }
 
 // writeSessionError maps common executor errors to HTTP responses.

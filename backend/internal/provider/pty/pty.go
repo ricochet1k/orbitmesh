@@ -458,3 +458,25 @@ func (p *PTYProvider) handleFailure(err error) {
 	p.state.SetError(err)
 	p.events.EmitError(err.Error(), "PTY_FAILURE")
 }
+
+// Suspend captures the PTY session state for persistence (minimal stub).
+func (p *PTYProvider) Suspend(ctx context.Context) (*session.SuspensionContext, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	return &session.SuspensionContext{
+		Reason:    "awaiting external response",
+		Timestamp: time.Now(),
+		// PTY provider stores minimal state; just track pending input
+		PendingInput: []string{},
+	}, nil
+}
+
+// Resume restores a PTY session from suspended state (minimal stub).
+func (p *PTYProvider) Resume(ctx context.Context, suspensionContext *session.SuspensionContext) error {
+	if suspensionContext == nil {
+		return fmt.Errorf("suspension context is nil")
+	}
+	// PTY provider has minimal state to restore
+	return nil
+}
