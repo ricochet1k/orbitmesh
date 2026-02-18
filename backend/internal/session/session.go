@@ -13,7 +13,6 @@ const (
 	StateCreated State = iota
 	StateStarting
 	StateRunning
-	StatePaused
 	StateStopping
 	StateStopped
 	StateError
@@ -27,8 +26,6 @@ func (s State) String() string {
 		return "starting"
 	case StateRunning:
 		return "running"
-	case StatePaused:
-		return "paused"
 	case StateStopping:
 		return "stopping"
 	case StateStopped:
@@ -85,12 +82,6 @@ type Session interface {
 	// Stop requests a graceful shutdown of the session.
 	// It should be idempotent.
 	Stop(ctx context.Context) error
-
-	// Pause temporarily suspends agent execution.
-	Pause(ctx context.Context) error
-
-	// Resume continues previously paused agent execution.
-	Resume(ctx context.Context) error
 
 	// Kill immediately terminates the provider and all child processes.
 	// It should be idempotent and must not block.

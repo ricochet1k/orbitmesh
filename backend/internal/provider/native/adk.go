@@ -415,47 +415,6 @@ func (p *ADKSession) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (p *ADKSession) Pause(ctx context.Context) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.state.GetState() != session.StateRunning {
-		return ErrNotStarted
-	}
-
-	p.pauseMu.Lock()
-	if p.paused {
-		p.pauseMu.Unlock()
-		return ErrAlreadyPaused
-	}
-	p.paused = true
-	p.pauseMu.Unlock()
-
-	p.state.SetState(session.StatePaused)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateSuspended, "waiting for external response")
-
-	return nil
-}
-
-func (p *ADKSession) Resume(ctx context.Context) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.state.GetState() != session.StatePaused {
-		return ErrNotPaused
-	}
-
-	p.pauseMu.Lock()
-	p.paused = false
-	p.pauseCond.Broadcast()
-	p.pauseMu.Unlock()
-
-	p.state.SetState(session.StateRunning)
-	p.events.EmitStatusChange(domain.SessionStateSuspended, domain.SessionStateRunning, "resuming from suspension")
-
-	return nil
-}
-
 func (p *ADKSession) Kill() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()

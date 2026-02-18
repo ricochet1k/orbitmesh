@@ -546,31 +546,7 @@ func TestIntegration_SessionLifecycle(t *testing.T) {
 	// Wait for the session to be running (the executor goroutine transitions it)
 	waitForStateHTTP(t, srv.URL, sessionID, "running")
 
-	// 3. Pause
-	pauseResp, err := http.Post(srv.URL+"/api/sessions/"+sessionID+"/pause", "", nil)
-	if err != nil {
-		t.Fatalf("pause: %v", err)
-	}
-	pauseResp.Body.Close()
-	if pauseResp.StatusCode != http.StatusNoContent {
-		t.Fatalf("pause: expected 204, got %d", pauseResp.StatusCode)
-	}
-
-	// 4. Resume
-	resumeBody, _ := json.Marshal(apiTypes.ResumeRequest{
-		ToolCallID: "test-tool-id",
-		Result:     map[string]string{"output": "test"},
-	})
-	resumeResp, err := http.Post(srv.URL+"/api/sessions/"+sessionID+"/resume", "application/json", bytes.NewReader(resumeBody))
-	if err != nil {
-		t.Fatalf("resume: %v", err)
-	}
-	resumeResp.Body.Close()
-	if resumeResp.StatusCode != http.StatusAccepted {
-		t.Fatalf("resume: expected 202, got %d", resumeResp.StatusCode)
-	}
-
-	// 5. Stop
+	// Stop
 	stopReq, _ := http.NewRequest(http.MethodDelete, srv.URL+"/api/sessions/"+sessionID, nil)
 	stopResp, err := http.DefaultClient.Do(stopReq)
 	if err != nil {

@@ -125,21 +125,7 @@ export async function stopSession(id: string): Promise<void> {
   if (!resp.ok) throw new Error(await readErrorMessage(resp));
 }
 
-export async function pauseSession(id: string): Promise<void> {
-  const resp = await fetch(`${BASE_URL}/sessions/${id}/pause`, {
-    method: "POST",
-    headers: withCSRFHeaders(),
-  });
-  if (!resp.ok) throw new Error(await readErrorMessage(resp));
-}
 
-export async function resumeSession(id: string): Promise<void> {
-  const resp = await fetch(`${BASE_URL}/sessions/${id}/resume`, {
-    method: "POST",
-    headers: withCSRFHeaders(),
-  });
-  if (!resp.ok) throw new Error(await readErrorMessage(resp));
-}
 
 export async function sendSessionInput(id: string, input: string): Promise<void> {
   const payload: SessionInputRequest = { input };

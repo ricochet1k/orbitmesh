@@ -63,26 +63,6 @@ func (m *mockProvider) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (m *mockProvider) Pause(ctx context.Context) error {
-	if m.pauseErr != nil {
-		return m.pauseErr
-	}
-	m.mu.Lock()
-	m.state = session.StatePaused
-	m.mu.Unlock()
-	return nil
-}
-
-func (m *mockProvider) Resume(ctx context.Context) error {
-	if m.resumeErr != nil {
-		return m.resumeErr
-	}
-	m.mu.Lock()
-	m.state = session.StateRunning
-	m.mu.Unlock()
-	return nil
-}
-
 func (m *mockProvider) Kill() error {
 	if m.killErr != nil {
 		return m.killErr
@@ -340,39 +320,6 @@ func TestAgentExecutor_StopSession(t *testing.T) {
 			t.Errorf("expected ErrSessionNotFound, got %v", err)
 		}
 	})
-}
-
-func TestAgentExecutor_PauseResumeSession(t *testing.T) {
-	prov := newMockProvider()
-	executor, _ := createTestExecutor(prov)
-	defer executor.Shutdown(context.Background())
-
-	config := session.Config{
-		ProviderType: "test",
-		WorkingDir:   "/tmp/test",
-	}
-
-	session, _ := executor.StartSession(context.Background(), "session1", config)
-	time.Sleep(50 * time.Millisecond)
-
-	err := executor.PauseSession(context.Background(), "session1")
-	if err != nil {
-		t.Fatalf("unexpected error on pause: %v", err)
-	}
-
-	// Per the new design, pausing a running session transitions it to suspended state
-	if session.GetState() != domain.SessionStateSuspended {
-		t.Errorf("expected state Suspended, got %s", session.GetState())
-	}
-
-	_, err = executor.ResumeSession(context.Background(), "session1", "test-tool-id", map[string]interface{}{})
-	if err != nil {
-		t.Fatalf("unexpected error on resume: %v", err)
-	}
-
-	if session.GetState() != domain.SessionStateRunning {
-		t.Errorf("expected state Running, got %s", session.GetState())
-	}
 }
 
 func TestAgentExecutor_KillSession(t *testing.T) {
@@ -638,24 +585,6 @@ func TestAgentExecutor_ShutdownPreventsNewSessions(t *testing.T) {
 	}
 }
 
-func TestAgentExecutor_InvalidStateTransitions(t *testing.T) {
-	prov := newMockProvider()
-	executor, _ := createTestExecutor(prov)
-	defer executor.Shutdown(context.Background())
-
-	config := session.Config{
-		ProviderType: "test",
-		WorkingDir:   "/tmp/test",
-	}
-
-	executor.StartSession(context.Background(), "session1", config)
-
-	_, err := executor.ResumeSession(context.Background(), "session1", "test-tool-id", map[string]interface{}{})
-	if err == nil {
-		t.Error("expected error when resuming non-paused session")
-	}
-}
-
 func TestAgentExecutor_FullLifecycleIntegration(t *testing.T) {
 	prov := newMockProvider()
 	executor, storage := createTestExecutor(prov)
@@ -672,21 +601,6 @@ func TestAgentExecutor_FullLifecycleIntegration(t *testing.T) {
 	}
 
 	time.Sleep(50 * time.Millisecond)
-	if session.GetState() != domain.SessionStateRunning {
-		t.Errorf("expected state Running, got %s", session.GetState())
-	}
-
-	if err := executor.PauseSession(context.Background(), "lifecycle-test"); err != nil {
-		t.Fatalf("failed to pause session: %v", err)
-	}
-	// Per the new design, pausing transitions to suspended state
-	if session.GetState() != domain.SessionStateSuspended {
-		t.Errorf("expected state Suspended, got %s", session.GetState())
-	}
-
-	if _, err := executor.ResumeSession(context.Background(), "lifecycle-test", "test-tool-id", map[string]interface{}{}); err != nil {
-		t.Fatalf("failed to resume session: %v", err)
-	}
 	if session.GetState() != domain.SessionStateRunning {
 		t.Errorf("expected state Running, got %s", session.GetState())
 	}
@@ -752,16 +666,6 @@ func TestAgentExecutor_MultipleConcurrentSessions(t *testing.T) {
 
 			if session.GetState() != domain.SessionStateRunning {
 				errChan <- errors.New("session not running")
-				return
-			}
-
-			if err := executor.PauseSession(context.Background(), sessionID); err != nil {
-				errChan <- err
-				return
-			}
-
-			if _, err := executor.ResumeSession(context.Background(), sessionID, "test-tool-id", map[string]interface{}{}); err != nil {
-				errChan <- err
 				return
 			}
 
@@ -1028,18 +932,6 @@ func TestAgentExecutor_LoadTest_TenConcurrentAgents(t *testing.T) {
 
 			time.Sleep(50 * time.Millisecond)
 
-			for j := 0; j < 5; j++ {
-				if err := executor.PauseSession(context.Background(), sessionID); err != nil {
-					errChan <- err
-					continue
-				}
-
-				if _, err := executor.ResumeSession(context.Background(), sessionID, "test-tool-id", map[string]interface{}{}); err != nil {
-					errChan <- err
-					continue
-				}
-			}
-
 			if err := executor.StopSession(context.Background(), sessionID); err != nil {
 				errChan <- err
 				return
@@ -1075,48 +967,6 @@ func TestAgentExecutor_LoadTest_TenConcurrentAgents(t *testing.T) {
 }
 
 func TestAgentExecutor_ProviderErrors(t *testing.T) {
-	t.Run("pause error", func(t *testing.T) {
-		prov := newMockProvider()
-		prov.pauseErr = errors.New("pause failed")
-		executor, _ := createTestExecutor(prov)
-		defer executor.Shutdown(context.Background())
-
-		config := session.Config{
-			ProviderType: "test",
-			WorkingDir:   "/tmp/test",
-		}
-
-		executor.StartSession(context.Background(), "session1", config)
-		time.Sleep(50 * time.Millisecond)
-
-		err := executor.PauseSession(context.Background(), "session1")
-		if err == nil {
-			t.Error("expected pause error")
-		}
-	})
-
-	t.Run("resume error", func(t *testing.T) {
-		prov := newMockProvider()
-		prov.resumeErr = errors.New("resume failed")
-		executor, _ := createTestExecutor(prov)
-		defer executor.Shutdown(context.Background())
-
-		config := session.Config{
-			ProviderType: "test",
-			WorkingDir:   "/tmp/test",
-		}
-
-		executor.StartSession(context.Background(), "session1", config)
-		time.Sleep(50 * time.Millisecond)
-
-		executor.PauseSession(context.Background(), "session1")
-
-		_, err := executor.ResumeSession(context.Background(), "session1", "test-tool-id", map[string]interface{}{})
-		if err == nil {
-			t.Error("expected resume error")
-		}
-	})
-
 	t.Run("stop error", func(t *testing.T) {
 		prov := newMockProvider()
 		prov.stopErr = errors.New("stop failed")
@@ -1182,14 +1032,6 @@ func TestAgentExecutor_NonExistentSessionOperations(t *testing.T) {
 	prov := newMockProvider()
 	executor, _ := createTestExecutor(prov)
 	defer executor.Shutdown(context.Background())
-
-	if err := executor.PauseSession(context.Background(), "nonexistent"); !errors.Is(err, ErrSessionNotFound) {
-		t.Errorf("expected ErrSessionNotFound, got %v", err)
-	}
-
-	if _, err := executor.ResumeSession(context.Background(), "nonexistent", "test-tool-id", map[string]interface{}{}); !errors.Is(err, ErrSessionNotFound) {
-		t.Errorf("expected ErrSessionNotFound, got %v", err)
-	}
 
 	if err := executor.KillSession("nonexistent"); !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("expected ErrSessionNotFound, got %v", err)
@@ -1338,39 +1180,6 @@ func TestAgentExecutor_CancelRun_Running(t *testing.T) {
 		if !strings.Contains(msg["contents"].(string), "cancelled") {
 			t.Errorf("expected message content to mention 'cancelled', got %v", msg["contents"])
 		}
-	}
-}
-
-func TestAgentExecutor_CancelRun_Suspended(t *testing.T) {
-	prov := newMockProvider()
-	executor, _ := createTestExecutor(prov)
-	defer executor.Shutdown(context.Background())
-
-	config := session.Config{
-		ProviderType: "test",
-		WorkingDir:   "/tmp/test",
-	}
-
-	sess, _ := executor.StartSession(context.Background(), "session1", config)
-	time.Sleep(50 * time.Millisecond)
-
-	// Pause the session to suspend it
-	_ = executor.PauseSession(context.Background(), "session1")
-
-	// Session should be suspended
-	if sess.GetState() != domain.SessionStateSuspended {
-		t.Fatalf("expected state Suspended, got %s", sess.GetState())
-	}
-
-	// Cancel the suspended session
-	err := executor.CancelRun(context.Background(), "session1")
-	if err != nil {
-		t.Fatalf("unexpected error on cancel: %v", err)
-	}
-
-	// Session should transition to idle
-	if sess.GetState() != domain.SessionStateIdle {
-		t.Errorf("expected state Idle, got %s", sess.GetState())
 	}
 }
 

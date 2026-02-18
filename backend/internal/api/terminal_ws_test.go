@@ -59,20 +59,6 @@ func (m *mockTerminalProvider) Stop(_ context.Context) error {
 	return nil
 }
 
-func (m *mockTerminalProvider) Pause(_ context.Context) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.state = session.StatePaused
-	return nil
-}
-
-func (m *mockTerminalProvider) Resume(_ context.Context) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.state = session.StateRunning
-	return nil
-}
-
 func (m *mockTerminalProvider) Kill() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

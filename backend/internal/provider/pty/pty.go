@@ -344,44 +344,6 @@ func (p *PTYProvider) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (p *PTYProvider) Pause(ctx context.Context) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.state.GetState() != session.StateRunning {
-		return ErrNotStarted
-	}
-
-	if p.cmd != nil && p.cmd.Process != nil {
-		if err := p.cmd.Process.Signal(syscall.SIGTSTP); err != nil {
-			return err
-		}
-	}
-
-	p.state.SetState(session.StatePaused)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateSuspended, "waiting for external response")
-	return nil
-}
-
-func (p *PTYProvider) Resume(ctx context.Context) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.state.GetState() != session.StatePaused {
-		return ErrNotPaused
-	}
-
-	if p.cmd != nil && p.cmd.Process != nil {
-		if err := p.cmd.Process.Signal(syscall.SIGCONT); err != nil {
-			return err
-		}
-	}
-
-	p.state.SetState(session.StateRunning)
-	p.events.EmitStatusChange(domain.SessionStateSuspended, domain.SessionStateRunning, "resuming from suspension")
-	return nil
-}
-
 func (p *PTYProvider) Kill() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()

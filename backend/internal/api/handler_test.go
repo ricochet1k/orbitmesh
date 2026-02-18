@@ -28,17 +28,14 @@ import (
 
 type mockProvider struct {
 	mu        sync.Mutex
-	state     session.State
 	events    chan domain.Event
 	startErr  error
-	pauseErr  error
 	sendErr   error
 	lastInput string
 }
 
 func newMockProvider() *mockProvider {
 	return &mockProvider{
-		state:  session.StateCreated,
 		events: make(chan domain.Event, 64),
 	}
 }
@@ -49,38 +46,18 @@ func (m *mockProvider) Start(_ context.Context, _ session.Config) error {
 	if m.startErr != nil {
 		return m.startErr
 	}
-	m.state = session.StateRunning
 	return nil
 }
 
 func (m *mockProvider) Stop(_ context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.state = session.StateStopped
-	return nil
-}
-
-func (m *mockProvider) Pause(_ context.Context) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.pauseErr != nil {
-		return m.pauseErr
-	}
-	m.state = session.StatePaused
-	return nil
-}
-
-func (m *mockProvider) Resume(_ context.Context) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.state = session.StateRunning
 	return nil
 }
 
 func (m *mockProvider) Kill() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.state = session.StateStopped
 	return nil
 }
 
@@ -88,7 +65,6 @@ func (m *mockProvider) Status() session.Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return session.Status{
-		State: m.state,
 		Metrics: session.Metrics{
 			TokensIn:  10,
 			TokensOut: 5,
@@ -811,195 +787,6 @@ func TestStopSession_NotFound(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", w.Code)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// POST /api/sessions/{id}/pause
-// ---------------------------------------------------------------------------
-
-func TestPauseSession_OK(t *testing.T) {
-	env := newTestEnv(t)
-	r := env.router()
-
-	created := createSession(t, r, "mock", "/tmp/test")
-	waitForRunning(t, env.executor, created.ID)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/pause", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestPauseSession_NotFound(t *testing.T) {
-	env := newTestEnv(t)
-	r := env.router()
-
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/does-not-exist/pause", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d", w.Code)
-	}
-}
-
-func TestPauseSession_InvalidState(t *testing.T) {
-	env := newTestEnv(t)
-	r := env.router()
-
-	created := createSession(t, r, "mock", "/tmp/test")
-	waitForRunning(t, env.executor, created.ID)
-
-	// Stop first, then try to pause the stopped session
-	stopReq := httptest.NewRequest(http.MethodDelete, "/api/sessions/"+created.ID, nil)
-	r.ServeHTTP(httptest.NewRecorder(), stopReq)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/pause", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusConflict {
-		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestPauseSession_ProviderError(t *testing.T) {
-	env := newTestEnv(t)
-	r := env.router()
-
-	created := createSession(t, r, "mock", "/tmp/test")
-	waitForRunning(t, env.executor, created.ID)
-
-	// Inject a provider-level error before the pause request.
-	env.lastMock.mu.Lock()
-	env.lastMock.pauseErr = fmt.Errorf("provider busy")
-	env.lastMock.mu.Unlock()
-
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/pause", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d: %s", w.Code, w.Body.String())
-	}
-	var errResp apiTypes.ErrorResponse
-	_ = json.Unmarshal(w.Body.Bytes(), &errResp)
-	if !strings.Contains(errResp.Error, "provider busy") {
-		t.Errorf("Error = %q, want to contain 'provider busy'", errResp.Error)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// POST /api/sessions/{id}/resume
-// ---------------------------------------------------------------------------
-
-func TestResumeSession_OK(t *testing.T) {
-	env := newTestEnv(t)
-	r := env.router()
-
-	created := createSession(t, r, "mock", "/tmp/test")
-	waitForRunning(t, env.executor, created.ID)
-
-	// Pause first
-	pauseReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/pause", nil)
-	pauseW := httptest.NewRecorder()
-	r.ServeHTTP(pauseW, pauseReq)
-	if pauseW.Code != http.StatusNoContent {
-		t.Fatalf("pause: expected 204, got %d: %s", pauseW.Code, pauseW.Body.String())
-	}
-
-	// Resume with tool result
-	resumeReqBody, _ := json.Marshal(apiTypes.ResumeRequest{
-		ToolCallID: "test-tool-call-123",
-		Result:     map[string]string{"output": "test result"},
-	})
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/resume", bytes.NewReader(resumeReqBody))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
-	}
-
-	// Verify response body contains session
-	var resp apiTypes.SessionResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to parse response: %v", err)
-	}
-	if resp.ID != created.ID {
-		t.Errorf("response session ID = %q, want %q", resp.ID, created.ID)
-	}
-}
-
-func TestResumeSession_NotPaused(t *testing.T) {
-	env := newTestEnv(t)
-	r := env.router()
-
-	created := createSession(t, r, "mock", "/tmp/test")
-	waitForRunning(t, env.executor, created.ID)
-
-	// Try to resume while running (not paused)
-	resumeReqBody, _ := json.Marshal(apiTypes.ResumeRequest{
-		ToolCallID: "test-tool-call-123",
-		Result:     map[string]string{"output": "test result"},
-	})
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/resume", bytes.NewReader(resumeReqBody))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusConflict {
-		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestResumeSession_NotFound(t *testing.T) {
-	env := newTestEnv(t)
-	r := env.router()
-
-	resumeReqBody, _ := json.Marshal(apiTypes.ResumeRequest{
-		ToolCallID: "test-tool-call-123",
-		Result:     map[string]string{"output": "test result"},
-	})
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/does-not-exist/resume", bytes.NewReader(resumeReqBody))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d", w.Code)
-	}
-}
-
-func TestResumeSession_MissingToolCallID(t *testing.T) {
-	env := newTestEnv(t)
-	r := env.router()
-
-	created := createSession(t, r, "mock", "/tmp/test")
-	waitForRunning(t, env.executor, created.ID)
-
-	// Pause first
-	pauseReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/pause", nil)
-	pauseW := httptest.NewRecorder()
-	r.ServeHTTP(pauseW, pauseReq)
-
-	// Resume with empty tool_call_id
-	resumeReqBody, _ := json.Marshal(apiTypes.ResumeRequest{
-		ToolCallID: "",
-		Result:     map[string]string{"output": "test result"},
-	})
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/resume", bytes.NewReader(resumeReqBody))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

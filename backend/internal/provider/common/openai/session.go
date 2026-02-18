@@ -107,14 +107,6 @@ func (s *Session) Kill() error {
 	panic("unimplemented")
 }
 
-func (s *Session) Pause(ctx context.Context) error {
-	panic("unimplemented")
-}
-
-func (s *Session) Resume(ctx context.Context) error {
-	panic("unimplemented")
-}
-
 func (s *Session) Status() session.Status {
 	panic("unimplemented")
 }
