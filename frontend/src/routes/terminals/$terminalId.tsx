@@ -114,7 +114,12 @@ export function TerminalDetailView(props: TerminalDetailViewProps = {}) {
                 </Show>
               }
             >
-              <TerminalView sessionId={terminal()?.session_id ?? ""} title="Terminal Stream" />
+              <TerminalView
+                sessionId={terminal()?.session_id ?? ""}
+                terminalId={terminalId()}
+                writeMode={true}
+                title="Terminal Stream"
+              />
             </Show>
           </Show>
         </section>

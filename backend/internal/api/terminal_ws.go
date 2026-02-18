@@ -569,9 +569,15 @@ func csrfTokenMatches(r *http.Request) bool {
 	if err != nil || cookie.Value == "" {
 		return false
 	}
-	header := r.Header.Get(csrfHeaderName)
-	if header == "" {
+	// Accept the token from the X-CSRF-Token header or, for WebSocket
+	// connections where custom headers are not supported by browsers, from
+	// the csrf_token query parameter.
+	candidate := r.Header.Get(csrfHeaderName)
+	if candidate == "" {
+		candidate = r.URL.Query().Get("csrf_token")
+	}
+	if candidate == "" {
 		return false
 	}
-	return header == cookie.Value
+	return candidate == cookie.Value
 }

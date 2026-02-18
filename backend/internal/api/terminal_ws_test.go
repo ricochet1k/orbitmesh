@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -151,7 +152,7 @@ func newTerminalTestEnv(t *testing.T) *terminalTestEnv {
 	})
 
 	providerStorage := storage.NewProviderConfigStorage(t.TempDir())
-	env.handler = NewHandler(env.executor, env.broadcaster, providerStorage)
+	env.handler = NewHandler(env.executor, env.broadcaster, providerStorage, nil)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -183,6 +184,83 @@ func startTerminalSession(t *testing.T, env *terminalTestEnv) string {
 		time.Sleep(5 * time.Millisecond)
 	}
 	return session.ID
+}
+
+func TestCSRFTokenMatches_QueryParam(t *testing.T) {
+	const token = "test-csrf-token-abc"
+
+	// Match via header
+	reqHeader, _ := http.NewRequest(http.MethodGet, "/api/test?write=true", nil)
+	reqHeader.AddCookie(&http.Cookie{Name: csrfCookieName, Value: token})
+	reqHeader.Header.Set(csrfHeaderName, token)
+	if !csrfTokenMatches(reqHeader) {
+		t.Fatal("expected CSRF match via header")
+	}
+
+	// Match via query param (WebSocket case)
+	reqQuery, _ := http.NewRequest(http.MethodGet, "/api/test?write=true&csrf_token="+token, nil)
+	reqQuery.AddCookie(&http.Cookie{Name: csrfCookieName, Value: token})
+	if !csrfTokenMatches(reqQuery) {
+		t.Fatal("expected CSRF match via query param")
+	}
+
+	// Reject when token missing entirely
+	reqNone, _ := http.NewRequest(http.MethodGet, "/api/test?write=true", nil)
+	reqNone.AddCookie(&http.Cookie{Name: csrfCookieName, Value: token})
+	if csrfTokenMatches(reqNone) {
+		t.Fatal("expected CSRF mismatch when no token provided")
+	}
+
+	// Reject when token wrong
+	reqWrong, _ := http.NewRequest(http.MethodGet, "/api/test?write=true&csrf_token=wrong", nil)
+	reqWrong.AddCookie(&http.Cookie{Name: csrfCookieName, Value: token})
+	if csrfTokenMatches(reqWrong) {
+		t.Fatal("expected CSRF mismatch with wrong token")
+	}
+}
+
+func TestTerminalWebSocket_WriteMode_CSRFQueryParam(t *testing.T) {
+	env := newTerminalTestEnv(t)
+	server := httptest.NewServer(env.router())
+	defer server.Close()
+	_ = startTerminalSession(t, env)
+
+	const token = "test-csrf-ws-token"
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/sessions/session-1/terminal/ws?write=true&csrf_token=" + token
+
+	// Build dialer that sends the CSRF cookie
+	jar := &mockCookieJar{cookies: map[string][]*http.Cookie{
+		server.URL: {{Name: csrfCookieName, Value: token}},
+	}}
+	dialer := &websocket.Dialer{Jar: jar}
+
+	conn, resp, err := dialer.Dial(wsURL, nil)
+	if err != nil {
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		t.Fatalf("expected successful dial for write mode with CSRF query param, got status %d: %v", status, err)
+	}
+	defer conn.Close()
+
+	// Should receive initial snapshot
+	var envelope terminalEnvelope
+	if err := conn.ReadJSON(&envelope); err != nil {
+		t.Fatalf("failed to read initial snapshot in write mode: %v", err)
+	}
+}
+
+// mockCookieJar satisfies http.CookieJar for the websocket dialer.
+type mockCookieJar struct {
+	cookies map[string][]*http.Cookie
+}
+
+func (j *mockCookieJar) SetCookies(_ *url.URL, _ []*http.Cookie) {}
+
+func (j *mockCookieJar) Cookies(u *url.URL) []*http.Cookie {
+	key := u.Scheme + "://" + u.Host
+	return j.cookies[key]
 }
 
 func TestTerminalWebSocket_AuthFailure(t *testing.T) {
