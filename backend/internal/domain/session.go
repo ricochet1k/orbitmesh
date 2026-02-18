@@ -182,6 +182,24 @@ func (s *Session) SetPreferredProviderID(providerID string) {
 	s.UpdatedAt = time.Now()
 }
 
+// AppendErrorMessage appends an error message to the session's message history.
+// The error is recorded as a system message that can be replayed in the transcript.
+func (s *Session) AppendErrorMessage(errorMsg string, providerType string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	message := map[string]interface{}{
+		"id":            fmt.Sprintf("error_%d", time.Now().UnixNano()),
+		"kind":          "error",
+		"provider_type": providerType,
+		"contents":      errorMsg,
+		"timestamp":     time.Now().UTC().Format(time.RFC3339),
+	}
+
+	s.Messages = append(s.Messages, message)
+	s.UpdatedAt = time.Now()
+}
+
 // SessionSnapshot is a point-in-time, lock-free copy of a Session's fields.
 type SessionSnapshot struct {
 	ID                  string

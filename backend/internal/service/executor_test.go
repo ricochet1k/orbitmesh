@@ -280,13 +280,26 @@ func TestAgentExecutor_StartSession(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 
 		// Per the new design, provider errors do not transition the session to error state.
-		// Instead, the error is recorded and the session returns to idle.
+		// Instead, the error is recorded in the message history and the session returns to idle.
 		if session.GetState() != domain.SessionStateIdle {
 			t.Errorf("expected state Idle after provider error, got %s", session.GetState())
 		}
-		// Verify the error was recorded
-		if session.ErrorMessage == "" {
-			t.Errorf("expected error message to be set, but got empty")
+		// Verify ErrorMessage is cleared (errors live in message history now)
+		if session.ErrorMessage != "" {
+			t.Errorf("expected ErrorMessage to be cleared, but got: %s", session.ErrorMessage)
+		}
+		// Verify the error was recorded in message history
+		if len(session.Messages) == 0 {
+			t.Errorf("expected error entry in message history, but got empty")
+		} else {
+			// Check that the first message is an error
+			if msg, ok := session.Messages[0].(map[string]interface{}); ok {
+				if kind, ok := msg["kind"].(string); !ok || kind != "error" {
+					t.Errorf("expected error message kind, got %v", msg["kind"])
+				}
+			} else {
+				t.Errorf("expected message to be a map, got %T", session.Messages[0])
+			}
 		}
 	})
 }

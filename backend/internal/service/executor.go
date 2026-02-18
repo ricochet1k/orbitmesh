@@ -178,11 +178,17 @@ func (e *AgentExecutor) runSessionLoop(ctx context.Context, sc *sessionContext, 
 	startCancel()
 
 	if err != nil {
-		errMsg := fmt.Sprintf("start failed: %v", err)
-		sc.session.SetError(errMsg)
+		errMsg := fmt.Sprintf("Provider failed to start: %v", err)
+		// Append error to message history instead of setting ErrorMessage
+		sc.session.AppendErrorMessage(errMsg, config.ProviderType)
 		run.SetError(err)
 		// On provider error, session stays idle (per design: errors are absorbed into message history)
 		// Session remains in idle state, ready to be retried or used again
+
+		// Save session with the new error message in history
+		if e.storage != nil {
+			_ = e.storage.Save(sc.session)
+		}
 
 		// Clear the run
 		e.mu.Lock()
@@ -261,9 +267,17 @@ func (e *AgentExecutor) healthCheck(ctx context.Context, sc *sessionContext, run
 		case <-ticker.C:
 			status := run.Provider.Status()
 			if status.State == session.StateError {
-				// Provider error: record it but don't change session state
+				// Provider error: append to message history and cancel the run
 				// The session will return to idle when the run completes
+				errMsg := fmt.Sprintf("Provider error: %s", status.Error)
+				sc.session.AppendErrorMessage(errMsg, sc.session.ProviderType)
 				run.SetError(status.Error)
+
+				// Save session with error in history
+				if e.storage != nil {
+					_ = e.storage.Save(sc.session)
+				}
+
 				run.Cancel() // Cancel the run context to trigger cleanup
 				return
 			}
@@ -686,11 +700,13 @@ func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.
 }
 
 func (e *AgentExecutor) handlePanic(sc *sessionContext, r any) {
-	errMsg := fmt.Sprintf("panic recovered: %v", r)
-	sc.session.SetError(errMsg)
+	errMsg := fmt.Sprintf("Panic recovered: %v", r)
+
+	// Append error to message history instead of setting ErrorMessage
+	sc.session.AppendErrorMessage(errMsg, sc.session.ProviderType)
 
 	// On panic, transition to idle state (per design: errors don't block session)
-	// The panic is recorded in the error message and session becomes idle again
+	// The panic is recorded in the message history and session becomes idle again
 	_ = sc.session.TransitionTo(domain.SessionStateIdle, errMsg)
 
 	if e.storage != nil {
