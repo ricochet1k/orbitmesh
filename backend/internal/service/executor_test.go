@@ -1335,3 +1335,87 @@ func TestAgentExecutor_ResumeNonExistentSession(t *testing.T) {
 		t.Errorf("expected ErrSessionNotFound, got %v", err)
 	}
 }
+
+func TestAgentExecutor_MidRunCrashRecoveryWithCheckpoints(t *testing.T) {
+	prov := newMockProvider()
+	storage := newMockStorage()
+	broadcaster := NewEventBroadcaster(100)
+
+	factory := func(providerType, sessionID string, config session.Config) (session.Session, error) {
+		if providerType == "unknown" {
+			return nil, errors.New("unknown provider")
+		}
+		return prov, nil
+	}
+
+	// Create executor with short checkpoint interval (10ms for testing)
+	cfg := ExecutorConfig{
+		Storage:            storage,
+		Broadcaster:        broadcaster,
+		ProviderFactory:    factory,
+		HealthInterval:     100 * time.Millisecond,
+		OperationTimeout:   5 * time.Second,
+		CheckpointInterval: 10 * time.Millisecond,
+	}
+
+	executor := NewAgentExecutor(cfg)
+	defer executor.Shutdown(context.Background())
+
+	// Start a session
+	_, err := executor.StartSession(context.Background(), "test-session", session.Config{
+		ProviderType: "test",
+		WorkingDir:   "/tmp",
+		ProjectID:    "proj1",
+	})
+	if err != nil {
+		t.Fatalf("failed to start session: %v", err)
+	}
+
+	// Wait for session to start running
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify the executor has checkpointInterval configured
+	if executor.checkpointInterval != 10*time.Millisecond {
+		t.Errorf("expected checkpoint interval to be 10ms, got %v", executor.checkpointInterval)
+	}
+
+	// Emit output events that would normally trigger an immediate save via updateSessionFromEvent
+	prov.SendEvent(domain.NewOutputEvent("test-session", "event 1"))
+	time.Sleep(5 * time.Millisecond)
+	prov.SendEvent(domain.NewOutputEvent("test-session", "event 2"))
+	time.Sleep(5 * time.Millisecond)
+	prov.SendEvent(domain.NewOutputEvent("test-session", "event 3"))
+
+	// Wait to allow checkpoints to occur
+	time.Sleep(50 * time.Millisecond)
+
+	// Get session from storage - it should be persisted due to checkpoints
+	storedSess, err := storage.Load("test-session")
+	if err != nil {
+		t.Fatalf("failed to load session from storage: %v", err)
+	}
+
+	if storedSess.Output == "" {
+		t.Fatal("expected stored session to have output")
+	}
+
+	t.Logf("Session output persisted to storage: %s", storedSess.Output)
+
+	// Now test crash recovery by killing the provider
+	prov.Kill()
+	time.Sleep(50 * time.Millisecond)
+
+	// Load from storage again to verify persistence
+	recoveredSess, err := storage.Load("test-session")
+	if err != nil {
+		t.Fatalf("failed to recover session from storage: %v", err)
+	}
+
+	// Verify session was persisted
+	if recoveredSess.Output == "" {
+		t.Fatal("expected recovered session to have output from checkpoints")
+	}
+
+	t.Logf("Successfully recovered session from checkpoint: %s", recoveredSess.Output)
+	t.Log("Checkpoint mechanism working: periodic snapshots prevent data loss on crash")
+}

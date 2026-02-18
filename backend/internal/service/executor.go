@@ -23,8 +23,9 @@ var (
 )
 
 const (
-	DefaultOperationTimeout = 30 * time.Second
-	DefaultHealthInterval   = 30 * time.Second
+	DefaultOperationTimeout   = 30 * time.Second
+	DefaultHealthInterval     = 30 * time.Second
+	DefaultCheckpointInterval = 30 * time.Second
 )
 
 type ProviderFactory func(providerType, sessionID string, config session.Config) (session.Session, error)
@@ -35,15 +36,16 @@ type sessionContext struct {
 }
 
 type AgentExecutor struct {
-	sessions        map[string]*sessionContext
-	mu              sync.RWMutex
-	storage         storage.Storage
-	terminalStorage storage.TerminalStorage
-	broadcaster     *EventBroadcaster
-	providerFactory ProviderFactory
-	healthInterval  time.Duration
-	opTimeout       time.Duration
-	terminalHubs    map[string]*TerminalHub
+	sessions           map[string]*sessionContext
+	mu                 sync.RWMutex
+	storage            storage.Storage
+	terminalStorage    storage.TerminalStorage
+	broadcaster        *EventBroadcaster
+	providerFactory    ProviderFactory
+	healthInterval     time.Duration
+	opTimeout          time.Duration
+	checkpointInterval time.Duration
+	terminalHubs       map[string]*TerminalHub
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -51,12 +53,13 @@ type AgentExecutor struct {
 }
 
 type ExecutorConfig struct {
-	Storage          storage.Storage
-	TerminalStorage  storage.TerminalStorage
-	Broadcaster      *EventBroadcaster
-	ProviderFactory  ProviderFactory
-	HealthInterval   time.Duration
-	OperationTimeout time.Duration
+	Storage            storage.Storage
+	TerminalStorage    storage.TerminalStorage
+	Broadcaster        *EventBroadcaster
+	ProviderFactory    ProviderFactory
+	HealthInterval     time.Duration
+	OperationTimeout   time.Duration
+	CheckpointInterval time.Duration
 }
 
 func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
@@ -72,17 +75,23 @@ func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
 		opTimeout = DefaultOperationTimeout
 	}
 
+	checkpointInterval := cfg.CheckpointInterval
+	if checkpointInterval <= 0 {
+		checkpointInterval = DefaultCheckpointInterval
+	}
+
 	return &AgentExecutor{
-		sessions:        make(map[string]*sessionContext),
-		storage:         cfg.Storage,
-		terminalStorage: cfg.TerminalStorage,
-		broadcaster:     cfg.Broadcaster,
-		providerFactory: cfg.ProviderFactory,
-		healthInterval:  healthInterval,
-		opTimeout:       opTimeout,
-		terminalHubs:    make(map[string]*TerminalHub),
-		ctx:             ctx,
-		cancel:          cancel,
+		sessions:           make(map[string]*sessionContext),
+		storage:            cfg.Storage,
+		terminalStorage:    cfg.TerminalStorage,
+		broadcaster:        cfg.Broadcaster,
+		providerFactory:    cfg.ProviderFactory,
+		healthInterval:     healthInterval,
+		opTimeout:          opTimeout,
+		checkpointInterval: checkpointInterval,
+		terminalHubs:       make(map[string]*TerminalHub),
+		ctx:                ctx,
+		cancel:             cancel,
 	}
 }
 
@@ -234,10 +243,20 @@ func (e *AgentExecutor) handleEvents(ctx context.Context, sc *sessionContext, ru
 		return
 	}
 
+	// Create a checkpoint ticker for periodic message history persistence
+	checkpointTicker := time.NewTicker(e.checkpointInterval)
+	defer checkpointTicker.Stop()
+
+	// Create a channel to receive checkpoint completion signals (non-blocking)
+	checkpointDone := make(chan struct{}, 1)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-checkpointTicker.C:
+			// Trigger a non-blocking checkpoint in the background
+			go e.checkpointSession(sc, checkpointDone)
 		case event, ok := <-events:
 			if !ok {
 				return
@@ -246,6 +265,25 @@ func (e *AgentExecutor) handleEvents(ctx context.Context, sc *sessionContext, ru
 			e.updateSessionFromEvent(sc, event)
 		}
 	}
+}
+
+// checkpointSession performs a non-blocking checkpoint of the session's message history.
+// It saves the current session state including the message history to storage.
+func (e *AgentExecutor) checkpointSession(sc *sessionContext, done chan<- struct{}) {
+	defer func() {
+		// Send signal that checkpoint is complete (non-blocking)
+		select {
+		case done <- struct{}{}:
+		default:
+		}
+	}()
+
+	if e.storage == nil || sc == nil || sc.session == nil {
+		return
+	}
+
+	// Save the session with its current message history
+	_ = e.storage.Save(sc.session)
 }
 
 func (e *AgentExecutor) healthCheck(ctx context.Context, sc *sessionContext, run *session.ProviderRun) {
