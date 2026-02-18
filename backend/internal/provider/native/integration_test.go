@@ -322,15 +322,7 @@ func TestConcurrentSessionLifecycle(t *testing.T) {
 			p.runCtx, p.runCancel = context.WithCancel(p.ctx)
 
 			for j := 0; j < 3; j++ {
-				if err := p.Pause(context.Background()); err != nil {
-					t.Errorf("session %d: pause %d failed: %v", idx, j, err)
-					continue
-				}
-
-				if err := p.Resume(context.Background()); err != nil {
-					t.Errorf("session %d: resume %d failed: %v", idx, j, err)
-					continue
-				}
+				
 			}
 
 			if err := p.Stop(context.Background()); err != nil {
@@ -420,10 +412,6 @@ func TestProviderStateRaceCondition(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 50; i++ {
-			_ = p.Pause(context.Background())
-			_ = p.Resume(context.Background())
-		}
 	}()
 
 	wg.Wait()
@@ -502,15 +490,7 @@ func TestLoadTest_ConcurrentAgents(t *testing.T) {
 				p.events.EmitMetric(100, 50, 1)
 			}
 
-			if err := p.Pause(context.Background()); err != nil {
-				errors <- err
-				return
-			}
-
-			if err := p.Resume(context.Background()); err != nil {
-				errors <- err
-				return
-			}
+			
 
 			if err := p.Stop(context.Background()); err != nil {
 				errors <- err
@@ -798,39 +778,6 @@ func TestStartWithMCPServers(t *testing.T) {
 	err := p.Start(context.Background(), cfg)
 	if err != nil {
 		t.Logf("Start failed as expected: %v", err)
-	}
-}
-
-func TestADKProvider_CheckPausedWithUnpause(t *testing.T) {
-	p := NewADKSession("test-session", ADKConfig{
-		APIKey: "test-key",
-	})
-
-	p.paused = true
-
-	done := make(chan struct{})
-	go func() {
-		p.checkPaused()
-		close(done)
-	}()
-
-	time.Sleep(10 * time.Millisecond)
-
-	select {
-	case <-done:
-		t.Error("checkPaused should block when paused")
-	default:
-	}
-
-	p.pauseMu.Lock()
-	p.paused = false
-	p.pauseCond.Broadcast()
-	p.pauseMu.Unlock()
-
-	select {
-	case <-done:
-	case <-time.After(100 * time.Millisecond):
-		t.Error("checkPaused should unblock after resume")
 	}
 }
 

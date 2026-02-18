@@ -307,42 +307,6 @@ func (s *Session) Stop(ctx context.Context) error {
 	return nil
 }
 
-// Pause temporarily suspends agent execution by buffering input.
-func (s *Session) Pause(ctx context.Context) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.state.GetState() != session.StateRunning {
-		return ErrNotStarted
-	}
-
-	if s.inputBuffer.IsPaused() {
-		return ErrAlreadyPaused
-	}
-
-	s.inputBuffer.Pause()
-	s.state.SetState(session.StatePaused)
-	s.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateSuspended, "acp provider paused")
-
-	return nil
-}
-
-// Resume continues previously paused agent execution.
-func (s *Session) Resume(ctx context.Context) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.state.GetState() != session.StatePaused {
-		return ErrNotPaused
-	}
-
-	s.inputBuffer.Resume()
-	s.state.SetState(session.StateRunning)
-	s.events.EmitStatusChange(domain.SessionStateSuspended, domain.SessionStateRunning, "acp provider resumed")
-
-	return nil
-}
-
 // Kill immediately terminates the ACP session.
 func (s *Session) Kill() error {
 	s.mu.Lock()
@@ -380,7 +344,7 @@ func (s *Session) SendInput(ctx context.Context, input string) error {
 	state := s.state.GetState()
 	s.mu.RUnlock()
 
-	if state != session.StateRunning && state != session.StatePaused {
+	if state != session.StateRunning {
 		return ErrNotStarted
 	}
 

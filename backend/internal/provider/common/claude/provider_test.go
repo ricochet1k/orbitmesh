@@ -64,38 +64,6 @@ func TestClaudeCodeProvider_Events(t *testing.T) {
 	}
 }
 
-func TestClaudeCodeProvider_Pause(t *testing.T) {
-	provider := NewClaudeCodeProvider("test-session")
-	provider.state.SetState(session.StateRunning)
-
-	ctx := context.Background()
-	err := provider.Pause(ctx)
-
-	if err != nil {
-		t.Errorf("Pause() should succeed: %v", err)
-	}
-
-	if provider.state.GetState() != session.StatePaused {
-		t.Errorf("State should be paused, got %v", provider.state.GetState())
-	}
-}
-
-func TestClaudeCodeProvider_Resume(t *testing.T) {
-	provider := NewClaudeCodeProvider("test-session")
-	provider.state.SetState(session.StatePaused)
-
-	ctx := context.Background()
-	err := provider.Resume(ctx)
-
-	if err != nil {
-		t.Errorf("Resume() should succeed: %v", err)
-	}
-
-	if provider.state.GetState() != session.StateRunning {
-		t.Errorf("State should be running, got %v", provider.state.GetState())
-	}
-}
-
 func TestEnvironmentParsing(t *testing.T) {
 	// Test that environment variables are correctly parsed from KEY=VALUE format
 	tests := []struct {

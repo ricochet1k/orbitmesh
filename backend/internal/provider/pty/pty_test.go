@@ -34,24 +34,6 @@ func TestPTYProvider_Lifecycle(t *testing.T) {
 		t.Errorf("expected state running, got %v", p.Status().State)
 	}
 
-	// Test Pause
-	err = p.Pause(ctx)
-	if err != nil {
-		t.Errorf("failed to pause: %v", err)
-	}
-	if p.Status().State != session.StatePaused {
-		t.Errorf("expected state paused, got %v", p.Status().State)
-	}
-
-	// Test Resume
-	err = p.Resume(ctx)
-	if err != nil {
-		t.Errorf("failed to resume: %v", err)
-	}
-	if p.Status().State != session.StateRunning {
-		t.Errorf("expected state running, got %v", p.Status().State)
-	}
-
 	// Give it a moment to extract task
 	time.Sleep(1 * time.Second)
 	status := p.Status()

@@ -158,42 +158,6 @@ func (p *ClaudeCodeProvider) Stop(ctx context.Context) error {
 	return nil
 }
 
-// Pause temporarily suspends agent execution by buffering input.
-func (p *ClaudeCodeProvider) Pause(ctx context.Context) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.state.GetState() != session.StateRunning {
-		return ErrNotStarted
-	}
-
-	if p.inputBuffer.IsPaused() {
-		return ErrAlreadyPaused
-	}
-
-	p.inputBuffer.Pause()
-	p.state.SetState(session.StatePaused)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateSuspended, "claude provider paused")
-
-	return nil
-}
-
-// Resume continues previously paused agent execution.
-func (p *ClaudeCodeProvider) Resume(ctx context.Context) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.state.GetState() != session.StatePaused {
-		return ErrNotPaused
-	}
-
-	p.inputBuffer.Resume()
-	p.state.SetState(session.StateRunning)
-	p.events.EmitStatusChange(domain.SessionStateSuspended, domain.SessionStateRunning, "claude provider resumed")
-
-	return nil
-}
-
 // Kill immediately terminates the Claude process.
 func (p *ClaudeCodeProvider) Kill() error {
 	p.mu.Lock()
@@ -231,11 +195,11 @@ func (p *ClaudeCodeProvider) SendInput(ctx context.Context, input string) error 
 	state := p.state.GetState()
 	p.mu.RUnlock()
 
-	if state != session.StateRunning && state != session.StatePaused {
+	if state != session.StateRunning {
 		return ErrNotStarted
 	}
 
-	// Send to input buffer (handles pause/resume automatically)
+	// Send to input buffer
 	return p.inputBuffer.Send(ctx, input)
 }
 

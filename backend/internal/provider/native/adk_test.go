@@ -109,94 +109,6 @@ func TestADKProvider_StopAlreadyStopped(t *testing.T) {
 	}
 }
 
-func TestADKProvider_Pause(t *testing.T) {
-	p := NewADKSession("test-session", ADKConfig{
-		APIKey: "test-key",
-	})
-
-	p.state.SetState(session.StateRunning)
-
-	err := p.Pause(context.Background())
-
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-
-	status := p.Status()
-	if status.State != session.StatePaused {
-		t.Errorf("expected state to be StatePaused, got %v", status.State)
-	}
-
-	if !p.paused {
-		t.Error("expected paused flag to be true")
-	}
-}
-
-func TestADKProvider_PauseNotRunning(t *testing.T) {
-	p := NewADKSession("test-session", ADKConfig{
-		APIKey: "test-key",
-	})
-
-	err := p.Pause(context.Background())
-
-	if err != ErrNotStarted {
-		t.Errorf("expected ErrNotStarted, got %v", err)
-	}
-}
-
-func TestADKProvider_PauseAlreadyPaused(t *testing.T) {
-	p := NewADKSession("test-session", ADKConfig{
-		APIKey: "test-key",
-	})
-
-	p.state.SetState(session.StateRunning)
-	p.paused = true
-
-	err := p.Pause(context.Background())
-
-	if err != ErrAlreadyPaused {
-		t.Errorf("expected ErrAlreadyPaused, got %v", err)
-	}
-}
-
-func TestADKProvider_Resume(t *testing.T) {
-	p := NewADKSession("test-session", ADKConfig{
-		APIKey: "test-key",
-	})
-
-	p.state.SetState(session.StatePaused)
-	p.paused = true
-
-	err := p.Resume(context.Background())
-
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-
-	status := p.Status()
-	if status.State != session.StateRunning {
-		t.Errorf("expected state to be StateRunning, got %v", status.State)
-	}
-
-	if p.paused {
-		t.Error("expected paused flag to be false")
-	}
-}
-
-func TestADKProvider_ResumeNotPaused(t *testing.T) {
-	p := NewADKSession("test-session", ADKConfig{
-		APIKey: "test-key",
-	})
-
-	p.state.SetState(session.StateRunning)
-
-	err := p.Resume(context.Background())
-
-	if err != ErrNotPaused {
-		t.Errorf("expected ErrNotPaused, got %v", err)
-	}
-}
-
 func TestADKProvider_Kill(t *testing.T) {
 	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
@@ -233,57 +145,6 @@ func TestADKProvider_Events(t *testing.T) {
 	}
 }
 
-func TestADKProvider_CheckPaused(t *testing.T) {
-	p := NewADKSession("test-session", ADKConfig{
-		APIKey: "test-key",
-	})
-
-	done := make(chan struct{})
-	go func() {
-		p.checkPaused()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(100 * time.Millisecond):
-		t.Error("checkPaused should return immediately when not paused")
-	}
-}
-
-func TestADKProvider_CheckPausedBlocks(t *testing.T) {
-	p := NewADKSession("test-session", ADKConfig{
-		APIKey: "test-key",
-	})
-
-	p.pauseMu.Lock()
-	p.paused = true
-	p.pauseMu.Unlock()
-
-	done := make(chan struct{})
-	go func() {
-		p.checkPaused()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		t.Error("checkPaused should block when paused")
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	p.pauseMu.Lock()
-	p.paused = false
-	p.pauseCond.Broadcast()
-	p.pauseMu.Unlock()
-
-	select {
-	case <-done:
-	case <-time.After(100 * time.Millisecond):
-		t.Error("checkPaused should unblock after resume")
-	}
-}
-
 func TestADKProvider_RunPromptNotStarted(t *testing.T) {
 	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
@@ -312,15 +173,6 @@ func TestADKProvider_ConcurrentOperations(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			_ = p.Status()
-		}()
-	}
-
-	for i := 0; i < 3; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_ = p.Pause(context.Background())
-			_ = p.Resume(context.Background())
 		}()
 	}
 
@@ -550,26 +402,6 @@ func TestADKProvider_ConcurrentStateAccess(t *testing.T) {
 	}
 }
 
-func TestADKProvider_PauseResumeCycle(t *testing.T) {
-	p := NewADKSession("test-session", ADKConfig{
-		APIKey: "test-key",
-	})
-
-	p.state.SetState(session.StateRunning)
-
-	if err := p.Pause(context.Background()); err != nil {
-		t.Fatalf("unexpected error on pause: %v", err)
-	}
-
-	if err := p.Resume(context.Background()); err != nil {
-		t.Fatalf("unexpected error on resume: %v", err)
-	}
-
-	if p.Status().State != session.StateRunning {
-		t.Errorf("expected state Running after resume, got %v", p.Status().State)
-	}
-}
-
 func TestADKProvider_MultipleStops(t *testing.T) {
 	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
@@ -665,39 +497,6 @@ func TestADKConfig_VertexAI(t *testing.T) {
 	}
 }
 
-func TestADKProvider_KillUnpausesSessions(t *testing.T) {
-	p := NewADKSession("test-session", ADKConfig{
-		APIKey: "test-key",
-	})
-
-	p.state.SetState(session.StateRunning)
-	p.ctx, p.cancel = context.WithCancel(context.Background())
-	p.paused = true
-
-	done := make(chan struct{})
-	go func() {
-		p.pauseMu.Lock()
-		for p.paused {
-			p.pauseCond.Wait()
-		}
-		p.pauseMu.Unlock()
-		close(done)
-	}()
-
-	time.Sleep(10 * time.Millisecond)
-
-	err := p.Kill()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	select {
-	case <-done:
-	case <-time.After(100 * time.Millisecond):
-		t.Error("kill should unpause waiting goroutines")
-	}
-}
-
 func TestADKProvider_StopInternalTimeout(t *testing.T) {
 	p := NewADKSession("test-session", ADKConfig{
 		APIKey: "test-key",
@@ -751,8 +550,7 @@ func TestADKProvider_StopFromDifferentStates(t *testing.T) {
 		initialState session.State
 	}{
 		{"from running", session.StateRunning},
-		{"from paused", session.StatePaused},
-		{"from starting", session.StateStarting},
+				{"from starting", session.StateStarting},
 		{"from error", session.StateError},
 	}
 
@@ -854,41 +652,6 @@ func TestADKProvider_StatusOutput(t *testing.T) {
 	}
 	if status.CurrentTask != "task-123" {
 		t.Errorf("expected task 'task-123', got %s", status.CurrentTask)
-	}
-}
-
-func TestADKProvider_ConcurrentPauseResume(t *testing.T) {
-	p := NewADKSession("test-session", ADKConfig{
-		APIKey: "test-key",
-	})
-
-	p.state.SetState(session.StateRunning)
-	p.ctx, p.cancel = context.WithCancel(context.Background())
-	p.runCtx, p.runCancel = context.WithCancel(p.ctx)
-
-	var wg sync.WaitGroup
-	errChan := make(chan error, 100)
-
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 5; j++ {
-				if err := p.Pause(context.Background()); err != nil && err != ErrNotStarted && err != ErrAlreadyPaused {
-					errChan <- err
-				}
-				if err := p.Resume(context.Background()); err != nil && err != ErrNotPaused {
-					errChan <- err
-				}
-			}
-		}()
-	}
-
-	wg.Wait()
-	close(errChan)
-
-	for err := range errChan {
-		t.Errorf("unexpected error: %v", err)
 	}
 }
 

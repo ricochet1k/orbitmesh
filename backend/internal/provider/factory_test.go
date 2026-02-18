@@ -98,7 +98,6 @@ func TestState_String(t *testing.T) {
 		{session.StateCreated, "created"},
 		{session.StateStarting, "starting"},
 		{session.StateRunning, "running"},
-		{session.StatePaused, "paused"},
 		{session.StateStopping, "stopping"},
 		{session.StateStopped, "stopped"},
 		{session.StateError, "error"},
@@ -119,8 +118,6 @@ type mockSession struct{}
 
 func (m *mockSession) Start(ctx context.Context, config session.Config) error { return nil }
 func (m *mockSession) Stop(ctx context.Context) error                         { return nil }
-func (m *mockSession) Pause(ctx context.Context) error                        { return nil }
-func (m *mockSession) Resume(ctx context.Context) error                       { return nil }
 func (m *mockSession) Kill() error                                            { return nil }
 func (m *mockSession) Status() session.Status                                 { return session.Status{} }
 func (m *mockSession) Events() <-chan domain.Event                            { return nil }

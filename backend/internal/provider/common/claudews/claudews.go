@@ -199,37 +199,6 @@ func (p *ClaudeWSProvider) Stop(ctx context.Context) error {
 	return nil
 }
 
-// Pause gates input delivery.
-func (p *ClaudeWSProvider) Pause(ctx context.Context) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.state.GetState() != session.StateRunning {
-		return ErrNotStarted
-	}
-	if p.inputBuffer.IsPaused() {
-		return ErrAlreadyPaused
-	}
-	p.inputBuffer.Pause()
-	p.state.SetState(session.StatePaused)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateSuspended, "claudews provider paused")
-	return nil
-}
-
-// Resume unblocks input delivery.
-func (p *ClaudeWSProvider) Resume(ctx context.Context) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.state.GetState() != session.StatePaused {
-		return ErrNotPaused
-	}
-	p.inputBuffer.Resume()
-	p.state.SetState(session.StateRunning)
-	p.events.EmitStatusChange(domain.SessionStateSuspended, domain.SessionStateRunning, "claudews provider resumed")
-	return nil
-}
-
 // Kill immediately terminates the process.
 func (p *ClaudeWSProvider) Kill() error {
 	p.mu.Lock()
@@ -285,7 +254,7 @@ func (p *ClaudeWSProvider) SendInput(ctx context.Context, input string) error {
 	st := p.state.GetState()
 	p.mu.RUnlock()
 
-	if st != session.StateRunning && st != session.StatePaused {
+	if st != session.StateRunning {
 		return ErrNotStarted
 	}
 	return p.inputBuffer.Send(ctx, input)
