@@ -403,3 +403,14 @@ type ProviderConfigResponse struct {
 type ProviderConfigListResponse struct {
 	Providers []ProviderConfigResponse `json:"providers"`
 }
+
+type Message struct {
+	ID        string    `json:"id"`
+	Kind      string    `json:"kind"`
+	Contents  string    `json:"contents"`
+	Timestamp time.Time `json:"timestamp,omitempty"`
+}
+
+type MessageListResponse struct {
+	Messages []Message `json:"messages"`
+}

@@ -233,7 +233,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	})
 
 	providerStorage := storage.NewProviderConfigStorage(t.TempDir())
-	env.handler = NewHandler(env.executor, env.broadcaster, providerStorage, nil)
+	env.handler = NewHandler(env.executor, env.broadcaster, store, providerStorage, nil)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -1285,5 +1285,142 @@ func TestSendMessage_RunningSessionWithOverride(t *testing.T) {
 	// Should still error because session is running
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", w.Code)
+	}
+}
+
+func TestGetSessionMessages(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Create a router and setup the routes
+	router := chi.NewRouter()
+	env.handler.Mount(router)
+
+	// Create a session first
+	createReq := httptest.NewRequest("POST", "/api/sessions", strings.NewReader(`{
+		"provider_type": "mock",
+		"working_dir": "/tmp"
+	}`))
+	createW := httptest.NewRecorder()
+	router.ServeHTTP(createW, createReq)
+
+	if createW.Code != http.StatusCreated {
+		t.Fatalf("create session status = %d, want 201", createW.Code)
+	}
+
+	var createResp apiTypes.SessionResponse
+	_ = json.Unmarshal(createW.Body.Bytes(), &createResp)
+	sessionID := createResp.ID
+
+	// Get messages for the created session
+	getReq := httptest.NewRequest("GET", fmt.Sprintf("/api/sessions/%s/messages", sessionID), nil)
+	getW := httptest.NewRecorder()
+	router.ServeHTTP(getW, getReq)
+
+	if getW.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", getW.Code)
+	}
+
+	var messagesResp apiTypes.MessageListResponse
+	if err := json.Unmarshal(getW.Body.Bytes(), &messagesResp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if messagesResp.Messages == nil {
+		t.Fatal("messages should not be nil")
+	}
+}
+
+func TestGetSessionMessagesNotFound(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Create a router and setup the routes
+	router := chi.NewRouter()
+	env.handler.Mount(router)
+
+	// Get messages for a non-existent session
+	req := httptest.NewRequest("GET", "/api/sessions/nonexistent/messages", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
+	}
+
+	var errResp apiTypes.ErrorResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &errResp)
+	if errResp.Error != "session not found" {
+		t.Fatalf("error = %s, want 'session not found'", errResp.Error)
+	}
+}
+
+func TestGetSessionMessagesWithSinceFilter(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Create a router and setup the routes
+	router := chi.NewRouter()
+	env.handler.Mount(router)
+
+	// Create a session first
+	createReq := httptest.NewRequest("POST", "/api/sessions", strings.NewReader(`{
+		"provider_type": "mock",
+		"working_dir": "/tmp"
+	}`))
+	createW := httptest.NewRecorder()
+	router.ServeHTTP(createW, createReq)
+
+	var createResp apiTypes.SessionResponse
+	_ = json.Unmarshal(createW.Body.Bytes(), &createResp)
+	sessionID := createResp.ID
+
+	// Get messages with a since filter (future timestamp should return no messages)
+	futureTime := time.Now().Add(1 * time.Hour).Format(time.RFC3339)
+	req := httptest.NewRequest("GET", fmt.Sprintf("/api/sessions/%s/messages?since=%s", sessionID, futureTime), nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	var messagesResp apiTypes.MessageListResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &messagesResp)
+
+	if messagesResp.Messages == nil {
+		t.Fatal("messages should not be nil")
+	}
+}
+
+func TestGetSessionMessagesInvalidSinceParameter(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Create a router and setup the routes
+	router := chi.NewRouter()
+	env.handler.Mount(router)
+
+	// Create a session first
+	createReq := httptest.NewRequest("POST", "/api/sessions", strings.NewReader(`{
+		"provider_type": "mock",
+		"working_dir": "/tmp"
+	}`))
+	createW := httptest.NewRecorder()
+	router.ServeHTTP(createW, createReq)
+
+	var createResp apiTypes.SessionResponse
+	_ = json.Unmarshal(createW.Body.Bytes(), &createResp)
+	sessionID := createResp.ID
+
+	// Get messages with an invalid since parameter
+	req := httptest.NewRequest("GET", fmt.Sprintf("/api/sessions/%s/messages?since=invalid", sessionID), nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+
+	var errResp apiTypes.ErrorResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &errResp)
+	if errResp.Error != "invalid since parameter" {
+		t.Fatalf("error = %s, want 'invalid since parameter'", errResp.Error)
 	}
 }

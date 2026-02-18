@@ -76,7 +76,7 @@ func main() {
 	r.Use(api.CORSMiddleware)
 	r.Use(api.CSRFMiddleware)
 
-	handler := api.NewHandler(executor, broadcaster, providerStorage, projectStorage)
+	handler := api.NewHandler(executor, broadcaster, store, providerStorage, projectStorage)
 	handler.Mount(r)
 
 	srv := &http.Server{

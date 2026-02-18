@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -22,6 +23,7 @@ import (
 type Handler struct {
 	executor        *service.AgentExecutor
 	broadcaster     *service.EventBroadcaster
+	sessionStorage  storage.Storage
 	providerStorage *storage.ProviderConfigStorage
 	projectStorage  *storage.ProjectStorage
 	gitDir          string
@@ -29,10 +31,11 @@ type Handler struct {
 }
 
 // NewHandler creates a Handler backed by the given executor and broadcaster.
-func NewHandler(executor *service.AgentExecutor, broadcaster *service.EventBroadcaster, providerStorage *storage.ProviderConfigStorage, projectStorage *storage.ProjectStorage) *Handler {
+func NewHandler(executor *service.AgentExecutor, broadcaster *service.EventBroadcaster, sessionStorage storage.Storage, providerStorage *storage.ProviderConfigStorage, projectStorage *storage.ProjectStorage) *Handler {
 	return &Handler{
 		executor:        executor,
 		broadcaster:     broadcaster,
+		sessionStorage:  sessionStorage,
 		providerStorage: providerStorage,
 		projectStorage:  projectStorage,
 		gitDir:          resolveGitDir(),
@@ -57,6 +60,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/sessions/{id}", h.getSession)
 	r.Delete("/api/sessions/{id}", h.stopSession)
 	r.Post("/api/sessions/{id}/input", h.sendSessionInput)
+	r.Get("/api/sessions/{id}/messages", h.getSessionMessages)
 	r.Post("/api/sessions/{id}/messages", h.sendSessionMessage)
 	r.Post("/api/sessions/{id}/pause", h.pauseSession)
 	r.Post("/api/sessions/{id}/resume", h.resumeSession)
@@ -384,6 +388,77 @@ func (h *Handler) stopSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) getSessionMessages(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	// Get all messages from storage
+	messages, err := h.sessionStorage.GetMessages(id)
+	if err != nil {
+		if errors.Is(err, storage.ErrSessionNotFound) {
+			writeError(w, http.StatusNotFound, "session not found", "")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get messages", err.Error())
+		return
+	}
+
+	// Parse optional ?since query parameter
+	var sinceTime *time.Time
+	if sinceParam := r.URL.Query().Get("since"); sinceParam != "" {
+		t, err := time.Parse(time.RFC3339, sinceParam)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid since parameter", "must be RFC3339 timestamp")
+			return
+		}
+		sinceTime = &t
+	}
+
+	// Convert messages to API format and filter by timestamp if needed
+	apiMessages := make([]apiTypes.Message, 0, len(messages))
+	for _, msg := range messages {
+		msgMap, ok := msg.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		apiMsg := apiTypes.Message{
+			ID:       toStringValue(msgMap["id"]),
+			Kind:     toStringValue(msgMap["kind"]),
+			Contents: toStringValue(msgMap["contents"]),
+		}
+
+		// Parse timestamp if present
+		if ts, ok := msgMap["timestamp"]; ok {
+			if tsStr, ok := ts.(string); ok {
+				if t, err := time.Parse(time.RFC3339, tsStr); err == nil {
+					apiMsg.Timestamp = t
+				}
+			}
+		}
+
+		// Filter by since timestamp if provided
+		if sinceTime != nil && !apiMsg.Timestamp.IsZero() && apiMsg.Timestamp.Before(*sinceTime) {
+			continue
+		}
+
+		apiMessages = append(apiMessages, apiMsg)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(apiTypes.MessageListResponse{
+		Messages: apiMessages,
+	})
+}
+
+// toStringValue converts a value to string, returning empty string if not a string
+func toStringValue(v interface{}) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }
 
 func (h *Handler) pauseSession(w http.ResponseWriter, r *http.Request) {
