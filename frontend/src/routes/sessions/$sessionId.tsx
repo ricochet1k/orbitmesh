@@ -159,22 +159,10 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
 
   const PERM_DENIED = "Bulk session controls are not permitted for your role."
 
-  const handlePause = () => {
+  const handleCancel = () => {
     if (!canManage()) { setActionNotice({ tone: "error", message: PERM_DENIED }); return }
     setActionNotice(null)
-    void actions.pause()
-  }
-
-  const handleResume = () => {
-    if (!canManage()) { setActionNotice({ tone: "error", message: PERM_DENIED }); return }
-    setActionNotice(null)
-    void actions.resume()
-  }
-
-  const handleStop = () => {
-    if (!canManage()) { setActionNotice({ tone: "error", message: PERM_DENIED }); return }
-    setActionNotice(null)
-    void actions.stop("Kill this session immediately?")
+    void actions.cancel()
   }
 
   const handleSend = async (text: string, providerId?: string) => {
@@ -245,9 +233,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
         pendingAction={pendingAction}
         canManage={canManage}
         actionNotice={actionNotice}
-        onPause={handlePause}
-        onResume={handleResume}
-        onStop={handleStop}
+        onCancel={handleCancel}
         onExportJson={() => exportTranscript("json")}
         onExportMarkdown={() => exportTranscript("markdown")}
         onClose={handleClose}

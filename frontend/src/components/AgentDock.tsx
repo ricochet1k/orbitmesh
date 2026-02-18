@@ -380,48 +380,26 @@ export default function AgentDock(props: AgentDockProps) {
              />
            </Show>
 
-          {/* Action bar */}
-          <Show when={dockLoadState() === "live"}>
-            <div class="agent-dock-actions">
-              <button
-                type="button"
-                class="btn btn-icon btn-sm"
-                onClick={() => {
-                  if (sessionState() === "paused") void actions.resume()
-                  else void actions.pause()
-                }}
-                disabled={!canManage() || !isActive() || actions.pendingAction() !== null}
-                title={
-                  !canManage()
-                    ? "Bulk session controls are not permitted for your role."
-                    : actions.pendingAction() !== null
-                    ? "Action in progress…"
-                    : !isActive()
-                    ? `Cannot control: session is ${sessionState()}`
-                    : sessionState() === "paused"
-                    ? "Resume session"
-                    : "Pause session"
-                }
-              >
-                {sessionState() === "paused" ? "▶" : "⏸"}
-              </button>
-              <button
-                type="button"
-                class="btn btn-icon btn-danger btn-sm"
-                onClick={() => void actions.stop("Terminate this session? This cannot be undone.")}
-                disabled={!canManage() || sessionState() === "stopped" || actions.pendingAction() !== null}
-                title={
-                  !canManage()
-                    ? "Bulk session controls are not permitted for your role."
-                    : actions.pendingAction() !== null
-                    ? "Action in progress…"
-                    : sessionState() === "stopped"
-                    ? "Session is already stopped"
-                    : "Stop session"
-                }
-              >
-                ⊗
-              </button>
+           {/* Action bar */}
+           <Show when={dockLoadState() === "live"}>
+             <div class="agent-dock-actions">
+               <button
+                 type="button"
+                 class="btn btn-icon btn-danger btn-sm"
+                 onClick={() => void actions.cancel()}
+                 disabled={!canManage() || sessionState() !== "running" || actions.pendingAction() !== null}
+                 title={
+                   !canManage()
+                     ? "Bulk session controls are not permitted for your role."
+                     : actions.pendingAction() !== null
+                     ? "Action in progress…"
+                     : sessionState() !== "running"
+                     ? `Cannot cancel: session is ${sessionState()}`
+                     : "Cancel the running session"
+                 }
+               >
+                 ⊗
+               </button>
               <button
                 type="button"
                 class="btn btn-secondary btn-sm"

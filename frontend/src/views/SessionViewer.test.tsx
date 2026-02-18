@@ -53,6 +53,7 @@ vi.mock("../api/client", () => ({
     pauseSession: vi.fn(),
     resumeSession: vi.fn(),
     stopSession: vi.fn(),
+    cancelSession: vi.fn(),
     getActivityEntries: vi.fn(),
     getEventsUrl: vi.fn(),
     getPermissions: vi.fn(),
@@ -191,23 +192,15 @@ describe("SessionViewer", () => {
     expect(screen.queryByText("PTY raw output")).toBeNull()
   })
 
-  it("invokes pause and kill controls", async () => {
+  it("invokes cancel control", async () => {
     (apiClient.getSession as any).mockResolvedValue(baseSession)
-      ; (apiClient.pauseSession as any).mockResolvedValue(undefined)
-      ; (apiClient.stopSession as any).mockResolvedValue(undefined)
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true)
+      ; (apiClient.cancelSession as any).mockResolvedValue(undefined)
 
     render(() => <SessionViewer sessionId="session-1" />)
 
     await screen.findByText("Session session-1 - native - running")
-    fireEvent.click(screen.getByText("Pause"))
-    expect(apiClient.pauseSession).toHaveBeenCalledWith("session-1")
-
-    fireEvent.click(screen.getByText("Kill"))
-    expect(confirmSpy).toHaveBeenCalled()
-    expect(apiClient.stopSession).toHaveBeenCalledWith("session-1")
-
-    confirmSpy.mockRestore()
+    fireEvent.click(screen.getByText("Cancel"))
+    expect(apiClient.cancelSession).toHaveBeenCalledWith("session-1")
   })
 
   it("calls onClose when close button is clicked", async () => {
@@ -221,8 +214,8 @@ describe("SessionViewer", () => {
     expect(onClose).toHaveBeenCalled()
   })
 
-  it("shows state-aware tooltips for disabled buttons", async () => {
-    // Test with suspended session
+  it("shows state-aware tooltips for cancel button", async () => {
+    // Test with suspended session - cancel should be disabled
     const suspendedSession = makeSession({ state: "suspended" as const })
     ; (apiClient.getSession as any).mockResolvedValue(suspendedSession)
 
@@ -232,37 +225,27 @@ describe("SessionViewer", () => {
     const stateBadge = await screen.findByTestId("session-state-badge")
     expect(stateBadge.textContent).toContain("suspended")
 
-    // Pause button should be disabled with tooltip explaining state
-    const pauseButton = screen.getByText("Pause") as HTMLButtonElement
-    expect(pauseButton.disabled).toBe(true)
-    expect(pauseButton.getAttribute("title")).toBe("Cannot pause: session is suspended")
-
-    // Resume button should be enabled with action tooltip
-    const resumeButton = screen.getByText("Resume") as HTMLButtonElement
-    expect(resumeButton.disabled).toBe(false)
-    expect(resumeButton.getAttribute("title")).toBe("Resume the suspended session")
-
-    // Kill button should be enabled
-    const killButton = screen.getByText("Kill") as HTMLButtonElement
-    expect(killButton.disabled).toBe(false)
-    expect(killButton.getAttribute("title")).toBe("Kill the session")
+    // Cancel button should be disabled when not running
+    const cancelButton = screen.getByText("Cancel") as HTMLButtonElement
+    expect(cancelButton.disabled).toBe(true)
+    expect(cancelButton.getAttribute("title")).toBe("Cannot cancel: session is suspended")
   })
 
   it("shows action-in-progress tooltips", async () => {
     ; (apiClient.getSession as any).mockResolvedValue(baseSession)
-    ; (apiClient.pauseSession as any).mockImplementation(() => new Promise(() => { })) // Never resolves
+    ; (apiClient.cancelSession as any).mockImplementation(() => new Promise(() => { })) // Never resolves
 
     render(() => <SessionViewer sessionId="session-1" />)
 
     await screen.findByText("Session session-1 - native - running")
 
-    // Click pause to start action
-    const pauseButton = screen.getByText("Pause") as HTMLButtonElement
-    fireEvent.click(pauseButton)
+    // Click cancel to start action
+    const cancelButton = screen.getByText("Cancel") as HTMLButtonElement
+    fireEvent.click(cancelButton)
 
     // Button should show in-progress tooltip
-    expect(pauseButton.disabled).toBe(true)
-    expect(pauseButton.getAttribute("title")).toBe("Pause action is in progress...")
+    expect(cancelButton.disabled).toBe(true)
+    expect(cancelButton.getAttribute("title")).toBe("Cancel action is in progress...")
   })
 
   it("updates state badge when status_change event arrives", async () => {

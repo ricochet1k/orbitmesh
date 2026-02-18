@@ -24,6 +24,7 @@ export const apiClient = {
   stopSession: sessionApi.stopSession,
   pauseSession: sessionApi.pauseSession,
   resumeSession: sessionApi.resumeSession,
+  cancelSession: sessionApi.cancelSession,
   sendSessionInput: sessionApi.sendSessionInput,
   sendMessage: sessionApi.sendMessage,
   getEventsUrl: sessionApi.getEventsUrl,

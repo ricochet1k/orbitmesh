@@ -8,12 +8,10 @@ interface SessionToolbarProps {
   streamStatus: Accessor<string>
   terminalStatus: Accessor<string>
   providerType: Accessor<string>
-  pendingAction: Accessor<"pause" | "resume" | "stop" | null>
+  pendingAction: Accessor<"cancel" | null>
   canManage: Accessor<boolean>
   actionNotice: Accessor<{ tone: "error" | "success"; message: string } | null>
-  onPause: () => void
-  onResume: () => void
-  onStop: () => void
+  onCancel: () => void
   onExportJson: () => void
   onExportMarkdown: () => void
   onClose: () => void
@@ -55,50 +53,20 @@ export default function SessionToolbar(props: SessionToolbarProps) {
             </button>
             <button
               type="button"
-              onClick={props.onPause}
-              disabled={!props.canManage() || props.sessionState() !== "running" || props.pendingAction() === "pause"}
-              title={
-                !props.canManage()
-                  ? PERM_DENIED
-                  : props.pendingAction() === "pause"
-                  ? "Pause action is in progress..."
-                  : props.sessionState() !== "running"
-                  ? `Cannot pause: session is ${props.sessionState()}`
-                  : "Pause the running session"
-              }
-            >
-              Pause
-            </button>
-            <button
-              type="button"
-              onClick={props.onResume}
-              disabled={!props.canManage() || props.sessionState() !== "suspended" || props.pendingAction() === "resume"}
-              title={
-                !props.canManage()
-                  ? PERM_DENIED
-                  : props.pendingAction() === "resume"
-                  ? "Resume action is in progress..."
-                  : props.sessionState() !== "suspended"
-                  ? `Cannot resume: session is ${props.sessionState()}`
-                  : "Resume the suspended session"
-              }
-            >
-              Resume
-            </button>
-            <button
-              type="button"
               class="danger"
-              onClick={props.onStop}
-              disabled={!props.canManage() || props.pendingAction() === "stop"}
+              onClick={props.onCancel}
+              disabled={!props.canManage() || props.sessionState() !== "running" || props.pendingAction() === "cancel"}
               title={
                 !props.canManage()
                   ? PERM_DENIED
-                  : props.pendingAction() === "stop"
-                  ? "Kill action is in progress..."
-                  : "Kill the session"
+                  : props.pendingAction() === "cancel"
+                  ? "Cancel action is in progress..."
+                  : props.sessionState() !== "running"
+                  ? `Cannot cancel: session is ${props.sessionState()}`
+                  : "Cancel the running session"
               }
             >
-              Kill
+              Cancel
             </button>
             <button
               type="button"

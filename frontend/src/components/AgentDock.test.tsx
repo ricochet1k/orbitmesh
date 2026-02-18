@@ -60,6 +60,7 @@ vi.mock("../api/client", () => ({
     pauseSession: vi.fn(),
     resumeSession: vi.fn(),
     stopSession: vi.fn(),
+    cancelSession: vi.fn(),
     sendSessionInput: vi.fn(),
     sendMessage: vi.fn(),
     getActivityEntries: vi.fn(),
@@ -153,13 +154,13 @@ describe("AgentDock", () => {
       "Bulk session controls are not permitted for your role.",
     ) as HTMLButtonElement[];
 
-    expect(actionButtons.length).toBe(2);
+    expect(actionButtons.length).toBe(1);
     actionButtons.forEach((button) => {
       expect(button.disabled).toBe(true);
     });
   });
 
-  it("surfaces action errors when pausing fails", async () => {
+  it("surfaces action errors when cancel fails", async () => {
     (apiClient.getSession as any).mockResolvedValue({
       id: "session-1",
       provider_type: "native",
@@ -174,7 +175,7 @@ describe("AgentDock", () => {
       can_initiate_bulk_actions: true,
     });
     (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1");
-    (apiClient.pauseSession as any).mockRejectedValue(new Error("Pause failed"));
+    (apiClient.cancelSession as any).mockRejectedValue(new Error("Cancel failed"));
 
     render(() => <AgentDock sessionId="session-1" />);
 
@@ -188,11 +189,11 @@ describe("AgentDock", () => {
 
     screen.getByTestId("agent-dock-toggle").click();
 
-    const pauseButton = screen.getByTitle("Pause session");
-    pauseButton.click();
+    const cancelButton = screen.getByTitle("Cancel the running session");
+    cancelButton.click();
 
     await waitFor(() => {
-      expect(screen.getByText("Pause failed")).toBeDefined();
+      expect(screen.getByText("Cancel failed")).toBeDefined();
     });
   });
 

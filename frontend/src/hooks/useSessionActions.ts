@@ -11,17 +11,15 @@ export function useSessionActions(
   sessionId: Accessor<string>,
   options: SessionActionsOptions = {},
 ) {
-  const [pendingAction, setPendingAction] = createSignal<"pause" | "resume" | "stop" | null>(null)
+  const [pendingAction, setPendingAction] = createSignal<"cancel" | null>(null)
   const [actionError, setActionError] = createSignal<string | null>(null)
 
-  const runAction = async (action: "pause" | "resume" | "stop", confirmText?: string) => {
+  const runAction = async (action: "cancel", confirmText?: string) => {
     if (confirmText !== undefined && !window.confirm(confirmText)) return
     setPendingAction(action)
     setActionError(null)
     try {
-      if (action === "pause") await apiClient.pauseSession(sessionId())
-      if (action === "resume") await apiClient.resumeSession(sessionId())
-      if (action === "stop") await apiClient.stopSession(sessionId())
+      if (action === "cancel") await apiClient.cancelSession(sessionId())
       const label = action.charAt(0).toUpperCase() + action.slice(1)
       options.onSuccess?.(action, `${label} request sent.`)
     } catch (error) {
@@ -37,8 +35,6 @@ export function useSessionActions(
     pendingAction,
     actionError,
     setActionError,
-    pause: (confirmText?: string) => runAction("pause", confirmText),
-    resume: (confirmText?: string) => runAction("resume", confirmText),
-    stop: (confirmText?: string) => runAction("stop", confirmText),
+    cancel: (confirmText?: string) => runAction("cancel", confirmText),
   }
 }
