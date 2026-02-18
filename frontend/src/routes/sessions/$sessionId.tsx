@@ -245,7 +245,6 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
         pendingAction={pendingAction}
         canManage={canManage}
         actionNotice={actionNotice}
-        sessionErrorMessage={() => session()?.error_message}
         onPause={handlePause}
         onResume={handleResume}
         onStop={handleStop}

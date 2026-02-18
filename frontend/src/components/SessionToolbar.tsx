@@ -11,7 +11,6 @@ interface SessionToolbarProps {
   pendingAction: Accessor<"pause" | "resume" | "stop" | null>
   canManage: Accessor<boolean>
   actionNotice: Accessor<{ tone: "error" | "success"; message: string } | null>
-  sessionErrorMessage: Accessor<string | undefined>
   onPause: () => void
   onResume: () => void
   onStop: () => void
@@ -117,13 +116,6 @@ export default function SessionToolbar(props: SessionToolbarProps) {
         {(notice) => (
           <p class={`notice-banner ${notice().tone}`} data-testid="session-action-notice">
             {notice().message}
-          </p>
-        )}
-      </Show>
-      <Show when={props.sessionErrorMessage()}>
-        {(errorMsg) => (
-          <p class="notice-banner error" data-testid="session-error-banner">
-            Session error: {errorMsg()}
           </p>
         )}
       </Show>

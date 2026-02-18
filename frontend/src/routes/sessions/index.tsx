@@ -340,14 +340,6 @@ function SessionsView(props: SessionsViewProps) {
                     <strong>{session().current_task}</strong>
                   </div>
                 </Show>
-                <Show when={session().error_message}>
-                  {(errorMsg) => (
-                    <div class="session-error" data-testid="session-error">
-                      <p class="muted">Error</p>
-                      <strong style={{ "color": "var(--color-error, red)" }}>{errorMsg()}</strong>
-                    </div>
-                  )}
-                </Show>
                 <button type="button" onClick={() => handleInspect(session().id)}>
                   Open full viewer
                 </button>
