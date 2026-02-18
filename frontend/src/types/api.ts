@@ -18,6 +18,7 @@ export interface SessionRequest {
   provider_type: string;
   provider_id?: string;
   working_dir?: string;
+  project_id?: string;
   environment?: Record<string, string>;
   system_prompt?: string;
   mcp_servers?: MCPServerConfig[];
@@ -25,6 +26,7 @@ export interface SessionRequest {
   task_id?: string;
   task_title?: string;
   session_kind?: string;
+  title?: string;
 }
 
 export interface SessionInputRequest {
@@ -35,13 +37,32 @@ export interface SessionResponse {
   id: string;
   provider_type: string;
   session_kind?: string;
+  title?: string;
   state: SessionState;
   working_dir: string;
+  project_id?: string;
   created_at: string;
   updated_at: string;
   current_task?: string;
   output?: string;
   error_message?: string;
+}
+
+export interface ProjectRequest {
+  name: string;
+  path: string;
+}
+
+export interface ProjectResponse {
+  id: string;
+  name: string;
+  path: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectListResponse {
+  projects: ProjectResponse[];
 }
 
 export interface SessionListResponse {

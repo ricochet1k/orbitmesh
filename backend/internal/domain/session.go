@@ -87,8 +87,10 @@ type Session struct {
 	ID           string
 	ProviderType string
 	Kind         string
+	Title        string
 	State        SessionState
 	WorkingDir   string
+	ProjectID    string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	CurrentTask  string
@@ -154,6 +156,13 @@ func (s *Session) SetKind(kind string) {
 	s.UpdatedAt = time.Now()
 }
 
+func (s *Session) SetTitle(title string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Title = title
+	s.UpdatedAt = time.Now()
+}
+
 func (s *Session) SetOutput(output string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -173,8 +182,10 @@ type SessionSnapshot struct {
 	ID           string
 	ProviderType string
 	Kind         string
+	Title        string
 	State        SessionState
 	WorkingDir   string
+	ProjectID    string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	CurrentTask  string
@@ -195,8 +206,10 @@ func (s *Session) Snapshot() SessionSnapshot {
 		ID:           s.ID,
 		ProviderType: s.ProviderType,
 		Kind:         s.Kind,
+		Title:        s.Title,
 		State:        s.State,
 		WorkingDir:   s.WorkingDir,
+		ProjectID:    s.ProjectID,
 		CreatedAt:    s.CreatedAt,
 		UpdatedAt:    s.UpdatedAt,
 		CurrentTask:  s.CurrentTask,

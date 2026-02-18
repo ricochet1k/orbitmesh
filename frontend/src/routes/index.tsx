@@ -1,14 +1,11 @@
 import { createFileRoute, useNavigate } from '@tanstack/solid-router'
-import { createResource, createSignal, createMemo, Show, For } from 'solid-js'
+import { createResource, createSignal, createMemo, Show } from 'solid-js'
 import { apiClient } from '../api/client'
 import AgentGraph from '../graph/AgentGraph'
 import { buildUnifiedGraph } from '../graph/graphData'
 import type { GraphNode } from '../graph/types'
-import EmptyState from '../components/EmptyState'
-import SkeletonLoader from '../components/SkeletonLoader'
 import { useSessionStore } from '../state/sessions'
-import { formatRelativeAge, getStreamStatus, isSessionStale } from '../utils/sessionStatus'
-import { getStreamStatusLabel } from '../utils/statusLabels'
+import SessionsTable from '../components/SessionsTable'
 
 export const Route = createFileRoute('/')({
   component: Dashboard,
@@ -31,11 +28,6 @@ export default function Dashboard(props: DashboardProps = {}) {
   const countByState = (state: string) => sessionList().filter((item) => item.state === state).length
   const canInspect = () => permissions()?.can_inspect_sessions ?? false
   const canManage = () => permissions()?.can_initiate_bulk_actions ?? false
-
-  const isActionPending = (id: string, action: string) => {
-    const pending = pendingAction()
-    return pending?.id === id && pending?.action === action
-  }
 
   const navigateTo = (path: string) => {
     if (props.onNavigate) {
@@ -88,10 +80,6 @@ export default function Dashboard(props: DashboardProps = {}) {
     if (node.id === "commit-root") {
       navigateTo("/history/commits")
     }
-  }
-
-  const handleInspect = (sessionId: string) => {
-    navigateTo(`/sessions/${sessionId}`)
   }
 
   return (
@@ -154,178 +142,16 @@ export default function Dashboard(props: DashboardProps = {}) {
           </div>
         </section>
 
-        <section class="sessions-list">
-          <div class="panel-header">
-            <div>
-              <p class="panel-kicker">Session operations</p>
-              <h2>Active Sessions</h2>
-            </div>
-            <span class="panel-pill neutral">Operators ready</span>
-          </div>
-          <Show 
-            when={hasLoaded()} 
-            fallback={<SkeletonLoader variant="table" count={5} />}
-          >
-            <Show 
-              when={sessionList().length > 0}
-              fallback={
-                <EmptyState
-                  icon="🚀"
-                  title="No active sessions"
-                  description="Get started by navigating to the Tasks view and starting an agent session."
-                  action={{
-                    label: "Go to Tasks",
-                    onClick: () => navigateTo("/tasks")
-                  }}
-                  secondaryAction={{
-                    label: "View Documentation",
-                    href: "/docs",
-                    target: "_blank",
-                    rel: "noreferrer",
-                  }}
-                />
-              }
-            >
-              <table data-testid="dashboard-sessions-table">
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Provider</th>
-                    <th>State</th>
-                    <th>Streams</th>
-                    <th>Last update</th>
-                    <th>Task</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <For each={sessionList()}>
-                    {(session) => {
-                      const streamStatus = getStreamStatus(session)
-                      const stale = isSessionStale(session)
-                      const relativeAge = formatRelativeAge(session)
-                      return (
-                    <tr data-session-id={session.id}>
-                      <td>{session.id.substring(0, 8)}...</td>
-                      <td>{session.provider_type}</td>
-                      <td>
-                        <span class={`state-badge ${session.state}`}>
-                          {session.state}
-                        </span>
-                      </td>
-                      <td>
-                        <div class="stream-pill-group">
-                          <span class={`stream-pill ${streamStatus}`}>
-                            Activity {getStreamStatusLabel(streamStatus)}
-                          </span>
-                          <Show when={session.provider_type === "pty"}>
-                            <span class={`stream-pill ${streamStatus}`}>
-                              Terminal {getStreamStatusLabel(streamStatus)}
-                            </span>
-                          </Show>
-                        </div>
-                      </td>
-                      <td>
-                        <div class="update-cell">
-                          <Show when={stale}>
-                            <span class="stale-badge">Stale</span>
-                          </Show>
-                          <span class="updated-at">{relativeAge}</span>
-                        </div>
-                      </td>
-                      <td>{session.current_task || "None"}</td>
-                      <td>
-                        <div class="action-stack">
-                          <Show
-                            when={canInspect()}
-                            fallback={
-                              <button
-                                type="button"
-                                disabled={true}
-                                title="Session inspection is not permitted for your role."
-                              >
-                                Inspect
-                              </button>
-                            }
-                          >
-                            <button type="button" onClick={() => handleInspect(session.id)}>
-                              Inspect
-                            </button>
-                          </Show>
-                          <Show
-                            when={canManage()}
-                            fallback={
-                              <div
-                                class="bulk-actions"
-                                title="Bulk actions are not permitted for your role."
-                              >
-                                <button type="button" disabled={true}>Pause</button>
-                                <button type="button" disabled={true}>Resume</button>
-                                <button type="button" disabled={true}>Stop</button>
-                              </div>
-                            }
-                          >
-                            <div class="bulk-actions">
-                              <button
-                                type="button"
-                                disabled={
-                                  session.state !== "running" || isActionPending(session.id, "pause")
-                                }
-                                onClick={() => runBulkAction(session.id, "pause")}
-                                title={
-                                  isActionPending(session.id, "pause")
-                                    ? "Pause action is in progress..."
-                                    : session.state !== "running"
-                                    ? `Cannot pause: session is ${session.state}`
-                                    : "Pause the running session"
-                                }
-                              >
-                                Pause
-                              </button>
-                              <button
-                                type="button"
-                                disabled={
-                                  session.state !== "paused" || isActionPending(session.id, "resume")
-                                }
-                                onClick={() => runBulkAction(session.id, "resume")}
-                                title={
-                                  isActionPending(session.id, "resume")
-                                    ? "Resume action is in progress..."
-                                    : session.state !== "paused"
-                                    ? `Cannot resume: session is ${session.state}`
-                                    : "Resume the paused session"
-                                }
-                              >
-                                Resume
-                              </button>
-                              <button
-                                type="button"
-                                disabled={
-                                  session.state === "stopped" || isActionPending(session.id, "stop")
-                                }
-                                onClick={() => runBulkAction(session.id, "stop")}
-                                title={
-                                  isActionPending(session.id, "stop")
-                                    ? "Stop action is in progress..."
-                                    : session.state === "stopped"
-                                    ? "Session is already stopped"
-                                    : "Stop the session"
-                                }
-                              >
-                                Stop
-                              </button>
-                            </div>
-                          </Show>
-                        </div>
-                      </td>
-                    </tr>
-                      )}}
-                  </For>
-                </tbody>
-              </table>
-            </Show>
-          </Show>
-        </section>
+        <SessionsTable
+          sessions={sessionList}
+          hasLoaded={hasLoaded}
+          canInspect={canInspect}
+          canManage={canManage}
+          pendingAction={pendingAction}
+          onInspect={(id) => navigateTo(`/sessions/${id}`)}
+          onAction={runBulkAction}
+          onNavigateToTasks={() => navigateTo("/tasks")}
+        />
 
         <section class="graph-view">
           <div class="panel-header">

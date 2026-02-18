@@ -22,16 +22,18 @@ type Handler struct {
 	executor        *service.AgentExecutor
 	broadcaster     *service.EventBroadcaster
 	providerStorage *storage.ProviderConfigStorage
+	projectStorage  *storage.ProjectStorage
 	gitDir          string
 	dockBridge      *DockBridge
 }
 
 // NewHandler creates a Handler backed by the given executor and broadcaster.
-func NewHandler(executor *service.AgentExecutor, broadcaster *service.EventBroadcaster, providerStorage *storage.ProviderConfigStorage) *Handler {
+func NewHandler(executor *service.AgentExecutor, broadcaster *service.EventBroadcaster, providerStorage *storage.ProviderConfigStorage, projectStorage *storage.ProjectStorage) *Handler {
 	return &Handler{
 		executor:        executor,
 		broadcaster:     broadcaster,
 		providerStorage: providerStorage,
+		projectStorage:  projectStorage,
 		gitDir:          resolveGitDir(),
 		dockBridge:      NewDockBridge(),
 	}
@@ -69,6 +71,11 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/v1/providers/{id}", h.getProvider)
 	r.Put("/api/v1/providers/{id}", h.updateProvider)
 	r.Delete("/api/v1/providers/{id}", h.deleteProvider)
+	r.Get("/api/v1/projects", h.listProjects)
+	r.Post("/api/v1/projects", h.createProject)
+	r.Get("/api/v1/projects/{id}", h.getProject)
+	r.Put("/api/v1/projects/{id}", h.updateProject)
+	r.Delete("/api/v1/projects/{id}", h.deleteProject)
 }
 
 func (h *Handler) sendSessionInput(w http.ResponseWriter, r *http.Request) {
@@ -130,7 +137,20 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "provider_type is required", "")
 		return
 	}
+
+	// Resolve working directory: explicit > project path > git dir
 	workingDir := req.WorkingDir
+	projectID := req.ProjectID
+	if projectID != "" && h.projectStorage != nil {
+		proj, err := h.projectStorage.Get(projectID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "project not found", err.Error())
+			return
+		}
+		if workingDir == "" {
+			workingDir = proj.Path
+		}
+	}
 	if workingDir == "" {
 		workingDir = h.gitDir
 	}
@@ -144,12 +164,14 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	config := session.Config{
 		ProviderType: req.ProviderType,
 		WorkingDir:   workingDir,
+		ProjectID:    projectID,
 		Environment:  req.Environment,
 		SystemPrompt: req.SystemPrompt,
 		Custom:       req.Custom,
 		TaskID:       req.TaskID,
 		TaskTitle:    req.TaskTitle,
 		SessionKind:  sessionKind,
+		Title:        req.Title,
 	}
 	if providerConfig != nil {
 		if len(providerConfig.Env) > 0 {
@@ -170,7 +192,7 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 			switch providerConfig.Type {
 			case "adk":
 				envKey = "GOOGLE_API_KEY"
-			case "anthropic":
+			case "anthropic", "claude", "claude-ws", "acp":
 				envKey = "ANTHROPIC_API_KEY"
 			case "openai":
 				envKey = "OPENAI_API_KEY"
@@ -264,11 +286,26 @@ func (h *Handler) getSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
-	sessions := h.executor.ListSessions()
+	allSessions := h.executor.ListSessions()
 
-	responses := make([]apiTypes.SessionResponse, len(sessions))
-	for i, session := range sessions {
-		responses[i] = sessionToResponse(session.Snapshot())
+	// Optional filter: ?project_id=<id> (empty string = sessions with no project)
+	filterByProject := r.URL.Query().Has("project_id")
+	projectID := r.URL.Query().Get("project_id")
+
+	var filtered []*domain.Session
+	for _, s := range allSessions {
+		if filterByProject && s.ProjectID != projectID {
+			continue
+		}
+		filtered = append(filtered, s)
+	}
+	if filtered == nil {
+		filtered = []*domain.Session{}
+	}
+
+	responses := make([]apiTypes.SessionResponse, len(filtered))
+	for i, s := range filtered {
+		responses[i] = sessionToResponse(s.Snapshot())
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -356,8 +393,10 @@ func sessionToResponse(s domain.SessionSnapshot) apiTypes.SessionResponse {
 		ID:           s.ID,
 		ProviderType: s.ProviderType,
 		SessionKind:  s.Kind,
+		Title:        s.Title,
 		State:        apiTypes.SessionState(s.State.String()),
 		WorkingDir:   s.WorkingDir,
+		ProjectID:    s.ProjectID,
 		CreatedAt:    s.CreatedAt,
 		UpdatedAt:    s.UpdatedAt,
 		CurrentTask:  s.CurrentTask,

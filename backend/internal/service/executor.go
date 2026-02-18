@@ -109,8 +109,12 @@ func (e *AgentExecutor) StartSession(ctx context.Context, id string, config sess
 	}
 
 	session := domain.NewSession(id, config.ProviderType, config.WorkingDir)
+	session.ProjectID = config.ProjectID
 	if config.SessionKind != "" {
 		session.SetKind(config.SessionKind)
+	}
+	if config.Title != "" {
+		session.SetTitle(config.Title)
 	}
 	if taskRef := formatTaskReference(config.TaskID, config.TaskTitle); taskRef != "" {
 		session.SetCurrentTask(taskRef)
@@ -401,6 +405,51 @@ func (e *AgentExecutor) ListSessions() []*domain.Session {
 	}
 
 	return sessions
+}
+
+// DeleteProjectSessions stops all live sessions for the given project and
+// removes them from storage. Best-effort: errors are accumulated but don't
+// abort the loop.
+func (e *AgentExecutor) DeleteProjectSessions(ctx context.Context, projectID string) error {
+	// Collect in-memory session IDs for this project.
+	e.mu.RLock()
+	var liveIDs []string
+	for id, sc := range e.sessions {
+		if sc.session.ProjectID == projectID {
+			liveIDs = append(liveIDs, id)
+		}
+	}
+	e.mu.RUnlock()
+
+	var firstErr error
+	for _, id := range liveIDs {
+		if err := e.StopSession(ctx, id); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+
+	if e.storage == nil {
+		return firstErr
+	}
+
+	all, err := e.storage.List()
+	if err != nil {
+		if firstErr == nil {
+			firstErr = err
+		}
+		return firstErr
+	}
+	for _, s := range all {
+		if s.ProjectID == projectID {
+			if err := e.storage.Delete(s.ID); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+
+	return firstErr
 }
 
 func (e *AgentExecutor) SendInput(ctx context.Context, id string, input string) error {

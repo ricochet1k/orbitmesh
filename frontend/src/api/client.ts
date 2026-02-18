@@ -5,6 +5,7 @@ import * as sessionApi from "./sessions";
 import * as terminalApi from "./terminals";
 import * as providerApi from "./providers";
 import * as taskApi from "./tasks";
+import * as projectApi from "./projects";
 
 /**
  * Unified API client. All methods are grouped by domain in separate modules
@@ -42,6 +43,13 @@ export const apiClient = {
   createProvider: providerApi.createProvider,
   updateProvider: providerApi.updateProvider,
   deleteProvider: providerApi.deleteProvider,
+
+  // Projects
+  listProjects: projectApi.listProjects,
+  getProject: projectApi.getProject,
+  createProject: projectApi.createProject,
+  updateProject: projectApi.updateProject,
+  deleteProject: projectApi.deleteProject,
 
   // Tasks, commits, permissions, extractors
   getPermissions: taskApi.getPermissions,

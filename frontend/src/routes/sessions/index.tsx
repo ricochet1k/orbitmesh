@@ -1,9 +1,11 @@
 import { createFileRoute, useNavigate } from '@tanstack/solid-router'
-import { createMemo, createSignal, For, Show } from "solid-js"
+import { createMemo, createResource, createSignal, For, Show } from "solid-js"
 import EmptyState from "../../components/EmptyState"
 import SkeletonLoader from "../../components/SkeletonLoader"
 import { useSessionStore } from "../../state/sessions"
-import { formatRelativeAge, getStreamStatus, isSessionStale } from "../../utils/sessionStatus"
+import { formatRelativeAge } from "../../utils/sessionStatus"
+import { apiClient } from "../../api/client"
+import type { SessionRequest, SessionResponse } from "../../types/api"
 
 export const Route = createFileRoute('/sessions/')({
   component: SessionsView,
@@ -13,22 +15,141 @@ interface SessionsViewProps {
   onNavigate?: (path: string) => void
 }
 
+/** Returns a human-readable display name for a session. */
+function sessionDisplayName(session: SessionResponse): string {
+  if (session.title) return session.title
+  if (session.current_task) return session.current_task
+  return `${session.provider_type} session`
+}
+
+/** Returns a short secondary label (provider type + abbreviated ID). */
+function sessionSubLabel(session: SessionResponse): string {
+  return `${session.provider_type} · ${session.id.slice(0, 8)}`
+}
+
+interface NewSessionFormProps {
+  onCreated: (id: string) => void
+  onCancel: () => void
+}
+
+function NewSessionForm(props: NewSessionFormProps) {
+  const [title, setTitle] = createSignal("")
+  // Each option is either "id:<providerId>" or "type:<providerType>"
+  const [providerChoice, setProviderChoice] = createSignal("type:claude-ws")
+  const [error, setError] = createSignal<string | null>(null)
+  const [creating, setCreating] = createSignal(false)
+
+  const [providers] = createResource(apiClient.listProviders)
+
+  const handleCreate = async () => {
+    setError(null)
+    setCreating(true)
+    try {
+      const choice = providerChoice()
+      let req: SessionRequest
+      if (choice.startsWith("id:")) {
+        const provider = providers()?.providers.find((p) => p.id === choice.slice(3))
+        req = {
+          provider_type: provider?.type ?? "claude-ws",
+          provider_id: choice.slice(3),
+          title: title().trim() || undefined,
+        }
+      } else {
+        req = {
+          provider_type: choice.slice(5),
+          title: title().trim() || undefined,
+        }
+      }
+      const created = await apiClient.createSession(req)
+      props.onCreated(created.id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create session")
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  return (
+    <div class="new-session-form" data-testid="new-session-form">
+      <h3>New Session</h3>
+      <div class="form-field">
+        <label for="session-title">Title (optional)</label>
+        <input
+          id="session-title"
+          type="text"
+          placeholder="e.g. Fix bug in auth module"
+          value={title()}
+          onInput={(e) => setTitle(e.currentTarget.value)}
+          disabled={creating()}
+        />
+      </div>
+      <div class="form-field">
+        <label for="session-provider">Provider</label>
+        <Show
+          when={!providers.loading && providers()}
+          fallback={
+            <select id="session-provider" value={providerChoice()} disabled>
+              <option value="type:claude-ws">claude-ws (default)</option>
+            </select>
+          }
+        >
+          {(provs) => (
+            <select
+              id="session-provider"
+              value={providerChoice()}
+              onChange={(e) => setProviderChoice(e.currentTarget.value)}
+              disabled={creating()}
+            >
+              <For each={provs().providers}>
+                {(p) => <option value={`id:${p.id}`}>{p.name} ({p.type})</option>}
+              </For>
+              <Show when={provs().providers.length === 0}>
+                <option value="type:claude-ws">claude-ws (default)</option>
+              </Show>
+            </select>
+          )}
+        </Show>
+      </div>
+      <Show when={error()}>
+        <p class="form-error" data-testid="new-session-error">{error()}</p>
+      </Show>
+      <div class="form-actions">
+        <button
+          type="button"
+          class="btn btn-secondary"
+          onClick={props.onCancel}
+          disabled={creating()}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="btn btn-primary"
+          onClick={handleCreate}
+          disabled={creating()}
+          data-testid="new-session-submit"
+        >
+          {creating() ? "Creating…" : "Create Session"}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function SessionsView(props: SessionsViewProps) {
   const navigate = useNavigate()
   const { sessions, hasLoaded } = useSessionStore()
   const [selectedId, setSelectedId] = createSignal<string | null>(null)
   const [stateFilter, setStateFilter] = createSignal("all")
-  const [streamFilter, setStreamFilter] = createSignal("all")
+  const [showNewForm, setShowNewForm] = createSignal(false)
 
   const sessionList = () => sessions()
   const selectedSession = createMemo(() => sessionList().find((item) => item.id === selectedId()) ?? null)
 
   const filteredSessions = createMemo(() => {
     const state = stateFilter()
-    const stream = streamFilter()
     return sessionList().filter((item) => {
       if (state !== "all" && item.state !== state) return false
-      if (stream !== "all" && getStreamStatus(item) !== stream) return false
       return true
     })
   })
@@ -47,6 +168,11 @@ function SessionsView(props: SessionsViewProps) {
       return
     }
     navigate({ to: `/sessions/${id}` })
+  }
+
+  const handleSessionCreated = (id: string) => {
+    setShowNewForm(false)
+    handleInspect(id)
   }
 
   return (
@@ -78,8 +204,25 @@ function SessionsView(props: SessionsViewProps) {
               <strong>{stateCounts().get("error") ?? 0}</strong>
             </Show>
           </div>
+          <button
+            type="button"
+            class="btn btn-primary"
+            onClick={() => setShowNewForm(true)}
+            data-testid="new-session-btn"
+          >
+            + New Session
+          </button>
         </div>
       </header>
+
+      <Show when={showNewForm()}>
+        <div class="new-session-panel" data-testid="new-session-panel">
+          <NewSessionForm
+            onCreated={handleSessionCreated}
+            onCancel={() => setShowNewForm(false)}
+          />
+        </div>
+      </Show>
 
       <main class="sessions-layout">
         <section class="session-list-panel">
@@ -101,50 +244,35 @@ function SessionsView(props: SessionsViewProps) {
                 <EmptyState
                   icon="📭"
                   title="No sessions yet"
-                  description="Create a new session to start an agent task. Navigate to the Tasks view to get started."
+                  description="Create a new session to get started."
                   action={{
-                    label: "Go to Tasks",
-                    onClick: () => {
-                      if (props.onNavigate) {
-                        props.onNavigate("/tasks")
-                      } else {
-                        navigate({ to: "/tasks" })
-                      }
-                    }
+                    label: "New Session",
+                    onClick: () => setShowNewForm(true)
                   }}
                 />
               }
             >
-                <div class="session-filters">
-                  <label>
-                    State
-                    <select value={stateFilter()} onChange={(event) => setStateFilter(event.currentTarget.value)}>
-                      <option value="all">All</option>
-                      <option value="created">Created</option>
-                      <option value="running">Running</option>
-                      <option value="starting">Starting</option>
-                      <option value="paused">Paused</option>
-                      <option value="stopping">Stopping</option>
-                      <option value="stopped">Stopped</option>
-                      <option value="error">Error</option>
-                    </select>
-                  </label>
-                  <label>
-                    Stream
-                    <select value={streamFilter()} onChange={(event) => setStreamFilter(event.currentTarget.value)}>
-                      <option value="all">All</option>
-                      <option value="live">Live</option>
-                      <option value="reconnecting">Reconnecting</option>
-                      <option value="disconnected">Disconnected</option>
-                    </select>
-                  </label>
-                </div>
-                <div class="session-list" data-testid="sessions-list">
+              <div class="session-filters">
+                <label>
+                  State
+                  <select value={stateFilter()} onChange={(event) => setStateFilter(event.currentTarget.value)}>
+                    <option value="all">All</option>
+                    <option value="created">Created</option>
+                    <option value="running">Running</option>
+                    <option value="starting">Starting</option>
+                    <option value="paused">Paused</option>
+                    <option value="stopping">Stopping</option>
+                    <option value="stopped">Stopped</option>
+                    <option value="error">Error</option>
+                  </select>
+                </label>
+              </div>
+              <div class="session-list" data-testid="sessions-list">
                 <For each={filteredSessions()}>
                   {(session) => {
-                    const streamStatus = getStreamStatus(session)
-                    const stale = isSessionStale(session)
                     const relativeAge = formatRelativeAge(session)
+                    const displayName = sessionDisplayName(session)
+                    const subLabel = sessionSubLabel(session)
                     return (
                     <div
                       class={`session-card ${selectedId() === session.id ? "active" : ""}`}
@@ -155,29 +283,13 @@ function SessionsView(props: SessionsViewProps) {
                         class="session-card-main"
                         onClick={() => setSelectedId(session.id)}
                       >
-                        <div>
-                          <p class="session-card-id">{session.id}</p>
-                          <p class="muted">{session.current_task || "No active task"}</p>
+                        <div class="session-card-info">
+                          <p class="session-card-name">{displayName}</p>
+                          <p class="session-card-sub muted">{subLabel}</p>
                         </div>
                         <div class="session-card-meta">
                           <span class={`state-badge ${session.state}`}>{session.state.replace("_", " ")}</span>
-                          <div class="stream-pill-group">
-                            <span class={`stream-pill ${streamStatus}`}>
-                              Activity {streamStatus}
-                            </span>
-                            <Show when={session.provider_type === "pty"}>
-                              <span class={`stream-pill ${streamStatus}`}>
-                                Terminal {streamStatus}
-                              </span>
-                            </Show>
-                          </div>
-                          <div class="update-cell">
-                            <Show when={stale}>
-                              <span class="stale-badge">Stale</span>
-                            </Show>
-                            <span class="updated-at">{relativeAge}</span>
-                          </div>
-                          <span class="muted">{session.provider_type}</span>
+                          <span class="updated-at">{relativeAge}</span>
                         </div>
                       </button>
                       <div class="session-card-actions">
@@ -204,9 +316,15 @@ function SessionsView(props: SessionsViewProps) {
           <Show when={selectedSession()} fallback={<p class="empty-state">Select a session to preview.</p>}>
             {(session) => (
               <div class="session-preview" data-testid="session-preview">
+                <Show when={session().title}>
+                  <div>
+                    <p class="muted">Title</p>
+                    <strong>{session().title}</strong>
+                  </div>
+                </Show>
                 <div>
                   <p class="muted">Session ID</p>
-                  <strong>{session().id}</strong>
+                  <strong class="session-id-mono">{session().id}</strong>
                 </div>
                 <div>
                   <p class="muted">State</p>
@@ -216,10 +334,12 @@ function SessionsView(props: SessionsViewProps) {
                   <p class="muted">Provider</p>
                   <strong>{session().provider_type}</strong>
                 </div>
-                <div>
-                  <p class="muted">Task</p>
-                  <strong>{session().current_task || "None"}</strong>
-                </div>
+                <Show when={session().current_task}>
+                  <div>
+                    <p class="muted">Current task</p>
+                    <strong>{session().current_task}</strong>
+                  </div>
+                </Show>
                 <Show when={session().error_message}>
                   {(errorMsg) => (
                     <div class="session-error" data-testid="session-error">

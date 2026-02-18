@@ -3,7 +3,7 @@ import type { SessionListResponse, ErrorResponse } from "../types/api";
 export const BASE_URL = "/api";
 export const CSRF_COOKIE_NAME = "orbitmesh-csrf-token";
 export const CSRF_HEADER_NAME = "X-CSRF-Token";
-export const DEFAULT_PROVIDER = "adk";
+export const DEFAULT_PROVIDER = "claude-ws";
 const SESSION_CACHE_KEY = "orbitmesh:sessions";
 
 export function readSessionCache(): SessionListResponse | undefined {

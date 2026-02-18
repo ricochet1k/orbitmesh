@@ -15,7 +15,9 @@ import (
 
 	"github.com/ricochet1k/orbitmesh/internal/api"
 	"github.com/ricochet1k/orbitmesh/internal/provider"
+	"github.com/ricochet1k/orbitmesh/internal/provider/common/acp"
 	"github.com/ricochet1k/orbitmesh/internal/provider/common/claude"
+	"github.com/ricochet1k/orbitmesh/internal/provider/common/claudews"
 	"github.com/ricochet1k/orbitmesh/internal/provider/native"
 	"github.com/ricochet1k/orbitmesh/internal/provider/pty"
 	"github.com/ricochet1k/orbitmesh/internal/service"
@@ -36,6 +38,7 @@ func main() {
 	}
 
 	providerStorage := storage.NewProviderConfigStorage(baseDir)
+	projectStorage := storage.NewProjectStorage(baseDir)
 
 	factory := provider.NewDefaultFactory()
 	factory.Register("adk", func(sessionID string, config session.Config) (session.Session, error) {
@@ -46,6 +49,14 @@ func main() {
 	})
 	factory.Register("claude", func(sessionID string, config session.Config) (session.Session, error) {
 		return claude.NewClaudeCodeProvider(sessionID), nil
+	})
+	factory.Register("claude-ws", func(sessionID string, config session.Config) (session.Session, error) {
+		// permHandler is nil → auto-allow all tools.
+		// Callers can wire a custom handler by constructing the provider directly.
+		return claudews.NewClaudeWSProvider(sessionID, nil), nil
+	})
+	factory.Register("acp", func(sessionID string, config session.Config) (session.Session, error) {
+		return acp.NewSession(sessionID, acpConfigFromProvider(config), config)
 	})
 
 	broadcaster := service.NewEventBroadcaster(100)
@@ -65,7 +76,7 @@ func main() {
 	r.Use(api.CORSMiddleware)
 	r.Use(api.CSRFMiddleware)
 
-	handler := api.NewHandler(executor, broadcaster, providerStorage)
+	handler := api.NewHandler(executor, broadcaster, providerStorage, projectStorage)
 	handler.Mount(r)
 
 	srv := &http.Server{
@@ -97,6 +108,24 @@ func main() {
 	}
 
 	fmt.Println("OrbitMesh shut down cleanly")
+}
+
+func acpConfigFromProvider(config session.Config) acp.Config {
+	cfg := acp.Config{}
+	if config.Custom == nil {
+		return cfg
+	}
+	if command, ok := config.Custom["acp_command"].(string); ok && command != "" {
+		cfg.Command = command
+	}
+	if args, ok := config.Custom["acp_args"].([]any); ok {
+		for _, a := range args {
+			if s, ok := a.(string); ok {
+				cfg.Args = append(cfg.Args, s)
+			}
+		}
+	}
+	return cfg
 }
 
 func adkConfigFromProvider(config session.Config) native.ADKConfig {

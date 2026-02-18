@@ -3,27 +3,23 @@ import {
   createMemo,
   createResource,
   createSignal,
-  For,
-  onCleanup,
   Show,
+  untrack,
 } from "solid-js"
 
 import { useNavigate } from "@tanstack/solid-router"
 import { apiClient } from "../api/client"
-import type { Event, SessionState, TranscriptMessage } from "../types/api"
-import { mcpDispatch } from "../mcp/dispatch"
-import { mcpRegistry } from "../mcp/registry"
-import { dockSessionId, setDockSessionId } from "../state/agentDock"
-import { formatActivityContent, normalizeActivityEntry } from "../utils/activityFormatting"
-import { isTestEnv } from "../utils/env"
+import type { SessionState } from "../types/api"
+import { dockSessionId } from "../state/agentDock"
 import { TIMEOUTS } from "../constants/timeouts"
 import { useSessionStream } from "../hooks/useSessionStream"
+import { useSessionTranscript } from "../hooks/useSessionTranscript"
+import { useSessionActions } from "../hooks/useSessionActions"
+import { useAgentDockSession } from "../hooks/useAgentDockSession"
+import { useAgentDockMcp } from "../hooks/useAgentDockMcp"
+import SessionTranscript from "./SessionTranscript"
+import SessionComposer from "./SessionComposer"
 import "./AgentDock.css"
-
-interface DockState {
-  type: "empty" | "loading" | "error" | "live"
-  message?: string
-}
 
 interface AgentDockProps {
   sessionId?: string
@@ -33,42 +29,49 @@ interface AgentDockProps {
 export default function AgentDock(props: AgentDockProps) {
   const navigate = useNavigate()
   const sessionId = () => props.sessionId ?? dockSessionId() ?? ""
-  const [session] = createResource(
+  const [session, { refetch: refetchSession }] = createResource(
     () => sessionId(),
     (id) => (id ? apiClient.getSession(id) : Promise.resolve(null)),
   )
   const [permissions] = createResource(apiClient.getPermissions)
-  const [messages, setMessages] = createSignal<TranscriptMessage[]>([])
-  const [dockState, setDockState] = createSignal<DockState>({ type: "empty" })
-  const [autoScroll, setAutoScroll] = createSignal(true)
-  const [inputValue, setInputValue] = createSignal("")
-  const [pendingAction, setPendingAction] = createSignal<string | null>(null)
-  const [actionError, setActionError] = createSignal<string | null>(null)
+
+  const [dockLoadState, setDockLoadState] = createSignal<"empty" | "loading" | "error" | "live">("empty")
+  const [dockError, setDockError] = createSignal<string | null>(null)
   const [isExpanded, setIsExpanded] = createSignal(false)
-  const [rehydrationState, setRehydrationState] = createSignal<
-    "idle" | "loading" | "done"
-  >("idle")
   const [streamStatus, setStreamStatus] = createSignal<
     "idle" | "connecting" | "reconnecting" | "live" | "disconnected" | "error"
   >("idle")
   const [lastAction, setLastAction] = createSignal<
-    { label: string; detail?: string; tone?: "info" | "error" }
-    | null
+    { label: string; detail?: string; tone?: "info" | "error" } | null
   >(null)
-  let transcriptRef: HTMLDivElement | undefined
-  let inputRef: HTMLTextAreaElement | undefined
-  let dockBootstrap: Promise<string | null> | null = null
+  const [composerError, setComposerError] = createSignal<string | null>(null)
+  const [composerPending, setComposerPending] = createSignal<string | null>(null)
+  const [sessionStateOverride, setSessionStateOverride] = createSignal<SessionState | null>(null)
+
+  let transcriptContainerRef: HTMLDivElement | undefined
+
+  const { ensureDockSessionId } = useAgentDockSession({
+    sessionId,
+    skipHydration: Boolean(props.sessionId),
+  })
+
+  const isDockSession = () =>
+    session()?.session_kind === "dock" || (!props.sessionId && Boolean(dockSessionId()))
+
+  useAgentDockMcp(sessionId, isDockSession)
 
   const canManage = () => permissions()?.can_initiate_bulk_actions ?? false
-
   const hasSession = () => Boolean(sessionId())
+  const sessionState = () => sessionStateOverride() ?? (session()?.state as SessionState | undefined)
+  const isRunning = () => sessionState() === "running"
+  const isActive = () => ["running", "paused"].includes(sessionState() ?? "")
 
   const toggleExpanded = () => setIsExpanded((prev) => !prev)
 
   const statusLabel = createMemo(() => {
     if (!hasSession()) return "Idle"
-    if (dockState().type === "loading") return "Connecting"
-    if (dockState().type === "error") return "Error"
+    if (dockLoadState() === "loading") return "Connecting"
+    if (dockLoadState() === "error") return "Error"
     if (streamStatus() === "connecting") return "Connecting"
     if (streamStatus() === "disconnected") return "Disconnected"
     if (streamStatus() === "reconnecting") return "Reconnecting"
@@ -84,309 +87,146 @@ export default function AgentDock(props: AgentDockProps) {
 
   const lastActionDetail = createMemo(() => lastAction()?.detail ?? "")
 
-  const hydrateDockSession = async () => {
-    const stored = dockSessionId()
-    try {
-      const list = await apiClient.listSessions()
-      const dock = list.sessions.find(
-        (entry) =>
-          entry.session_kind === "dock" &&
-          ["running", "starting", "paused"].includes(entry.state),
-      )
-      if (dock) {
-        try {
-          await apiClient.getSession(dock.id)
-          if (dock.id !== stored) {
-            setDockSessionId(dock.id)
-          }
-          return
-        } catch {
-          // continue to clear stored session
-        }
-      }
-      if (stored) {
-        try {
-          await apiClient.getSession(stored)
-        } catch {
-          setDockSessionId(null)
-        }
-      }
-    } catch {
-      // Ignore rehydration failures; fallback handled on send.
-    }
-  }
-
-  const ensureDockSessionId = async (): Promise<string | null> => {
-    const existing = sessionId()
-    if (existing) return existing
-    if (dockBootstrap) return dockBootstrap
-    dockBootstrap = (async () => {
-      const stored = dockSessionId()
-      if (stored) {
-        try {
-          await apiClient.getSession(stored)
-          return stored
-        } catch {
-          setDockSessionId(null)
-        }
-      }
-      try {
-        const list = await apiClient.listSessions()
-        const dock = list.sessions.find(
-          (entry) =>
-            entry.session_kind === "dock" &&
-            ["running", "starting", "paused"].includes(entry.state),
-        )
-        if (dock) {
-          try {
-            await apiClient.getSession(dock.id)
-            setDockSessionId(dock.id)
-            return dock.id
-          } catch {
-            // ignore stale dock session
-          }
-        }
-      } catch {
-        // Continue to create a new dock session.
-      }
-      try {
-        const created = await apiClient.createDockSession()
-        setDockSessionId(created.id)
-        return created.id
-      } catch {
-        return null
-      }
-    })()
-    const result = await dockBootstrap
-    dockBootstrap = null
-    return result
-  }
-
-  const isDockSession = () => session()?.session_kind === "dock" || (!props.sessionId && Boolean(dockSessionId()))
-
-  const handleDockRequest = async (request: { kind: string; target_id?: string; action?: string; payload?: any }) => {
-    if (request.kind === "list") {
-      const components = mcpRegistry
-        .list()
-        .map((entry) => ({ id: entry.id, name: entry.name, description: entry.description }))
-      return { ok: true, components }
-    }
-    if (request.kind === "multi_edit") {
-      return mcpDispatch.dispatchMultiFieldEdit(request.payload ?? {})
-    }
-    if (request.kind === "dispatch") {
-      return mcpDispatch.dispatchAction(
-        request.target_id ?? "",
-        request.action as any,
-        request.payload,
-      )
-    }
-    return { ok: false, error: "Unknown dock request" }
-  }
-
   const formatShort = (value: unknown, limit = 120) => {
     if (value === null || value === undefined) return ""
     const raw = typeof value === "string" ? value : JSON.stringify(value)
-    if (raw.length <= limit) return raw
-    return `${raw.slice(0, limit - 3)}...`
+    return raw.length <= limit ? raw : `${raw.slice(0, limit - 3)}...`
   }
 
   const markStreamActive = () => {
     if (streamStatus() !== "live") setStreamStatus("live")
   }
 
-  // Stream setup
+  // Transcript hook — provides full history, merge, filter, auto-scroll
+  const transcript = useSessionTranscript({
+    sessionId,
+    session: session as any,
+    permissions,
+    refetchSession,
+    onStatusChange: (state) => setSessionStateOverride(state),
+  })
+
+  // Session actions hook
+  const actions = useSessionActions(sessionId, {
+    onError: (_action, msg) => setComposerError(msg),
+  })
+
+  // Track when session is confirmed to exist (at least one successful fetch).
+  // This is separate from session.loading so that refetches don't reset stream state.
+  const [sessionReady, setSessionReady] = createSignal(false)
+
+  // Session load state management — reacts to resource loading/error but does NOT affect the stream.
   createEffect(() => {
     const activeSessionId = sessionId()
     if (!activeSessionId) {
-      setDockState({ type: "empty" })
-      setMessages([])
+      setDockLoadState("empty")
+      setDockError(null)
       setStreamStatus("idle")
       setLastAction(null)
+      setSessionReady(false)
       return
     }
 
     if (session.loading) {
-      setDockState({ type: "loading" })
-      setStreamStatus("connecting")
+      // Only set loading state if we're not already live (don't interrupt an open stream)
+      if (untrack(() => !sessionReady())) {
+        setDockLoadState("loading")
+        setStreamStatus("connecting")
+      }
       return
     }
 
     if (session.error) {
-      setDockState({
-        type: "error",
-        message: "Failed to connect to session. Check the full viewer for details.",
-      })
-      setStreamStatus("error")
+      // Only surface resource errors if the stream hasn't started yet
+      if (untrack(() => !sessionReady())) {
+        setDockLoadState("error")
+        setDockError("Failed to connect to session. Check the full viewer for details.")
+        setStreamStatus("error")
+      }
       return
     }
 
     const sess = session()
     if (!sess) {
-      setDockState({ type: "empty" })
+      setDockLoadState("empty")
       setStreamStatus("idle")
+      setSessionReady(false)
       return
     }
 
-    // Reset state for new session
-    setMessages([])
-    setAutoScroll(true)
-    setDockState({ type: "live" })
+    // Session loaded successfully — mark it ready so the stream can start.
+    setSessionReady(true)
+  })
+
+  // Stream management — only restarts when the session ID changes.
+  // Does NOT depend on session() or session.loading so refetches don't kill the stream.
+  createEffect(() => {
+    const activeSessionId = sessionId()
+    // Wait for session to be confirmed ready before opening the stream.
+    if (!activeSessionId || !sessionReady()) return
+
+    setDockLoadState("live")
     setStreamStatus("connecting")
     setLastAction(null)
-
-    // Connect to event stream
-    const handleEvent = (eventType: Event["type"], event: MessageEvent) => {
-      if (typeof event.data !== "string") return
-      let payload: Event | null = null
-      try {
-        const parsed = JSON.parse(event.data)
-        if (parsed && typeof parsed === "object" && "type" in parsed) {
-          payload = parsed as Event
-        } else {
-          payload = {
-            type: eventType,
-            timestamp: new Date().toISOString(),
-            session_id: activeSessionId,
-            data: parsed,
-          }
-        }
-      } catch (err) {
-        console.error("Failed to parse stream event:", err)
-        return
-      }
-
-      if (!payload) return
-      markStreamActive()
-
-      switch (payload.type) {
-        case "output": {
-          const content = payload.data?.content || ""
-          if (content) {
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: crypto.randomUUID(),
-                type: "agent",
-                timestamp: payload.timestamp,
-                content,
-              },
-            ])
-            if (autoScroll()) {
-              requestAnimationFrame(() => {
-                if (transcriptRef) {
-                  transcriptRef.scrollTop = transcriptRef.scrollHeight
-                }
-              })
-            }
-            setLastAction({ label: "Output", detail: formatShort(content) })
-          }
-          if (dockState().type === "loading") {
-            setDockState({ type: "live" })
-          }
-          break
-        }
-        case "status_change": {
-          const detail = `${payload.data?.old_state ?? "?"} -> ${payload.data?.new_state ?? "?"}`
-          setLastAction({ label: "Status change", detail })
-          if (dockState().type === "loading") {
-            setDockState({ type: "live" })
-          }
-          break
-        }
-        case "metadata": {
-          const key = payload.data?.key ?? "metadata"
-          const value = formatShort(payload.data?.value)
-          setLastAction({ label: `Metadata: ${key}`, detail: value })
-          if (dockState().type === "loading") {
-            setDockState({ type: "live" })
-          }
-          break
-        }
-        case "activity_entry": {
-          const entry = normalizeActivityEntry(payload.data)
-          if (entry) {
-            setLastAction({
-              label: `Action: ${entry.kind ?? "activity"}`,
-              detail: formatShort(formatActivityContent(entry)),
-            })
-          }
-          if (dockState().type === "loading") {
-            setDockState({ type: "live" })
-          }
-          break
-        }
-        case "error": {
-          const errorMessage = payload.data?.message || "Unknown error"
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: crypto.randomUUID(),
-              type: "error",
-              timestamp: payload.timestamp,
-              content: errorMessage,
-            },
-          ])
-          setLastAction({ label: "Error", detail: errorMessage, tone: "error" })
-          setDockState({
-            type: "error",
-            message: "Stream error: " + errorMessage,
-          })
-          setStreamStatus("error")
-          break
-        }
-        case "metric": {
-          const detail = `in ${payload.data?.tokens_in ?? "-"} · out ${payload.data?.tokens_out ?? "-"}`
-          setLastAction({ label: "Metrics", detail })
-          if (dockState().type === "loading") {
-            setDockState({ type: "live" })
-          }
-          break
-        }
-        default:
-          break
-      }
-    }
-
-    const handleHeartbeat = () => {
-      markStreamActive()
-    }
 
     useSessionStream(
       apiClient.getEventsUrl(activeSessionId),
       {
-        onEvent: (type, event) => handleEvent(type as Event["type"], event),
-        onHeartbeat: handleHeartbeat,
+        onEvent: (eventType, event) => {
+          markStreamActive()
+          // Delegate all transcript event handling to the shared hook
+          transcript.handleEvent(eventType, event)
+
+          // Additionally update the "last action" summary label for the dock header
+          if (typeof event.data !== "string") return
+          try {
+            const payload = JSON.parse(event.data)
+            switch (payload?.type ?? eventType) {
+              case "output":
+                setLastAction({ label: "Output", detail: formatShort(payload?.data?.content) })
+                break
+              case "status_change":
+                setLastAction({ label: "Status change", detail: `${payload?.data?.old_state} -> ${payload?.data?.new_state}` })
+                break
+              case "metadata":
+                setLastAction({ label: `Metadata: ${payload?.data?.key ?? ""}`, detail: formatShort(payload?.data?.value) })
+                break
+              case "activity_entry":
+                setLastAction({ label: `Action: ${payload?.data?.entry?.kind ?? "activity"}` })
+                break
+              case "error":
+                setLastAction({ label: "Error", detail: payload?.data?.message, tone: "error" })
+                break
+              case "metric":
+                setLastAction({ label: "Metrics", detail: `in ${payload?.data?.tokens_in ?? "-"} · out ${payload?.data?.tokens_out ?? "-"}` })
+                break
+            }
+          } catch { /* ignore parse errors — transcript hook handles its own */ }
+        },
+        onHeartbeat: () => markStreamActive(),
         onStatus: (status) => {
           if (status === "connecting") {
             setStreamStatus("connecting")
           } else if (status === "backoff") {
             setStreamStatus("reconnecting")
-            setDockState({
-              type: "error",
-              message: "Connection lost. Attempting to reconnect...",
-            })
+            setDockLoadState("error")
+            setDockError("Connection lost. Attempting to reconnect…")
           } else if (status === "not_found") {
             setStreamStatus("error")
-            setDockState({
-              type: "error",
-              message: "Stream endpoint not found.",
-            })
+            setDockLoadState("error")
+            setDockError("Stream endpoint not found.")
           }
         },
         onOpen: () => {
           setStreamStatus("live")
-          if (dockState().type !== "live") {
-            setDockState({ type: "live" })
-          }
+          setDockLoadState("live")
+          setDockError(null)
         },
         onError: (status) => {
           if (status === 404) {
             setStreamStatus("error")
-            setDockState({
-              type: "error",
-              message: "Stream endpoint not found.",
-            })
+            setDockLoadState("error")
+            setDockError("Stream endpoint not found.")
             return
           }
           setStreamStatus("disconnected")
@@ -396,150 +236,48 @@ export default function AgentDock(props: AgentDockProps) {
     )
   })
 
-  // Restore dock session on load (dock-only)
+  // Auto-scroll when new messages arrive
   createEffect(() => {
-    if (props.sessionId) return
-    if (rehydrationState() !== "idle") return
-    setRehydrationState("loading")
-    void hydrateDockSession().finally(() => setRehydrationState("done"))
-  })
-
-  // Dock MCP polling
-  createEffect(() => {
-    const activeSessionId = sessionId()
-    if (!activeSessionId || !isDockSession()) return
-    if (isTestEnv()) return
-
-    let cancelled = false
-    const controller = new AbortController()
-
-    const run = async () => {
-      while (!cancelled) {
-        try {
-          const req = await apiClient.pollDockMcp(activeSessionId, { timeoutMs: TIMEOUTS.MCP_POLL_MS })
-          if (!req) continue
-          const result = await handleDockRequest(req)
-          await apiClient.respondDockMcp(activeSessionId, {
-            id: req.id,
-            result,
-          })
-        } catch (error) {
-          if (controller.signal.aborted) return
-          await new Promise((resolve) => setTimeout(resolve, 1000))
-        }
+    transcript.messages()
+    if (!transcript.autoScroll() || !transcriptContainerRef) return
+    requestAnimationFrame(() => {
+      if (transcriptContainerRef) {
+        transcriptContainerRef.scrollTop = transcriptContainerRef.scrollHeight
       }
-    }
-
-    void run()
-
-    onCleanup(() => {
-      cancelled = true
-      controller.abort()
     })
   })
 
-  // Handle manual scroll detection
-  const handleTranscriptScroll = () => {
-    if (!transcriptRef) return
-    const isNearBottom =
-      transcriptRef.scrollHeight - transcriptRef.scrollTop -
-      transcriptRef.clientHeight <
-      100
-    setAutoScroll(isNearBottom)
-  }
-
-  // Keyboard shortcuts
-  const handleInputKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault()
-      handleSendMessage()
-    }
-  }
-
-  const handleSendMessage = async () => {
-    const message = inputValue().trim()
-    if (!message) return
-
-    setPendingAction("send")
-    setActionError(null)
-
+  const handleSend = async (text: string) => {
+    setComposerError(null)
+    setComposerPending("send")
     try {
-      let activeSessionId = sessionId()
+      let activeSessionId: string | null = sessionId() || null
       if (!activeSessionId) {
-        setDockState({ type: "loading" })
+        setDockLoadState("loading")
         setStreamStatus("connecting")
         activeSessionId = await ensureDockSessionId()
       }
-      if (!activeSessionId) {
-        throw new Error("Unable to start dock session.")
-      }
-      const providerType = session()?.provider_type
-      const payload = providerType === "pty" && !message.endsWith("\n")
-        ? `${message}\n`
-        : message
-      await apiClient.sendSessionInput(activeSessionId, payload)
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          type: "user",
-          timestamp: new Date().toISOString(),
-          content: message,
-        },
-      ])
-      setLastAction({ label: "Input", detail: formatShort(message) })
-      setInputValue("")
-    } catch (error) {
-      setActionError(
-        error instanceof Error ? error.message : "Failed to send input",
-      )
+      if (!activeSessionId) throw new Error("Unable to start dock session.")
+      const pType = session()?.provider_type
+      const payload = pType === "pty" && !text.endsWith("\n") ? `${text}\n` : text
+      await apiClient.sendSessionInput(activeSessionId!, payload)
+      setLastAction({ label: "Input", detail: text.slice(0, 80) })
+    } catch (err) {
+      setComposerError(err instanceof Error ? err.message : "Failed to send input")
     } finally {
-      setPendingAction(null)
+      setComposerPending(null)
     }
   }
 
-  const handlePauseResume = async () => {
-    if (!sessionId() || !session()) return
-
-    const state = session()?.state
-    const action = state === "paused" ? "resume" : "pause"
-
-    setPendingAction(action)
-    setActionError(null)
-
+  const handleInterrupt = async () => {
+    setComposerError(null)
+    setComposerPending("interrupt")
     try {
-      if (action === "pause") {
-        await apiClient.pauseSession(sessionId())
-      } else {
-        await apiClient.resumeSession(sessionId())
-      }
-    } catch (error) {
-      setActionError(
-        error instanceof Error ? error.message : "Action failed",
-      )
+      await apiClient.sendSessionInput(sessionId(), "\x03")
+    } catch (err) {
+      setComposerError(err instanceof Error ? err.message : "Failed to send interrupt")
     } finally {
-      setPendingAction(null)
-    }
-  }
-
-  const handleKillSession = async () => {
-    if (!sessionId()) return
-
-    if (!window.confirm("Terminate this session? This cannot be undone.")) {
-      return
-    }
-
-    setPendingAction("stop")
-    setActionError(null)
-
-    try {
-      await apiClient.stopSession(sessionId())
-    } catch (error) {
-      setActionError(
-        error instanceof Error ? error.message : "Failed to stop session",
-      )
-    } finally {
-      setPendingAction(null)
+      setComposerPending(null)
     }
   }
 
@@ -553,23 +291,20 @@ export default function AgentDock(props: AgentDockProps) {
     navigate({ to: `/sessions/${id}` })
   }
 
-  const sessionState = () => session()?.state as SessionState | undefined
-  const isSessionActive = () =>
-    sessionState() && ["running", "paused"].includes(sessionState() || "")
-
   return (
     <div
       class="agent-dock"
       data-testid="agent-dock"
       classList={{ minimized: !isExpanded(), active: hasSession(), idle: !hasSession() }}
     >
+      {/* Header — always visible */}
       <div class="agent-dock-header">
         <div>
           <p class="agent-dock-title">Agent Box</p>
           <p class="agent-dock-subtitle">MCP activity feed</p>
         </div>
         <div class="agent-dock-summary">
-          <span class={`agent-dock-status ${dockState().type}`}>{statusLabel()}</span>
+          <span class={`agent-dock-status ${dockLoadState()}`}>{statusLabel()}</span>
           <span class="agent-dock-last-action" title={lastActionDetail()}>
             {lastActionLabel()}
           </span>
@@ -587,116 +322,82 @@ export default function AgentDock(props: AgentDockProps) {
 
       <Show when={isExpanded()}>
         <div class="agent-dock-body">
-          <Show when={dockState().type === "empty"} fallback={null}>
+          {/* Empty */}
+          <Show when={dockLoadState() === "empty"}>
             <div class="agent-dock-empty">
               <p class="agent-dock-empty-icon">⊘</p>
               <p class="agent-dock-empty-text">No session selected</p>
-              <p class="agent-dock-empty-hint">
-                Select a session to view agent activity
-              </p>
+              <p class="agent-dock-empty-hint">Select a session to view agent activity</p>
             </div>
           </Show>
 
-          <Show when={dockState().type === "loading"} fallback={null}>
-            <div class="agent-dock-loading">
+          {/* Loading */}
+          <Show when={dockLoadState() === "loading"}>
+            <div class="agent-dock-loading" data-testid="agent-dock-loading">
               <div class="agent-dock-spinner" />
-              <p class="agent-dock-loading-text">Connecting to session...</p>
+              <p class="agent-dock-loading-text">Connecting to session…</p>
             </div>
           </Show>
 
-          <Show when={dockState().type === "error"} fallback={null}>
-            <div class="agent-dock-error">
+          {/* Error */}
+          <Show when={dockLoadState() === "error"}>
+            <div class="agent-dock-error" data-testid="agent-dock-error">
               <p class="agent-dock-error-icon">!</p>
-              <p class="agent-dock-error-text">{dockState().message}</p>
-              <button
-                type="button"
-                class="btn btn-secondary btn-sm"
-                onClick={handleOpenFullViewer}
-              >
+              <p class="agent-dock-error-text">{dockError()}</p>
+              <button type="button" class="btn btn-secondary btn-sm" onClick={handleOpenFullViewer}>
                 View Details
               </button>
             </div>
           </Show>
 
-          <Show when={dockState().type === "live"} fallback={null}>
-            <div class="agent-dock-container">
-              {/* Transcript */}
-              <div class="agent-dock-transcript-area">
-                <div
-                  ref={transcriptRef}
-                  class="agent-dock-transcript"
-                  onScroll={handleTranscriptScroll}
-                >
-                  <Show when={messages().length === 0}>
-                    <div class="agent-dock-placeholder">
-                      <p class="agent-dock-placeholder-text">
-                        Waiting for agent activity...
-                      </p>
-                    </div>
-                  </Show>
-                  <For each={messages()}>
-                    {(message) => (
-                      <div
-                        class="agent-dock-message"
-                        classList={{ [message.type]: true }}
-                      >
-                        <span class="agent-dock-message-type">{message.type}</span>
-                        <div class="agent-dock-message-content">
-                          {message.content}
-                        </div>
-                        <span class="agent-dock-message-time">
-                          {new Date(message.timestamp).toLocaleTimeString()}
-                        </span>
-                      </div>
-                    )}
-                  </For>
-                </div>
-              </div>
+          {/* Live — shared transcript component */}
+          <Show when={dockLoadState() === "live"}>
+            <div class="agent-dock-transcript-area">
+              <SessionTranscript
+                messages={transcript.filteredMessages}
+                filter={transcript.filter}
+                setFilter={transcript.setFilter}
+                autoScroll={transcript.autoScroll}
+                setAutoScroll={transcript.setAutoScroll}
+                activityCursor={transcript.activityCursor}
+                activityHistoryLoading={transcript.activityHistoryLoading}
+                onLoadEarlier={transcript.handleLoadEarlier}
+                onRef={(el) => { transcriptContainerRef = el }}
+                emptyLabel="Waiting for agent activity…"
+              />
             </div>
           </Show>
 
-          <Show when={dockState().type !== "error"}>
-            <div class="agent-dock-composer-area">
-              <Show when={actionError()}>
-                <div class="agent-dock-error-banner">{actionError()}</div>
-              </Show>
-              <div class="agent-dock-composer">
-                <textarea
-                  ref={inputRef}
-                  class="agent-dock-input"
-                  placeholder="Type a message... (Shift+Enter for newline)"
-                  value={inputValue()}
-                  onInput={(e) => setInputValue(e.currentTarget.value)}
-                  onKeyDown={handleInputKeyDown}
-                  disabled={pendingAction() !== null}
-                  rows={2}
-                />
-                <button
-                  type="button"
-                  class="agent-dock-send-btn"
-                  disabled={!inputValue().trim() || pendingAction() !== null}
-                  onClick={handleSendMessage}
-                  title="Send message (Enter)"
-                >
-                  Send
-                </button>
-              </div>
-            </div>
+          {/* Composer — shared component, shown unless errored */}
+          <Show when={dockLoadState() !== "error"}>
+            <SessionComposer
+              canSend={() => dockLoadState() === "live" || !sessionId()}
+              isRunning={isRunning}
+              pendingAction={composerPending}
+              onSend={handleSend}
+              onInterrupt={handleInterrupt}
+              error={composerError}
+              placeholder="Type a message… (Enter to send)"
+            />
           </Show>
 
-          <Show when={dockState().type === "live"}>
+          {/* Action bar */}
+          <Show when={dockLoadState() === "live"}>
             <div class="agent-dock-actions">
               <button
                 type="button"
                 class="btn btn-icon btn-sm"
-                onClick={handlePauseResume}
-                disabled={!canManage() || !isSessionActive() || pendingAction() !== null}
+                onClick={() => {
+                  if (sessionState() === "paused") void actions.resume()
+                  else void actions.pause()
+                }}
+                disabled={!canManage() || !isActive() || actions.pendingAction() !== null}
                 title={
                   !canManage()
                     ? "Bulk session controls are not permitted for your role."
-                    : pendingAction() !== null
-                    ? "Action is in progress..."
-                    : !isSessionActive()
+                    : actions.pendingAction() !== null
+                    ? "Action in progress…"
+                    : !isActive()
                     ? `Cannot control: session is ${sessionState()}`
                     : sessionState() === "paused"
                     ? "Resume session"
@@ -708,13 +409,13 @@ export default function AgentDock(props: AgentDockProps) {
               <button
                 type="button"
                 class="btn btn-icon btn-danger btn-sm"
-                onClick={handleKillSession}
-                disabled={!canManage() || sessionState() === "stopped" || pendingAction() !== null}
+                onClick={() => void actions.stop("Terminate this session? This cannot be undone.")}
+                disabled={!canManage() || sessionState() === "stopped" || actions.pendingAction() !== null}
                 title={
                   !canManage()
                     ? "Bulk session controls are not permitted for your role."
-                    : pendingAction() !== null
-                    ? "Action is in progress..."
+                    : actions.pendingAction() !== null
+                    ? "Action in progress…"
                     : sessionState() === "stopped"
                     ? "Session is already stopped"
                     : "Stop session"

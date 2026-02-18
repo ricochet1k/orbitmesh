@@ -44,3 +44,4 @@ yarn-error.log*
 node_modules
 .playwright-cli
 tests/.orbitmesh-e2e
+.roam

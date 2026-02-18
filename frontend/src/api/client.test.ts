@@ -128,7 +128,7 @@ describe("apiClient", () => {
   });
 
   it("createDockSession tags dock sessions", async () => {
-    const mockResponse = { id: "dock-1", provider_type: "adk", state: "created" };
+    const mockResponse = { id: "dock-1", provider_type: "claude-ws", state: "created" };
 
     (fetch as any).mockResolvedValue({
       ok: true,
@@ -144,7 +144,7 @@ describe("apiClient", () => {
         "X-CSRF-Token": "test-token"
       }),
       body: JSON.stringify({
-        provider_type: "adk",
+        provider_type: "claude-ws",
         session_kind: "dock"
       })
     }));

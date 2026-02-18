@@ -61,6 +61,8 @@ vi.mock("../api/client", () => ({
     resumeSession: vi.fn(),
     stopSession: vi.fn(),
     sendSessionInput: vi.fn(),
+    getActivityEntries: vi.fn(),
+    listTerminals: vi.fn(),
   },
 }));
 
@@ -89,6 +91,8 @@ describe("AgentDock", () => {
     });
     (apiClient.pollDockMcp as any).mockResolvedValue(null);
     (apiClient.respondDockMcp as any).mockResolvedValue(undefined);
+    (apiClient.getActivityEntries as any).mockResolvedValue({ entries: [], next_cursor: null });
+    (apiClient.listTerminals as any).mockResolvedValue({ terminals: [] });
   });
 
   it("shows empty state when no session is selected", async () => {
@@ -112,7 +116,7 @@ describe("AgentDock", () => {
     screen.getByTestId("agent-dock-toggle").click();
 
     await waitFor(() => {
-      expect(screen.getByText("Connecting to session...")).toBeDefined();
+      expect(screen.getByTestId("agent-dock-loading")).toBeDefined();
     });
   });
 
@@ -219,13 +223,11 @@ describe("AgentDock", () => {
 
     screen.getByTestId("agent-dock-toggle").click();
 
-    const input = screen.getByPlaceholderText(
-      "Type a message... (Shift+Enter for newline)",
-    ) as HTMLTextAreaElement;
+    const input = screen.getByTestId("session-composer-input") as HTMLTextAreaElement;
     input.value = "hello";
     input.dispatchEvent(new Event("input", { bubbles: true }));
 
-    screen.getByText("Send").click();
+    screen.getByTestId("session-composer-send").click();
 
     await waitFor(() => {
       expect(input.value).toBe("");
@@ -254,13 +256,11 @@ describe("AgentDock", () => {
 
     screen.getByTestId("agent-dock-toggle").click();
 
-    const input = screen.getByPlaceholderText(
-      "Type a message... (Shift+Enter for newline)",
-    ) as HTMLTextAreaElement;
+    const input = screen.getByTestId("session-composer-input") as HTMLTextAreaElement;
     input.value = "hello";
     input.dispatchEvent(new Event("input", { bubbles: true }));
 
-    screen.getByText("Send").click();
+    screen.getByTestId("session-composer-send").click();
 
     await waitFor(() => {
       expect(apiClient.createDockSession).toHaveBeenCalled();
@@ -295,9 +295,7 @@ describe("AgentDock", () => {
     eventSources[0]?.emit("error");
 
     await waitFor(() => {
-      expect(screen.getByText("Connection lost. Attempting to reconnect...")).toBeDefined();
+      expect(screen.getByTestId("agent-dock-error")).toBeDefined();
     });
-
-    expect(screen.getAllByText("Error").length).toBeGreaterThan(0);
   });
 });

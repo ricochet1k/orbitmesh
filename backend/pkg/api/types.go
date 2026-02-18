@@ -18,6 +18,7 @@ type SessionRequest struct {
 	ProviderType string            `json:"provider_type"`
 	ProviderID   string            `json:"provider_id,omitempty"`
 	WorkingDir   string            `json:"working_dir,omitempty"`
+	ProjectID    string            `json:"project_id,omitempty"`
 	Environment  map[string]string `json:"environment,omitempty"`
 	SystemPrompt string            `json:"system_prompt,omitempty"`
 	MCPServers   []MCPServerConfig `json:"mcp_servers,omitempty"`
@@ -25,6 +26,7 @@ type SessionRequest struct {
 	TaskID       string            `json:"task_id,omitempty"`
 	TaskTitle    string            `json:"task_title,omitempty"`
 	SessionKind  string            `json:"session_kind,omitempty"`
+	Title        string            `json:"title,omitempty"`
 }
 
 type SessionInputRequest struct {
@@ -42,13 +44,35 @@ type SessionResponse struct {
 	ID           string       `json:"id"`
 	ProviderType string       `json:"provider_type"`
 	SessionKind  string       `json:"session_kind,omitempty"`
+	Title        string       `json:"title,omitempty"`
 	State        SessionState `json:"state"`
 	WorkingDir   string       `json:"working_dir"`
+	ProjectID    string       `json:"project_id,omitempty"`
 	CreatedAt    time.Time    `json:"created_at"`
 	UpdatedAt    time.Time    `json:"updated_at"`
 	CurrentTask  string       `json:"current_task,omitempty"`
 	Output       string       `json:"output,omitempty"`
 	ErrorMessage string       `json:"error_message,omitempty"`
+}
+
+// ProjectRequest is the body for create/update project endpoints.
+type ProjectRequest struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// ProjectResponse is the API representation of a project.
+type ProjectResponse struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Path      string    `json:"path"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// ProjectListResponse wraps a list of projects.
+type ProjectListResponse struct {
+	Projects []ProjectResponse `json:"projects"`
 }
 
 type SessionListResponse struct {

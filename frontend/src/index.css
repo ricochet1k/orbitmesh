@@ -571,9 +571,19 @@ textarea:focus-visible {
 }
 
 .header-meta {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(140px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.75rem;
+  align-items: center;
+}
+
+.header-meta .meta-card {
+  flex: 1 1 140px;
+}
+
+.header-meta .btn {
+  flex-shrink: 0;
+  align-self: flex-start;
 }
 
 .meta-card {
@@ -1830,6 +1840,21 @@ tbody tr:hover {
   word-break: break-all;
 }
 
+.session-card-name {
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.session-card-sub {
+  font-size: 0.8em;
+  margin-top: 0.1rem;
+}
+
+.session-id-mono {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.85em;
+}
+
 .terminal-card-main {
   display: flex;
   justify-content: space-between;
@@ -1886,6 +1911,66 @@ tbody tr:hover {
 .session-card-actions button:hover {
   border-color: rgba(37, 99, 235, 0.5);
   color: var(--ink-1);
+}
+
+/* New session panel and form */
+.new-session-panel {
+  background: var(--surface-1, #fff);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-3);
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.new-session-form h3 {
+  margin: 0 0 1rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.new-session-form .form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.9rem;
+}
+
+.new-session-form .form-field label {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--ink-2, #555);
+}
+
+.new-session-form .form-field input,
+.new-session-form .form-field select {
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  font-size: 0.9rem;
+  background: var(--surface-0, #fafafa);
+  color: var(--ink-1);
+  width: 100%;
+  max-width: 480px;
+}
+
+.new-session-form .form-field input:focus,
+.new-session-form .form-field select:focus {
+  outline: none;
+  border-color: rgba(37, 99, 235, 0.5);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+}
+
+.new-session-form .form-error {
+  color: var(--color-error, #dc2626);
+  font-size: 0.85rem;
+  margin: 0 0 0.75rem;
+}
+
+.new-session-form .form-actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: flex-end;
+  max-width: 480px;
 }
 
 .terminal-card-actions button,
@@ -2048,6 +2133,184 @@ tbody tr:hover {
 .transcript-content code {
   font-family: var(--font-mono);
   display: block;
+}
+
+/* Transcript header layout */
+.transcript-item-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  font-size: 0.64rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--ink-3);
+}
+
+/* Per-type label badges */
+.transcript-type {
+  padding: 0.15rem 0.4rem;
+  border-radius: var(--radius-1);
+  background: rgba(0,0,0,0.07);
+  font-weight: 600;
+}
+.transcript-type-agent   { background: rgba(15,118,110,0.15); color: #0f766e; }
+.transcript-type-user    { background: rgba(37,99,235,0.15);  color: #2563eb; }
+.transcript-type-system  { background: rgba(100,116,139,0.15); color: var(--ink-3); }
+.transcript-type-error   { background: rgba(185,28,28,0.2);   color: #b91c1c; }
+
+/* Open/final status badge */
+.transcript-status {
+  font-size: 0.6rem;
+  padding: 0.1rem 0.3rem;
+  border-radius: var(--radius-1);
+}
+.transcript-status.open  { background: rgba(234,179,8,0.18); color: #a16207; }
+.transcript-status.final { background: rgba(15,118,110,0.12); color: #0f766e; }
+
+.transcript-time {
+  margin-left: auto;
+}
+
+/* Collapsible long messages */
+.transcript-content-collapsed {
+  max-height: 10rem;
+  overflow: hidden;
+  position: relative;
+}
+.transcript-content-collapsed::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3rem;
+  background: linear-gradient(transparent, var(--surface-1, white));
+  pointer-events: none;
+}
+.transcript-expand-toggle {
+  margin-top: 0.25rem;
+  font-size: 0.7rem;
+  color: var(--ink-3);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+.transcript-expand-toggle:hover { color: var(--ink-1); }
+
+/* Wrap for the full transcript section (header + scrollable list) */
+.session-transcript-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── SessionComposer ──────────────────────────────────────── */
+.session-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.65rem 0;
+  border-top: 1px solid var(--border);
+  margin-top: 0.5rem;
+}
+.session-composer-error {
+  background: rgba(185,28,28,0.08);
+  border: 1px solid rgba(185,28,28,0.2);
+  border-radius: var(--radius-2);
+  padding: 0.4rem 0.65rem;
+  color: #b91c1c;
+  font-size: 0.8rem;
+}
+.session-composer-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+.session-composer-input {
+  flex: 1;
+  resize: vertical;
+  min-height: 2.5rem;
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  background: var(--surface-2);
+  color: var(--ink-1);
+  line-height: 1.5;
+}
+.session-composer-input:focus { outline: none; border-color: var(--accent); }
+.session-composer-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.session-composer-interrupt {
+  font-size: 0.75rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: var(--radius-2);
+  border: 1px solid rgba(185,28,28,0.3);
+  background: rgba(185,28,28,0.06);
+  color: #b91c1c;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.session-composer-interrupt:hover:not(:disabled) { background: rgba(185,28,28,0.14); }
+.session-composer-send {
+  font-size: 0.8rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: var(--radius-2);
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.session-composer-send:hover:not(:disabled) { filter: brightness(1.08); }
+.session-composer-send:disabled,
+.session-composer-interrupt:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ── SessionTerminals ─────────────────────────────────────── */
+.session-terminals {
+  margin-top: 1rem;
+}
+.session-terminal-entry {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-3);
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+}
+.session-terminal-entry-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 0.75rem;
+  background: var(--surface-2);
+  font-size: 0.78rem;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+.session-terminal-entry-header:hover { background: var(--surface-3); }
+.session-terminal-kind { font-weight: 600; color: var(--ink-1); }
+.session-terminal-id   { color: var(--ink-3); font-family: var(--font-mono); font-size: 0.72rem; }
+.session-terminal-updated { margin-left: auto; color: var(--ink-3); font-size: 0.7rem; }
+.session-terminal-toggle { color: var(--ink-3); font-size: 0.7rem; }
+.session-terminal-view { border-top: 1px solid var(--border); }
+
+/* Side panels column (metrics + terminals) */
+.session-side-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 
 .session-metrics {
@@ -2448,7 +2711,7 @@ tbody tr:hover {
   }
 
   .header-meta {
-    grid-template-columns: 1fr;
+    flex-direction: column;
   }
 
   .session-layout {

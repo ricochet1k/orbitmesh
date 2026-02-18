@@ -18,12 +18,17 @@ import {
   readErrorMessage,
 } from "./_base";
 
-export async function listSessions(): Promise<SessionListResponse> {
+export async function listSessions(projectId?: string | null): Promise<SessionListResponse> {
   const cached = readSessionCache();
+  let url = `${BASE_URL}/sessions`;
+  if (projectId !== undefined) {
+    const params = new URLSearchParams({ project_id: projectId ?? "" });
+    url += `?${params}`;
+  }
   let resp: Response;
 
   try {
-    resp = await fetch(`${BASE_URL}/sessions`);
+    resp = await fetch(url);
   } catch (error) {
     if (cached) return cached;
     throw error;

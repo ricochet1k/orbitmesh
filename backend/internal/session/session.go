@@ -51,6 +51,7 @@ type MCPServerConfig struct {
 type Config struct {
 	ProviderType string
 	WorkingDir   string
+	ProjectID    string
 	Environment  map[string]string
 	SystemPrompt string
 	MCPServers   []MCPServerConfig
@@ -58,6 +59,7 @@ type Config struct {
 	TaskID       string
 	TaskTitle    string
 	SessionKind  string
+	Title        string
 }
 
 type Metrics struct {

@@ -1,6 +1,7 @@
 import { createRoot, createSignal, onCleanup } from "solid-js"
 import type { SessionResponse } from "../types/api"
 import { apiClient } from "../api/client"
+import { useProjectStore } from "./project"
 
 const REFRESH_INTERVAL_MS = 15000
 
@@ -15,6 +16,7 @@ const sortSessions = (list: SessionResponse[]): SessionResponse[] => {
 }
 
 const sessionStore = createRoot(() => {
+  const projectStore = useProjectStore()
   const cached = apiClient.getCachedSessions()
   const [sessions, setSessions] = createSignal<SessionResponse[]>(
     sortSessions(cached?.sessions ?? []),
@@ -33,7 +35,8 @@ const sessionStore = createRoot(() => {
     setIsLoading(true)
     setError(null)
     try {
-      const response = await apiClient.listSessions()
+      const activeProjectId = projectStore.activeProjectId()
+      const response = await apiClient.listSessions(activeProjectId)
       applySessions(response.sessions)
     } catch (err) {
       if (err instanceof Error) {

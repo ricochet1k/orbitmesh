@@ -34,8 +34,10 @@ type sessionData struct {
 	ID           string           `json:"id"`
 	ProviderType string           `json:"provider_type"`
 	Kind         string           `json:"kind,omitempty"`
+	Title        string           `json:"title,omitempty"`
 	State        string           `json:"state"`
 	WorkingDir   string           `json:"working_dir"`
+	ProjectID    string           `json:"project_id,omitempty"`
 	CreatedAt    time.Time        `json:"created_at"`
 	UpdatedAt    time.Time        `json:"updated_at"`
 	CurrentTask  string           `json:"current_task,omitempty"`
@@ -308,8 +310,10 @@ func snapshotToData(snap domain.SessionSnapshot) *sessionData {
 		ID:           snap.ID,
 		ProviderType: snap.ProviderType,
 		Kind:         snap.Kind,
+		Title:        snap.Title,
 		State:        snap.State.String(),
 		WorkingDir:   snap.WorkingDir,
+		ProjectID:    snap.ProjectID,
 		CreatedAt:    snap.CreatedAt,
 		UpdatedAt:    snap.UpdatedAt,
 		CurrentTask:  snap.CurrentTask,
@@ -347,8 +351,10 @@ func dataToSession(data *sessionData) (*domain.Session, error) {
 		ID:           data.ID,
 		ProviderType: data.ProviderType,
 		Kind:         data.Kind,
+		Title:        data.Title,
 		State:        state,
 		WorkingDir:   data.WorkingDir,
+		ProjectID:    data.ProjectID,
 		CreatedAt:    data.CreatedAt,
 		UpdatedAt:    data.UpdatedAt,
 		CurrentTask:  data.CurrentTask,
