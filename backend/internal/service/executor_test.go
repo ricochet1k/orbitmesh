@@ -365,7 +365,7 @@ func TestAgentExecutor_PauseResumeSession(t *testing.T) {
 		t.Errorf("expected state Suspended, got %s", session.GetState())
 	}
 
-	err = executor.ResumeSession(context.Background(), "session1")
+	_, err = executor.ResumeSession(context.Background(), "session1", "test-tool-id", map[string]interface{}{})
 	if err != nil {
 		t.Fatalf("unexpected error on resume: %v", err)
 	}
@@ -650,7 +650,7 @@ func TestAgentExecutor_InvalidStateTransitions(t *testing.T) {
 
 	executor.StartSession(context.Background(), "session1", config)
 
-	err := executor.ResumeSession(context.Background(), "session1")
+	_, err := executor.ResumeSession(context.Background(), "session1", "test-tool-id", map[string]interface{}{})
 	if err == nil {
 		t.Error("expected error when resuming non-paused session")
 	}
@@ -684,7 +684,7 @@ func TestAgentExecutor_FullLifecycleIntegration(t *testing.T) {
 		t.Errorf("expected state Suspended, got %s", session.GetState())
 	}
 
-	if err := executor.ResumeSession(context.Background(), "lifecycle-test"); err != nil {
+	if _, err := executor.ResumeSession(context.Background(), "lifecycle-test", "test-tool-id", map[string]interface{}{}); err != nil {
 		t.Fatalf("failed to resume session: %v", err)
 	}
 	if session.GetState() != domain.SessionStateRunning {
@@ -760,7 +760,7 @@ func TestAgentExecutor_MultipleConcurrentSessions(t *testing.T) {
 				return
 			}
 
-			if err := executor.ResumeSession(context.Background(), sessionID); err != nil {
+			if _, err := executor.ResumeSession(context.Background(), sessionID, "test-tool-id", map[string]interface{}{}); err != nil {
 				errChan <- err
 				return
 			}
@@ -1034,7 +1034,7 @@ func TestAgentExecutor_LoadTest_TenConcurrentAgents(t *testing.T) {
 					continue
 				}
 
-				if err := executor.ResumeSession(context.Background(), sessionID); err != nil {
+				if _, err := executor.ResumeSession(context.Background(), sessionID, "test-tool-id", map[string]interface{}{}); err != nil {
 					errChan <- err
 					continue
 				}
@@ -1111,7 +1111,7 @@ func TestAgentExecutor_ProviderErrors(t *testing.T) {
 
 		executor.PauseSession(context.Background(), "session1")
 
-		err := executor.ResumeSession(context.Background(), "session1")
+		_, err := executor.ResumeSession(context.Background(), "session1", "test-tool-id", map[string]interface{}{})
 		if err == nil {
 			t.Error("expected resume error")
 		}
@@ -1187,7 +1187,7 @@ func TestAgentExecutor_NonExistentSessionOperations(t *testing.T) {
 		t.Errorf("expected ErrSessionNotFound, got %v", err)
 	}
 
-	if err := executor.ResumeSession(context.Background(), "nonexistent"); !errors.Is(err, ErrSessionNotFound) {
+	if _, err := executor.ResumeSession(context.Background(), "nonexistent", "test-tool-id", map[string]interface{}{}); !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("expected ErrSessionNotFound, got %v", err)
 	}
 

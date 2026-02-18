@@ -31,6 +31,11 @@ type SessionInputRequest struct {
 	ProviderType string `json:"provider_type,omitempty"`
 }
 
+type ResumeRequest struct {
+	ToolCallID string `json:"tool_call_id"`
+	Result     any    `json:"result"`
+}
+
 type SendMessageRequest struct {
 	Content      string `json:"content"`
 	ProviderID   string `json:"provider_id,omitempty"`

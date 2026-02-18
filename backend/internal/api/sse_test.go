@@ -557,13 +557,17 @@ func TestIntegration_SessionLifecycle(t *testing.T) {
 	}
 
 	// 4. Resume
-	resumeResp, err := http.Post(srv.URL+"/api/sessions/"+sessionID+"/resume", "", nil)
+	resumeBody, _ := json.Marshal(apiTypes.ResumeRequest{
+		ToolCallID: "test-tool-id",
+		Result:     map[string]string{"output": "test"},
+	})
+	resumeResp, err := http.Post(srv.URL+"/api/sessions/"+sessionID+"/resume", "application/json", bytes.NewReader(resumeBody))
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
 	resumeResp.Body.Close()
-	if resumeResp.StatusCode != http.StatusNoContent {
-		t.Fatalf("resume: expected 204, got %d", resumeResp.StatusCode)
+	if resumeResp.StatusCode != http.StatusAccepted {
+		t.Fatalf("resume: expected 202, got %d", resumeResp.StatusCode)
 	}
 
 	// 5. Stop

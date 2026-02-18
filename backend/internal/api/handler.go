@@ -473,11 +473,27 @@ func (h *Handler) pauseSession(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) resumeSession(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := h.executor.ResumeSession(r.Context(), id); err != nil {
+
+	var req apiTypes.ResumeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", err.Error())
+		return
+	}
+
+	if strings.TrimSpace(req.ToolCallID) == "" {
+		writeError(w, http.StatusBadRequest, "tool_call_id is required", "")
+		return
+	}
+
+	session, err := h.executor.ResumeSession(r.Context(), id, req.ToolCallID, req.Result)
+	if err != nil {
 		writeSessionError(w, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(sessionToResponse(session))
 }
 
 func (h *Handler) cancelSession(w http.ResponseWriter, r *http.Request) {

@@ -912,13 +912,27 @@ func TestResumeSession_OK(t *testing.T) {
 		t.Fatalf("pause: expected 204, got %d: %s", pauseW.Code, pauseW.Body.String())
 	}
 
-	// Resume
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/resume", nil)
+	// Resume with tool result
+	resumeReqBody, _ := json.Marshal(apiTypes.ResumeRequest{
+		ToolCallID: "test-tool-call-123",
+		Result:     map[string]string{"output": "test result"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/resume", bytes.NewReader(resumeReqBody))
+	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify response body contains session
+	var resp apiTypes.SessionResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp.ID != created.ID {
+		t.Errorf("response session ID = %q, want %q", resp.ID, created.ID)
 	}
 }
 
@@ -930,7 +944,12 @@ func TestResumeSession_NotPaused(t *testing.T) {
 	waitForRunning(t, env.executor, created.ID)
 
 	// Try to resume while running (not paused)
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/resume", nil)
+	resumeReqBody, _ := json.Marshal(apiTypes.ResumeRequest{
+		ToolCallID: "test-tool-call-123",
+		Result:     map[string]string{"output": "test result"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/resume", bytes.NewReader(resumeReqBody))
+	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -943,12 +962,44 @@ func TestResumeSession_NotFound(t *testing.T) {
 	env := newTestEnv(t)
 	r := env.router()
 
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/does-not-exist/resume", nil)
+	resumeReqBody, _ := json.Marshal(apiTypes.ResumeRequest{
+		ToolCallID: "test-tool-call-123",
+		Result:     map[string]string{"output": "test result"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/does-not-exist/resume", bytes.NewReader(resumeReqBody))
+	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestResumeSession_MissingToolCallID(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	created := createSession(t, r, "mock", "/tmp/test")
+	waitForRunning(t, env.executor, created.ID)
+
+	// Pause first
+	pauseReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/pause", nil)
+	pauseW := httptest.NewRecorder()
+	r.ServeHTTP(pauseW, pauseReq)
+
+	// Resume with empty tool_call_id
+	resumeReqBody, _ := json.Marshal(apiTypes.ResumeRequest{
+		ToolCallID: "",
+		Result:     map[string]string{"output": "test result"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/resume", bytes.NewReader(resumeReqBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

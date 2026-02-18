@@ -356,36 +356,43 @@ func (e *AgentExecutor) PauseSession(ctx context.Context, id string) error {
 	return nil
 }
 
-func (e *AgentExecutor) ResumeSession(ctx context.Context, id string) error {
+func (e *AgentExecutor) ResumeSession(ctx context.Context, id string, toolCallID string, result any) (domain.SessionSnapshot, error) {
 	e.mu.RLock()
 	sc, exists := e.sessions[id]
 	e.mu.RUnlock()
 
 	if !exists {
-		return ErrSessionNotFound
+		return domain.SessionSnapshot{}, ErrSessionNotFound
 	}
 
 	currentState := sc.session.GetState()
 
 	// Resume is only valid when suspended
 	if currentState != domain.SessionStateSuspended {
-		return fmt.Errorf("%w: can only resume suspended session, current state: %s", ErrInvalidState, currentState)
+		return domain.SessionSnapshot{}, fmt.Errorf("%w: can only resume suspended session, current state: %s", ErrInvalidState, currentState)
 	}
 
 	run := sc.run
 	if run == nil {
-		return fmt.Errorf("no active run to resume")
+		return domain.SessionSnapshot{}, fmt.Errorf("no active run to resume")
 	}
 
 	resumeCtx, cancel := context.WithTimeout(ctx, e.opTimeout)
 	defer cancel()
 
+	// TODO: Deliver the tool result to the provider via suspension context
+	// This will be implemented in the suspension context generalization task.
+	// For now, we accept the tool result and resume the provider.
+	_ = toolCallID
+	_ = result
+
+	// Resume the provider execution
 	if err := run.Provider.Resume(resumeCtx); err != nil {
-		return fmt.Errorf("failed to resume provider: %w", err)
+		return domain.SessionSnapshot{}, fmt.Errorf("failed to resume provider: %w", err)
 	}
 
 	e.transitionWithSave(sc, domain.SessionStateRunning, "session resumed")
-	return nil
+	return sc.session.Snapshot(), nil
 }
 
 func (e *AgentExecutor) KillSession(id string) error {
