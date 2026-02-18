@@ -159,6 +159,17 @@ func (s *mockStorage) List() ([]*domain.Session, error) {
 	return sessions, nil
 }
 
+func (s *mockStorage) GetMessages(id string) ([]any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if session, ok := s.sessions[id]; ok {
+		messages := make([]any, len(session.Messages))
+		copy(messages, session.Messages)
+		return messages, nil
+	}
+	return nil, storage.ErrSessionNotFound
+}
+
 func createTestExecutor(prov *mockProvider) (*AgentExecutor, *mockStorage) {
 	storage := newMockStorage()
 	broadcaster := NewEventBroadcaster(100)

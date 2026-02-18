@@ -270,3 +270,153 @@ func TestJSONFileStorage_TransitionsPersist(t *testing.T) {
 		t.Errorf("expected reason 'waiting for tool', got %q", tr.Reason)
 	}
 }
+
+func TestJSONFileStorage_MessagePersistence(t *testing.T) {
+	tmpDir := t.TempDir()
+	storage, _ := NewJSONFileStorage(tmpDir)
+
+	// Create a session with messages
+	session := domain.NewSession("test-msg-session", "pty", "/tmp")
+	session.Messages = []any{
+		map[string]interface{}{
+			"id":       "msg-1",
+			"kind":     "user",
+			"contents": "Hello, AI!",
+		},
+		map[string]interface{}{
+			"id":       "msg-2",
+			"kind":     "assistant",
+			"contents": "Hello! How can I help?",
+		},
+		map[string]interface{}{
+			"id":       "msg-3",
+			"kind":     "user",
+			"contents": "Tell me about Go",
+		},
+	}
+
+	// Save the session
+	if err := storage.Save(session); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	// Load the session back
+	loaded, err := storage.Load("test-msg-session")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	// Verify messages were persisted
+	if len(loaded.Messages) != 3 {
+		t.Errorf("expected 3 messages, got %d", len(loaded.Messages))
+	}
+
+	// Check first message
+	msg1, ok := loaded.Messages[0].(map[string]interface{})
+	if !ok {
+		t.Errorf("expected message to be map[string]interface{}, got %T", loaded.Messages[0])
+	}
+	if msg1["id"] != "msg-1" {
+		t.Errorf("expected id 'msg-1', got %v", msg1["id"])
+	}
+	if msg1["kind"] != "user" {
+		t.Errorf("expected kind 'user', got %v", msg1["kind"])
+	}
+	if msg1["contents"] != "Hello, AI!" {
+		t.Errorf("expected contents 'Hello, AI!', got %v", msg1["contents"])
+	}
+
+	// Check last message
+	msg3, ok := loaded.Messages[2].(map[string]interface{})
+	if !ok {
+		t.Errorf("expected message to be map[string]interface{}, got %T", loaded.Messages[2])
+	}
+	if msg3["id"] != "msg-3" {
+		t.Errorf("expected id 'msg-3', got %v", msg3["id"])
+	}
+	if msg3["kind"] != "user" {
+		t.Errorf("expected kind 'user', got %v", msg3["kind"])
+	}
+}
+
+func TestJSONFileStorage_GetMessages(t *testing.T) {
+	tmpDir := t.TempDir()
+	storage, _ := NewJSONFileStorage(tmpDir)
+
+	// Create and save a session with messages
+	session := domain.NewSession("test-get-msgs", "pty", "/tmp")
+	session.Messages = []any{
+		map[string]interface{}{
+			"id":       "msg-1",
+			"kind":     "system",
+			"contents": "You are a helpful assistant",
+		},
+	}
+
+	if err := storage.Save(session); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	// Retrieve messages using GetMessages
+	messages, err := storage.GetMessages("test-get-msgs")
+	if err != nil {
+		t.Fatalf("GetMessages failed: %v", err)
+	}
+
+	if len(messages) != 1 {
+		t.Errorf("expected 1 message, got %d", len(messages))
+	}
+
+	msg, ok := messages[0].(map[string]interface{})
+	if !ok {
+		t.Errorf("expected message to be map[string]interface{}, got %T", messages[0])
+	}
+	if msg["id"] != "msg-1" {
+		t.Errorf("expected id 'msg-1', got %v", msg["id"])
+	}
+}
+
+func TestJSONFileStorage_MessageSurvivesRestart(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// First session: create and save
+	{
+		storage, _ := NewJSONFileStorage(tmpDir)
+		session := domain.NewSession("restart-test", "pty", "/tmp")
+		session.Messages = []any{
+			map[string]interface{}{
+				"id":       "pre-restart",
+				"kind":     "assistant",
+				"contents": "This message should survive restart",
+			},
+		}
+
+		if err := storage.Save(session); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+	}
+
+	// Second session: reload and verify
+	{
+		storage, _ := NewJSONFileStorage(tmpDir)
+		loaded, err := storage.Load("restart-test")
+		if err != nil {
+			t.Fatalf("Load after restart failed: %v", err)
+		}
+
+		if len(loaded.Messages) != 1 {
+			t.Errorf("expected 1 message after restart, got %d", len(loaded.Messages))
+		}
+
+		msg, ok := loaded.Messages[0].(map[string]interface{})
+		if !ok {
+			t.Errorf("expected message to be map[string]interface{}, got %T", loaded.Messages[0])
+		}
+		if msg["id"] != "pre-restart" {
+			t.Errorf("expected id 'pre-restart', got %v", msg["id"])
+		}
+		if msg["contents"] != "This message should survive restart" {
+			t.Errorf("expected contents 'This message should survive restart', got %v", msg["contents"])
+		}
+	}
+}

@@ -117,6 +117,19 @@ func (e *AgentExecutor) StartSession(ctx context.Context, id string, config sess
 		session.SetCurrentTask(taskRef)
 	}
 
+	// Set messages if provided for resumption
+	if len(config.ResumeMessages) > 0 {
+		messages := make([]any, len(config.ResumeMessages))
+		for i, msg := range config.ResumeMessages {
+			messages[i] = map[string]interface{}{
+				"id":       msg.ID,
+				"kind":     msg.Kind,
+				"contents": msg.Contents,
+			}
+		}
+		session.SetMessages(messages)
+	}
+
 	// Session is created in idle state by NewSession(), no need to transition
 
 	if e.storage != nil {

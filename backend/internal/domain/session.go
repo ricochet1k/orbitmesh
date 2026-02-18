@@ -81,6 +81,7 @@ type Session struct {
 	Output       string
 	ErrorMessage string
 	Transitions  []StateTransition
+	Messages     []any // []session.Message
 
 	mu sync.RWMutex
 }
@@ -95,6 +96,7 @@ func NewSession(id, providerType, workingDir string) *Session {
 		CreatedAt:    now,
 		UpdatedAt:    now,
 		Transitions:  make([]StateTransition, 0),
+		Messages:     make([]any, 0),
 	}
 }
 
@@ -161,6 +163,17 @@ func (s *Session) SetError(message string) {
 	s.UpdatedAt = time.Now()
 }
 
+func (s *Session) SetMessages(messages []any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if messages == nil {
+		s.Messages = make([]any, 0)
+	} else {
+		s.Messages = messages
+	}
+	s.UpdatedAt = time.Now()
+}
+
 // SessionSnapshot is a point-in-time, lock-free copy of a Session's fields.
 type SessionSnapshot struct {
 	ID           string
@@ -176,6 +189,7 @@ type SessionSnapshot struct {
 	Output       string
 	ErrorMessage string
 	Transitions  []StateTransition
+	Messages     []any // []session.Message
 }
 
 // Snapshot returns an atomic copy of the session under its read lock.
@@ -185,6 +199,9 @@ func (s *Session) Snapshot() SessionSnapshot {
 
 	transitions := make([]StateTransition, len(s.Transitions))
 	copy(transitions, s.Transitions)
+
+	messages := make([]any, len(s.Messages))
+	copy(messages, s.Messages)
 
 	return SessionSnapshot{
 		ID:           s.ID,
@@ -200,5 +217,6 @@ func (s *Session) Snapshot() SessionSnapshot {
 		Output:       s.Output,
 		ErrorMessage: s.ErrorMessage,
 		Transitions:  transitions,
+		Messages:     messages,
 	}
 }

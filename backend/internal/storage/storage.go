@@ -28,6 +28,13 @@ type Storage interface {
 	Load(id string) (*domain.Session, error)
 	Delete(id string) error
 	List() ([]*domain.Session, error)
+	GetMessages(id string) ([]any, error)
+}
+
+type messageData struct {
+	ID       string `json:"id"`
+	Kind     string `json:"kind"`
+	Contents string `json:"contents"`
 }
 
 type sessionData struct {
@@ -44,6 +51,7 @@ type sessionData struct {
 	Output       string           `json:"output,omitempty"`
 	ErrorMessage string           `json:"error_message,omitempty"`
 	Transitions  []transitionData `json:"transitions"`
+	Messages     []messageData    `json:"messages,omitempty"`
 }
 
 type transitionData struct {
@@ -263,6 +271,58 @@ func (s *JSONFileStorage) List() ([]*domain.Session, error) {
 	return sessions, nil
 }
 
+func (s *JSONFileStorage) GetMessages(id string) ([]any, error) {
+	if err := validateSessionID(id); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.getMessagesUnlocked(id)
+}
+
+func (s *JSONFileStorage) getMessagesUnlocked(id string) ([]any, error) {
+	filePath := s.sessionPath(id)
+
+	info, err := os.Lstat(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrSessionNotFound
+		}
+		return nil, err
+	}
+
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("%w: %s", ErrSymlinkNotAllowed, id)
+	}
+
+	if info.Size() > maxSessionFileSize {
+		return nil, fmt.Errorf("%w: %s (%d bytes)", ErrSessionFileTooLarge, id, info.Size())
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	var sd sessionData
+	if err := json.Unmarshal(data, &sd); err != nil {
+		return nil, err
+	}
+
+	messages := make([]any, len(sd.Messages))
+	for i, m := range sd.Messages {
+		messages[i] = map[string]interface{}{
+			"id":       m.ID,
+			"kind":     m.Kind,
+			"contents": m.Contents,
+		}
+	}
+
+	return messages, nil
+}
+
 func (s *JSONFileStorage) loadUnlocked(id string) (*domain.Session, error) {
 	filePath := s.sessionPath(id)
 
@@ -306,6 +366,19 @@ func snapshotToData(snap domain.SessionSnapshot) *sessionData {
 		}
 	}
 
+	messages := make([]messageData, len(snap.Messages))
+	for i, m := range snap.Messages {
+		// Messages are stored as generic any, but expected to be json.RawMessage or map[string]any
+		// We'll marshal and unmarshal to ensure correct structure
+		if msgMap, ok := m.(map[string]interface{}); ok {
+			messages[i] = messageData{
+				ID:       toString(msgMap["id"]),
+				Kind:     toString(msgMap["kind"]),
+				Contents: toString(msgMap["contents"]),
+			}
+		}
+	}
+
 	return &sessionData{
 		ID:           snap.ID,
 		ProviderType: snap.ProviderType,
@@ -320,7 +393,15 @@ func snapshotToData(snap domain.SessionSnapshot) *sessionData {
 		Output:       snap.Output,
 		ErrorMessage: snap.ErrorMessage,
 		Transitions:  transitions,
+		Messages:     messages,
 	}
+}
+
+func toString(v interface{}) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }
 
 func dataToSession(data *sessionData) (*domain.Session, error) {
@@ -347,6 +428,15 @@ func dataToSession(data *sessionData) (*domain.Session, error) {
 		}
 	}
 
+	messages := make([]any, len(data.Messages))
+	for i, m := range data.Messages {
+		messages[i] = map[string]interface{}{
+			"id":       m.ID,
+			"kind":     m.Kind,
+			"contents": m.Contents,
+		}
+	}
+
 	return &domain.Session{
 		ID:           data.ID,
 		ProviderType: data.ProviderType,
@@ -361,6 +451,7 @@ func dataToSession(data *sessionData) (*domain.Session, error) {
 		Output:       data.Output,
 		ErrorMessage: data.ErrorMessage,
 		Transitions:  transitions,
+		Messages:     messages,
 	}, nil
 }
 

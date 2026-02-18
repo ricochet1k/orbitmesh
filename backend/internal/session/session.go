@@ -49,17 +49,18 @@ type MCPServerConfig struct {
 }
 
 type Config struct {
-	ProviderType string
-	WorkingDir   string
-	ProjectID    string
-	Environment  map[string]string
-	SystemPrompt string
-	MCPServers   []MCPServerConfig
-	Custom       map[string]any
-	TaskID       string
-	TaskTitle    string
-	SessionKind  string
-	Title        string
+	ProviderType   string
+	WorkingDir     string
+	ProjectID      string
+	Environment    map[string]string
+	SystemPrompt   string
+	MCPServers     []MCPServerConfig
+	Custom         map[string]any
+	TaskID         string
+	TaskTitle      string
+	SessionKind    string
+	Title          string
+	ResumeMessages []Message // Message history to resume from (for session resumption)
 }
 
 type Metrics struct {

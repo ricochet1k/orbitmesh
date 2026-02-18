@@ -156,6 +156,18 @@ func (s *inMemStore) List() ([]*domain.Session, error) {
 	return out, nil
 }
 
+func (s *inMemStore) GetMessages(id string) ([]any, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	sess, ok := s.sessions[id]
+	if !ok {
+		return nil, storage.ErrSessionNotFound
+	}
+	messages := make([]any, len(sess.Messages))
+	copy(messages, sess.Messages)
+	return messages, nil
+}
+
 func (s *inMemStore) SaveTerminal(term *domain.Terminal) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
