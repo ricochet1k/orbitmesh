@@ -82,12 +82,18 @@ func TestEventAdapter_Close(t *testing.T) {
 
 	adapter.Close()
 
+	// After Close(), emitting should be a no-op (no panic).
 	adapter.EmitOutput("after close")
 
+	// The events channel should be closed: reads return immediately with ok=false.
 	select {
-	case <-adapter.Events():
-		t.Error("expected no event after close")
+	case _, ok := <-adapter.Events():
+		if ok {
+			t.Error("expected channel to be closed after Close()")
+		}
+		// ok=false is the expected result — channel is closed, no real event.
 	case <-time.After(50 * time.Millisecond):
+		t.Error("expected closed channel to be readable immediately")
 	}
 }
 

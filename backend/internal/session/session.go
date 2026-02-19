@@ -75,27 +75,41 @@ type Status struct {
 	Metrics     Metrics
 }
 
+// Session is the interface implemented by every agent runner (ACP, Claude, PTY, ADK, …).
+//
+// Lifecycle:
+//
+//	SendInput is the sole entry point.  On the first call the runner starts
+//	itself, sends the initial message, and returns an event channel that
+//	stays open for the lifetime of the run.  Subsequent calls (mid-run
+//	follow-up input) send input to the already-running agent; they may
+//	return the same channel or nil.  The runner MUST close the channel
+//	(via defer) when the run terminates for any reason — success, error,
+//	or kill — so that the executor's event-handling goroutine exits cleanly
+//	without needing a separate health-check poller.
+//
+// Error surfacing:
+//
+//	Startup and runtime errors should be emitted as domain.ErrorEvent on
+//	the channel before closing it.  The channel close itself signals
+//	completion; the executor does not poll Status() for errors.
 type Session interface {
-	// Start initializes the session and begins agent execution.
-	Start(ctx context.Context, config Config) error
+	// SendInput starts the session on the first call and delivers subsequent
+	// user input.  It returns the event channel on the first call (and may
+	// return the same channel or nil on subsequent calls).  An error return
+	// means the call failed synchronously; async errors flow through the
+	// event channel.
+	SendInput(ctx context.Context, config Config, input string) (<-chan domain.Event, error)
 
 	// Stop requests a graceful shutdown of the session.
 	// It should be idempotent.
 	Stop(ctx context.Context) error
 
-	// Kill immediately terminates the provider and all child processes.
+	// Kill immediately terminates the runner and all child processes.
 	// It should be idempotent and must not block.
 	Kill() error
 
-	// Status returns the current status of the provider.
+	// Status returns the current status of the runner.
 	// It must be thread-safe.
 	Status() Status
-
-	// Events returns a channel that streams real-time events from the provider.
-	// The provider is responsible for closing this channel when it terminates.
-	// Successive calls to Events() must return the same channel.
-	Events() <-chan domain.Event
-
-	// SendInput sends user input to the agent.
-	SendInput(ctx context.Context, input string) error
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -24,15 +25,18 @@ var (
 
 const (
 	DefaultOperationTimeout   = 30 * time.Second
-	DefaultHealthInterval     = 30 * time.Second
 	DefaultCheckpointInterval = 30 * time.Second
 )
 
-type ProviderFactory func(providerType, sessionID string, config session.Config) (session.Session, error)
+// SessionFactory creates a session runner for the given provider type.
+type SessionFactory func(providerType, sessionID string, config session.Config) (session.Session, error)
+
+// ProviderFactory is a deprecated alias for SessionFactory kept for call-site compatibility.
+type ProviderFactory = SessionFactory
 
 type sessionContext struct {
 	session *domain.Session
-	run     *session.ProviderRun // The active provider run (nil if idle)
+	run     *session.Run // The active run (nil if idle)
 }
 
 type AgentExecutor struct {
@@ -41,8 +45,7 @@ type AgentExecutor struct {
 	storage            storage.Storage
 	terminalStorage    storage.TerminalStorage
 	broadcaster        *EventBroadcaster
-	providerFactory    ProviderFactory
-	healthInterval     time.Duration
+	sessionFactory     SessionFactory
 	opTimeout          time.Duration
 	checkpointInterval time.Duration
 	terminalHubs       map[string]*TerminalHub
@@ -56,19 +59,14 @@ type ExecutorConfig struct {
 	Storage            storage.Storage
 	TerminalStorage    storage.TerminalStorage
 	Broadcaster        *EventBroadcaster
-	ProviderFactory    ProviderFactory
-	HealthInterval     time.Duration
+	ProviderFactory    SessionFactory
+	HealthInterval     time.Duration // Deprecated: no longer used; kept for config compatibility
 	OperationTimeout   time.Duration
 	CheckpointInterval time.Duration
 }
 
 func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
 	ctx, cancel := context.WithCancel(context.Background())
-
-	healthInterval := cfg.HealthInterval
-	if healthInterval <= 0 {
-		healthInterval = DefaultHealthInterval
-	}
 
 	opTimeout := cfg.OperationTimeout
 	if opTimeout <= 0 {
@@ -85,8 +83,7 @@ func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
 		storage:            cfg.Storage,
 		terminalStorage:    cfg.TerminalStorage,
 		broadcaster:        cfg.Broadcaster,
-		providerFactory:    cfg.ProviderFactory,
-		healthInterval:     healthInterval,
+		sessionFactory:     cfg.ProviderFactory,
 		opTimeout:          opTimeout,
 		checkpointInterval: checkpointInterval,
 		terminalHubs:       make(map[string]*TerminalHub),
@@ -114,6 +111,10 @@ func (e *AgentExecutor) CreateSession(ctx context.Context, id string, config ses
 	// Create session in idle state without instantiating a provider
 	session := domain.NewSession(id, config.ProviderType, config.WorkingDir)
 	session.ProjectID = config.ProjectID
+	// Preserve provider-specific config so it can be recovered on SendMessage.
+	if len(config.Custom) > 0 {
+		session.ProviderCustom = config.Custom
+	}
 	if config.SessionKind != "" {
 		session.SetKind(config.SessionKind)
 	}
@@ -164,70 +165,7 @@ func (e *AgentExecutor) StartSession(ctx context.Context, id string, config sess
 	return e.CreateSession(ctx, id, config)
 }
 
-func (e *AgentExecutor) runSessionLoop(ctx context.Context, sc *sessionContext, prov session.Session, config session.Config) {
-	defer e.wg.Done()
-	defer func() {
-		if r := recover(); r != nil {
-			e.handlePanic(sc, r)
-		}
-	}()
-
-	// Create a new provider run for this execution
-	run := session.NewProviderRun(prov, ctx)
-
-	e.mu.Lock()
-	sc.run = run
-	e.mu.Unlock()
-
-	// Start the provider
-	startCtx, startCancel := context.WithTimeout(run.Ctx, e.opTimeout)
-	err := run.Provider.Start(startCtx, config)
-	startCancel()
-
-	if err != nil {
-		errMsg := fmt.Sprintf("Provider failed to start: %v", err)
-		// Append error to message history instead of setting ErrorMessage
-		sc.session.AppendErrorMessage(errMsg, config.ProviderType)
-		run.SetError(err)
-		// On provider error, session stays idle (per design: errors are absorbed into message history)
-		// Session remains in idle state, ready to be retried or used again
-
-		// Save session with the new error message in history
-		if e.storage != nil {
-			_ = e.storage.Save(sc.session)
-		}
-
-		// Clear the run
-		e.mu.Lock()
-		sc.run = nil
-		e.mu.Unlock()
-		return
-	}
-
-	run.MarkActive()
-	e.transitionWithSave(sc, domain.SessionStateRunning, "provider started")
-	e.ensureTerminalHubForPTY(sc)
-
-	e.wg.Add(2)
-	go e.handleEvents(run.Ctx, sc, run)
-	go e.healthCheck(run.Ctx, sc, run)
-
-	<-run.Ctx.Done()
-
-	// Wait for event handling to complete
-	<-run.EventsDone
-	<-run.HealthDone
-
-	// Run completed - return session to idle state
-	e.transitionWithSave(sc, domain.SessionStateIdle, "provider run completed")
-
-	// Clear the run
-	e.mu.Lock()
-	sc.run = nil
-	e.mu.Unlock()
-}
-
-func (e *AgentExecutor) handleEvents(ctx context.Context, sc *sessionContext, run *session.ProviderRun) {
+func (e *AgentExecutor) handleEvents(ctx context.Context, sc *sessionContext, run *session.Run, events <-chan domain.Event) {
 	defer e.wg.Done()
 	defer close(run.EventsDone)
 	defer func() {
@@ -236,25 +174,38 @@ func (e *AgentExecutor) handleEvents(ctx context.Context, sc *sessionContext, ru
 		}
 	}()
 
-	events := run.Provider.Events()
 	if events == nil {
 		return
 	}
 
-	// Create a checkpoint ticker for periodic message history persistence
+	// Create a checkpoint ticker for periodic message history persistence.
+	// A mutex-guarded bool prevents pile-up if checkpoints are slow.
 	checkpointTicker := time.NewTicker(e.checkpointInterval)
 	defer checkpointTicker.Stop()
 
-	// Create a channel to receive checkpoint completion signals (non-blocking)
-	checkpointDone := make(chan struct{}, 1)
+	var checkpointMu sync.Mutex
+	checkpointRunning := false
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-checkpointTicker.C:
-			// Trigger a non-blocking checkpoint in the background
-			go e.checkpointSession(sc, checkpointDone)
+			checkpointMu.Lock()
+			if !checkpointRunning {
+				checkpointRunning = true
+				checkpointMu.Unlock()
+				e.wg.Add(1)
+				go func() {
+					defer e.wg.Done()
+					e.checkpointSession(sc)
+					checkpointMu.Lock()
+					checkpointRunning = false
+					checkpointMu.Unlock()
+				}()
+			} else {
+				checkpointMu.Unlock()
+			}
 		case event, ok := <-events:
 			if !ok {
 				return
@@ -265,60 +216,12 @@ func (e *AgentExecutor) handleEvents(ctx context.Context, sc *sessionContext, ru
 	}
 }
 
-// checkpointSession performs a non-blocking checkpoint of the session's message history.
-// It saves the current session state including the message history to storage.
-func (e *AgentExecutor) checkpointSession(sc *sessionContext, done chan<- struct{}) {
-	defer func() {
-		// Send signal that checkpoint is complete (non-blocking)
-		select {
-		case done <- struct{}{}:
-		default:
-		}
-	}()
-
+// checkpointSession saves the current session state to storage.
+func (e *AgentExecutor) checkpointSession(sc *sessionContext) {
 	if e.storage == nil || sc == nil || sc.session == nil {
 		return
 	}
-
-	// Save the session with its current message history
 	_ = e.storage.Save(sc.session)
-}
-
-func (e *AgentExecutor) healthCheck(ctx context.Context, sc *sessionContext, run *session.ProviderRun) {
-	defer e.wg.Done()
-	defer close(run.HealthDone)
-	defer func() {
-		if r := recover(); r != nil {
-			e.handlePanic(sc, r)
-		}
-	}()
-
-	ticker := time.NewTicker(e.healthInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			status := run.Provider.Status()
-			if status.State == session.StateError {
-				// Provider error: append to message history and cancel the run
-				// The session will return to idle when the run completes
-				errMsg := fmt.Sprintf("Provider error: %s", status.Error)
-				sc.session.AppendErrorMessage(errMsg, sc.session.ProviderType)
-				run.SetError(status.Error)
-
-				// Save session with error in history
-				if e.storage != nil {
-					_ = e.storage.Save(sc.session)
-				}
-
-				run.Cancel() // Cancel the run context to trigger cleanup
-				return
-			}
-		}
-	}
 }
 
 func (e *AgentExecutor) StopSession(ctx context.Context, id string) error {
@@ -345,7 +248,7 @@ func (e *AgentExecutor) StopSession(ctx context.Context, id string) error {
 			stopCtx, cancel := context.WithTimeout(ctx, e.opTimeout)
 			defer cancel()
 
-			stopErr = run.Provider.Stop(stopCtx)
+			stopErr = run.Session.Stop(stopCtx)
 			run.Cancel()
 		}
 		e.closeTerminalHub(id)
@@ -378,7 +281,7 @@ func (e *AgentExecutor) KillSession(id string) error {
 	// Kill the active provider run
 	run := sc.run
 	if run != nil {
-		if err := run.Provider.Kill(); err != nil {
+		if err := run.Session.Kill(); err != nil {
 			return fmt.Errorf("failed to kill provider: %w", err)
 		}
 		run.Cancel()
@@ -415,7 +318,7 @@ func (e *AgentExecutor) CancelRun(ctx context.Context, id string) error {
 	run := sc.run
 	if run != nil {
 		run.Cancel()
-		if err := run.Provider.Kill(); err != nil {
+		if err := run.Session.Kill(); err != nil {
 			return fmt.Errorf("failed to cancel provider: %w", err)
 		}
 	}
@@ -464,7 +367,7 @@ func (e *AgentExecutor) ResumeSession(ctx context.Context, id string) (*domain.S
 
 	// If there's an active run, try to resume the provider
 	if sc.run != nil {
-		suspendable, ok := sc.run.Provider.(session.Suspendable)
+		suspendable, ok := sc.run.Session.(session.Suspendable)
 		if !ok {
 			return nil, fmt.Errorf("provider does not support resumption")
 		}
@@ -529,7 +432,7 @@ func (e *AgentExecutor) GetSessionStatus(id string) (session.Status, error) {
 		return session.Status{}, nil
 	}
 
-	return run.Provider.Status(), nil
+	return run.Session.Status(), nil
 }
 
 func (e *AgentExecutor) ListSessions() []*domain.Session {
@@ -626,7 +529,14 @@ func (e *AgentExecutor) SendInput(ctx context.Context, id string, input string, 
 		return fmt.Errorf("no active provider run for session %s", id)
 	}
 
-	return run.Provider.SendInput(ctx, input)
+	// Build minimal config for mid-run input (runner is already started).
+	cfg := session.Config{
+		ProviderType: sc.session.ProviderType,
+		WorkingDir:   sc.session.WorkingDir,
+		ProjectID:    sc.session.ProjectID,
+	}
+	_, err := run.Session.SendInput(ctx, cfg, input)
+	return err
 }
 
 // SendMessage sends a message to a session, starting a new run if the session is idle.
@@ -701,20 +611,23 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 		}
 	}
 
-	// Create provider run configuration
+	// Create provider run configuration, restoring the original provider-specific
+	// config so providers that rely on Custom fields (e.g. acp_command for the
+	// ACP provider) can initialise correctly.
 	config := session.Config{
 		ProviderType: pType,
 		WorkingDir:   sess.WorkingDir,
 		ProjectID:    sess.ProjectID,
 		SessionKind:  sess.Kind,
 		Title:        sess.Title,
+		Custom:       sess.ProviderCustom,
 		// Note: We don't pass the full messages list as ResumeMessages here;
 		// that would be for full resumption. For SendMessage on idle sessions,
 		// the provider should reconstruct context from the session if needed.
 	}
 
 	// Create provider instance
-	prov, err := e.providerFactory(pType, id, config)
+	prov, err := e.sessionFactory(pType, id, config)
 	if err != nil {
 		return sess, fmt.Errorf("%w: %s", ErrProviderNotFound, pType)
 	}
@@ -735,7 +648,8 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 	run := session.NewProviderRun(prov, e.ctx)
 	sc.run = run
 
-	// Start the provider asynchronously
+	// Start the session asynchronously: call SendInput (which also starts the runner),
+	// then pump events until the channel closes.
 	e.wg.Add(1)
 	go func() {
 		defer e.wg.Done()
@@ -745,13 +659,16 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 			}
 		}()
 
-		// Start provider
-		startCtx, startCancel := context.WithTimeout(run.Ctx, e.opTimeout)
-		err := run.Provider.Start(startCtx, config)
-		startCancel()
+		log.Printf("STARTING SESSION %s with provider %s", id, pType)
 
+		startCtx, startCancel := context.WithTimeout(run.Ctx, e.opTimeout)
+		defer startCancel()
+
+		// SendInput both starts the runner and sends the first message.
+		events, err := run.Session.SendInput(startCtx, config, content)
 		if err != nil {
 			errMsg := fmt.Sprintf("Provider failed to start: %v", err)
+			log.Printf("SESSION START FAILED: %v", errMsg)
 			sc.session.AppendErrorMessage(errMsg, pType)
 			run.SetError(err)
 
@@ -759,21 +676,8 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 				_ = e.storage.Save(sc.session)
 			}
 
-			e.mu.Lock()
-			sc.run = nil
-			e.mu.Unlock()
-			return
-		}
-
-		// Send the initial message to the provider
-		if err := run.Provider.SendInput(startCtx, content); err != nil {
-			errMsg := fmt.Sprintf("Failed to send initial message: %v", err)
-			sc.session.AppendErrorMessage(errMsg, pType)
-			run.SetError(err)
-
-			if e.storage != nil {
-				_ = e.storage.Save(sc.session)
-			}
+			// Broadcast the error so the frontend knows
+			e.broadcaster.Broadcast(domain.NewErrorEvent(id, errMsg, "SESSION_START_FAILED"))
 
 			e.mu.Lock()
 			sc.run = nil
@@ -782,21 +686,15 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 		}
 
 		run.MarkActive()
-		e.transitionWithSave(sc, domain.SessionStateRunning, "provider started with message")
+		e.transitionWithSave(sc, domain.SessionStateRunning, "session started")
 		e.ensureTerminalHubForPTY(sc)
 
-		e.wg.Add(2)
-		go e.handleEvents(run.Ctx, sc, run)
-		go e.healthCheck(run.Ctx, sc, run)
-
-		<-run.Ctx.Done()
-
-		// Wait for event handling to complete
-		<-run.EventsDone
-		<-run.HealthDone
+		// handleEvents blocks until the events channel closes (runner done).
+		e.wg.Add(1)
+		e.handleEvents(run.Ctx, sc, run, events)
 
 		// Run completed - return session to idle state
-		e.transitionWithSave(sc, domain.SessionStateIdle, "provider run completed")
+		e.transitionWithSave(sc, domain.SessionStateIdle, "session run completed")
 
 		e.mu.Lock()
 		sc.run = nil
@@ -824,7 +722,7 @@ func (e *AgentExecutor) TerminalHub(id string) (*TerminalHub, error) {
 		return nil, fmt.Errorf("no active provider run for session %s", id)
 	}
 
-	provider, ok := run.Provider.(TerminalProvider)
+	provider, ok := run.Session.(TerminalProvider)
 	if !ok {
 		return nil, ErrTerminalNotSupported
 	}
@@ -857,7 +755,7 @@ func (e *AgentExecutor) TerminalSnapshot(id string) (terminal.Snapshot, error) {
 		return terminal.Snapshot{}, fmt.Errorf("no active provider run for session %s", id)
 	}
 
-	provider, ok := run.Provider.(TerminalProvider)
+	provider, ok := run.Session.(TerminalProvider)
 	if !ok {
 		return terminal.Snapshot{}, ErrTerminalNotSupported
 	}
@@ -958,7 +856,7 @@ func (e *AgentExecutor) suspendSession(sc *sessionContext, toolCallID string) {
 	}
 
 	// Check if provider implements Suspendable interface
-	suspendable, ok := sc.run.Provider.(session.Suspendable)
+	suspendable, ok := sc.run.Session.(session.Suspendable)
 	if !ok {
 		// Provider doesn't support suspension, cannot suspend
 		return
@@ -995,6 +893,7 @@ func (e *AgentExecutor) suspendSession(sc *sessionContext, toolCallID string) {
 
 func (e *AgentExecutor) handlePanic(sc *sessionContext, r any) {
 	errMsg := fmt.Sprintf("Panic recovered: %v", r)
+	log.Printf("PANIC: %v", errMsg)
 
 	// Append error to message history instead of setting ErrorMessage
 	sc.session.AppendErrorMessage(errMsg, sc.session.ProviderType)
@@ -1067,7 +966,7 @@ func (e *AgentExecutor) ensureTerminalHubForPTY(sc *sessionContext) {
 		return
 	}
 
-	if _, ok := run.Provider.(TerminalProvider); !ok {
+	if _, ok := run.Session.(TerminalProvider); !ok {
 		return
 	}
 	_, _ = e.TerminalHub(sc.session.ID)

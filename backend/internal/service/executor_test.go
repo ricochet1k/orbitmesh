@@ -33,24 +33,29 @@ func newMockProvider() *mockProvider {
 	}
 }
 
-func (m *mockProvider) Start(ctx context.Context, config session.Config) error {
+// SendInput implements session.Session.  On the first call (startErr != nil it fails
+// immediately; otherwise it transitions to running and returns the events channel.
+// Subsequent calls are no-ops.
+func (m *mockProvider) SendInput(ctx context.Context, config session.Config, input string) (<-chan domain.Event, error) {
 	if m.startDelay > 0 {
 		select {
 		case <-time.After(m.startDelay):
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil, ctx.Err()
 		}
 	}
 	if m.startErr != nil {
 		m.mu.Lock()
 		m.state = session.StateError
 		m.mu.Unlock()
-		return m.startErr
+		return nil, m.startErr
 	}
 	m.mu.Lock()
-	m.state = session.StateRunning
+	if m.state == session.StateCreated {
+		m.state = session.StateRunning
+	}
 	m.mu.Unlock()
-	return nil
+	return m.events, nil
 }
 
 func (m *mockProvider) Stop(ctx context.Context) error {
@@ -68,9 +73,12 @@ func (m *mockProvider) Kill() error {
 		return m.killErr
 	}
 	m.mu.Lock()
+	alreadyStopped := m.state == session.StateStopped
 	m.state = session.StateStopped
 	m.mu.Unlock()
-	close(m.events)
+	if !alreadyStopped {
+		close(m.events)
+	}
 	return nil
 }
 
@@ -78,14 +86,6 @@ func (m *mockProvider) Status() session.Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return session.Status{State: m.state}
-}
-
-func (m *mockProvider) Events() <-chan domain.Event {
-	return m.events
-}
-
-func (m *mockProvider) SendInput(ctx context.Context, input string) error {
-	return nil
 }
 
 func (m *mockProvider) SendEvent(e domain.Event) {
@@ -1486,4 +1486,108 @@ func TestAgentExecutor_MidRunCrashRecoveryWithCheckpoints(t *testing.T) {
 
 	t.Logf("Successfully recovered session from checkpoint: %s", recoveredSess.Output)
 	t.Log("Checkpoint mechanism working: periodic snapshots prevent data loss on crash")
+}
+
+// ---------------------------------------------------------------------------
+// formatTaskReference
+// ---------------------------------------------------------------------------
+
+func TestFormatTaskReference(t *testing.T) {
+	tests := []struct {
+		id, title, want string
+	}{
+		{"T1a2b", "Fix the bug", "T1a2b - Fix the bug"},
+		{"T1a2b", "", "T1a2b"},
+		{"", "Fix the bug", "Fix the bug"},
+		{"", "", ""},
+	}
+	for _, tt := range tests {
+		got := formatTaskReference(tt.id, tt.title)
+		if got != tt.want {
+			t.Errorf("formatTaskReference(%q, %q) = %q, want %q", tt.id, tt.title, got, tt.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// terminalKindForSession
+// ---------------------------------------------------------------------------
+
+func TestTerminalKindForSession(t *testing.T) {
+	if got := terminalKindForSession(nil); got != domain.TerminalKindAdHoc {
+		t.Errorf("nil session = %q, want %q", got, domain.TerminalKindAdHoc)
+	}
+
+	ptySession := &domain.Session{ProviderType: "pty"}
+	if got := terminalKindForSession(ptySession); got != domain.TerminalKindPTY {
+		t.Errorf("pty session = %q, want %q", got, domain.TerminalKindPTY)
+	}
+
+	nativeSession := &domain.Session{ProviderType: "adk"}
+	if got := terminalKindForSession(nativeSession); got != domain.TerminalKindAdHoc {
+		t.Errorf("adk session = %q, want %q", got, domain.TerminalKindAdHoc)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// DeleteProjectSessions
+// ---------------------------------------------------------------------------
+
+func TestAgentExecutor_DeleteProjectSessions(t *testing.T) {
+	t.Run("deletes sessions for the given project", func(t *testing.T) {
+		prov := newMockProvider()
+		executor, store := createTestExecutor(prov)
+		defer executor.Shutdown(context.Background())
+
+		cfg := session.Config{ProviderType: "test", WorkingDir: "/tmp"}
+
+		// Create two sessions for project A and one for project B
+		_, err := executor.StartSession(context.Background(), "s-a1", cfg)
+		if err != nil {
+			t.Fatalf("StartSession: %v", err)
+		}
+		executor.sessions["s-a1"].session.ProjectID = "proj-a"
+
+		_, err = executor.StartSession(context.Background(), "s-a2", cfg)
+		if err != nil {
+			t.Fatalf("StartSession: %v", err)
+		}
+		executor.sessions["s-a2"].session.ProjectID = "proj-a"
+
+		_, err = executor.StartSession(context.Background(), "s-b1", cfg)
+		if err != nil {
+			t.Fatalf("StartSession: %v", err)
+		}
+		executor.sessions["s-b1"].session.ProjectID = "proj-b"
+
+		// Also put a proj-a session only in storage (already-finished session)
+		storedSess := &domain.Session{ID: "s-a3", ProjectID: "proj-a"}
+		_ = store.Save(storedSess)
+
+		err = executor.DeleteProjectSessions(context.Background(), "proj-a")
+		if err != nil {
+			t.Fatalf("DeleteProjectSessions: %v", err)
+		}
+
+		// Stored-only session should be gone from storage
+		if _, err := store.Load("s-a3"); err == nil {
+			t.Error("expected s-a3 to be deleted from storage")
+		}
+
+		// Proj-b session should still be in storage
+		if _, err := store.Load("s-b1"); err != nil {
+			t.Errorf("s-b1 should still exist: %v", err)
+		}
+	})
+
+	t.Run("no-op when project has no sessions", func(t *testing.T) {
+		prov := newMockProvider()
+		executor, _ := createTestExecutor(prov)
+		defer executor.Shutdown(context.Background())
+
+		err := executor.DeleteProjectSessions(context.Background(), "nonexistent-project")
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
+	})
 }

@@ -3,12 +3,14 @@ package openai
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/packages/ssestream"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/ricochet1k/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/provider/native"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 )
 
@@ -18,33 +20,45 @@ type Session struct {
 	conversation []*session.Message
 
 	liveStream *session.Stream
+
+	mu     sync.Mutex
+	events *native.EventAdapter
 }
 
 var _ session.Session = (*Session)(nil)
 
-func (s *Session) Start(ctx context.Context, config session.Config) error {
-	return nil
-}
+// SendInput implements session.Session.  It fires an OpenAI streaming request
+// and forwards events onto the returned channel.
+func (s *Session) SendInput(ctx context.Context, config session.Config, input string) (<-chan domain.Event, error) {
+	s.mu.Lock()
+	if s.events == nil {
+		// Use session ID from config on first call.
+		sessID := config.TaskID
+		if sessID == "" {
+			sessID = "openai"
+		}
+		s.events = native.NewEventAdapter(sessID, 100)
+	}
+	s.mu.Unlock()
 
-func (s *Session) SendInput(ctx context.Context, input string) error {
 	stream := s.provider.client.Responses.NewStreaming(ctx, responses.ResponseNewParams{
 		Background:   param.NewOpt(true),
 		Instructions: param.NewOpt(""),
 		ContextManagement: []responses.ResponseNewParamsContextManagement{
 			{Type: "compaction", CompactThreshold: param.NewOpt[int64](2000000)},
 		},
-		// PreviousResponseID: "",
-		// Conversation: responses.ResponseNewParamsConversationUnion{},
 		Input: responses.ResponseNewParamsInputUnion{
 			OfInputItemList: responses.ResponseInputParam{
 				{OfInputMessage: &responses.ResponseInputItemMessageParam{
 					Role: "system",
 					Content: responses.ResponseInputMessageContentListParam{
-						// {OfInputFile: &responses.ResponseInputFileParam{}},
 						{OfInputText: &responses.ResponseInputTextParam{Text: ""}},
 					},
 				}},
-				{OfMessage: &responses.EasyInputMessageParam{Role: "user", Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(input)}}},
+				{OfMessage: &responses.EasyInputMessageParam{
+					Role:    "user",
+					Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(input)},
+				}},
 			},
 		},
 		Model: openai.ChatModelGPT5_2,
@@ -52,10 +66,12 @@ func (s *Session) SendInput(ctx context.Context, input string) error {
 
 	s.liveStream = session.NewStream()
 	go s.handleStream(stream)
-	return nil
+	return s.events.Events(), nil
 }
 
 func (s *Session) handleStream(stream *ssestream.Stream[responses.ResponseStreamEventUnion]) {
+	defer s.events.Close()
+
 	messageId := "TODO"
 	currentMessage := session.Message{
 		ID:       messageId,
@@ -73,6 +89,7 @@ func (s *Session) handleStream(stream *ssestream.Stream[responses.ResponseStream
 				ID:       messageId,
 				Contents: data.Delta,
 			})
+			s.events.EmitOutput(data.Delta)
 		case responses.ResponseTextDoneEvent:
 			currentMessage.Contents = data.Text
 			s.liveStream.MessageReplace(session.Message{
@@ -80,10 +97,11 @@ func (s *Session) handleStream(stream *ssestream.Stream[responses.ResponseStream
 				Contents: data.Text,
 			})
 		default:
+			msg := fmt.Sprintf("Unhandled stream event: %#v", data)
 			s.liveStream.MessageNew(session.Message{
 				ID:       messageId,
 				Kind:     session.MKError,
-				Contents: fmt.Sprintf("Unhandled stream event: %#v", data),
+				Contents: msg,
 			})
 		}
 	}
@@ -96,21 +114,23 @@ func (s *Session) handleStream(stream *ssestream.Stream[responses.ResponseStream
 		}
 		s.conversation = append(s.conversation, &errMsg)
 		s.liveStream.MessageNew(errMsg)
+		s.events.EmitError(err.Error(), "OPENAI_STREAM_ERROR")
 	}
 }
 
-func (s *Session) Events() <-chan domain.Event {
-	panic("unimplemented")
-}
-
 func (s *Session) Kill() error {
-	panic("unimplemented")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.events != nil {
+		s.events.Close()
+	}
+	return nil
 }
 
 func (s *Session) Status() session.Status {
-	panic("unimplemented")
+	return session.Status{State: session.StateRunning}
 }
 
 func (s *Session) Stop(ctx context.Context) error {
-	panic("unimplemented")
+	return s.Kill()
 }

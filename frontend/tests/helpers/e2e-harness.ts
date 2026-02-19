@@ -1,8 +1,9 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createWriteStream, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { reservePort } from "./free-port.js";
 
 const STARTUP_TIMEOUT_MS = 15_000;
 const POLL_INTERVAL_MS = 500;
@@ -100,14 +101,44 @@ async function stopProcess(proc: ManagedProcess) {
   proc.logStream.end();
 }
 
+/** Build a Go binary under backendDir/cmd/<name> and return its path. */
+async function buildGoBinary(
+  name: string,
+  backendDir: string,
+  outDir: string,
+): Promise<string> {
+  const outPath = path.join(outDir, name);
+  const result = spawnSync("go", ["build", "-o", outPath, `./cmd/${name}`], {
+    cwd: backendDir,
+    encoding: "utf-8",
+  });
+  if (result.status !== 0) {
+    throw new Error(
+      `Failed to build ${name}:\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    );
+  }
+  return outPath;
+}
+
 export default async function globalSetup() {
   const { frontendDir, repoRoot, backendDir } = resolvePaths();
-  const backendPort = Number(process.env.E2E_BACKEND_PORT ?? "8080");
-  const frontendPort = Number(process.env.E2E_FRONTEND_PORT ?? "4173");
+  // reservePort reads from process.env if already set (e.g. from the config
+  // file loading first), otherwise allocates a fresh free port and writes it
+  // back to process.env so both config and harness agree on the same value.
+  const backendPort = reservePort("E2E_BACKEND_PORT", 8090);
+  const frontendPort = reservePort("E2E_FRONTEND_PORT", 4174);
   const logDir = path.join(frontendDir, "test-results", "e2e-logs");
 
   await fs.mkdir(logDir, { recursive: true });
   const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "orbitmesh-e2e-"));
+
+  // Build helper binaries used by e2e tests and expose paths as env vars.
+  const acpEchoBin = await buildGoBinary("acp-echo", backendDir, stateDir);
+  process.env.ACP_ECHO_BIN = acpEchoBin;
+
+  // Expose the backend URL so test helpers can make direct HTTP requests
+  // (bypassing the browser's connection-per-origin limit).
+  process.env.E2E_BACKEND_URL = `http://127.0.0.1:${backendPort}`;
 
   const backendLog = path.join(logDir, "backend.log");
   const frontendLog = path.join(logDir, "frontend.log");

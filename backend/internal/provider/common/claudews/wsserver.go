@@ -63,11 +63,13 @@ func (s *wsServer) Addr() string {
 // context is cancelled or the underlying listener is closed.
 func (s *wsServer) Serve(ctx context.Context) {
 	go func() {
+		_ = s.srv.Serve(s.ln) // returns when closed
+	}()
+	go func() {
 		// Shutdown when context is cancelled.
 		<-ctx.Done()
 		_ = s.srv.Close()
 	}()
-	_ = s.srv.Serve(s.ln) // returns when closed
 }
 
 // Close stops the server immediately.

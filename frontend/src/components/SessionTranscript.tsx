@@ -1,9 +1,9 @@
-import { createSignal, For, Show } from "solid-js"
+import { createMemo, createSignal, For, Show } from "solid-js"
 import type { Accessor } from "solid-js"
 import type { TranscriptMessage } from "../types/api"
 
 // Max lines before a message is collapsed with an expand toggle
-const COLLAPSE_LINE_THRESHOLD = 20
+export const COLLAPSE_LINE_THRESHOLD = 20
 
 export interface SessionTranscriptProps {
   messages: Accessor<TranscriptMessage[]>
@@ -23,82 +23,47 @@ export interface SessionTranscriptProps {
 
 export default function SessionTranscript(props: SessionTranscriptProps) {
   return (
-    <div class="session-transcript-wrap">
-      <div class="panel-header">
-        <div>
-          <p class="panel-kicker">Live transcript</p>
-          <h2>Activity Feed</h2>
-        </div>
-        <div class="panel-tools">
-          <button
-            type="button"
-            class="neutral"
-            onClick={props.onLoadEarlier}
-            disabled={!props.activityCursor() || props.activityHistoryLoading()}
-            data-testid="session-load-earlier"
-          >
-            {props.activityHistoryLoading() ? "Loading…" : "Load earlier"}
-          </button>
-          <input
-            type="search"
-            placeholder="Search transcript"
-            value={props.filter()}
-            onInput={(e) => props.setFilter(e.currentTarget.value)}
-          />
-          <button
-            type="button"
-            class="neutral"
-            onClick={() => props.setAutoScroll(true)}
-            classList={{ active: props.autoScroll() }}
-          >
-            {props.autoScroll() ? "Auto-scroll on" : "Auto-scroll off"}
-          </button>
-        </div>
-      </div>
-
-      <div
-        class="transcript"
-        ref={(el) => props.onRef?.(el)}
-        onScroll={(e) => props.onScroll?.(e)}
+    <div
+      class="transcript"
+      ref={(el) => props.onRef?.(el)}
+      onScroll={(e) => props.onScroll?.(e)}
+    >
+      <Show
+        when={props.messages().length > 0}
+        fallback={<p class="empty-state">{props.emptyLabel ?? "No transcript yet."}</p>}
       >
-        <Show
-          when={props.messages().length > 0}
-          fallback={<p class="empty-state">{props.emptyLabel ?? "No transcript yet."}</p>}
-        >
-          <For each={props.messages()}>
-            {(message) => <TranscriptItem message={message} />}
-          </For>
-        </Show>
-      </div>
+        <For each={props.messages()}>
+          {(message) => <TranscriptItem message={message} />}
+        </For>
+      </Show>
     </div>
   )
 }
 
 function TranscriptItem(props: { message: TranscriptMessage }) {
   const [expanded, setExpanded] = createSignal(false)
-  const { message } = props
 
-  const blocks = splitIntoBlocks(message.content)
-  const lineCount = message.content.split("\n").length
-  const isLong = lineCount > COLLAPSE_LINE_THRESHOLD
+  const blocks = createMemo(() => splitIntoBlocks(props.message.content))
+  const lineCount = createMemo(() => props.message.content.split("\n").length)
+  const isLong = createMemo(() => lineCount() > COLLAPSE_LINE_THRESHOLD)
 
   // Derive a display label: prefer kind (e.g. "tool_use") else type
-  const kindLabel = message.kind ?? message.type
+  const kindLabel = createMemo(() => props.message.kind ?? props.message.type)
 
   return (
-    <article class={`transcript-item ${message.type}`} data-kind={message.kind}>
+    <article class={`transcript-item ${props.message.type}`} data-kind={props.message.kind}>
       <header class="transcript-item-header">
-        <span class={`transcript-type transcript-type-${message.type}`}>{kindLabel}</span>
-        <Show when={message.open !== undefined}>
-          <span class={`transcript-status ${message.open ? "open" : "final"}`}>
-            {message.open ? "streaming" : "done"}
+        <span class={`transcript-type transcript-type-${props.message.type}`}>{kindLabel()}</span>
+        <Show when={props.message.open !== undefined}>
+          <span class={`transcript-status ${props.message.open ? "open" : "final"}`}>
+            {props.message.open ? "streaming" : "done"}
           </span>
         </Show>
-        <time class="transcript-time">{new Date(message.timestamp).toLocaleTimeString()}</time>
+        <time class="transcript-time">{new Date(props.message.timestamp).toLocaleTimeString()}</time>
       </header>
 
-      <div class={`transcript-content ${isLong && !expanded() ? "transcript-content-collapsed" : ""}`}>
-        <For each={blocks}>
+      <div class={`transcript-content ${isLong() && !expanded() ? "transcript-content-collapsed" : ""}`}>
+        <For each={blocks()}>
           {(block) =>
             block.kind === "code" ? (
               <pre>
@@ -111,20 +76,20 @@ function TranscriptItem(props: { message: TranscriptMessage }) {
         </For>
       </div>
 
-      <Show when={isLong}>
+      <Show when={isLong()}>
         <button
           type="button"
           class="transcript-expand-toggle"
           onClick={() => setExpanded((v) => !v)}
         >
-          {expanded() ? "Collapse" : `Expand (${lineCount} lines)`}
+          {expanded() ? "Collapse" : `Expand (${lineCount()} lines)`}
         </button>
       </Show>
     </article>
   )
 }
 
-function splitIntoBlocks(content: string) {
+export function splitIntoBlocks(content: string) {
   const blocks: { kind: "text" | "code"; content: string; lang?: string }[] = []
   let lastIndex = 0
   let match: RegExpExecArray | null = null

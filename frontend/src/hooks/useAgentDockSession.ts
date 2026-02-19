@@ -8,6 +8,11 @@ interface AgentDockSessionOptions {
   skipHydration?: boolean
 }
 
+export interface DockSessionParams {
+  providerId?: string
+  providerType?: string
+}
+
 export function useAgentDockSession({ sessionId, skipHydration }: AgentDockSessionOptions) {
   let dockBootstrap: Promise<string | null> | null = null
   const [rehydrationState, setRehydrationState] = createSignal<"idle" | "loading" | "done">("idle")
@@ -44,41 +49,51 @@ export function useAgentDockSession({ sessionId, skipHydration }: AgentDockSessi
     }
   }
 
-  const ensureDockSessionId = async (): Promise<string | null> => {
+  const ensureDockSessionId = async (params: DockSessionParams = {}): Promise<string | null> => {
     const existing = sessionId()
     if (existing) return existing
     if (dockBootstrap) return dockBootstrap
     dockBootstrap = (async () => {
-      const stored = dockSessionId()
-      if (stored) {
-        try {
-          await apiClient.getSession(stored)
-          return stored
-        } catch {
-          setDockSessionId(null)
-        }
-      }
-      try {
-        const list = await apiClient.listSessions()
-        const dock = list.sessions.find(
-          (entry) =>
-            entry.session_kind === "dock" &&
-            ["running", "starting", "paused"].includes(entry.state),
-        )
-        if (dock) {
+      // If specific provider params requested, skip reuse and create fresh
+      if (!params.providerId && !params.providerType) {
+        const stored = dockSessionId()
+        if (stored) {
           try {
-            await apiClient.getSession(dock.id)
-            setDockSessionId(dock.id)
-            return dock.id
-          } catch {
-            // ignore stale dock session
+            await apiClient.getSession(stored)
+            return stored
+          } catch (e) {
+            console.warn("Error getting session", stored, e)
+            setDockSessionId(null)
           }
         }
-      } catch {
-        // Continue to create a new dock session.
+        try {
+          const list = await apiClient.listSessions()
+          console.log('list.sessions', list.sessions)
+          const dock = list.sessions.reverse().find(
+            (entry) =>
+              entry.session_kind === "dock" &&
+              ["running", "starting", "paused"].includes(entry.state),
+          )
+          if (dock) {
+            try {
+              await apiClient.getSession(dock.id)
+              setDockSessionId(dock.id)
+              return dock.id
+            } catch (e) {
+              console.warn("Error getting session", dock.id, e)
+              // ignore stale dock session
+            }
+          }
+        } catch (e) {
+          console.warn("Error listing sessions", e)
+          // Continue to create a new dock session.
+        }
       }
       try {
-        const created = await apiClient.createDockSession()
+        const created = await apiClient.createDockSession({
+          providerId: params.providerId,
+          providerType: params.providerType,
+        })
         setDockSessionId(created.id)
         return created.id
       } catch {

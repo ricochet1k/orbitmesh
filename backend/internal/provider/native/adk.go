@@ -79,6 +79,8 @@ type ADKSession struct {
 
 	failureCount  int
 	cooldownUntil time.Time
+
+	started bool
 }
 
 type mcpClientHandle struct {
@@ -101,11 +103,31 @@ func NewADKSession(sessionID string, cfg ADKConfig) *ADKSession {
 	return p
 }
 
-func (p *ADKSession) Start(ctx context.Context, config session.Config) error {
+// SendInput implements session.Session.  On the first call it initialises the
+// ADK runner and sends the initial prompt.  On subsequent calls it runs
+// another prompt against the existing runner.
+func (p *ADKSession) SendInput(ctx context.Context, config session.Config, input string) (<-chan domain.Event, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	if !p.started {
+		if err := p.start(config); err != nil {
+			p.mu.Unlock()
+			return nil, err
+		}
+	}
+	p.mu.Unlock()
 
-	if p.state.GetState() != session.StateCreated {
+	// RunPrompt blocks until the ADK runner finishes — run it in a goroutine
+	// so we can return the channel immediately.
+	go func() {
+		if err := p.RunPrompt(ctx, input); err != nil {
+			p.events.EmitError(err.Error(), "ADK_PROMPT_ERROR")
+		}
+	}()
+	return p.events.Events(), nil
+}
+
+func (p *ADKSession) start(config session.Config) error {
+	if p.started {
 		return ErrAlreadyStarted
 	}
 
@@ -192,6 +214,7 @@ func (p *ADKSession) Start(ctx context.Context, config session.Config) error {
 	p.state.SetState(session.StateRunning)
 	// Provider is now running; we've already emitted idle->running at startup
 	p.events.EmitMetadata("model", p.config.Model)
+	p.started = true
 
 	return nil
 }
@@ -446,14 +469,6 @@ func (p *ADKSession) Kill() error {
 
 func (p *ADKSession) Status() session.Status {
 	return p.state.Status()
-}
-
-func (p *ADKSession) Events() <-chan domain.Event {
-	return p.events.Events()
-}
-
-func (p *ADKSession) SendInput(ctx context.Context, input string) error {
-	return p.RunPrompt(ctx, input)
 }
 
 func (p *ADKSession) sanitizeError(err error, apiKey string) error {

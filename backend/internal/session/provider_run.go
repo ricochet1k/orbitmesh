@@ -5,42 +5,40 @@ import (
 	"sync"
 )
 
-// ProviderRunState tracks the lifecycle of a single provider execution
-// independently from the session state. Provider-internal states like
-// starting and stopping are kept here, not in domain.Session.State.
-type ProviderRunState int
+// RunState tracks the lifecycle of a single session execution.
+type RunState int
 
 const (
-	ProviderRunStateStarting ProviderRunState = iota
-	ProviderRunStateActive
-	ProviderRunStateDone
-	ProviderRunStateFailed
+	RunStateStarting RunState = iota
+	RunStateActive
+	RunStateDone
+	RunStateFailed
 )
 
-func (s ProviderRunState) String() string {
+func (s RunState) String() string {
 	switch s {
-	case ProviderRunStateStarting:
+	case RunStateStarting:
 		return "starting"
-	case ProviderRunStateActive:
+	case RunStateActive:
 		return "active"
-	case ProviderRunStateDone:
+	case RunStateDone:
 		return "done"
-	case ProviderRunStateFailed:
+	case RunStateFailed:
 		return "failed"
 	default:
 		return "unknown"
 	}
 }
 
-// ProviderRun encapsulates the lifecycle of a single execution of a provider.
-// It tracks the provider state, context, and error independently from the
-// session state machine.
-type ProviderRun struct {
-	// The actual provider instance
-	Provider Session
+// Run encapsulates the lifecycle of a single execution of a session runner.
+// It tracks the runner state, context, and error independently from the
+// domain session state machine.
+type Run struct {
+	// Session is the actual runner instance.
+	Session Session
 
 	// State of this run (starting, active, done, failed)
-	State ProviderRunState
+	State RunState
 
 	// Context for this run
 	Ctx context.Context
@@ -51,86 +49,94 @@ type ProviderRun struct {
 	// Error if the run failed (set when State transitions to Failed)
 	Err error
 
-	// Sync/coordination channels
+	// EventsDone is closed when the handleEvents goroutine finishes.
 	EventsDone chan struct{}
-	HealthDone chan struct{}
 
 	mu sync.RWMutex
 }
 
-// NewProviderRun creates a new provider run.
-func NewProviderRun(provider Session, ctx context.Context) *ProviderRun {
+// NewRun creates a new session run.
+func NewRun(runner Session, ctx context.Context) *Run {
 	runCtx, cancel := context.WithCancel(ctx)
-	return &ProviderRun{
-		Provider:   provider,
-		State:      ProviderRunStateStarting,
+	return &Run{
+		Session:    runner,
+		State:      RunStateStarting,
 		Ctx:        runCtx,
 		Cancel:     cancel,
 		EventsDone: make(chan struct{}),
-		HealthDone: make(chan struct{}),
 	}
 }
 
 // SetState updates the run state.
-func (pr *ProviderRun) SetState(state ProviderRunState) {
-	pr.mu.Lock()
-	defer pr.mu.Unlock()
-	pr.State = state
+func (r *Run) SetState(state RunState) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.State = state
 }
 
 // GetState returns the current run state.
-func (pr *ProviderRun) GetState() ProviderRunState {
-	pr.mu.RLock()
-	defer pr.mu.RUnlock()
-	return pr.State
+func (r *Run) GetState() RunState {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.State
 }
 
 // SetError sets the error and transitions to Failed state.
-func (pr *ProviderRun) SetError(err error) {
-	pr.mu.Lock()
-	defer pr.mu.Unlock()
-	pr.Err = err
-	pr.State = ProviderRunStateFailed
+func (r *Run) SetError(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.Err = err
+	r.State = RunStateFailed
 }
 
 // GetError returns the error if the run failed.
-func (pr *ProviderRun) GetError() error {
-	pr.mu.RLock()
-	defer pr.mu.RUnlock()
-	return pr.Err
+func (r *Run) GetError() error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.Err
 }
 
 // IsActive returns true if the run is in the Active state.
-func (pr *ProviderRun) IsActive() bool {
-	pr.mu.RLock()
-	defer pr.mu.RUnlock()
-	return pr.State == ProviderRunStateActive
+func (r *Run) IsActive() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.State == RunStateActive
 }
 
 // IsDone returns true if the run has completed (either successfully or with error).
-func (pr *ProviderRun) IsDone() bool {
-	pr.mu.RLock()
-	defer pr.mu.RUnlock()
-	return pr.State == ProviderRunStateDone || pr.State == ProviderRunStateFailed
+func (r *Run) IsDone() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.State == RunStateDone || r.State == RunStateFailed
 }
 
 // MarkDone marks the run as successfully completed.
-func (pr *ProviderRun) MarkDone() {
-	pr.mu.Lock()
-	defer pr.mu.Unlock()
-	pr.State = ProviderRunStateDone
+func (r *Run) MarkDone() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.State = RunStateDone
 }
 
 // MarkActive marks the run as active.
-func (pr *ProviderRun) MarkActive() {
-	pr.mu.Lock()
-	defer pr.mu.Unlock()
-	pr.State = ProviderRunStateActive
+func (r *Run) MarkActive() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.State = RunStateActive
 }
 
 // Cleanup cancels the run context. Should be called when the run is no longer needed.
-func (pr *ProviderRun) Cleanup() {
-	if pr.Cancel != nil {
-		pr.Cancel()
+func (r *Run) Cleanup() {
+	if r.Cancel != nil {
+		r.Cancel()
 	}
+}
+
+// Deprecated type aliases — kept so a single refactor step compiles cleanly.
+// Remove once all callers use Run directly.
+type ProviderRun = Run
+type ProviderRunState = RunState
+
+// NewProviderRun is a deprecated alias for NewRun.
+func NewProviderRun(runner Session, ctx context.Context) *Run {
+	return NewRun(runner, ctx)
 }

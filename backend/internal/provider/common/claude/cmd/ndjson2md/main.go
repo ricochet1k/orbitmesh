@@ -113,25 +113,25 @@ func handleSystemEvent(line []byte) {
 		fmt.Printf("**Working Directory:** `%s`\n\n", init.CWD)
 		fmt.Printf("**Version:** `%s`\n\n", init.ClaudeCodeVersion)
 		fmt.Printf("**Permission Mode:** `%s`\n\n", init.PermissionMode)
-		fmt.Println("---\n")
+		fmt.Println("---")
 	}
 }
 
 func handleUserEvent(line []byte) {
 	var userMsg struct {
-		Type           string `json:"type"`
-		Message        struct {
+		Type    string `json:"type"`
+		Message struct {
 			Role    string `json:"role"`
 			Content []struct {
-				Type       string `json:"type"`
-				ToolUseID  string `json:"tool_use_id"`
-				Content    string `json:"content"`
-				IsError    bool   `json:"is_error"`
+				Type      string `json:"type"`
+				ToolUseID string `json:"tool_use_id"`
+				Content   string `json:"content"`
+				IsError   bool   `json:"is_error"`
 			} `json:"content"`
 		} `json:"message"`
 		ToolUseResult struct {
-			Stdout  string `json:"stdout"`
-			Stderr  string `json:"stderr"`
+			Stdout string `json:"stdout"`
+			Stderr string `json:"stderr"`
 		} `json:"tool_use_result"`
 	}
 
@@ -202,7 +202,7 @@ func handleStreamEvent(eventData json.RawMessage, currentTextBlock *strings.Buil
 			// Starting a tool use block
 			if currentTextBlock.Len() > 0 {
 				fmt.Print(currentTextBlock.String())
-				fmt.Println("\n")
+				fmt.Println()
 				currentTextBlock.Reset()
 			}
 			*currentToolUse = &ToolUse{
@@ -245,9 +245,9 @@ func handleStreamEvent(eventData json.RawMessage, currentTextBlock *strings.Buil
 		// End of entire message
 		if currentTextBlock.Len() > 0 {
 			fmt.Print(currentTextBlock.String())
-			fmt.Println("\n")
+			fmt.Println()
 			currentTextBlock.Reset()
 		}
-		fmt.Println("---\n")
+		fmt.Println("---")
 	}
 }

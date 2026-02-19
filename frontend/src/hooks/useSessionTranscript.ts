@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal } from "solid-js"
+import { createEffect, createMemo, createResource, createSignal, untrack } from "solid-js"
 import type { Accessor, Resource } from "solid-js"
 import type {
   ActivityEntry,
@@ -27,19 +27,17 @@ export function useSessionTranscript({
   onStatusChange,
 }: SessionTranscriptOptions) {
   const [messages, setMessages] = createSignal<TranscriptMessage[]>([])
-  const [activityCursor, setActivityCursor] = createSignal<string | null>(null)
-  const [activityHistoryReady, setActivityHistoryReady] = createSignal(false)
-  const [activityHistoryLoading, setActivityHistoryLoading] = createSignal(false)
-  const [hasActivityHistory, setHasActivityHistory] = createSignal(false)
-  const [initialOutput, setInitialOutput] = createSignal<string | null>(null)
-  const [initialOutputTimestamp, setInitialOutputTimestamp] = createSignal<string | null>(null)
-  const [initialOutputApplied, setInitialOutputApplied] = createSignal(false)
+  // cursor for paginating backwards: null = load latest page, string = load that page
+  const [paginationCursor, setPaginationCursor] = createSignal<string | null | undefined>(undefined)
   const [filter, setFilter] = createSignal("")
   const [autoScroll, setAutoScroll] = createSignal(true)
   const [initialized, setInitialized] = createSignal(false)
+  const [initialOutput, setInitialOutput] = createSignal<string | null>(null)
+  const [initialOutputTimestamp, setInitialOutputTimestamp] = createSignal<string | null>(null)
+  const [initialOutputApplied, setInitialOutputApplied] = createSignal(false)
 
-  const providerType = () => session()?.provider_type ?? ""
-  const canInspect = () => permissions()?.can_inspect_sessions ?? false
+  const canInspect = createMemo(() => permissions()?.can_inspect_sessions ?? false)
+  const providerType = createMemo(() => session()?.provider_type ?? "")
 
   const filteredMessages = createMemo(() => {
     const term = filter().trim().toLowerCase()
@@ -49,6 +47,108 @@ export function useSessionTranscript({
         msg.content.toLowerCase().includes(term) || msg.type.toLowerCase().includes(term),
     )
   })
+
+  // ── Activity history via createResource ────────────────────────────────────
+  // The source tuple drives a fresh fetch whenever sessionId, canInspect, or
+  // paginationCursor changes.  `undefined` cursor means "not yet ready to
+  // fetch" (e.g. permissions still loading or canInspect is false).
+  const activitySource = createMemo((): { id: string; cursor: string | null } | undefined => {
+    const id = sessionId()
+    if (!id || permissions.loading || !canInspect()) return undefined
+    const cursor = paginationCursor()
+    // undefined paginationCursor means we haven't kicked off yet — start with latest (null cursor)
+    if (cursor === undefined) return undefined
+    return { id, cursor }
+  })
+
+  const [activityPage] = createResource(
+    activitySource,
+    async ({ id, cursor }) => {
+      const response = await apiClient.getActivityEntries(id, {
+        limit: 100,
+        cursor: cursor ?? undefined,
+      })
+      return response
+    },
+  )
+
+  // Derived: next cursor for pagination (null = no more history)
+  const activityCursor = createMemo(() => activityPage()?.next_cursor ?? null)
+  const activityHistoryLoading = createMemo(() => activityPage.loading)
+
+  // Merge newly-loaded activity entries into messages when the resource resolves
+  createEffect(() => {
+    const page = activityPage()
+    if (!page) return
+    const entries = page.entries ?? []
+    if (entries.length > 0) {
+      mergeMessages(entries.map((entry) => toActivityMessage(entry)), { sort: true })
+    }
+  })
+
+  // ── Initialisation: kick off the first activity fetch once we're ready ─────
+  createEffect(() => {
+    const id = sessionId()
+    if (!id || permissions.loading) return
+    // Reset per-session state when session changes
+    untrack(() => {
+      setMessages([])
+      setInitialized(false)
+      setInitialOutput(null)
+      setInitialOutputTimestamp(null)
+      setInitialOutputApplied(false)
+    })
+    if (!canInspect()) return
+    // Trigger the resource by moving paginationCursor from undefined → null
+    setPaginationCursor(null)
+  })
+
+  // ── Initial output injection (only when no activity history exists) ────────
+  createEffect(() => {
+    if (initialOutputApplied()) return
+    const initial = session()
+    if (!initial || activityPage.loading) return
+    if (initial.provider_type === "pty") {
+      setInitialOutputApplied(true)
+      return
+    }
+    const io = initialOutput()
+    const hasHistory = (activityPage()?.entries?.length ?? 0) > 0
+    if (!io || hasHistory) {
+      setInitialOutputApplied(true)
+      return
+    }
+    pushMessage({
+      id: crypto.randomUUID(),
+      type: "agent",
+      timestamp: initialOutputTimestamp() ?? initial.updated_at,
+      content: io,
+    })
+    setInitialOutputApplied(true)
+  })
+
+  // ── Session initialisation: push system message + capture initial output ──
+  createEffect(() => {
+    if (initialized() || session.loading) return
+    const initial = session()
+    if (!initial) return
+    setInitialized(true)
+    onStatusChange?.(initial.state)
+    untrack(() => {
+      pushMessage({
+        id: crypto.randomUUID(),
+        type: "system",
+        timestamp: initial.updated_at,
+        content: `Session ${initial.id} - ${initial.provider_type} - ${initial.state}`,
+      })
+      if (initial.output) {
+        setInitialOutput(initial.output)
+        setInitialOutputTimestamp(initial.updated_at)
+      }
+    })
+  })
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
   const mergeMessages = (incoming: TranscriptMessage[], opts: { sort?: boolean } = {}) => {
     if (incoming.length === 0) return
@@ -196,93 +296,11 @@ export function useSessionTranscript({
     }
   }
 
-  const loadActivityHistory = async (opts: { cursor?: string | null; reset?: boolean } = {}) => {
-    if (activityHistoryLoading()) return
-    const id = sessionId()
-    if (!id) return
-    setActivityHistoryLoading(true)
-    if (opts.reset) {
-      setActivityCursor(null)
-      setHasActivityHistory(false)
-    }
-    try {
-      const response = await apiClient.getActivityEntries(id, {
-        limit: 100,
-        cursor: opts.cursor ?? undefined,
-      })
-      const entries = response?.entries ?? []
-      if (entries.length > 0) {
-        setHasActivityHistory(true)
-        mergeMessages(entries.map((entry) => toActivityMessage(entry)), { sort: true })
-      }
-      setActivityCursor(response?.next_cursor ?? null)
-    } catch {
-      // ignore load failures; stream will still populate if available
-    } finally {
-      setActivityHistoryLoading(false)
-      setActivityHistoryReady(true)
-    }
-  }
-
   const handleLoadEarlier = () => {
-    if (!activityCursor()) return
-    void loadActivityHistory({ cursor: activityCursor() })
+    const cursor = activityCursor()
+    if (!cursor) return
+    setPaginationCursor(cursor)
   }
-
-  // Initialization effect
-  createEffect(() => {
-    if (initialized() || session.loading) return
-    const initial = session()
-    if (!initial) return
-    setInitialized(true)
-    onStatusChange?.(initial.state)
-    pushMessage({
-      id: crypto.randomUUID(),
-      type: "system",
-      timestamp: initial.updated_at,
-      content: `Session ${initial.id} - ${initial.provider_type} - ${initial.state}`,
-    })
-    if (initial.output) {
-      setInitialOutput(initial.output)
-      setInitialOutputTimestamp(initial.updated_at)
-    }
-  })
-
-  // Initial output effect
-  createEffect(() => {
-    if (initialOutputApplied()) return
-    const initial = session()
-    if (!initial) return
-    if (!activityHistoryReady()) return
-    if (initial.provider_type === "pty") {
-      setInitialOutputApplied(true)
-      return
-    }
-    if (!initialOutput() || hasActivityHistory()) {
-      setInitialOutputApplied(true)
-      return
-    }
-    pushMessage({
-      id: crypto.randomUUID(),
-      type: "agent",
-      timestamp: initialOutputTimestamp() ?? initial.updated_at,
-      content: initialOutput() ?? "",
-    })
-    setInitialOutputApplied(true)
-  })
-
-  // Activity history load effect
-  createEffect(() => {
-    const id = sessionId()
-    if (!id || permissions.loading) return
-    if (!canInspect()) {
-      setActivityHistoryReady(true)
-      return
-    }
-    setActivityHistoryReady(false)
-    setInitialOutputApplied(false)
-    void loadActivityHistory({ reset: true })
-  })
 
   return {
     messages,
@@ -293,9 +311,10 @@ export function useSessionTranscript({
     setAutoScroll,
     activityCursor,
     activityHistoryLoading,
-    activityHistoryReady,
     handleEvent,
     handleLoadEarlier,
+    // Expose for consumers that need to know if history is ready
+    activityHistoryReady: createMemo(() => !activityPage.loading && activityPage() !== undefined),
   }
 }
 

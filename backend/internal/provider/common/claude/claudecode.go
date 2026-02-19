@@ -43,6 +43,8 @@ type ClaudeCodeProvider struct {
 	cancel          context.CancelFunc
 	wg              sync.WaitGroup
 	lastMessageTime time.Time
+
+	started bool
 }
 
 // NewClaudeCodeProvider creates a new Claude programmatic provider.
@@ -56,12 +58,28 @@ func NewClaudeCodeProvider(sessionID string) *ClaudeCodeProvider {
 	}
 }
 
-// Start initializes the Claude process with streaming JSON I/O.
-func (p *ClaudeCodeProvider) Start(ctx context.Context, config session.Config) error {
+// SendInput implements session.Session.  On the first call it starts the Claude
+// process and sends the initial message.  On subsequent calls it queues input.
+func (p *ClaudeCodeProvider) SendInput(ctx context.Context, config session.Config, input string) (<-chan domain.Event, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	if !p.started {
+		if err := p.start(config); err != nil {
+			p.mu.Unlock()
+			return nil, err
+		}
+	}
+	p.mu.Unlock()
 
-	if p.state.GetState() != session.StateCreated {
+	if err := p.inputBuffer.Send(ctx, input); err != nil {
+		return nil, err
+	}
+	return p.events.Events(), nil
+}
+
+// start initializes the Claude process with streaming JSON I/O.
+// Caller must hold p.mu (write lock).
+func (p *ClaudeCodeProvider) start(config session.Config) error {
+	if p.started {
 		return ErrAlreadyStarted
 	}
 
@@ -120,6 +138,7 @@ func (p *ClaudeCodeProvider) Start(ctx context.Context, config session.Config) e
 	// Transition to running state
 	p.state.SetState(session.StateRunning)
 	// Already emitted idle->running at startup
+	p.started = true
 
 	return nil
 }
@@ -182,25 +201,6 @@ func (p *ClaudeCodeProvider) Kill() error {
 // Status returns the current status of the provider.
 func (p *ClaudeCodeProvider) Status() session.Status {
 	return p.state.Status()
-}
-
-// Events returns the event stream channel.
-func (p *ClaudeCodeProvider) Events() <-chan domain.Event {
-	return p.events.Events()
-}
-
-// SendInput sends input to the Claude process via stdin in stream-json format.
-func (p *ClaudeCodeProvider) SendInput(ctx context.Context, input string) error {
-	p.mu.RLock()
-	state := p.state.GetState()
-	p.mu.RUnlock()
-
-	if state != session.StateRunning {
-		return ErrNotStarted
-	}
-
-	// Send to input buffer
-	return p.inputBuffer.Send(ctx, input)
 }
 
 // processStdout reads and parses JSON messages from Claude's stdout.

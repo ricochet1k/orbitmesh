@@ -116,9 +116,9 @@ func TestState_String(t *testing.T) {
 // mockSession is a minimal session.Session for testing the factory.
 type mockSession struct{}
 
-func (m *mockSession) Start(ctx context.Context, config session.Config) error { return nil }
-func (m *mockSession) Stop(ctx context.Context) error                         { return nil }
-func (m *mockSession) Kill() error                                            { return nil }
-func (m *mockSession) Status() session.Status                                 { return session.Status{} }
-func (m *mockSession) Events() <-chan domain.Event                            { return nil }
-func (m *mockSession) SendInput(ctx context.Context, input string) error      { return nil }
+func (m *mockSession) Stop(ctx context.Context) error { return nil }
+func (m *mockSession) Kill() error                    { return nil }
+func (m *mockSession) Status() session.Status         { return session.Status{} }
+func (m *mockSession) SendInput(ctx context.Context, config session.Config, input string) (<-chan domain.Event, error) {
+	return nil, nil
+}

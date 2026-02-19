@@ -76,14 +76,18 @@ type Session struct {
 	State               SessionState
 	WorkingDir          string
 	ProjectID           string
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
-	CurrentTask         string
-	Output              string
-	ErrorMessage        string
-	Transitions         []StateTransition
-	Messages            []any // []session.Message
-	SuspensionContext   any   // *session.SuspensionContext (to avoid circular import)
+	// ProviderCustom preserves the original provider-specific config (e.g.
+	// acp_command) so it can be re-supplied when starting a new run on an
+	// idle session via SendMessage.
+	ProviderCustom    map[string]any
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	CurrentTask       string
+	Output            string
+	ErrorMessage      string
+	Transitions       []StateTransition
+	Messages          []any // []session.Message
+	SuspensionContext any   // *session.SuspensionContext (to avoid circular import)
 
 	mu sync.RWMutex
 }
@@ -243,6 +247,7 @@ type SessionSnapshot struct {
 	State               SessionState
 	WorkingDir          string
 	ProjectID           string
+	ProviderCustom      map[string]any
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 	CurrentTask         string
@@ -273,6 +278,7 @@ func (s *Session) Snapshot() SessionSnapshot {
 		State:               s.State,
 		WorkingDir:          s.WorkingDir,
 		ProjectID:           s.ProjectID,
+		ProviderCustom:      s.ProviderCustom,
 		CreatedAt:           s.CreatedAt,
 		UpdatedAt:           s.UpdatedAt,
 		CurrentTask:         s.CurrentTask,

@@ -13,9 +13,9 @@ func buildDefaultPermissions() apiTypes.PermissionsResponse {
 	base := apiTypes.PermissionsResponse{
 		Role:                                "developer",
 		CanInspectSessions:                  true,
-		CanManageRoles:                      false,
+		CanManageRoles:                      true,
 		CanManageTemplates:                  true,
-		CanInitiateBulkActions:              false,
+		CanInitiateBulkActions:              true,
 		RequiresOwnerApprovalForRoleChanges: true,
 	}
 	return base

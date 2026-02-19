@@ -1,154 +1,280 @@
 /* Agent Dock Component Styles
- * Compact chat panel with transcript, composer, and quick actions
- * Responsive design for desktop and mobile
+ * Compact bottom-pinned chat panel with transcript, composer, and quick actions
  */
 
-/* Main dock container */
+/* ──────────────────────────────────────────
+   CSS custom properties (dock-scoped)
+   ────────────────────────────────────────── */
+:root {
+  --dock-header-h: 36px;       /* closed height */
+  --dock-open-h: 440px;        /* expanded height on desktop */
+  --dock-width: 380px;
+  --dock-z: 100;
+}
+
+/* ──────────────────────────────────────────
+   Main container
+   ────────────────────────────────────────── */
 .agent-dock {
   position: fixed;
   bottom: 0;
-  right: 30px;
-  height: 500px;
-  width: 400px;
+  right: 24px;
+  width: var(--dock-width);
+  height: var(--dock-open-h);
 
   display: flex;
   flex-direction: column;
   background: var(--color-surface-1);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-xl);
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+  border-bottom: none;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  box-shadow: 0 -4px 24px rgba(15, 23, 42, 0.10);
   pointer-events: auto;
+  z-index: var(--dock-z);
   transition:
-    opacity var(--duration-fast) var(--easing-standard),
-    height var(--duration-fast) var(--easing-standard),
-    width var(--duration-fast) var(--easing-standard);
-}
-
-.agent-dock.idle {
-  opacity: 0.9;
+    height var(--duration-fast) var(--easing-standard);
 }
 
 .agent-dock.minimized {
-  height: 78px;
-  width: 320px;
+  height: var(--dock-header-h);
 }
 
+.agent-dock.idle {
+  opacity: 0.92;
+}
+
+/* ──────────────────────────────────────────
+   Header — single compact line
+   ────────────────────────────────────────── */
 .agent-dock-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-3) var(--space-4);
+  gap: 6px;
+  padding: 0 10px;
+  height: var(--dock-header-h);
+  min-height: var(--dock-header-h);
+  flex-shrink: 0;
   border-bottom: 1px solid var(--color-border);
-  background: linear-gradient(135deg, rgba(15, 23, 42, 0.04), rgba(59, 130, 246, 0.06));
+  background: var(--color-surface-2);
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  user-select: none;
 }
 
-.agent-dock-title {
-  margin: 0;
-  font-size: var(--font-size-sm);
+/* Status dot */
+.agent-dock-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--color-text-tertiary);
+  transition: background var(--duration-fast) var(--easing-standard);
+}
+.agent-dock-dot.live     { background: #22c55e; box-shadow: 0 0 0 2px rgba(34,197,94,0.2); }
+.agent-dock-dot.loading,
+.agent-dock-dot.connecting { background: #f59e0b; animation: pulse 1.2s ease-in-out infinite; }
+.agent-dock-dot.error    { background: var(--color-error); }
+.agent-dock-dot.empty    { background: var(--color-text-tertiary); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+/* Title */
+.agent-dock-title-label {
+  font-size: 11px;
   font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.agent-dock-subtitle {
-  margin: 0;
-  font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
-.agent-dock-summary {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  align-items: flex-end;
-  text-align: right;
+/* Activity summary — fills remaining space */
+.agent-dock-activity {
   flex: 1;
-}
-
-.agent-dock-status {
-  font-size: var(--font-size-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-secondary);
-}
-
-.agent-dock-status.error {
-  color: var(--color-error);
-}
-
-.agent-dock-last-action {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-primary);
-  max-width: 180px;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
 
-.agent-dock-toggle {
+/* Inline error text (small, in header) */
+.agent-dock-error-inline {
+  font-size: 11px;
+  color: var(--color-error);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Icon buttons (menu + chevron) */
+.agent-dock-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--easing-standard),
+              background var(--duration-fast) var(--easing-standard);
+}
+.agent-dock-icon-btn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-0);
+}
+
+/* Chevron rotates when expanded */
+.agent-dock-chevron svg {
+  transition: transform var(--duration-fast) var(--easing-standard);
+}
+.agent-dock-chevron.expanded svg {
+  transform: rotate(180deg);
+}
+
+/* ──────────────────────────────────────────
+   Hamburger menu dropdown
+   ────────────────────────────────────────── */
+.agent-dock-menu-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.agent-dock-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  min-width: 210px;
+  background: var(--color-surface-1);
   border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  padding: 6px;
+  z-index: calc(var(--dock-z) + 10);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-dock-menu-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 6px 6px;
+}
+
+.agent-dock-menu-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-tertiary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.agent-dock-menu-select {
+  font-size: var(--font-size-xs);
   background: var(--color-surface-0);
   color: var(--color-text-primary);
-  padding: 0.35rem 0.75rem;
-  border-radius: 999px;
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
   cursor: pointer;
-  transition: all var(--duration-fast) var(--easing-standard);
+  width: 100%;
 }
 
-.agent-dock-toggle:hover {
-  border-color: rgba(37, 99, 235, 0.4);
-  color: var(--color-primary);
+.agent-dock-menu-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 2px 0;
 }
 
+.agent-dock-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-primary);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--easing-standard);
+}
+.agent-dock-menu-item:hover:not(:disabled) {
+  background: var(--color-surface-2);
+}
+.agent-dock-menu-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.agent-dock-menu-item--danger {
+  color: var(--color-error);
+}
+.agent-dock-menu-item--danger:hover:not(:disabled) {
+  background: rgba(220, 38, 38, 0.07);
+}
+
+/* ──────────────────────────────────────────
+   Body (only visible when expanded)
+   ────────────────────────────────────────── */
 .agent-dock-body {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
-.agent-dock.minimized .agent-dock-body {
-  display: none;
-}
-
-/* Empty state */
+/* ──────────────────────────────────────────
+   Empty state
+   ────────────────────────────────────────── */
 .agent-dock-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-4);
+  gap: var(--space-3);
   padding: var(--space-8);
   flex: 1;
   color: var(--color-text-secondary);
 }
 
 .agent-dock-empty-icon {
-  font-size: var(--font-size-4xl);
+  font-size: var(--font-size-3xl);
   margin: 0;
-  opacity: 0.4;
+  opacity: 0.3;
 }
 
 .agent-dock-empty-text {
   margin: 0;
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
 }
 
 .agent-dock-empty-hint {
   margin: 0;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
   text-align: center;
   max-width: 200px;
 }
 
-/* Loading state */
+/* ──────────────────────────────────────────
+   Loading state
+   ────────────────────────────────────────── */
 .agent-dock-loading {
   display: flex;
   flex-direction: column;
@@ -160,8 +286,8 @@
 }
 
 .agent-dock-spinner {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border: 2px solid var(--color-border);
   border-top-color: var(--color-primary);
   border-radius: 50%;
@@ -170,55 +296,20 @@
 
 .agent-dock-loading-text {
   margin: 0;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
 }
 
-/* Error state */
-.agent-dock-error {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-4);
-  padding: var(--space-8);
-  flex: 1;
-  background: rgba(220, 38, 38, 0.03);
-  color: var(--color-error);
-  border-radius: var(--radius-lg);
-}
-
-.agent-dock-error-icon {
-  font-size: var(--font-size-4xl);
-  margin: 0;
-  opacity: 0.6;
-}
-
-.agent-dock-error-text {
-  margin: 0;
-  font-size: var(--font-size-sm);
-  text-align: center;
-  color: var(--color-text-secondary);
-  max-width: 220px;
-}
-
-/* Live state - main container */
-.agent-dock-container {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  gap: 0;
-  overflow: hidden;
-}
-
-/* Transcript area */
+/* ──────────────────────────────────────────
+   Transcript area
+   ────────────────────────────────────────── */
 .agent-dock-transcript-area {
   flex: 1;
   min-height: 0;
   border-bottom: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .agent-dock-transcript {
@@ -233,22 +324,9 @@
   line-height: var(--line-height-base);
 }
 
-/* Transcript placeholder */
-.agent-dock-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  text-align: center;
-  color: var(--color-text-tertiary);
-}
-
-.agent-dock-placeholder-text {
-  margin: 0;
-  font-size: var(--font-size-sm);
-}
-
-/* Message styling */
+/* ──────────────────────────────────────────
+   Message styling
+   ────────────────────────────────────────── */
 .agent-dock-message {
   display: flex;
   flex-direction: column;
@@ -260,26 +338,10 @@
   animation: slideUp var(--duration-fast) var(--easing-decelerate);
 }
 
-.agent-dock-message.agent {
-  background: rgba(37, 99, 235, 0.04);
-  border-color: rgba(37, 99, 235, 0.15);
-}
-
-.agent-dock-message.user {
-  background: rgba(6, 182, 212, 0.04);
-  border-color: rgba(6, 182, 212, 0.15);
-  margin-left: var(--space-2);
-}
-
-.agent-dock-message.system {
-  background: rgba(75, 85, 99, 0.06);
-  border-color: rgba(75, 85, 99, 0.15);
-}
-
-.agent-dock-message.error {
-  background: rgba(220, 38, 38, 0.06);
-  border-color: rgba(220, 38, 38, 0.2);
-}
+.agent-dock-message.agent  { background: rgba(37, 99, 235, 0.04); border-color: rgba(37, 99, 235, 0.15); }
+.agent-dock-message.user   { background: rgba(6, 182, 212, 0.04); border-color: rgba(6, 182, 212, 0.15); margin-left: var(--space-2); }
+.agent-dock-message.system { background: rgba(75, 85, 99, 0.06); border-color: rgba(75, 85, 99, 0.15); }
+.agent-dock-message.error  { background: rgba(220, 38, 38, 0.06); border-color: rgba(220, 38, 38, 0.2); }
 
 .agent-dock-message-type {
   font-size: var(--font-size-xs);
@@ -308,329 +370,101 @@
   opacity: 0.6;
 }
 
-/* Composer area */
+/* ──────────────────────────────────────────
+   Composer area
+   ────────────────────────────────────────── */
 .agent-dock-composer-area {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  padding: var(--space-4);
+  padding: var(--space-3) var(--space-4);
   background: var(--color-surface-1);
   border-top: 1px solid var(--color-border);
 }
 
-.agent-dock-error-banner {
-  padding: var(--space-2) var(--space-3);
-  background: rgba(220, 38, 38, 0.08);
-  border: 1px solid rgba(220, 38, 38, 0.2);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-xs);
-  color: var(--color-error);
-  line-height: 1.4;
-}
+/* ──────────────────────────────────────────
+   Scrollbar styling
+   ────────────────────────────────────────── */
+.agent-dock-transcript::-webkit-scrollbar { width: 4px; }
+.agent-dock-transcript::-webkit-scrollbar-track { background: transparent; }
+.agent-dock-transcript::-webkit-scrollbar-thumb { background: var(--color-border-strong); border-radius: 2px; }
+.agent-dock-message-content::-webkit-scrollbar { width: 3px; }
+.agent-dock-message-content::-webkit-scrollbar-track { background: transparent; }
+.agent-dock-message-content::-webkit-scrollbar-thumb { background: rgba(75, 85, 99, 0.3); border-radius: 2px; }
 
-.agent-dock-composer {
-  display: flex;
-  gap: var(--space-2);
-  align-items: flex-end;
-}
-
-.agent-dock-input {
-  flex: 1;
-  padding: var(--space-2) var(--space-3);
-  font-size: var(--font-size-sm);
-  font-family: var(--font-family-mono);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-0);
-  color: var(--color-text-primary);
-  resize: none;
-  max-height: 80px;
-  outline: none;
-  transition: border-color var(--duration-fast) var(--easing-standard),
-    box-shadow var(--duration-fast) var(--easing-standard);
-}
-
-.agent-dock-input:focus {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
-}
-
-.agent-dock-input:disabled {
-  background: var(--color-surface-2);
-  color: var(--color-text-tertiary);
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.agent-dock-send-btn {
-  padding: var(--space-2) var(--space-3);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-  background: var(--color-primary);
-  color: white;
-  border: none;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: background var(--duration-fast) var(--easing-standard),
-    opacity var(--duration-fast) var(--easing-standard);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.agent-dock-send-btn:hover:not(:disabled) {
-  background: var(--color-primary-dark);
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.2);
-}
-
-.agent-dock-send-btn:active:not(:disabled) {
-  transform: scale(0.98);
-}
-
-.agent-dock-send-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* Quick actions */
+/* ──────────────────────────────────────────
+   Action bar (kept for Cancel icon if ever needed directly)
+   ────────────────────────────────────────── */
 .agent-dock-actions {
   display: flex;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-2) var(--space-4);
   background: var(--color-surface-2);
   border-top: 1px solid var(--color-border);
   align-items: center;
 }
 
-.btn.btn-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  font-size: var(--font-size-base);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-1);
-  color: var(--color-text-primary);
-  cursor: pointer;
-  transition: all var(--duration-fast) var(--easing-standard);
-}
-
-.btn.btn-icon:hover:not(:disabled) {
-  background: var(--color-surface-0);
-  border-color: var(--color-primary);
-  box-shadow: 0 1px 4px rgba(37, 99, 235, 0.1);
-}
-
-.btn.btn-icon:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn.btn-icon.btn-danger {
-  border-color: rgba(220, 38, 38, 0.2);
-  color: var(--color-error);
-}
-
-.btn.btn-icon.btn-danger:hover:not(:disabled) {
-  background: rgba(220, 38, 38, 0.08);
-  border-color: var(--color-error);
-  box-shadow: 0 1px 4px rgba(220, 38, 38, 0.1);
-}
-
-.agent-dock-actions .btn-secondary {
-  margin-left: auto;
-}
-
-/* Desktop layout - dock on right side */
-@media (min-width: 1200px) {
-  /* .agent-dock {
-    position: relative;
-    width: 320px;
-    min-width: 320px;
-    max-width: 320px;
-    border-left: 1px solid var(--color-border);
-    border-right: none;
-    flex-shrink: 0;
-  } */
-}
-
-/* Tablet layout - dock below main content */
-@media (max-width: 1199px) and (min-width: 800px) {
-  .app-main {
-    grid-template-rows: auto 1fr auto;
-  }
-
-  .agent-dock {
-    border-left: none;
-    border-top: 1px solid var(--color-border);
-    max-height: 240px;
-    min-height: 200px;
-  }
-
-  .agent-dock-message {
-    padding: var(--space-2);
-  }
-
-  .agent-dock-transcript {
-    padding: var(--space-3);
-    gap: var(--space-2);
-  }
-}
-
-/* Mobile layout - bottom sheet or expandable panel */
+/* ──────────────────────────────────────────
+   Mobile — full-width bottom sheet
+   ────────────────────────────────────────── */
 @media (max-width: 799px) {
-  .app-shell {
-    grid-template-columns: 1fr;
+  :root {
+    --dock-width: 100%;
+    --dock-open-h: 55vh;
+    --dock-header-h: 40px;
   }
 
   .agent-dock {
-    display: flex;
-    position: fixed;
-    bottom: 0;
-    left: 0;
     right: 0;
+    left: 0;
     width: 100%;
-    max-width: 100%;
-    height: 50vh;
-    max-height: 50vh;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     border-left: none;
-    border-top: 1px solid var(--color-border);
-    border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
-    background: var(--color-surface-1);
-    z-index: 40;
-    animation: slideUp var(--duration-normal) var(--easing-decelerate);
+    border-right: none;
   }
 
-  .agent-dock.minimized {
-    height: 70px;
-    max-height: 70px;
+  /* Push page content up by the header height so the dock doesn't overlap */
+  body {
+    padding-bottom: var(--dock-header-h);
+  }
+
+  /* When expanded, push content up more */
+  body:has(.agent-dock:not(.minimized)) {
+    padding-bottom: var(--dock-open-h);
   }
 
   .agent-dock-header {
-    flex-wrap: wrap;
-    align-items: flex-start;
+    padding: 0 14px;
   }
 
-  .agent-dock-summary {
-    flex: 1 1 100%;
-    order: 3;
-    align-items: flex-start;
-    text-align: left;
-  }
-
-  .agent-dock-toggle {
-    order: 2;
-    margin-left: auto;
-  }
-
-  .agent-dock-last-action {
-    max-width: 100%;
-  }
-
-  /* Reduce padding on mobile */
-  .agent-dock-message {
-    padding: var(--space-2);
-  }
-
-  .agent-dock-transcript {
-    padding: var(--space-3);
-    gap: var(--space-2);
-  }
-
-  .agent-dock-composer-area {
-    padding: var(--space-3);
-  }
-
-  .agent-dock-actions {
-    padding: var(--space-2) var(--space-3);
-    padding-bottom: calc(var(--space-2) + env(safe-area-inset-bottom));
-  }
-
-  /* Stack actions vertically on very small screens */
-  @media (max-width: 480px) {
-    .agent-dock-actions {
-      flex-direction: column;
-      width: 100%;
-    }
-
-    .agent-dock-actions .btn-secondary {
-      margin-left: 0;
-      width: 100%;
-    }
-
-    .agent-dock-input {
-      padding: var(--space-2);
-      font-size: var(--font-size-xs);
-    }
-
-    .agent-dock-composer {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
-    .agent-dock-send-btn {
-      width: 100%;
-    }
+  .agent-dock-menu {
+    /* On mobile the menu should open upward, keep it within screen */
+    right: 0;
+    left: auto;
+    min-width: 180px;
   }
 }
 
-/* Scrollbar styling */
-.agent-dock-transcript::-webkit-scrollbar {
-  width: 6px;
-}
-
-.agent-dock-transcript::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.agent-dock-transcript::-webkit-scrollbar-thumb {
-  background: var(--color-border-strong);
-  border-radius: 3px;
-}
-
-.agent-dock-transcript::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-tertiary);
-}
-
-.agent-dock-message-content::-webkit-scrollbar {
-  width: 4px;
-}
-
-.agent-dock-message-content::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.agent-dock-message-content::-webkit-scrollbar-thumb {
-  background: rgba(75, 85, 99, 0.3);
-  border-radius: 2px;
-}
-
-/* Animation keyframes */
+/* ──────────────────────────────────────────
+   Animations
+   ────────────────────────────────────────── */
 @keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+  to { transform: rotate(360deg); }
 }
 
-/* Reduced motion */
+/* ──────────────────────────────────────────
+   Reduced motion
+   ────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
-
   .agent-dock,
-  .agent-dock-message {
+  .agent-dock-message,
+  .agent-dock-dot,
+  .agent-dock-chevron svg {
     animation: none;
     transition: none;
   }

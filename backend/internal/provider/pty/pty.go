@@ -47,6 +47,7 @@ type PTYProvider struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
+	started         bool
 	terminalEvents  chan terminal.Event
 	terminalUpdates *terminal.UpdateBroadcaster
 
@@ -62,11 +63,30 @@ func NewPTYProvider(sessionID string) *PTYProvider {
 	}
 }
 
-func (p *PTYProvider) Start(ctx context.Context, config session.Config) error {
+// SendInput implements session.Session.  On the first call it starts the PTY
+// process and writes the initial input.  On subsequent calls it writes input
+// directly to the terminal.
+func (p *PTYProvider) SendInput(ctx context.Context, config session.Config, input string) (<-chan domain.Event, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	if !p.started {
+		if err := p.start(config); err != nil {
+			p.mu.Unlock()
+			return nil, err
+		}
+	}
+	term := p.terminal
+	p.mu.Unlock()
 
-	if p.state.GetState() != session.StateCreated {
+	if term != nil && input != "" {
+		if _, err := term.Write([]byte(input)); err != nil {
+			return nil, err
+		}
+	}
+	return p.events.Events(), nil
+}
+
+func (p *PTYProvider) start(config session.Config) error {
+	if p.started {
 		return ErrAlreadyStarted
 	}
 
@@ -132,6 +152,7 @@ func (p *PTYProvider) Start(ctx context.Context, config session.Config) error {
 	p.outputLog = outputLog
 	p.state.SetState(session.StateRunning)
 	// Already emitted idle->running at startup
+	p.started = true
 
 	p.wg.Add(1)
 	go p.processTerminalEvents()
@@ -139,7 +160,20 @@ func (p *PTYProvider) Start(ctx context.Context, config session.Config) error {
 		p.events.EmitMetadata("extractor_warning", map[string]any{"error": err.Error()})
 	}
 
+	// Close the events channel when the process exits.
+	p.wg.Add(1)
+	go p.waitForExit()
+
 	return nil
+}
+
+// waitForExit waits for the PTY command to terminate and closes the event channel.
+func (p *PTYProvider) waitForExit() {
+	defer p.wg.Done()
+	if p.cmd != nil {
+		_ = p.cmd.Wait()
+	}
+	p.events.Close()
 }
 
 func resolvePTYCommand(config session.Config) (string, []string, error) {
@@ -375,21 +409,6 @@ func (p *PTYProvider) Kill() error {
 
 func (p *PTYProvider) Status() session.Status {
 	return p.state.Status()
-}
-
-func (p *PTYProvider) Events() <-chan domain.Event {
-	return p.events.Events()
-}
-
-func (p *PTYProvider) SendInput(ctx context.Context, input string) error {
-	p.mu.RLock()
-	terminal := p.terminal
-	p.mu.RUnlock()
-	if terminal == nil {
-		return ErrNotStarted
-	}
-	_, err := terminal.Write([]byte(input))
-	return err
 }
 
 func (p *PTYProvider) TerminalSnapshot() (terminal.Snapshot, error) {

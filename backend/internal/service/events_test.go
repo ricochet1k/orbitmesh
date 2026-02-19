@@ -159,6 +159,94 @@ func TestEventBroadcaster_ConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
+func TestEventBroadcaster_SubscribeWithReplay(t *testing.T) {
+	t.Run("no history returns empty replay", func(t *testing.T) {
+		b := NewEventBroadcaster(10)
+		sub, replay := b.SubscribeWithReplay("sub1", "session1", 0)
+		if sub == nil {
+			t.Fatal("expected non-nil subscriber")
+		}
+		if len(replay) != 0 {
+			t.Errorf("expected empty replay, got %d events", len(replay))
+		}
+		if b.SubscriberCount() != 1 {
+			t.Errorf("expected 1 subscriber, got %d", b.SubscriberCount())
+		}
+	})
+
+	t.Run("replays events after lastEventID", func(t *testing.T) {
+		b := NewEventBroadcaster(10)
+
+		// Broadcast three events without any subscriber
+		e1 := domain.NewOutputEvent("session1", "first")
+		e2 := domain.NewOutputEvent("session1", "second")
+		e3 := domain.NewOutputEvent("session1", "third")
+		b.Broadcast(e1)
+		b.Broadcast(e2)
+		b.Broadcast(e3)
+
+		// Subscribe with lastEventID=1, so we should replay events 2 and 3
+		sub, replay := b.SubscribeWithReplay("sub1", "session1", 1)
+		if sub == nil {
+			t.Fatal("expected non-nil subscriber")
+		}
+		if len(replay) != 2 {
+			t.Fatalf("expected 2 replayed events, got %d", len(replay))
+		}
+		if replay[0].ID != 2 || replay[1].ID != 3 {
+			t.Errorf("unexpected replayed event IDs: %d, %d", replay[0].ID, replay[1].ID)
+		}
+	})
+
+	t.Run("lastEventID at current returns no replay", func(t *testing.T) {
+		b := NewEventBroadcaster(10)
+
+		e := domain.NewOutputEvent("session1", "only")
+		b.Broadcast(e)
+
+		// lastEventID >= nextID means nothing to replay
+		sub, replay := b.SubscribeWithReplay("sub1", "session1", 999)
+		if sub == nil {
+			t.Fatal("expected non-nil subscriber")
+		}
+		if len(replay) != 0 {
+			t.Errorf("expected empty replay, got %d events", len(replay))
+		}
+	})
+
+	t.Run("replays only matching session events", func(t *testing.T) {
+		b := NewEventBroadcaster(10)
+
+		b.Broadcast(domain.NewOutputEvent("session1", "s1 event"))
+		b.Broadcast(domain.NewOutputEvent("session2", "s2 event"))
+		b.Broadcast(domain.NewOutputEvent("session1", "s1 event 2"))
+
+		_, replay := b.SubscribeWithReplay("sub1", "session1", 0)
+		for _, ev := range replay {
+			if ev.SessionID != "session1" {
+				t.Errorf("got event for wrong session: %s", ev.SessionID)
+			}
+		}
+		if len(replay) != 2 {
+			t.Errorf("expected 2 session1 events, got %d", len(replay))
+		}
+	})
+
+	t.Run("history capped at buffer size", func(t *testing.T) {
+		b := NewEventBroadcaster(3)
+
+		for i := 0; i < 5; i++ {
+			b.Broadcast(domain.NewOutputEvent("session1", "event"))
+		}
+
+		_, replay := b.SubscribeWithReplay("sub1", "session1", 0)
+		// historySize is 3, so only last 3 events are kept
+		if len(replay) != 3 {
+			t.Errorf("expected 3 replayed events (history cap), got %d", len(replay))
+		}
+	})
+}
+
 func TestEventBroadcaster_SessionSubscriberCount(t *testing.T) {
 	b := NewEventBroadcaster(10)
 

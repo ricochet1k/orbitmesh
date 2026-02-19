@@ -52,6 +52,7 @@ vi.mock("../api/client", () => ({
   apiClient: {
     getSession: vi.fn(),
     getPermissions: vi.fn(),
+    listProviders: vi.fn(),
     listSessions: vi.fn(),
     createDockSession: vi.fn(),
     pollDockMcp: vi.fn(),
@@ -82,6 +83,7 @@ describe("AgentDock", () => {
       body: { cancel: vi.fn().mockResolvedValue(undefined) },
     }));
     (apiClient.listSessions as any).mockResolvedValue({ sessions: [] });
+    (apiClient.listProviders as any).mockResolvedValue({ providers: [] });
     (apiClient.createDockSession as any).mockResolvedValue({
       id: "dock-session-1",
       provider_type: "adk",
@@ -150,13 +152,12 @@ describe("AgentDock", () => {
 
     screen.getByTestId("agent-dock-toggle").click();
 
-    const actionButtons = screen.getAllByTitle(
-      "Bulk session controls are not permitted for your role.",
-    ) as HTMLButtonElement[];
+    // Open the hamburger menu to find the cancel session button
+    screen.getByTestId("agent-dock-menu").click();
 
-    expect(actionButtons.length).toBe(1);
-    actionButtons.forEach((button) => {
-      expect(button.disabled).toBe(true);
+    await waitFor(() => {
+      const cancelButton = screen.getByText("Cancel session") as HTMLButtonElement;
+      expect(cancelButton.disabled).toBe(true);
     });
   });
 
@@ -189,8 +190,14 @@ describe("AgentDock", () => {
 
     screen.getByTestId("agent-dock-toggle").click();
 
-    const cancelButton = screen.getByTitle("Cancel the running session");
-    cancelButton.click();
+    // Open the hamburger menu and click Cancel session
+    screen.getByTestId("agent-dock-menu").click();
+
+    await waitFor(() => {
+      expect(screen.getByText("Cancel session")).toBeDefined();
+    });
+
+    (screen.getByText("Cancel session") as HTMLButtonElement).click();
 
     await waitFor(() => {
       expect(screen.getByText("Cancel failed")).toBeDefined();
@@ -296,8 +303,10 @@ describe("AgentDock", () => {
     screen.getByTestId("agent-dock-toggle").click();
     eventSources[0]?.emit("error");
 
+    // Errors are now surfaced as inline text in the header, not a full error panel
     await waitFor(() => {
-      expect(screen.getByTestId("agent-dock-error")).toBeDefined();
+      const dock = screen.getByTestId("agent-dock");
+      expect(dock.textContent).toMatch(/Connection lost|Stream endpoint|disconnected/i);
     });
   });
 });

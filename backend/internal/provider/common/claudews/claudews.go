@@ -66,6 +66,8 @@ type ClaudeWSProvider struct {
 	claudeSessionID string
 
 	connReady chan struct{} // closed when wsConn is established
+
+	started bool
 }
 
 // NewClaudeWSProvider creates a new WebSocket-mode Claude provider.
@@ -83,12 +85,29 @@ func NewClaudeWSProvider(sessionID string, permHandler PermissionHandler) *Claud
 	return p
 }
 
-// Start launches the WebSocket server and the Claude subprocess.
-func (p *ClaudeWSProvider) Start(ctx context.Context, config session.Config) error {
+// SendInput implements session.Session.  On the first call it starts the
+// WebSocket server, launches the Claude subprocess, and sends the initial
+// prompt.  On subsequent calls it queues input to the running agent.
+func (p *ClaudeWSProvider) SendInput(ctx context.Context, config session.Config, input string) (<-chan domain.Event, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	if !p.started {
+		if err := p.start(ctx, config); err != nil {
+			p.mu.Unlock()
+			return nil, err
+		}
+	}
+	p.mu.Unlock()
 
-	if p.state.GetState() != session.StateCreated {
+	if err := p.inputBuffer.Send(ctx, input); err != nil {
+		return nil, err
+	}
+	return p.events.Events(), nil
+}
+
+// start launches the WebSocket server and the Claude subprocess.
+// Caller must hold p.mu (write lock).
+func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) error {
+	if p.started {
 		return ErrAlreadyStarted
 	}
 	if p.circuitBreaker.IsInCooldown() {
@@ -96,7 +115,7 @@ func (p *ClaudeWSProvider) Start(ctx context.Context, config session.Config) err
 	}
 
 	p.config = config
-	p.ctx, p.cancel = context.WithCancel(context.Background())
+	p.ctx, p.cancel = context.WithCancel(context.WithoutCancel(ctx))
 
 	p.state.SetState(session.StateStarting)
 	p.events.EmitStatusChange(domain.SessionStateIdle, domain.SessionStateRunning, "starting claudews provider")
@@ -160,6 +179,7 @@ func (p *ClaudeWSProvider) Start(ctx context.Context, config session.Config) err
 
 	p.state.SetState(session.StateRunning)
 	// Already emitted idle->running at startup
+	p.started = true
 
 	return nil
 }
@@ -241,23 +261,6 @@ func (p *ClaudeWSProvider) Interrupt() error {
 // Status returns the current provider status.
 func (p *ClaudeWSProvider) Status() session.Status {
 	return p.state.Status()
-}
-
-// Events returns the event stream channel.
-func (p *ClaudeWSProvider) Events() <-chan domain.Event {
-	return p.events.Events()
-}
-
-// SendInput queues a user prompt for delivery over the WebSocket.
-func (p *ClaudeWSProvider) SendInput(ctx context.Context, input string) error {
-	p.mu.RLock()
-	st := p.state.GetState()
-	p.mu.RUnlock()
-
-	if st != session.StateRunning {
-		return ErrNotStarted
-	}
-	return p.inputBuffer.Send(ctx, input)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

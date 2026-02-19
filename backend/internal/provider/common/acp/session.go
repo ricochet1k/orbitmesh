@@ -59,6 +59,9 @@ type Session struct {
 
 	// Message history for snapshot persistence
 	messageHistory []SnapshotMessage
+
+	// started is true once the ACP process has been launched successfully.
+	started bool
 }
 
 // SnapshotMessage represents a message in the conversation history.
@@ -85,12 +88,29 @@ func NewSession(sessionID string, providerConfig Config, sessionConfig session.C
 	}, nil
 }
 
-// Start initializes the ACP agent process and establishes the connection.
-func (s *Session) Start(ctx context.Context, config session.Config) error {
+// SendInput implements session.Session.  On the first call it starts the ACP
+// process, establishes the connection, and sends the initial prompt.  On
+// subsequent calls it queues input to the running agent.
+func (s *Session) SendInput(ctx context.Context, config session.Config, input string) (<-chan domain.Event, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	if !s.started {
+		if err := s.start(config); err != nil {
+			s.mu.Unlock()
+			return nil, err
+		}
+	}
+	s.mu.Unlock()
 
-	if s.state.GetState() != session.StateCreated {
+	if err := s.inputBuffer.Send(ctx, input); err != nil {
+		return nil, err
+	}
+	return s.events.Events(), nil
+}
+
+// start initializes the ACP agent process and establishes the connection.
+// Caller must hold s.mu (write lock).
+func (s *Session) start(config session.Config) error {
+	if s.started {
 		return ErrAlreadyStarted
 	}
 
@@ -196,7 +216,23 @@ func (s *Session) Start(ctx context.Context, config session.Config) error {
 		}
 	}
 
+	s.started = true
+
+	// Close the events channel when the process exits so handleEvents sees EOF.
+	s.wg.Add(1)
+	go s.waitForExit()
+
 	return nil
+}
+
+// waitForExit waits for the ACP process to terminate and then closes the event
+// channel so the executor's handleEvents goroutine exits cleanly.
+func (s *Session) waitForExit() {
+	defer s.wg.Done()
+	if s.processMgr != nil {
+		_ = s.processMgr.Wait()
+	}
+	s.events.Close()
 }
 
 // initializeConnection sends the Initialize request to the ACP agent.
@@ -245,6 +281,10 @@ func (s *Session) createACPSession() error {
 		})
 	}
 
+	// McpServers must be a non-nil slice (ACP SDK validation requires it).
+	if mcpServers == nil {
+		mcpServers = []acpsdk.McpServer{}
+	}
 	newSessionReq := acpsdk.NewSessionRequest{
 		Cwd:        cwd,
 		McpServers: mcpServers,
@@ -333,25 +373,6 @@ func (s *Session) Kill() error {
 // Status returns the current status of the session.
 func (s *Session) Status() session.Status {
 	return s.state.Status()
-}
-
-// Events returns the event stream channel.
-func (s *Session) Events() <-chan domain.Event {
-	return s.events.Events()
-}
-
-// SendInput sends input to the ACP agent.
-func (s *Session) SendInput(ctx context.Context, input string) error {
-	s.mu.RLock()
-	state := s.state.GetState()
-	s.mu.RUnlock()
-
-	if state != session.StateRunning {
-		return ErrNotStarted
-	}
-
-	// Send to input buffer (handles pause/resume automatically)
-	return s.inputBuffer.Send(ctx, input)
 }
 
 // processStderr reads error output from the agent's stderr.

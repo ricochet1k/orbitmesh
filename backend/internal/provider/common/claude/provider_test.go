@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
 	"github.com/ricochet1k/orbitmesh/internal/session"
@@ -48,19 +47,12 @@ func TestClaudeCodeProvider_Status(t *testing.T) {
 	}
 }
 
-func TestClaudeCodeProvider_Events(t *testing.T) {
+func TestClaudeCodeProvider_EventsChannel(t *testing.T) {
+	// Verify that the internal events adapter is non-nil (events are
+	// returned from SendInput once the provider is started).
 	provider := NewClaudeCodeProvider("test-session")
-
-	events := provider.Events()
-	if events == nil {
-		t.Error("Events() returned nil channel")
-	}
-
-	// Should be able to receive from the channel (it exists)
-	select {
-	case <-events:
-	case <-time.After(10 * time.Millisecond):
-		// Expected - no events yet
+	if provider.events == nil {
+		t.Error("internal events adapter is nil")
 	}
 }
 

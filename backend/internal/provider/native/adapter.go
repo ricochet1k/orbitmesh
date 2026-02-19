@@ -12,6 +12,7 @@ type EventAdapter struct {
 	sessionID string
 	events    chan domain.Event
 	done      chan struct{}
+	mu        sync.Mutex
 	closeOnce sync.Once
 }
 
@@ -51,6 +52,9 @@ func (a *EventAdapter) EmitMetadata(key string, value any) {
 }
 
 func (a *EventAdapter) emit(event domain.Event) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
 	select {
 	case <-a.done:
 		return
@@ -58,8 +62,6 @@ func (a *EventAdapter) emit(event domain.Event) {
 	}
 
 	select {
-	case <-a.done:
-		return
 	case a.events <- event:
 	default:
 	}
@@ -67,7 +69,13 @@ func (a *EventAdapter) emit(event domain.Event) {
 
 func (a *EventAdapter) Close() {
 	a.closeOnce.Do(func() {
+		a.mu.Lock()
+		defer a.mu.Unlock()
 		close(a.done)
+		// Close the events channel so readers see EOF.
+		// The mutex ensures no concurrent emit() is between its done-check and
+		// the channel send when we close here.
+		close(a.events)
 	})
 }
 

@@ -38,20 +38,21 @@ type messageData struct {
 }
 
 type sessionData struct {
-	ID           string           `json:"id"`
-	ProviderType string           `json:"provider_type"`
-	Kind         string           `json:"kind,omitempty"`
-	Title        string           `json:"title,omitempty"`
-	State        string           `json:"state"`
-	WorkingDir   string           `json:"working_dir"`
-	ProjectID    string           `json:"project_id,omitempty"`
-	CreatedAt    time.Time        `json:"created_at"`
-	UpdatedAt    time.Time        `json:"updated_at"`
-	CurrentTask  string           `json:"current_task,omitempty"`
-	Output       string           `json:"output,omitempty"`
-	ErrorMessage string           `json:"error_message,omitempty"`
-	Transitions  []transitionData `json:"transitions"`
-	Messages     []messageData    `json:"messages,omitempty"`
+	ID             string           `json:"id"`
+	ProviderType   string           `json:"provider_type"`
+	Kind           string           `json:"kind,omitempty"`
+	Title          string           `json:"title,omitempty"`
+	State          string           `json:"state"`
+	WorkingDir     string           `json:"working_dir"`
+	ProjectID      string           `json:"project_id,omitempty"`
+	ProviderCustom map[string]any   `json:"provider_custom,omitempty"`
+	CreatedAt      time.Time        `json:"created_at"`
+	UpdatedAt      time.Time        `json:"updated_at"`
+	CurrentTask    string           `json:"current_task,omitempty"`
+	Output         string           `json:"output,omitempty"`
+	ErrorMessage   string           `json:"error_message,omitempty"`
+	Transitions    []transitionData `json:"transitions"`
+	Messages       []messageData    `json:"messages,omitempty"`
 }
 
 type transitionData struct {
@@ -380,20 +381,21 @@ func snapshotToData(snap domain.SessionSnapshot) *sessionData {
 	}
 
 	return &sessionData{
-		ID:           snap.ID,
-		ProviderType: snap.ProviderType,
-		Kind:         snap.Kind,
-		Title:        snap.Title,
-		State:        snap.State.String(),
-		WorkingDir:   snap.WorkingDir,
-		ProjectID:    snap.ProjectID,
-		CreatedAt:    snap.CreatedAt,
-		UpdatedAt:    snap.UpdatedAt,
-		CurrentTask:  snap.CurrentTask,
-		Output:       snap.Output,
-		ErrorMessage: snap.ErrorMessage,
-		Transitions:  transitions,
-		Messages:     messages,
+		ID:             snap.ID,
+		ProviderType:   snap.ProviderType,
+		Kind:           snap.Kind,
+		Title:          snap.Title,
+		State:          snap.State.String(),
+		WorkingDir:     snap.WorkingDir,
+		ProjectID:      snap.ProjectID,
+		ProviderCustom: snap.ProviderCustom,
+		CreatedAt:      snap.CreatedAt,
+		UpdatedAt:      snap.UpdatedAt,
+		CurrentTask:    snap.CurrentTask,
+		Output:         snap.Output,
+		ErrorMessage:   snap.ErrorMessage,
+		Transitions:    transitions,
+		Messages:       messages,
 	}
 }
 
@@ -438,20 +440,21 @@ func dataToSession(data *sessionData) (*domain.Session, error) {
 	}
 
 	return &domain.Session{
-		ID:           data.ID,
-		ProviderType: data.ProviderType,
-		Kind:         data.Kind,
-		Title:        data.Title,
-		State:        state,
-		WorkingDir:   data.WorkingDir,
-		ProjectID:    data.ProjectID,
-		CreatedAt:    data.CreatedAt,
-		UpdatedAt:    data.UpdatedAt,
-		CurrentTask:  data.CurrentTask,
-		Output:       data.Output,
-		ErrorMessage: data.ErrorMessage,
-		Transitions:  transitions,
-		Messages:     messages,
+		ID:             data.ID,
+		ProviderType:   data.ProviderType,
+		Kind:           data.Kind,
+		Title:          data.Title,
+		State:          state,
+		WorkingDir:     data.WorkingDir,
+		ProjectID:      data.ProjectID,
+		ProviderCustom: data.ProviderCustom,
+		CreatedAt:      data.CreatedAt,
+		UpdatedAt:      data.UpdatedAt,
+		CurrentTask:    data.CurrentTask,
+		Output:         data.Output,
+		ErrorMessage:   data.ErrorMessage,
+		Transitions:    transitions,
+		Messages:       messages,
 	}, nil
 }
 

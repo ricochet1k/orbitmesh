@@ -76,7 +76,12 @@ export default function SessionsTable(props: SessionsTableProps) {
                   const relativeAge = formatRelativeAge(session)
                   return (
                     <tr data-session-id={session.id}>
-                      <td>{session.id.substring(0, 8)}...</td>
+                      <td>
+                        {session.id.substring(0, 8)}...
+                        <Show when={session.session_kind === "dock"}>
+                          <span class="dock-badge" title="Agent Dock session">dock</span>
+                        </Show>
+                      </td>
                       <td>{session.provider_type}</td>
                       <td>
                         <span class={`state-badge ${session.state}`}>

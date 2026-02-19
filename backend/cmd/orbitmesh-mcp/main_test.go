@@ -211,6 +211,50 @@ func TestAddTaskValidation(t *testing.T) {
 	}
 }
 
+func TestIsValidTaskID(t *testing.T) {
+	valid := []struct {
+		input string
+		desc  string
+	}{
+		{"T1a2b3c", "typical short ID"},
+		{"Taj3cp2", "mixed alpha+digit"},
+		{"T1a2b3c4d5", "longer ID"},
+		{"T1a2b3c,", "trailing comma stripped"},
+		{"T1a2b3c.", "trailing period stripped"},
+		{"T1a2b3c:", "trailing colon stripped"},
+		{"T1a2b3c;", "trailing semicolon stripped"},
+		{"T1ABCDE", "uppercase after T"},
+		{"T12", "minimal length (3 chars)"},
+	}
+	for _, tt := range valid {
+		if !isValidTaskID(tt.input) {
+			t.Errorf("expected %q (%s) to be valid", tt.input, tt.desc)
+		}
+	}
+
+	invalid := []struct {
+		input string
+		desc  string
+	}{
+		{"", "empty string"},
+		{"T", "too short (1 char)"},
+		{"Ta", "too short (2 chars), no digit"},
+		{"Task", "word starting with T, no digit"},
+		{"The", "word starting with T, no digit"},
+		{"1abc", "doesn't start with T"},
+		{"abc123", "no T prefix"},
+		{"T1-2", "hyphen not allowed in middle"},
+		{"T1 2", "space not allowed"},
+		{"T1a2b3c4d5e6f7g8h9i0j", "too long (>20 chars)"},
+		{"Tabcdefg", "all alpha after T, no digit"},
+	}
+	for _, tt := range invalid {
+		if isValidTaskID(tt.input) {
+			t.Errorf("expected %q (%s) to be invalid", tt.input, tt.desc)
+		}
+	}
+}
+
 func TestClaimTaskValidation(t *testing.T) {
 	tool := NewStrandTool()
 	ctx := context.Background()

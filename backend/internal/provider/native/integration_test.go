@@ -37,7 +37,7 @@ func TestProcessEvent_PartialContent(t *testing.T) {
 	p.processEvent(event)
 
 	select {
-	case ev := <-p.Events():
+	case ev := <-p.events.Events():
 		if ev.Type != domain.EventTypeOutput {
 			t.Errorf("expected output event, got %v", ev.Type)
 		}
@@ -72,7 +72,7 @@ func TestProcessEvent_TurnComplete(t *testing.T) {
 	p.processEvent(event)
 
 	select {
-	case ev := <-p.Events():
+	case ev := <-p.events.Events():
 		if ev.Type != domain.EventTypeMetadata {
 			t.Errorf("expected metadata event, got %v", ev.Type)
 		}
@@ -107,7 +107,7 @@ func TestProcessEvent_StateDelta(t *testing.T) {
 	p.processEvent(event)
 
 	select {
-	case ev := <-p.Events():
+	case ev := <-p.events.Events():
 		if ev.Type != domain.EventTypeMetadata {
 			t.Errorf("expected metadata event, got %v", ev.Type)
 		}
@@ -204,7 +204,7 @@ func TestAfterModelCallback_Error(t *testing.T) {
 	}
 
 	select {
-	case ev := <-p.Events():
+	case ev := <-p.events.Events():
 		if ev.Type != domain.EventTypeError {
 			t.Errorf("expected error event, got %v", ev.Type)
 		}
@@ -322,7 +322,7 @@ func TestConcurrentSessionLifecycle(t *testing.T) {
 			p.runCtx, p.runCancel = context.WithCancel(p.ctx)
 
 			for j := 0; j < 3; j++ {
-				
+
 			}
 
 			if err := p.Stop(context.Background()); err != nil {
@@ -367,12 +367,12 @@ func TestConcurrentEventEmission(t *testing.T) {
 loop:
 	for {
 		select {
-		case <-p.Events():
+		case <-p.events.Events():
 			received++
 		case <-done:
 			for {
 				select {
-				case <-p.Events():
+				case <-p.events.Events():
 					received++
 				default:
 					break loop
@@ -438,7 +438,7 @@ func TestFullEventFlow(t *testing.T) {
 loop:
 	for {
 		select {
-		case ev := <-p.Events():
+		case ev := <-p.events.Events():
 			eventTypes[ev.Type]++
 		case <-timeout:
 			break loop
@@ -489,8 +489,6 @@ func TestLoadTest_ConcurrentAgents(t *testing.T) {
 				p.events.EmitOutput("output")
 				p.events.EmitMetric(100, 50, 1)
 			}
-
-			
 
 			if err := p.Stop(context.Background()); err != nil {
 				errors <- err
@@ -593,7 +591,10 @@ func TestProcessEvent_MultipleParts(t *testing.T) {
 loop:
 	for {
 		select {
-		case <-p.Events():
+		case _, ok := <-p.events.Events():
+			if !ok {
+				break loop
+			}
 			count++
 		case <-timeout:
 			break loop
@@ -775,7 +776,10 @@ func TestStartWithMCPServers(t *testing.T) {
 		},
 	}
 
-	err := p.Start(context.Background(), cfg)
+	p.mu.Lock()
+
+	err := p.start(cfg)
+	p.mu.Unlock()
 	if err != nil {
 		t.Logf("Start failed as expected: %v", err)
 	}
@@ -790,7 +794,10 @@ func TestStartBranchAPIKeyFromEnvironment(t *testing.T) {
 		},
 	}
 
-	err := p.Start(context.Background(), cfg)
+	p.mu.Lock()
+
+	err := p.start(cfg)
+	p.mu.Unlock()
 
 	if err != nil {
 		t.Logf("Start error (expected for invalid key): %v", err)

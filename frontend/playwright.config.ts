@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
+import { reservePort } from "./tests/helpers/free-port.js";
 
-const port = 4173;
+const port = reservePort("UI_MOCK_PORT", 4173);
 
 export default defineConfig({
   testDir: "tests/ui",

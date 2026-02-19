@@ -1,4 +1,4 @@
-import { createSignal, Show, createEffect } from "solid-js"
+import { createSignal, Show, onMount } from "solid-js"
 import type { Accessor } from "solid-js"
 import type { SessionState, ProviderConfigResponse } from "../types/api"
 
@@ -29,13 +29,12 @@ export default function SessionComposer(props: SessionComposerProps) {
   const [selectedProviderId, setSelectedProviderId] = createSignal<string | undefined>(undefined)
   let inputRef: HTMLTextAreaElement | undefined
 
-  // Initialize provider selection after component mounts
-  createEffect(() => {
-    if (!selectedProviderId()) {
-      const preferred = props.defaultProviderId
-      const stored = localStorage.getItem("lastUsedProviderId")
-      setSelectedProviderId(preferred || stored || undefined)
-    }
+  // Initialize provider selection once on mount; not reactive — the default only
+  // applies at construction time and must not re-run when selectedProviderId changes.
+  onMount(() => {
+    const preferred = props.defaultProviderId
+    const stored = localStorage.getItem("lastUsedProviderId")
+    setSelectedProviderId(preferred || stored || undefined)
   })
 
   const placeholder = () => {

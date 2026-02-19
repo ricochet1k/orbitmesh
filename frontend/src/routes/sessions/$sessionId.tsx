@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/solid-router'
-import { createResource, createSignal, createEffect, Show } from 'solid-js'
+import { createResource, createSignal, createEffect } from 'solid-js'
 import { apiClient } from '../../api/client'
 import { listProviders } from '../../api/providers'
 import type { SessionState } from '../../types/api'
@@ -241,18 +241,53 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
 
       <main class="session-layout">
         <section class="session-panel">
-          <SessionTranscript
-            messages={transcript.filteredMessages}
-            filter={transcript.filter}
-            setFilter={transcript.setFilter}
-            autoScroll={transcript.autoScroll}
-            setAutoScroll={transcript.setAutoScroll}
-            activityCursor={transcript.activityCursor}
-            activityHistoryLoading={transcript.activityHistoryLoading}
-            onLoadEarlier={transcript.handleLoadEarlier}
-            onRef={(el) => { transcriptRef = el }}
-            onScroll={handleScroll}
-          />
+
+          <div class="session-transcript-wrap">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">Live transcript</p>
+                <h2>Activity Feed</h2>
+              </div>
+              <div class="panel-tools">
+                <button
+                  type="button"
+                  class="neutral"
+                  onClick={transcript.handleLoadEarlier}
+                  disabled={!transcript.activityCursor() || transcript.activityHistoryLoading()}
+                  data-testid="session-load-earlier"
+                >
+                  {transcript.activityHistoryLoading() ? "Loading…" : "Load earlier"}
+                </button>
+                <input
+                  type="search"
+                  placeholder="Search transcript"
+                  value={transcript.filter()}
+                  onInput={(e) => transcript.setFilter(e.currentTarget.value)}
+                />
+                <button
+                  type="button"
+                  class="neutral"
+                  onClick={() => transcript.setAutoScroll(true)}
+                  classList={{ active: transcript.autoScroll() }}
+                >
+                  {transcript.autoScroll() ? "Auto-scroll on" : "Auto-scroll off"}
+                </button>
+              </div>
+            </div>
+
+            <SessionTranscript
+              messages={transcript.filteredMessages}
+              filter={transcript.filter}
+              setFilter={transcript.setFilter}
+              autoScroll={transcript.autoScroll}
+              setAutoScroll={transcript.setAutoScroll}
+              activityCursor={transcript.activityCursor}
+              activityHistoryLoading={transcript.activityHistoryLoading}
+              onLoadEarlier={transcript.handleLoadEarlier}
+              onRef={(el) => { transcriptRef = el }}
+              onScroll={handleScroll}
+            />
+          </div>
 
           <SessionComposer
             sessionState={sessionState}
@@ -265,7 +300,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
             providers={() => providers()?.providers ?? []}
             defaultProviderId={session()?.preferred_provider_id}
           />
-        </section>
+        </section >
 
         <div class="session-side-panels">
           <SessionMetrics
@@ -277,8 +312,8 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
 
           <SessionTerminals sessionId={sessionId} />
         </div>
-      </main>
-    </div>
+      </main >
+    </div >
   )
 }
 

@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
+import { reservePort } from "./tests/helpers/free-port.js";
 
-const port = Number(process.env.E2E_FRONTEND_PORT ?? "4173");
+const port = reservePort("E2E_FRONTEND_PORT", 4174);
 
 export default defineConfig({
   testDir: "tests/e2e",

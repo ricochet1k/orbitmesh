@@ -31,7 +31,8 @@ func main() {
 	sessionID := "test-session-1"
 	lineNum := 0
 
-	fmt.Println("=== Testing OrbitMesh Claude Provider Parser ===\n")
+	fmt.Println("=== Testing OrbitMesh Claude Provider Parser ===")
+	fmt.Println()
 
 	for scanner.Scan() {
 		lineNum++

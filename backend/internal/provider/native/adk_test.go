@@ -48,7 +48,10 @@ func TestNewADKProvider_DefaultModel(t *testing.T) {
 func TestADKProvider_StartWithoutAPIKey(t *testing.T) {
 	p := NewADKSession("test-session", ADKConfig{})
 
-	err := p.Start(context.Background(), session.Config{})
+	p.mu.Lock()
+
+	err := p.start(session.Config{})
+	p.mu.Unlock()
 
 	if err != ErrAPIKey {
 		t.Errorf("expected ErrAPIKey, got %v", err)
@@ -65,9 +68,14 @@ func TestADKProvider_StartAlreadyStarted(t *testing.T) {
 		APIKey: "test-key",
 	})
 
-	p.state.SetState(session.StateRunning)
+	// Mark as already started (the flag start() checks).
+	p.mu.Lock()
+	p.started = true
+	p.mu.Unlock()
 
-	err := p.Start(context.Background(), session.Config{})
+	p.mu.Lock()
+	err := p.start(session.Config{})
+	p.mu.Unlock()
 
 	if err != ErrAlreadyStarted {
 		t.Errorf("expected ErrAlreadyStarted, got %v", err)
@@ -139,7 +147,7 @@ func TestADKProvider_Events(t *testing.T) {
 		APIKey: "test-key",
 	})
 
-	events := p.Events()
+	events := p.events.Events()
 	if events == nil {
 		t.Error("expected events channel to be non-nil")
 	}
@@ -248,11 +256,14 @@ func TestADKProvider_ImplementsSessionInterface(t *testing.T) {
 func TestADKProvider_StartWithAPIKeyFromEnv(t *testing.T) {
 	p := NewADKSession("test-session", ADKConfig{})
 
-	err := p.Start(context.Background(), session.Config{
+	p.mu.Lock()
+
+	err := p.start(session.Config{
 		Environment: map[string]string{
 			"GOOGLE_API_KEY": "env-api-key",
 		},
 	})
+	p.mu.Unlock()
 
 	if err == nil || err == ErrAPIKey {
 		return
@@ -425,7 +436,7 @@ func TestADKProvider_EventsChannel(t *testing.T) {
 		APIKey: "test-key",
 	})
 
-	ch := p.Events()
+	ch := p.events.Events()
 	if ch == nil {
 		t.Error("events channel should not be nil")
 	}
@@ -550,7 +561,7 @@ func TestADKProvider_StopFromDifferentStates(t *testing.T) {
 		initialState session.State
 	}{
 		{"from running", session.StateRunning},
-				{"from starting", session.StateStarting},
+		{"from starting", session.StateStarting},
 		{"from error", session.StateError},
 	}
 
@@ -628,7 +639,10 @@ func TestADKProvider_ProviderConfigStored(t *testing.T) {
 		SystemPrompt: "You are a helpful assistant.",
 	}
 
-	err := p.Start(context.Background(), cfg)
+	p.mu.Lock()
+
+	err := p.start(cfg)
+	p.mu.Unlock()
 
 	if err != nil {
 		if p.providerCfg.WorkingDir != cfg.WorkingDir {

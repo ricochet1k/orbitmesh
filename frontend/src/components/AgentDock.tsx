@@ -5,12 +5,13 @@ import {
   createSignal,
   Show,
   untrack,
+  For,
 } from "solid-js"
 
 import { useNavigate } from "@tanstack/solid-router"
 import { apiClient } from "../api/client"
 import type { SessionState } from "../types/api"
-import { dockSessionId } from "../state/agentDock"
+import { clearDockSessionId, dockSessionId } from "../state/agentDock"
 import { TIMEOUTS } from "../constants/timeouts"
 import { useSessionStream } from "../hooks/useSessionStream"
 import { useSessionTranscript } from "../hooks/useSessionTranscript"
@@ -34,6 +35,7 @@ export default function AgentDock(props: AgentDockProps) {
     (id) => (id ? apiClient.getSession(id) : Promise.resolve(null)),
   )
   const [permissions] = createResource(apiClient.getPermissions)
+  const [providers] = createResource(apiClient.listProviders)
 
   const [dockLoadState, setDockLoadState] = createSignal<"empty" | "loading" | "error" | "live">("empty")
   const [dockError, setDockError] = createSignal<string | null>(null)
@@ -47,8 +49,11 @@ export default function AgentDock(props: AgentDockProps) {
   const [composerError, setComposerError] = createSignal<string | null>(null)
   const [composerPending, setComposerPending] = createSignal<string | null>(null)
   const [sessionStateOverride, setSessionStateOverride] = createSignal<SessionState | null>(null)
+  const [menuOpen, setMenuOpen] = createSignal(false)
+  const [selectedProviderId, setSelectedProviderId] = createSignal<string | null>(null)
 
   let transcriptContainerRef: HTMLDivElement | undefined
+  let menuRef: HTMLDivElement | undefined
 
   const { ensureDockSessionId } = useAgentDockSession({
     sessionId,
@@ -64,21 +69,22 @@ export default function AgentDock(props: AgentDockProps) {
   const hasSession = () => Boolean(sessionId())
   const sessionState = () => sessionStateOverride() ?? (session()?.state as SessionState | undefined)
   const isRunning = () => sessionState() === "running"
-  const isActive = () => ["running", "paused"].includes(sessionState() ?? "")
 
   const toggleExpanded = () => setIsExpanded((prev) => !prev)
+  const toggleMenu = () => setMenuOpen((prev) => !prev)
+  const closeMenu = () => setMenuOpen(false)
 
-  const statusLabel = createMemo(() => {
-    if (!hasSession()) return "Idle"
-    if (dockLoadState() === "loading") return "Connecting"
-    if (dockLoadState() === "error") return "Error"
-    if (streamStatus() === "connecting") return "Connecting"
-    if (streamStatus() === "disconnected") return "Disconnected"
-    if (streamStatus() === "reconnecting") return "Reconnecting"
-    const state = session()?.state
-    if (!state) return "Unknown"
-    return state.replace("_", " ")
+  // Close menu when clicking outside
+  createEffect(() => {
+    if (!menuOpen()) return
+    const handler = (e: MouseEvent) => {
+      if (menuRef && !menuRef.contains(e.target as Node)) closeMenu()
+    }
+    document.addEventListener("mousedown", handler)
+    return () => document.removeEventListener("mousedown", handler)
   })
+
+  const hasError = () => dockLoadState() === "error" && Boolean(dockError())
 
   const lastActionLabel = createMemo(() => {
     if (!hasSession()) return "No session"
@@ -112,10 +118,9 @@ export default function AgentDock(props: AgentDockProps) {
   })
 
   // Track when session is confirmed to exist (at least one successful fetch).
-  // This is separate from session.loading so that refetches don't reset stream state.
   const [sessionReady, setSessionReady] = createSignal(false)
 
-  // Session load state management — reacts to resource loading/error but does NOT affect the stream.
+  // Session load state management
   createEffect(() => {
     const activeSessionId = sessionId()
     if (!activeSessionId) {
@@ -128,7 +133,6 @@ export default function AgentDock(props: AgentDockProps) {
     }
 
     if (session.loading) {
-      // Only set loading state if we're not already live (don't interrupt an open stream)
       if (untrack(() => !sessionReady())) {
         setDockLoadState("loading")
         setStreamStatus("connecting")
@@ -137,10 +141,9 @@ export default function AgentDock(props: AgentDockProps) {
     }
 
     if (session.error) {
-      // Only surface resource errors if the stream hasn't started yet
       if (untrack(() => !sessionReady())) {
         setDockLoadState("error")
-        setDockError("Failed to connect to session. Check the full viewer for details.")
+        setDockError("Failed to connect to session.")
         setStreamStatus("error")
       }
       return
@@ -154,15 +157,12 @@ export default function AgentDock(props: AgentDockProps) {
       return
     }
 
-    // Session loaded successfully — mark it ready so the stream can start.
     setSessionReady(true)
   })
 
-  // Stream management — only restarts when the session ID changes.
-  // Does NOT depend on session() or session.loading so refetches don't kill the stream.
+  // Stream management
   createEffect(() => {
     const activeSessionId = sessionId()
-    // Wait for session to be confirmed ready before opening the stream.
     if (!activeSessionId || !sessionReady()) return
 
     setDockLoadState("live")
@@ -174,10 +174,8 @@ export default function AgentDock(props: AgentDockProps) {
       {
         onEvent: (eventType, event) => {
           markStreamActive()
-          // Delegate all transcript event handling to the shared hook
           transcript.handleEvent(eventType, event)
 
-          // Additionally update the "last action" summary label for the dock header
           if (typeof event.data !== "string") return
           try {
             const payload = JSON.parse(event.data)
@@ -201,7 +199,7 @@ export default function AgentDock(props: AgentDockProps) {
                 setLastAction({ label: "Metrics", detail: `in ${payload?.data?.tokens_in ?? "-"} · out ${payload?.data?.tokens_out ?? "-"}` })
                 break
             }
-          } catch { /* ignore parse errors — transcript hook handles its own */ }
+          } catch { /* ignore parse errors */ }
         },
         onHeartbeat: () => markStreamActive(),
         onStatus: (status) => {
@@ -210,7 +208,7 @@ export default function AgentDock(props: AgentDockProps) {
           } else if (status === "backoff") {
             setStreamStatus("reconnecting")
             setDockLoadState("error")
-            setDockError("Connection lost. Attempting to reconnect…")
+            setDockError("Connection lost. Reconnecting…")
           } else if (status === "not_found") {
             setStreamStatus("error")
             setDockLoadState("error")
@@ -232,7 +230,7 @@ export default function AgentDock(props: AgentDockProps) {
           setStreamStatus("disconnected")
         },
       },
-      { connectionTimeoutMs: TIMEOUTS.STREAM_CONNECTION_MS },
+      { connectionTimeoutMs: TIMEOUTS.DOCK_STREAM_CONNECTION_MS, preflight: false },
     )
   })
 
@@ -255,10 +253,10 @@ export default function AgentDock(props: AgentDockProps) {
       if (!activeSessionId) {
         setDockLoadState("loading")
         setStreamStatus("connecting")
-        activeSessionId = await ensureDockSessionId()
+        const pid = selectedProviderId()
+        activeSessionId = await ensureDockSessionId(pid ? { providerId: pid } : {})
       }
       if (!activeSessionId) throw new Error("Unable to start dock session.")
-      // Use new /messages endpoint for all session states (idle, running, suspended)
       await apiClient.sendMessage(activeSessionId!, text)
       setLastAction({ label: "Input", detail: text.slice(0, 80) })
     } catch (err) {
@@ -280,14 +278,37 @@ export default function AgentDock(props: AgentDockProps) {
     }
   }
 
+  const handleNewSession = async () => {
+    clearDockSessionId()
+    setDockLoadState("loading")
+    setStreamStatus("connecting")
+    setDockError(null)
+    setSessionReady(false)
+    closeMenu()
+    const pid = selectedProviderId()
+    const newId = await ensureDockSessionId(pid ? { providerId: pid } : {})
+    if (!newId) {
+      setDockLoadState("error")
+      setDockError("Failed to create a new session.")
+    }
+  }
+
   const handleOpenFullViewer = () => {
     const id = sessionId()
     if (!id) return
+    closeMenu()
     if (props.onNavigate) {
       props.onNavigate(`/sessions/${id}`)
       return
     }
     navigate({ to: `/sessions/${id}` })
+  }
+
+  const providerList = () => providers()?.providers ?? []
+  const selectedProvider = () => {
+    const pid = selectedProviderId()
+    if (!pid) return providerList()[0] ?? null
+    return providerList().find((p) => p.id === pid) ?? providerList()[0] ?? null
   }
 
   return (
@@ -296,40 +317,94 @@ export default function AgentDock(props: AgentDockProps) {
       data-testid="agent-dock"
       classList={{ minimized: !isExpanded(), active: hasSession(), idle: !hasSession() }}
     >
-      {/* Header — always visible */}
+      {/* Header — always visible, single line */}
       <div class="agent-dock-header">
-        <div>
-          <p class="agent-dock-title">Agent Box</p>
-          <p class="agent-dock-subtitle">MCP activity feed</p>
+        {/* Status dot + title */}
+        <span class={`agent-dock-dot ${dockLoadState()}`} aria-hidden="true" />
+        <span class="agent-dock-title-label">Agent Dock</span>
+
+        {/* Last action summary — fills available space */}
+        <span class="agent-dock-activity" title={lastActionDetail()}>
+          {hasError()
+            ? <span class="agent-dock-error-inline" title={dockError() ?? ""}>⚠ {dockError()}</span>
+            : lastActionLabel()}
+        </span>
+
+        {/* Hamburger menu */}
+        <div class="agent-dock-menu-wrap" ref={menuRef}>
+          <button
+            type="button"
+            class="agent-dock-icon-btn"
+            onClick={toggleMenu}
+            aria-label="Menu"
+            title="Menu"
+            data-testid="agent-dock-menu"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+              <line x1="1" y1="3.5" x2="13" y2="3.5" />
+              <line x1="1" y1="7" x2="13" y2="7" />
+              <line x1="1" y1="10.5" x2="13" y2="10.5" />
+            </svg>
+          </button>
+
+          <Show when={menuOpen()}>
+            <div class="agent-dock-menu">
+              {/* Provider selector */}
+              <Show when={providerList().length > 0}>
+                <div class="agent-dock-menu-section">
+                  <label class="agent-dock-menu-label">Provider</label>
+                  <select
+                    class="agent-dock-menu-select"
+                    value={selectedProvider()?.id ?? ""}
+                    onChange={(e) => setSelectedProviderId(e.currentTarget.value || null)}
+                  >
+                    <For each={providerList()}>
+                      {(p) => <option value={p.id}>{p.name} ({p.type})</option>}
+                    </For>
+                  </select>
+                </div>
+                <div class="agent-dock-menu-divider" />
+              </Show>
+
+              {/* Actions */}
+              <button type="button" class="agent-dock-menu-item" onClick={handleNewSession}>
+                New session
+              </button>
+              <Show when={dockLoadState() === "live"}>
+                <button type="button" class="agent-dock-menu-item" onClick={handleOpenFullViewer}>
+                  Open full viewer
+                </button>
+                <button
+                  type="button"
+                  class="agent-dock-menu-item agent-dock-menu-item--danger"
+                  onClick={() => { void actions.cancel(); closeMenu() }}
+                  disabled={!canManage() || sessionState() !== "running" || actions.pendingAction() !== null}
+                >
+                  Cancel session
+                </button>
+              </Show>
+            </div>
+          </Show>
         </div>
-        <div class="agent-dock-summary">
-          <span class={`agent-dock-status ${dockLoadState()}`}>{statusLabel()}</span>
-          <span class="agent-dock-last-action" title={lastActionDetail()}>
-            {lastActionLabel()}
-          </span>
-        </div>
+
+        {/* Collapse toggle — chevron icon */}
         <button
           type="button"
-          class="agent-dock-toggle"
+          class="agent-dock-icon-btn agent-dock-chevron"
+          classList={{ expanded: isExpanded() }}
           onClick={toggleExpanded}
           aria-expanded={isExpanded()}
           data-testid="agent-dock-toggle"
+          title={isExpanded() ? "Collapse" : "Expand"}
         >
-          {isExpanded() ? "Collapse" : "Expand"}
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="2,4 6,8 10,4" />
+          </svg>
         </button>
       </div>
 
       <Show when={isExpanded()}>
         <div class="agent-dock-body">
-          {/* Empty */}
-          <Show when={dockLoadState() === "empty"}>
-            <div class="agent-dock-empty">
-              <p class="agent-dock-empty-icon">⊘</p>
-              <p class="agent-dock-empty-text">No session selected</p>
-              <p class="agent-dock-empty-hint">Select a session to view agent activity</p>
-            </div>
-          </Show>
-
           {/* Loading */}
           <Show when={dockLoadState() === "loading"}>
             <div class="agent-dock-loading" data-testid="agent-dock-loading">
@@ -338,14 +413,12 @@ export default function AgentDock(props: AgentDockProps) {
             </div>
           </Show>
 
-          {/* Error */}
-          <Show when={dockLoadState() === "error"}>
-            <div class="agent-dock-error" data-testid="agent-dock-error">
-              <p class="agent-dock-error-icon">!</p>
-              <p class="agent-dock-error-text">{dockError()}</p>
-              <button type="button" class="btn btn-secondary btn-sm" onClick={handleOpenFullViewer}>
-                View Details
-              </button>
+          {/* Empty */}
+          <Show when={dockLoadState() === "empty"}>
+            <div class="agent-dock-empty">
+              <p class="agent-dock-empty-icon">⊘</p>
+              <p class="agent-dock-empty-text">No session selected</p>
+              <p class="agent-dock-empty-hint">Select a session or send a message to start</p>
             </div>
           </Show>
 
@@ -367,49 +440,16 @@ export default function AgentDock(props: AgentDockProps) {
             </div>
           </Show>
 
-           {/* Composer — shared component, shown unless errored */}
-           <Show when={dockLoadState() !== "error"}>
-             <SessionComposer
-               sessionState={() => sessionState() ?? "idle"}
-               canSend={() => dockLoadState() === "live" || !sessionId()}
-               isRunning={isRunning}
-               pendingAction={composerPending}
-               onSend={handleSend}
-               onInterrupt={handleInterrupt}
-               error={composerError}
-             />
-           </Show>
-
-           {/* Action bar */}
-           <Show when={dockLoadState() === "live"}>
-             <div class="agent-dock-actions">
-               <button
-                 type="button"
-                 class="btn btn-icon btn-danger btn-sm"
-                 onClick={() => void actions.cancel()}
-                 disabled={!canManage() || sessionState() !== "running" || actions.pendingAction() !== null}
-                 title={
-                   !canManage()
-                     ? "Bulk session controls are not permitted for your role."
-                     : actions.pendingAction() !== null
-                     ? "Action in progress…"
-                     : sessionState() !== "running"
-                     ? `Cannot cancel: session is ${sessionState()}`
-                     : "Cancel the running session"
-                 }
-               >
-                 ⊗
-               </button>
-              <button
-                type="button"
-                class="btn btn-secondary btn-sm"
-                onClick={handleOpenFullViewer}
-                title="Open full session viewer"
-              >
-                View Full
-              </button>
-            </div>
-          </Show>
+          {/* Composer */}
+          <SessionComposer
+            sessionState={() => sessionState() ?? "idle"}
+            canSend={() => dockLoadState() === "live" || !sessionId()}
+            isRunning={isRunning}
+            pendingAction={composerPending}
+            onSend={handleSend}
+            onInterrupt={handleInterrupt}
+            error={composerError}
+          />
         </div>
       </Show>
     </div>

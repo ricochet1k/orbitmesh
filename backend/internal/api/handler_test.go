@@ -40,15 +40,6 @@ func newMockProvider() *mockProvider {
 	}
 }
 
-func (m *mockProvider) Start(_ context.Context, _ session.Config) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.startErr != nil {
-		return m.startErr
-	}
-	return nil
-}
-
 func (m *mockProvider) Stop(_ context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -72,16 +63,14 @@ func (m *mockProvider) Status() session.Status {
 	}
 }
 
-func (m *mockProvider) Events() <-chan domain.Event { return m.events }
-
-func (m *mockProvider) SendInput(ctx context.Context, input string) error {
+func (m *mockProvider) SendInput(_ context.Context, _ session.Config, input string) (<-chan domain.Event, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.sendErr != nil {
-		return m.sendErr
+		return nil, m.sendErr
 	}
 	m.lastInput = input
-	return nil
+	return m.events, nil
 }
 
 // inMemStore is an in-memory Storage for tests.

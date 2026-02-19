@@ -45,13 +45,6 @@ func newMockTerminalProvider() *mockTerminalProvider {
 	}
 }
 
-func (m *mockTerminalProvider) Start(_ context.Context, _ session.Config) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.state = session.StateRunning
-	return nil
-}
-
 func (m *mockTerminalProvider) Stop(_ context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -72,9 +65,9 @@ func (m *mockTerminalProvider) Status() session.Status {
 	return session.Status{State: m.state}
 }
 
-func (m *mockTerminalProvider) Events() <-chan domain.Event { return m.events }
-
-func (m *mockTerminalProvider) SendInput(ctx context.Context, input string) error { return nil }
+func (m *mockTerminalProvider) SendInput(_ context.Context, _ session.Config, _ string) (<-chan domain.Event, error) {
+	return m.events, nil
+}
 
 func (m *mockTerminalProvider) TerminalSnapshot() (terminal.Snapshot, error) {
 	m.mu.Lock()
