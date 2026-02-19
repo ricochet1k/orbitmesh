@@ -45,3 +45,4 @@ node_modules
 .playwright-cli
 tests/.orbitmesh-e2e
 .roam
+backend/acp-echo
