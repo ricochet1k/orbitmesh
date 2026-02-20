@@ -1494,6 +1494,51 @@ tbody tr:hover {
   align-items: start;
 }
 
+/* Settings sub-nav shell */
+.settings-shell {
+  display: flex;
+  flex: 1;
+  gap: 0;
+  min-height: 0;
+}
+
+.settings-subnav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 180px;
+  flex-shrink: 0;
+  padding: 1.5rem 0 2.5rem 1.75rem;
+  border-right: 1px solid var(--border);
+}
+
+.settings-subnav-item {
+  display: block;
+  padding: 0.45rem 0.75rem;
+  border-radius: var(--radius-3);
+  font-size: 0.875rem;
+  color: var(--text-2);
+  text-decoration: none;
+  transition: background 100ms ease, color 100ms ease;
+}
+
+.settings-subnav-item:hover {
+  background: var(--surface-3);
+  color: var(--text-1);
+}
+
+.settings-subnav-item.active {
+  background: var(--surface-3);
+  color: var(--text-1);
+  font-weight: 500;
+}
+
+.settings-content {
+  flex: 1;
+  padding: 1.5rem 1.75rem 2.5rem;
+  min-width: 0;
+}
+
 .extractor-view {
   display: flex;
   flex-direction: column;

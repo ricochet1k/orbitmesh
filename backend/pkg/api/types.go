@@ -104,9 +104,16 @@ const (
 	EventTypeMetric       EventType = "metric"
 	EventTypeError        EventType = "error"
 	EventTypeMetadata     EventType = "metadata"
+	EventTypeToolCall     EventType = "tool_call"
+	EventTypeThought      EventType = "thought"
+	EventTypePlan         EventType = "plan"
 )
 
 type Event struct {
+	// EventID is the monotonic SSE event sequence number. Clients should send
+	// this back as Last-Event-ID on reconnect to resume from where they left
+	// off. Zero means the event has no persistent ID (e.g. heartbeats).
+	EventID   int64     `json:"event_id,omitempty"`
 	Type      EventType `json:"type"`
 	Timestamp time.Time `json:"timestamp"`
 	SessionID string    `json:"session_id"`
@@ -121,6 +128,9 @@ type StatusChangeData struct {
 
 type OutputData struct {
 	Content string `json:"content"`
+	// IsDelta indicates this is a streaming chunk to be appended to the
+	// previous output message rather than starting a new one.
+	IsDelta bool `json:"is_delta,omitempty"`
 }
 
 type MetricData struct {
@@ -137,6 +147,30 @@ type ErrorData struct {
 type MetadataData struct {
 	Key   string `json:"key"`
 	Value any    `json:"value"`
+}
+
+type ToolCallData struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Status string `json:"status,omitempty"`
+	Title  string `json:"title,omitempty"`
+	Input  any    `json:"input,omitempty"`
+	Output any    `json:"output,omitempty"`
+}
+
+type ThoughtData struct {
+	Content string `json:"content"`
+}
+
+type PlanStep struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+	Status      string `json:"status,omitempty"`
+}
+
+type PlanData struct {
+	Description string     `json:"description,omitempty"`
+	Steps       []PlanStep `json:"steps,omitempty"`
 }
 
 type ActivityEntry struct {

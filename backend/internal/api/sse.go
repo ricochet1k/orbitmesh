@@ -121,6 +121,7 @@ func writeSSEHeartbeat(w http.ResponseWriter, timestamp time.Time) error {
 
 func domainEventToAPIEvent(e domain.Event) apiTypes.Event {
 	return apiTypes.Event{
+		EventID:   e.ID,
 		Type:      apiTypes.EventType(e.Type.String()),
 		Timestamp: e.Timestamp,
 		SessionID: e.SessionID,
@@ -137,13 +138,30 @@ func convertEventData(e domain.Event) any {
 			Reason:   d.Reason,
 		}
 	case domain.OutputData:
-		return apiTypes.OutputData{Content: d.Content}
+		return apiTypes.OutputData{Content: d.Content, IsDelta: d.IsDelta}
 	case domain.MetricData:
 		return apiTypes.MetricData{TokensIn: d.TokensIn, TokensOut: d.TokensOut, RequestCount: d.RequestCount}
 	case domain.ErrorData:
 		return apiTypes.ErrorData{Message: d.Message, Code: d.Code}
 	case domain.MetadataData:
 		return apiTypes.MetadataData{Key: d.Key, Value: d.Value}
+	case domain.ToolCallData:
+		return apiTypes.ToolCallData{
+			ID:     d.ID,
+			Name:   d.Name,
+			Status: d.Status,
+			Title:  d.Title,
+			Input:  d.Input,
+			Output: d.Output,
+		}
+	case domain.ThoughtData:
+		return apiTypes.ThoughtData{Content: d.Content}
+	case domain.PlanData:
+		steps := make([]apiTypes.PlanStep, len(d.Steps))
+		for i, s := range d.Steps {
+			steps[i] = apiTypes.PlanStep{ID: s.ID, Description: s.Description, Status: s.Status}
+		}
+		return apiTypes.PlanData{Description: d.Description, Steps: steps}
 	default:
 		return d
 	}

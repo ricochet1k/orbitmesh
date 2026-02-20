@@ -11,6 +11,7 @@ import {
 import { useNavigate } from "@tanstack/solid-router"
 import { apiClient } from "../api/client"
 import type { SessionState } from "../types/api"
+import { parseSSEEvent } from "../types/api"
 import { clearDockSessionId, dockSessionId } from "../state/agentDock"
 import { TIMEOUTS } from "../constants/timeouts"
 import { useSessionStream } from "../hooks/useSessionStream"
@@ -57,7 +58,7 @@ export default function AgentDock(props: AgentDockProps) {
 
   const { ensureDockSessionId } = useAgentDockSession({
     sessionId,
-    skipHydration: Boolean(props.sessionId),
+    skipHydration: untrack(() => Boolean(props.sessionId)),
   })
 
   const isDockSession = () =>
@@ -176,30 +177,34 @@ export default function AgentDock(props: AgentDockProps) {
           markStreamActive()
           transcript.handleEvent(eventType, event)
 
-          if (typeof event.data !== "string") return
-          try {
-            const payload = JSON.parse(event.data)
-            switch (payload?.type ?? eventType) {
-              case "output":
-                setLastAction({ label: "Output", detail: formatShort(payload?.data?.content) })
-                break
-              case "status_change":
-                setLastAction({ label: "Status change", detail: `${payload?.data?.old_state} -> ${payload?.data?.new_state}` })
-                break
-              case "metadata":
-                setLastAction({ label: `Metadata: ${payload?.data?.key ?? ""}`, detail: formatShort(payload?.data?.value) })
-                break
-              case "activity_entry":
-                setLastAction({ label: `Action: ${payload?.data?.entry?.kind ?? "activity"}` })
-                break
-              case "error":
-                setLastAction({ label: "Error", detail: payload?.data?.message, tone: "error" })
-                break
-              case "metric":
-                setLastAction({ label: "Metrics", detail: `in ${payload?.data?.tokens_in ?? "-"} · out ${payload?.data?.tokens_out ?? "-"}` })
-                break
-            }
-          } catch { /* ignore parse errors */ }
+          const payload = parseSSEEvent(eventType, event)
+          if (!payload) return
+          switch (payload.type) {
+            case "output":
+              setLastAction({ label: "Output", detail: formatShort(payload.data.content) })
+              break
+            case "status_change":
+              setLastAction({ label: "Status change", detail: `${payload.data.old_state} -> ${payload.data.new_state}` })
+              break
+            case "metadata":
+              setLastAction({ label: `Metadata: ${payload.data.key}`, detail: formatShort(payload.data.value) })
+              break
+            case "tool_call":
+              setLastAction({ label: `Tool: ${payload.data.title || payload.data.name}` })
+              break
+            case "thought":
+              setLastAction({ label: "Thinking…", detail: formatShort(payload.data.content) })
+              break
+            case "plan":
+              setLastAction({ label: "Plan", detail: payload.data.description })
+              break
+            case "error":
+              setLastAction({ label: "Error", detail: payload.data.message, tone: "error" })
+              break
+            case "metric":
+              setLastAction({ label: "Metrics", detail: `in ${payload.data.tokens_in} · out ${payload.data.tokens_out}` })
+              break
+          }
         },
         onHeartbeat: () => markStreamActive(),
         onStatus: (status) => {

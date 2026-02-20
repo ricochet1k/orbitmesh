@@ -2,14 +2,14 @@ import { createEffect, createMemo, createResource, createSignal, untrack } from 
 import type { Accessor, Resource } from "solid-js"
 import type {
   ActivityEntry,
-  Event,
   PermissionsResponse,
   SessionState,
   SessionStatusResponse,
   TranscriptMessage,
 } from "../types/api"
+import { parseSSEEvent } from "../types/api"
 import { apiClient } from "../api/client"
-import { formatActivityContent, normalizeActivityMutation } from "../utils/activityFormatting"
+import { formatActivityContent } from "../utils/activityFormatting"
 
 export interface SessionTranscriptOptions {
   sessionId: Accessor<string>
@@ -119,7 +119,7 @@ export function useSessionTranscript({
       return
     }
     pushMessage({
-      id: crypto.randomUUID(),
+      id: `session-output:${initial.id}`,
       type: "agent",
       timestamp: initialOutputTimestamp() ?? initial.updated_at,
       content: io,
@@ -136,7 +136,7 @@ export function useSessionTranscript({
     onStatusChange?.(initial.state)
     untrack(() => {
       pushMessage({
-        id: crypto.randomUUID(),
+        id: `session-init:${initial.id}`,
         type: "system",
         timestamp: initial.updated_at,
         content: `Session ${initial.id} - ${initial.provider_type} - ${initial.state}`,
@@ -180,32 +180,15 @@ export function useSessionTranscript({
     })
   }
 
-  const removeMessageById = (id: string) => {
-    setMessages((prev) => prev.filter((msg) => msg.id !== id))
-  }
-
   const pushMessage = (message: TranscriptMessage) => {
     setMessages((prev) => [...prev, message])
   }
 
   const handleEvent = (eventType: string, event: MessageEvent) => {
-    if (typeof event.data !== "string") return
-    let payload: Event | null = null
-    try {
-      const parsed = JSON.parse(event.data)
-      if (parsed && typeof parsed === "object" && "type" in parsed) {
-        payload = parsed
-      } else {
-        payload = {
-          type: eventType as Event["type"],
-          timestamp: new Date().toISOString(),
-          session_id: sessionId(),
-          data: parsed,
-        }
-      }
-    } catch {
+    const payload = parseSSEEvent(eventType, event)
+    if (!payload) {
       pushMessage({
-        id: crypto.randomUUID(),
+        id: `parse-error:${Date.now()}`,
         type: "error",
         timestamp: new Date().toISOString(),
         content: "Failed to parse stream event payload.",
@@ -213,86 +196,116 @@ export function useSessionTranscript({
       return
     }
 
-    if (!payload) return
+    // Stable ID derived from the backend's monotonic event sequence number.
+    // Falls back to a timestamp-based string only when event_id is absent (0).
+    const stableId = (suffix: string) =>
+      payload.event_id > 0 ? `event:${payload.event_id}:${suffix}` : `event:${payload.timestamp}:${suffix}`
 
     switch (payload.type) {
       case "output": {
         if (providerType() === "pty") break
-        const content = payload.data?.content ?? ""
-        if (content) {
-          pushMessage({
-            id: crypto.randomUUID(),
-            type: "agent",
-            timestamp: payload.timestamp,
-            content,
+        const { content, is_delta } = payload.data
+        if (!content) break
+        if (is_delta) {
+          // Append to the most recent agent message rather than pushing a new one.
+          setMessages((prev) => {
+            const lastAgentIdx = [...prev].reverse().findIndex((m) => m.type === "agent" && m.open)
+            if (lastAgentIdx === -1) {
+              return [...prev, { id: stableId("output"), type: "agent", timestamp: payload.timestamp, content, open: true }]
+            }
+            const realIdx = prev.length - 1 - lastAgentIdx
+            const updated = { ...prev[realIdx], content: prev[realIdx].content + content }
+            return [...prev.slice(0, realIdx), updated, ...prev.slice(realIdx + 1)]
           })
+        } else {
+          // Non-delta: a complete, self-contained output message.
+          mergeMessages([{ id: stableId("output"), type: "agent", timestamp: payload.timestamp, content, open: false }], { sort: false })
         }
         break
       }
       case "status_change": {
-        const content = `State changed: ${payload.data?.old_state} -> ${payload.data?.new_state}`
-        if (payload.data?.new_state) {
-          onStatusChange?.(payload.data.new_state as SessionState)
-        }
+        const { old_state, new_state } = payload.data
+        onStatusChange?.(new_state as SessionState)
         void refetchSession()
         pushMessage({
-          id: crypto.randomUUID(),
+          id: stableId("status"),
           type: "system",
           timestamp: payload.timestamp,
-          content,
+          content: `State changed: ${old_state} -> ${new_state}`,
         })
         break
       }
       case "metric": {
-        const content = `Metrics updated - in ${payload.data?.tokens_in} - out ${payload.data?.tokens_out} - requests ${payload.data?.request_count}`
+        const { tokens_in, tokens_out, request_count } = payload.data
         pushMessage({
-          id: crypto.randomUUID(),
+          id: stableId("metric"),
           type: "system",
           timestamp: payload.timestamp,
-          content,
+          content: `Metrics updated - in ${tokens_in} - out ${tokens_out} - requests ${request_count}`,
         })
         break
       }
       case "error": {
-        const content = payload.data?.message ?? "Unknown error"
         pushMessage({
-          id: crypto.randomUUID(),
+          id: stableId("error"),
           type: "error",
           timestamp: payload.timestamp,
-          content,
+          content: payload.data.message ?? "Unknown error",
         })
         break
       }
       case "metadata": {
-        const key = payload.data?.key ?? "metadata"
-        const value = payload.data?.value
-        const content = `Metadata - ${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`
+        const { key, value } = payload.data
         pushMessage({
-          id: crypto.randomUUID(),
+          id: stableId("metadata"),
           type: "system",
           timestamp: payload.timestamp,
-          content,
+          content: `Metadata - ${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`,
         })
         break
       }
-      case "activity_entry": {
-        const mutation = normalizeActivityMutation(payload.data)
-        if (mutation.entries && mutation.entries.length > 0) {
-          const msgs = mutation.entries.map((entry) => toActivityMessage(entry))
-          mergeMessages(msgs, { sort: true })
-          break
-        }
-        if (!mutation.entry) break
-        const entryId = toActivityMessageId(mutation.entry)
-        if (mutation.action === "delete") {
-          removeMessageById(entryId)
-          break
-        }
-        mergeMessages([toActivityMessage(mutation.entry)], { sort: true })
+      case "thought": {
+        mergeMessages([{
+          id: stableId("thought"),
+          type: "system",
+          kind: "thought",
+          timestamp: payload.timestamp,
+          content: payload.data.content,
+        }], { sort: false })
         break
       }
-      default:
+      case "tool_call": {
+        const { id: toolId, name, status, title, input, output } = payload.data
+        // Tool calls have their own stable ID from the provider; use it directly.
+        const msgId = toolId ? `tool:${toolId}` : stableId("tool_call")
+        const label = title || name
+        const detail = output != null
+          ? `${label}: ${typeof output === "string" ? output : JSON.stringify(output)}`
+          : input != null
+            ? `${label}(${typeof input === "string" ? input : JSON.stringify(input)})`
+            : label
+        mergeMessages([{
+          id: msgId,
+          type: "system",
+          kind: "tool_call",
+          timestamp: payload.timestamp,
+          content: detail,
+          open: status === "running",
+        }], { sort: false })
         break
+      }
+      case "plan": {
+        const { description, steps } = payload.data
+        const lines = [description, ...(steps ?? []).map((s) => `  ${s.status ?? "?"} ${s.description}`)].filter(Boolean)
+        mergeMessages([{
+          id: stableId("plan"),
+          type: "system",
+          kind: "plan",
+          timestamp: payload.timestamp,
+          content: lines.join("\n"),
+        }], { sort: false })
+        break
+      }
     }
   }
 
@@ -301,6 +314,8 @@ export function useSessionTranscript({
     if (!cursor) return
     setPaginationCursor(cursor)
   }
+
+  const activityHistoryReady = createMemo(() => !activityPage.loading && activityPage() !== undefined)
 
   return {
     messages,
@@ -314,7 +329,7 @@ export function useSessionTranscript({
     handleEvent,
     handleLoadEarlier,
     // Expose for consumers that need to know if history is ready
-    activityHistoryReady: createMemo(() => !activityPage.loading && activityPage() !== undefined),
+    activityHistoryReady,
   }
 }
 

@@ -15,8 +15,13 @@ import { Route as ExtractorsRouteImport } from './routes/extractors'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as TerminalsIndexRouteImport } from './routes/terminals/index'
+import { Route as SettingsIndexRouteImport } from './routes/settings/index'
 import { Route as SessionsIndexRouteImport } from './routes/sessions/index'
 import { Route as TerminalsTerminalIdRouteImport } from './routes/terminals/$terminalId'
+import { Route as SettingsProvidersRouteImport } from './routes/settings/providers'
+import { Route as SettingsProfileRouteImport } from './routes/settings/profile'
+import { Route as SettingsPreferencesRouteImport } from './routes/settings/preferences'
+import { Route as SettingsIntegrationsRouteImport } from './routes/settings/integrations'
 import { Route as SessionsSessionIdRouteImport } from './routes/sessions/$sessionId'
 import { Route as HistoryCommitsRouteImport } from './routes/history/commits'
 
@@ -50,6 +55,11 @@ const TerminalsIndexRoute = TerminalsIndexRouteImport.update({
   path: '/terminals/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsIndexRoute = SettingsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SessionsIndexRoute = SessionsIndexRouteImport.update({
   id: '/sessions/',
   path: '/sessions/',
@@ -59,6 +69,26 @@ const TerminalsTerminalIdRoute = TerminalsTerminalIdRouteImport.update({
   id: '/terminals/$terminalId',
   path: '/terminals/$terminalId',
   getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsProvidersRoute = SettingsProvidersRouteImport.update({
+  id: '/providers',
+  path: '/providers',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsProfileRoute = SettingsProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsPreferencesRoute = SettingsPreferencesRouteImport.update({
+  id: '/preferences',
+  path: '/preferences',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsIntegrationsRoute = SettingsIntegrationsRouteImport.update({
+  id: '/integrations',
+  path: '/integrations',
+  getParentRoute: () => SettingsRoute,
 } as any)
 const SessionsSessionIdRoute = SessionsSessionIdRouteImport.update({
   id: '/sessions/$sessionId',
@@ -75,24 +105,33 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/extractors': typeof ExtractorsRoute
-  '/settings': typeof SettingsRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/tasks': typeof TasksRoute
   '/history/commits': typeof HistoryCommitsRoute
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
+  '/settings/integrations': typeof SettingsIntegrationsRoute
+  '/settings/preferences': typeof SettingsPreferencesRoute
+  '/settings/profile': typeof SettingsProfileRoute
+  '/settings/providers': typeof SettingsProvidersRoute
   '/terminals/$terminalId': typeof TerminalsTerminalIdRoute
   '/sessions/': typeof SessionsIndexRoute
+  '/settings/': typeof SettingsIndexRoute
   '/terminals/': typeof TerminalsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/extractors': typeof ExtractorsRoute
-  '/settings': typeof SettingsRoute
   '/tasks': typeof TasksRoute
   '/history/commits': typeof HistoryCommitsRoute
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
+  '/settings/integrations': typeof SettingsIntegrationsRoute
+  '/settings/preferences': typeof SettingsPreferencesRoute
+  '/settings/profile': typeof SettingsProfileRoute
+  '/settings/providers': typeof SettingsProvidersRoute
   '/terminals/$terminalId': typeof TerminalsTerminalIdRoute
   '/sessions': typeof SessionsIndexRoute
+  '/settings': typeof SettingsIndexRoute
   '/terminals': typeof TerminalsIndexRoute
 }
 export interface FileRoutesById {
@@ -100,12 +139,17 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/extractors': typeof ExtractorsRoute
-  '/settings': typeof SettingsRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/tasks': typeof TasksRoute
   '/history/commits': typeof HistoryCommitsRoute
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
+  '/settings/integrations': typeof SettingsIntegrationsRoute
+  '/settings/preferences': typeof SettingsPreferencesRoute
+  '/settings/profile': typeof SettingsProfileRoute
+  '/settings/providers': typeof SettingsProvidersRoute
   '/terminals/$terminalId': typeof TerminalsTerminalIdRoute
   '/sessions/': typeof SessionsIndexRoute
+  '/settings/': typeof SettingsIndexRoute
   '/terminals/': typeof TerminalsIndexRoute
 }
 export interface FileRouteTypes {
@@ -118,20 +162,29 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/history/commits'
     | '/sessions/$sessionId'
+    | '/settings/integrations'
+    | '/settings/preferences'
+    | '/settings/profile'
+    | '/settings/providers'
     | '/terminals/$terminalId'
     | '/sessions/'
+    | '/settings/'
     | '/terminals/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/about'
     | '/extractors'
-    | '/settings'
     | '/tasks'
     | '/history/commits'
     | '/sessions/$sessionId'
+    | '/settings/integrations'
+    | '/settings/preferences'
+    | '/settings/profile'
+    | '/settings/providers'
     | '/terminals/$terminalId'
     | '/sessions'
+    | '/settings'
     | '/terminals'
   id:
     | '__root__'
@@ -142,8 +195,13 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/history/commits'
     | '/sessions/$sessionId'
+    | '/settings/integrations'
+    | '/settings/preferences'
+    | '/settings/profile'
+    | '/settings/providers'
     | '/terminals/$terminalId'
     | '/sessions/'
+    | '/settings/'
     | '/terminals/'
   fileRoutesById: FileRoutesById
 }
@@ -151,7 +209,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
   ExtractorsRoute: typeof ExtractorsRoute
-  SettingsRoute: typeof SettingsRoute
+  SettingsRoute: typeof SettingsRouteWithChildren
   TasksRoute: typeof TasksRoute
   HistoryCommitsRoute: typeof HistoryCommitsRoute
   SessionsSessionIdRoute: typeof SessionsSessionIdRoute
@@ -204,6 +262,13 @@ declare module '@tanstack/solid-router' {
       preLoaderRoute: typeof TerminalsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/': {
+      id: '/settings/'
+      path: '/'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof SettingsIndexRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/sessions/': {
       id: '/sessions/'
       path: '/sessions'
@@ -217,6 +282,34 @@ declare module '@tanstack/solid-router' {
       fullPath: '/terminals/$terminalId'
       preLoaderRoute: typeof TerminalsTerminalIdRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/settings/providers': {
+      id: '/settings/providers'
+      path: '/providers'
+      fullPath: '/settings/providers'
+      preLoaderRoute: typeof SettingsProvidersRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/profile': {
+      id: '/settings/profile'
+      path: '/profile'
+      fullPath: '/settings/profile'
+      preLoaderRoute: typeof SettingsProfileRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/preferences': {
+      id: '/settings/preferences'
+      path: '/preferences'
+      fullPath: '/settings/preferences'
+      preLoaderRoute: typeof SettingsPreferencesRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/integrations': {
+      id: '/settings/integrations'
+      path: '/integrations'
+      fullPath: '/settings/integrations'
+      preLoaderRoute: typeof SettingsIntegrationsRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/sessions/$sessionId': {
       id: '/sessions/$sessionId'
@@ -235,11 +328,31 @@ declare module '@tanstack/solid-router' {
   }
 }
 
+interface SettingsRouteChildren {
+  SettingsIntegrationsRoute: typeof SettingsIntegrationsRoute
+  SettingsPreferencesRoute: typeof SettingsPreferencesRoute
+  SettingsProfileRoute: typeof SettingsProfileRoute
+  SettingsProvidersRoute: typeof SettingsProvidersRoute
+  SettingsIndexRoute: typeof SettingsIndexRoute
+}
+
+const SettingsRouteChildren: SettingsRouteChildren = {
+  SettingsIntegrationsRoute: SettingsIntegrationsRoute,
+  SettingsPreferencesRoute: SettingsPreferencesRoute,
+  SettingsProfileRoute: SettingsProfileRoute,
+  SettingsProvidersRoute: SettingsProvidersRoute,
+  SettingsIndexRoute: SettingsIndexRoute,
+}
+
+const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
+  SettingsRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
   ExtractorsRoute: ExtractorsRoute,
-  SettingsRoute: SettingsRoute,
+  SettingsRoute: SettingsRouteWithChildren,
   TasksRoute: TasksRoute,
   HistoryCommitsRoute: HistoryCommitsRoute,
   SessionsSessionIdRoute: SessionsSessionIdRoute,

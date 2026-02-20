@@ -74,19 +74,94 @@ export interface SessionStatusResponse extends SessionResponse {
   metrics: SessionMetrics;
 }
 
-export type EventType =
-  | "status_change"
-  | "output"
-  | "metric"
-  | "error"
-  | "metadata"
-  | "activity_entry";
+// ── SSE event payloads ────────────────────────────────────────────────────────
 
-export interface Event {
-  type: EventType;
-  timestamp: string;
-  session_id: string;
-  data: any;
+export interface StatusChangeData {
+  old_state: string;
+  new_state: string;
+  reason?: string;
+}
+
+export interface OutputData {
+  content: string;
+  /** True when this chunk should be appended to the previous output message. */
+  is_delta?: boolean;
+}
+
+export interface MetricData {
+  tokens_in: number;
+  tokens_out: number;
+  request_count: number;
+}
+
+export interface ErrorData {
+  message: string;
+  code?: string;
+}
+
+export interface MetadataData {
+  key: string;
+  value: unknown;
+}
+
+export interface ToolCallData {
+  id: string;
+  name: string;
+  status?: string;
+  title?: string;
+  input?: unknown;
+  output?: unknown;
+}
+
+export interface ThoughtData {
+  content: string;
+}
+
+export interface PlanStep {
+  id: string;
+  description: string;
+  status?: string;
+}
+
+export interface PlanData {
+  description?: string;
+  steps?: PlanStep[];
+}
+
+// Discriminated union — exhaustive switch on `.type` is now type-safe.
+export type SSEEvent =
+  | { event_id: number; type: "status_change"; timestamp: string; session_id: string; data: StatusChangeData }
+  | { event_id: number; type: "output";        timestamp: string; session_id: string; data: OutputData }
+  | { event_id: number; type: "metric";        timestamp: string; session_id: string; data: MetricData }
+  | { event_id: number; type: "error";         timestamp: string; session_id: string; data: ErrorData }
+  | { event_id: number; type: "metadata";      timestamp: string; session_id: string; data: MetadataData }
+  | { event_id: number; type: "tool_call";     timestamp: string; session_id: string; data: ToolCallData }
+  | { event_id: number; type: "thought";       timestamp: string; session_id: string; data: ThoughtData }
+  | { event_id: number; type: "plan";          timestamp: string; session_id: string; data: PlanData }
+
+export type SSEEventType = SSEEvent["type"]
+
+/** Parse a raw SSE MessageEvent into a typed SSEEvent, or return null on failure. */
+export function parseSSEEvent(sseType: string, event: MessageEvent): SSEEvent | null {
+  if (typeof event.data !== "string") return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(event.data)
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== "object") return null
+  const obj = parsed as Record<string, unknown>
+  // The backend always puts `type` in the JSON body; use it if present,
+  // otherwise fall back to the SSE event name (e.g. for older compatibility).
+  const type = (typeof obj["type"] === "string" ? obj["type"] : sseType) as SSEEventType
+  return {
+    event_id: typeof obj["event_id"] === "number" ? obj["event_id"] : 0,
+    type,
+    timestamp: typeof obj["timestamp"] === "string" ? obj["timestamp"] : new Date().toISOString(),
+    session_id: typeof obj["session_id"] === "string" ? obj["session_id"] : "",
+    data: (obj["data"] ?? {}) as SSEEvent["data"],
+  } as SSEEvent
 }
 
 export interface ActivityEntry {
@@ -108,32 +183,6 @@ export interface ActivityEntryMutation {
 export interface ActivityHistoryResponse {
   entries: ActivityEntry[];
   next_cursor?: string | null;
-}
-
-export interface StatusChangeData {
-  old_state: string;
-  new_state: string;
-  reason?: string;
-}
-
-export interface OutputData {
-  content: string;
-}
-
-export interface MetricData {
-  tokens_in: number;
-  tokens_out: number;
-  request_count: number;
-}
-
-export interface ErrorData {
-  message: string;
-  code?: string;
-}
-
-export interface MetadataData {
-  key: string;
-  value: any;
 }
 
 export interface PermissionsResponse {

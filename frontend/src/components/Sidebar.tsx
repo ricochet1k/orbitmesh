@@ -187,7 +187,7 @@ export default function Sidebar() {
           <BsSliders class="nav-icon" />
           <span class="nav-label">Extractors</span>
         </Link>
-        <Link to="/settings" class={`nav-item`}>
+        <Link to="/settings/providers" class={`nav-item`}>
           <IoSettingsSharp class="nav-icon" />
           <span class="nav-label">Settings</span>
         </Link>
