@@ -23,7 +23,7 @@ func (e *AgentExecutor) TerminalHub(id string) (*TerminalHub, error) {
 		return hub, nil
 	}
 
-	run := sc.run
+	run := sc.getRun()
 	if run == nil {
 		return nil, fmt.Errorf("no active provider run for session %s", id)
 	}
@@ -56,7 +56,7 @@ func (e *AgentExecutor) TerminalSnapshot(id string) (terminal.Snapshot, error) {
 		return terminal.Snapshot{}, ErrSessionNotFound
 	}
 
-	run := sc.run
+	run := sc.getRun()
 	if run == nil {
 		return terminal.Snapshot{}, fmt.Errorf("no active provider run for session %s", id)
 	}
@@ -120,7 +120,7 @@ func (e *AgentExecutor) ensureTerminalHubForPTY(sc *sessionContext) {
 		return
 	}
 
-	run := sc.run
+	run := sc.getRun()
 	if run == nil {
 		return
 	}

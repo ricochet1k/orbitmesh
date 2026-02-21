@@ -13,10 +13,12 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/realtime"
 	"github.com/ricochet1k/orbitmesh/internal/service"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
 	apiTypes "github.com/ricochet1k/orbitmesh/pkg/api"
+	realtimeTypes "github.com/ricochet1k/orbitmesh/pkg/realtime"
 )
 
 // Handler routes REST API requests to the agent executor service.
@@ -29,11 +31,13 @@ type Handler struct {
 	projectStorage  *storage.ProjectStorage
 	gitDir          string
 	dockBridge      *DockBridge
+	realtimeHub     *realtime.Hub
+	snapshotter     *realtime.SnapshotProvider
 }
 
 // NewHandler creates a Handler backed by the given executor and broadcaster.
 func NewHandler(executor *service.AgentExecutor, broadcaster *service.EventBroadcaster, sessionStorage storage.Storage, providerStorage *storage.ProviderConfigStorage, agentStorage *storage.AgentConfigStorage, projectStorage *storage.ProjectStorage) *Handler {
-	return &Handler{
+	h := &Handler{
 		executor:        executor,
 		broadcaster:     broadcaster,
 		sessionStorage:  sessionStorage,
@@ -42,7 +46,11 @@ func NewHandler(executor *service.AgentExecutor, broadcaster *service.EventBroad
 		projectStorage:  projectStorage,
 		gitDir:          resolveGitDir(),
 		dockBridge:      NewDockBridge(),
+		realtimeHub:     realtime.NewHub(),
+		snapshotter:     realtime.NewSnapshotProvider(executor),
 	}
+	h.startRealtimeBridge()
+	return h
 }
 
 // Mount registers all API routes on the provided router.
@@ -59,6 +67,8 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/v1/terminals/{id}/snapshot", h.getTerminalSnapshotByID)
 	r.Get("/api/sessions", h.listSessions)
 	r.Post("/api/sessions", h.createSession)
+	r.Get("/api/sessions/events", h.sseSessionEvents)
+	r.Get("/api/realtime", h.realtimeWebSocket)
 	r.Get("/api/sessions/{id}", h.getSession)
 	r.Delete("/api/sessions/{id}", h.stopSession)
 	r.Post("/api/sessions/{id}/input", h.sendSessionInput)
@@ -89,6 +99,46 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/v1/projects/{id}", h.getProject)
 	r.Put("/api/v1/projects/{id}", h.updateProject)
 	r.Delete("/api/v1/projects/{id}", h.deleteProject)
+}
+
+func (h *Handler) startRealtimeBridge() {
+	if h.broadcaster == nil || h.realtimeHub == nil {
+		return
+	}
+
+	sub := h.broadcaster.Subscribe(generateID(), "")
+	go func() {
+		for event := range sub.Events {
+			if event.Type != domain.EventTypeStatusChange {
+				continue
+			}
+			h.realtimeHub.Publish(realtime.TopicSessionsState, realtimeTypes.ServerEnvelope{
+				Type:    realtimeTypes.ServerMessageTypeEvent,
+				Topic:   realtime.TopicSessionsState,
+				Payload: h.toRealtimeSessionStateEvent(event),
+			})
+		}
+	}()
+}
+
+func (h *Handler) toRealtimeSessionStateEvent(event domain.Event) realtimeTypes.SessionStateEvent {
+	derived := domain.SessionStateIdle
+	if state, err := h.executor.DeriveSessionState(event.SessionID); err == nil {
+		derived = state
+	}
+
+	stateEvent := realtimeTypes.SessionStateEvent{
+		EventID:      event.ID,
+		Timestamp:    event.Timestamp,
+		SessionID:    event.SessionID,
+		DerivedState: derived.String(),
+	}
+
+	if data, ok := event.Data.(domain.StatusChangeData); ok {
+		stateEvent.Reason = data.Reason
+	}
+
+	return stateEvent
 }
 
 func (h *Handler) sendSessionInput(w http.ResponseWriter, r *http.Request) {
@@ -348,6 +398,9 @@ func (h *Handler) getSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	snap := session.Snapshot()
+	if derivedState, derr := h.executor.DeriveSessionState(id); derr == nil {
+		snap.State = derivedState
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 
@@ -380,7 +433,11 @@ func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
 
 	responses := make([]apiTypes.SessionResponse, len(filtered))
 	for i, s := range filtered {
-		responses[i] = sessionToResponse(s.Snapshot())
+		snap := s.Snapshot()
+		if derivedState, err := h.executor.DeriveSessionState(s.ID); err == nil {
+			snap.State = derivedState
+		}
+		responses[i] = sessionToResponse(snap)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -485,10 +542,17 @@ func (h *Handler) cancelSession(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) resumeSession(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	var req apiTypes.ResumeSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", err.Error())
+		return
+	}
+	if strings.TrimSpace(req.TokenID) == "" {
+		writeError(w, http.StatusBadRequest, "token_id is required", "")
+		return
+	}
 
-	// Resume a suspended session
-	// The suspension context should be stored on the session
-	sess, err := h.executor.ResumeSession(r.Context(), id)
+	sess, err := h.executor.ResumeSessionWithToken(r.Context(), id, req.TokenID)
 	if err != nil {
 		writeSessionError(w, err)
 		return
@@ -506,6 +570,12 @@ func writeSessionError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "session not found", "")
 	case errors.Is(err, service.ErrInvalidState):
 		writeError(w, http.StatusConflict, err.Error(), "")
+	case errors.Is(err, service.ErrInvalidResumeToken):
+		writeError(w, http.StatusUnauthorized, "invalid resume token", "")
+	case errors.Is(err, service.ErrExpiredResumeToken):
+		writeError(w, http.StatusGone, "expired resume token", "")
+	case errors.Is(err, service.ErrRevokedResumeToken):
+		writeError(w, http.StatusGone, "revoked resume token", "")
 	default:
 		writeError(w, http.StatusInternalServerError, err.Error(), "")
 	}

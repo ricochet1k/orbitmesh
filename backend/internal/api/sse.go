@@ -89,6 +89,69 @@ func (h *Handler) sseEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// sseSessionEvents streams global session-state change events across all sessions.
+func (h *Handler) sseSessionEvents(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming not supported", "")
+		return
+	}
+
+	lastEventID := parseLastEventID(r)
+
+	subID := generateID()
+	sub, replay := h.broadcaster.SubscribeWithReplay(subID, "", lastEventID)
+	defer h.broadcaster.Unsubscribe(subID)
+
+	if lastEventID == 0 {
+		replay = nil
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	for _, event := range replay {
+		if event.Type != domain.EventTypeStatusChange {
+			continue
+		}
+		stateEvent := h.toSessionStateEvent(event)
+		if err := writeSSESessionStateEvent(w, stateEvent); err != nil {
+			return
+		}
+		flusher.Flush()
+	}
+
+	ctx := r.Context()
+	heartbeat := time.NewTicker(sseHeartbeatInterval)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-sub.Events:
+			if !ok {
+				return
+			}
+			if event.Type != domain.EventTypeStatusChange {
+				continue
+			}
+			stateEvent := h.toSessionStateEvent(event)
+			if err := writeSSESessionStateEvent(w, stateEvent); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-heartbeat.C:
+			if err := writeSSEHeartbeat(w, time.Now()); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
 // writeSSEEvent serialises a single domain event in the SSE wire format:
 //
 //	event: <type>\n
@@ -117,6 +180,36 @@ func writeSSEHeartbeat(w http.ResponseWriter, timestamp time.Time) error {
 	}
 	_, err = fmt.Fprintf(w, "event: heartbeat\ndata: %s\n\n", data)
 	return err
+}
+
+func writeSSESessionStateEvent(w http.ResponseWriter, event apiTypes.SessionStateEvent) error {
+	data, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", event.EventID, apiTypes.EventTypeSessionState, data)
+	return err
+}
+
+func (h *Handler) toSessionStateEvent(event domain.Event) apiTypes.SessionStateEvent {
+	derived := domain.SessionStateIdle
+	if state, err := h.executor.DeriveSessionState(event.SessionID); err == nil {
+		derived = state
+	}
+
+	stateEvent := apiTypes.SessionStateEvent{
+		EventID:      event.ID,
+		Type:         apiTypes.EventTypeSessionState,
+		Timestamp:    event.Timestamp,
+		SessionID:    event.SessionID,
+		DerivedState: apiTypes.SessionState(derived.String()),
+	}
+
+	if data, ok := event.Data.(domain.StatusChangeData); ok {
+		stateEvent.Reason = data.Reason
+	}
+
+	return stateEvent
 }
 
 func domainEventToAPIEvent(e domain.Event) apiTypes.Event {

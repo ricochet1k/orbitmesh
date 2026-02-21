@@ -24,6 +24,14 @@ func newAttemptID() string {
 	return hex.EncodeToString(b[:])
 }
 
+func newResumeTokenID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b[:])
+}
+
 func (e *AgentExecutor) startRunAttempt(sc *sessionContext, providerType, providerID string) {
 	if e == nil || e.attemptStorage == nil || sc == nil || sc.session == nil {
 		return
@@ -58,10 +66,33 @@ func (e *AgentExecutor) touchRunAttempt(sc *sessionContext) {
 
 func (e *AgentExecutor) markRunAttemptWaiting(sc *sessionContext, kind, ref string) {
 	e.updateRunAttempt(sc, func(a *storage.RunAttemptMetadata) {
+		tokenID := e.mintResumeTokenForAttempt(a)
 		a.WaitKind = kind
 		a.WaitRef = ref
+		a.ResumeTokenID = tokenID
 		a.HeartbeatAt = time.Now().UTC()
 	})
+}
+
+func (e *AgentExecutor) mintResumeTokenForAttempt(attempt *storage.RunAttemptMetadata) string {
+	if e == nil || e.resumeTokenStorage == nil || attempt == nil {
+		return ""
+	}
+	now := time.Now().UTC()
+	token := &storage.ResumeTokenMetadata{
+		TokenID:   newResumeTokenID(),
+		SessionID: attempt.SessionID,
+		AttemptID: attempt.AttemptID,
+		CreatedAt: now,
+		ExpiresAt: now.Add(e.resumeTokenTTL),
+	}
+	if token.TokenID == "" {
+		token.TokenID = now.Format("20060102150405")
+	}
+	if err := e.resumeTokenStorage.SaveResumeToken(token); err != nil {
+		return ""
+	}
+	return token.TokenID
 }
 
 func (e *AgentExecutor) finalizeRunAttempt(sc *sessionContext, terminalReason, interruptionReason string) {

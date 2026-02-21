@@ -455,6 +455,138 @@ func TestSSE_ReplayWithLastEventID(t *testing.T) {
 	}
 }
 
+func TestSSE_GlobalSessionEvents_Headers(t *testing.T) {
+	env := newTestEnv(t)
+	srv := httptest.NewServer(env.router())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/sessions/events")
+	if err != nil {
+		t.Fatalf("SSE request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", ct)
+	}
+	if cc := resp.Header.Get("Cache-Control"); cc != "no-cache" {
+		t.Errorf("Cache-Control = %q, want no-cache", cc)
+	}
+}
+
+func TestSSE_GlobalSessionEvents_MultipleSessions(t *testing.T) {
+	env := newTestEnv(t)
+	srv := httptest.NewServer(env.router())
+	defer srv.Close()
+
+	sessionA := createSessionViaHTTP(t, srv.URL)
+	sessionB := createSessionViaHTTP(t, srv.URL)
+
+	resp, err := http.Get(srv.URL + "/api/sessions/events")
+	if err != nil {
+		t.Fatalf("SSE request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	frames := readSSEMessages(resp)
+
+	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionA, "ignore-non-status"))
+	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionA, domain.SessionStateIdle, domain.SessionStateRunning, "start-a"))
+	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionB, domain.SessionStateIdle, domain.SessionStateRunning, "start-b"))
+
+	collected := make([]apiTypes.SessionStateEvent, 0, 2)
+	timeout := time.After(2 * time.Second)
+	for len(collected) < 2 {
+		select {
+		case frame := <-frames:
+			if frame.Event != string(apiTypes.EventTypeSessionState) {
+				continue
+			}
+			var ev apiTypes.SessionStateEvent
+			if err := json.Unmarshal([]byte(frame.Data), &ev); err != nil {
+				t.Fatalf("unmarshal session state event: %v", err)
+			}
+			collected = append(collected, ev)
+		case <-timeout:
+			t.Fatalf("timed out waiting for global session state events; got %d", len(collected))
+		}
+	}
+
+	if collected[0].SessionID != sessionA {
+		t.Fatalf("event 0 session_id = %q, want %q", collected[0].SessionID, sessionA)
+	}
+	if collected[1].SessionID != sessionB {
+		t.Fatalf("event 1 session_id = %q, want %q", collected[1].SessionID, sessionB)
+	}
+	if collected[0].Reason != "start-a" || collected[1].Reason != "start-b" {
+		t.Fatalf("unexpected reasons: %q, %q", collected[0].Reason, collected[1].Reason)
+	}
+}
+
+func TestSSE_GlobalSessionEvents_ReplayWithLastEventID(t *testing.T) {
+	env := newTestEnv(t)
+	srv := httptest.NewServer(env.router())
+	defer srv.Close()
+
+	sessionA := createSessionViaHTTP(t, srv.URL)
+	sessionB := createSessionViaHTTP(t, srv.URL)
+
+	resp, err := http.Get(srv.URL + "/api/sessions/events")
+	if err != nil {
+		t.Fatalf("SSE request: %v", err)
+	}
+
+	frames := readSSEMessages(resp)
+
+	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionA, domain.SessionStateIdle, domain.SessionStateRunning, "first"))
+
+	var firstFrame sseMessage
+	select {
+	case firstFrame = <-frames:
+		if firstFrame.ID == "" {
+			resp.Body.Close()
+			t.Fatal("expected SSE id for first global event")
+		}
+	case <-time.After(2 * time.Second):
+		resp.Body.Close()
+		t.Fatal("timed out waiting for first global SSE event")
+	}
+
+	resp.Body.Close()
+
+	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionB, domain.SessionStateIdle, domain.SessionStateRunning, "second"))
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/sessions/events?last_event_id="+firstFrame.ID, nil)
+	respReplay, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("replay request: %v", err)
+	}
+	defer respReplay.Body.Close()
+
+	replayFrames := readSSEMessages(respReplay)
+	select {
+	case frame := <-replayFrames:
+		if frame.Event != string(apiTypes.EventTypeSessionState) {
+			t.Fatalf("expected session_state frame, got %q", frame.Event)
+		}
+		var ev apiTypes.SessionStateEvent
+		if err := json.Unmarshal([]byte(frame.Data), &ev); err != nil {
+			t.Fatalf("unmarshal replay event: %v", err)
+		}
+		if ev.SessionID != sessionB {
+			t.Fatalf("expected replay session %q, got %q", sessionB, ev.SessionID)
+		}
+		if ev.Reason != "second" {
+			t.Fatalf("expected replay reason second, got %q", ev.Reason)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for replayed global SSE event")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // convertEventData unit tests
 // ---------------------------------------------------------------------------

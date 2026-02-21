@@ -129,6 +129,9 @@ func TestEventBroadcaster_BroadcastNonBlocking(t *testing.T) {
 	b.Broadcast(event3)
 
 	<-sub.Events
+	if b.DroppedEventCount() == 0 {
+		t.Fatal("expected dropped events to be tracked for slow subscriber")
+	}
 }
 
 func TestEventBroadcaster_ConcurrentAccess(t *testing.T) {
@@ -243,6 +246,25 @@ func TestEventBroadcaster_SubscribeWithReplay(t *testing.T) {
 		// historySize is 3, so only last 3 events are kept
 		if len(replay) != 3 {
 			t.Errorf("expected 3 replayed events (history cap), got %d", len(replay))
+		}
+	})
+
+	t.Run("wildcard replay uses global history", func(t *testing.T) {
+		b := NewEventBroadcaster(10)
+
+		b.Broadcast(domain.NewOutputEvent("session1", "s1 first"))
+		b.Broadcast(domain.NewOutputEvent("session2", "s2 first"))
+		b.Broadcast(domain.NewOutputEvent("session1", "s1 second"))
+
+		_, replay := b.SubscribeWithReplay("sub-global", "", 1)
+		if len(replay) != 2 {
+			t.Fatalf("expected 2 global replay events, got %d", len(replay))
+		}
+		if replay[0].SessionID != "session2" || replay[1].SessionID != "session1" {
+			t.Fatalf("unexpected replay order/session ids: %s, %s", replay[0].SessionID, replay[1].SessionID)
+		}
+		if replay[0].ID != 2 || replay[1].ID != 3 {
+			t.Fatalf("unexpected replay IDs: %d, %d", replay[0].ID, replay[1].ID)
 		}
 	})
 }

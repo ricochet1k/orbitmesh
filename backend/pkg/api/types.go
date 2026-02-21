@@ -41,6 +41,10 @@ type SendMessageRequest struct {
 	ProviderType string `json:"provider_type,omitempty"`
 }
 
+type ResumeSessionRequest struct {
+	TokenID string `json:"token_id"`
+}
+
 type MCPServerConfig struct {
 	Name    string            `json:"name"`
 	Command string            `json:"command"`
@@ -104,6 +108,7 @@ type EventType string
 
 const (
 	EventTypeStatusChange EventType = "status_change"
+	EventTypeSessionState EventType = "session_state"
 	EventTypeOutput       EventType = "output"
 	EventTypeMetric       EventType = "metric"
 	EventTypeError        EventType = "error"
@@ -122,6 +127,17 @@ type Event struct {
 	Timestamp time.Time `json:"timestamp"`
 	SessionID string    `json:"session_id"`
 	Data      any       `json:"data"`
+}
+
+type SessionStateEvent struct {
+	EventID      int64        `json:"event_id"`
+	Type         EventType    `json:"type"`
+	Timestamp    time.Time    `json:"timestamp"`
+	SessionID    string       `json:"session_id"`
+	DerivedState SessionState `json:"derived_state"`
+	Reason       string       `json:"reason,omitempty"`
+	Source       string       `json:"source,omitempty"`
+	RunAttemptID string       `json:"run_attempt_id,omitempty"`
 }
 
 type StatusChangeData struct {

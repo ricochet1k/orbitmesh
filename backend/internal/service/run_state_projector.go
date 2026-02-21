@@ -11,16 +11,16 @@ func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.
 	switch data := event.Data.(type) {
 	case domain.OutputData:
 		if data.IsDelta {
-			sc.session.AppendOutputDelta(data.Content)
+			e.appendOutputDelta(sc.session, data.Content, event.Raw, event.Timestamp)
 		} else {
-			sc.session.AppendMessageRaw(domain.MessageKindOutput, data.Content, event.Raw)
+			e.appendSessionMessageRaw(sc.session, domain.MessageKindOutput, data.Content, event.Raw, event.Timestamp)
 		}
 	case domain.ThoughtData:
-		sc.session.AppendMessageRaw(domain.MessageKindThought, data.Content, event.Raw)
+		e.appendSessionMessageRaw(sc.session, domain.MessageKindThought, data.Content, event.Raw, event.Timestamp)
 	case domain.ErrorData:
-		sc.session.AppendMessageRaw(domain.MessageKindError, data.Message, event.Raw)
+		e.appendSessionMessageRaw(sc.session, domain.MessageKindError, data.Message, event.Raw, event.Timestamp)
 	case domain.ToolCallData:
-		sc.session.AppendMessageRaw(domain.MessageKindToolUse, fmt.Sprintf("%s: %s", data.Name, data.ID), event.Raw)
+		e.appendSessionMessageRaw(sc.session, domain.MessageKindToolUse, fmt.Sprintf("%s: %s", data.Name, data.ID), event.Raw, event.Timestamp)
 		if data.Status == "pending" || data.Status == "waiting" {
 			e.suspendSession(sc, data.ID)
 		}
@@ -30,13 +30,13 @@ func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.
 				sc.session.SetCurrentTask(task)
 			}
 		}
-		sc.session.AppendMessageRaw(domain.MessageKindSystem, data.Key, event.Raw)
+		e.appendSessionMessageRaw(sc.session, domain.MessageKindSystem, data.Key, event.Raw, event.Timestamp)
 	case domain.MetricData:
-		sc.session.AppendMessageRaw(domain.MessageKindMetric,
-			fmt.Sprintf("in=%d out=%d requests=%d", data.TokensIn, data.TokensOut, data.RequestCount), event.Raw)
+		e.appendSessionMessageRaw(sc.session, domain.MessageKindMetric,
+			fmt.Sprintf("in=%d out=%d requests=%d", data.TokensIn, data.TokensOut, data.RequestCount), event.Raw, event.Timestamp)
 	case domain.StatusChangeData:
-		sc.session.AppendMessageRaw(domain.MessageKindSystem,
-			fmt.Sprintf("status: %s -> %s", data.OldState, data.NewState), event.Raw)
+		e.appendSessionMessageRaw(sc.session, domain.MessageKindSystem,
+			fmt.Sprintf("status: %s -> %s", data.OldState, data.NewState), event.Raw, event.Timestamp)
 	case domain.PlanData:
 		steps := make([]string, 0, len(data.Steps))
 		for _, step := range data.Steps {
@@ -46,7 +46,7 @@ func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.
 		if len(steps) > 0 {
 			content = fmt.Sprintf("%s\n%s", data.Description, strings.Join(steps, "\n"))
 		}
-		sc.session.AppendMessageRaw(domain.MessageKindPlan, content, event.Raw)
+		e.appendSessionMessageRaw(sc.session, domain.MessageKindPlan, content, event.Raw, event.Timestamp)
 	}
 
 	if e.storage != nil {

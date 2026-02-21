@@ -157,10 +157,11 @@ export async function pauseSession(id: string): Promise<void> {
   if (!resp.ok) throw new Error(await readErrorMessage(resp));
 }
 
-export async function resumeSession(id: string): Promise<void> {
+export async function resumeSession(id: string, tokenId?: string): Promise<void> {
   const resp = await fetch(`${BASE_URL}/sessions/${id}/resume`, {
     method: "POST",
-    headers: withCSRFHeaders(),
+    headers: withCSRFHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ token_id: tokenId ?? "" }),
   });
   if (!resp.ok) throw new Error(await readErrorMessage(resp));
 }
@@ -203,6 +204,13 @@ export async function sendMessage(
 
 export function getEventsUrl(id: string): string {
   return `${BASE_URL}/sessions/${id}/events`;
+}
+
+export function getGlobalSessionEventsUrl(lastEventId?: number): string {
+  if (lastEventId && lastEventId > 0) {
+    return `${BASE_URL}/sessions/events?last_event_id=${encodeURIComponent(String(lastEventId))}`;
+  }
+  return `${BASE_URL}/sessions/events`;
 }
 
 export async function pollDockMcp(

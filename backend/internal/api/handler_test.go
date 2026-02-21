@@ -78,12 +78,16 @@ type inMemStore struct {
 	mu        sync.RWMutex
 	sessions  map[string]*domain.Session
 	terminals map[string]*domain.Terminal
+	attempts  map[string]map[string]*storage.RunAttemptMetadata
+	tokens    map[string]*storage.ResumeTokenMetadata
 }
 
 func newInMemStore() *inMemStore {
 	return &inMemStore{
 		sessions:  make(map[string]*domain.Session),
 		terminals: make(map[string]*domain.Terminal),
+		attempts:  make(map[string]map[string]*storage.RunAttemptMetadata),
+		tokens:    make(map[string]*storage.ResumeTokenMetadata),
 	}
 }
 
@@ -167,6 +171,68 @@ func (s *inMemStore) ListTerminals() ([]*domain.Terminal, error) {
 	return out, nil
 }
 
+func (s *inMemStore) SaveRunAttempt(attempt *storage.RunAttemptMetadata) error {
+	if attempt == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.attempts[attempt.SessionID]; !ok {
+		s.attempts[attempt.SessionID] = make(map[string]*storage.RunAttemptMetadata)
+	}
+	copyAttempt := *attempt
+	s.attempts[attempt.SessionID][attempt.AttemptID] = &copyAttempt
+	return nil
+}
+
+func (s *inMemStore) LoadRunAttempt(sessionID, attemptID string) (*storage.RunAttemptMetadata, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if bySession, ok := s.attempts[sessionID]; ok {
+		if attempt, ok := bySession[attemptID]; ok {
+			copyAttempt := *attempt
+			return &copyAttempt, nil
+		}
+	}
+	return nil, storage.ErrRunAttemptNotFound
+}
+
+func (s *inMemStore) ListRunAttempts(sessionID string) ([]*storage.RunAttemptMetadata, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	bySession, ok := s.attempts[sessionID]
+	if !ok {
+		return []*storage.RunAttemptMetadata{}, nil
+	}
+	out := make([]*storage.RunAttemptMetadata, 0, len(bySession))
+	for _, attempt := range bySession {
+		copyAttempt := *attempt
+		out = append(out, &copyAttempt)
+	}
+	return out, nil
+}
+
+func (s *inMemStore) SaveResumeToken(token *storage.ResumeTokenMetadata) error {
+	if token == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	copyToken := *token
+	s.tokens[token.TokenID] = &copyToken
+	return nil
+}
+
+func (s *inMemStore) LoadResumeToken(tokenID string) (*storage.ResumeTokenMetadata, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if token, ok := s.tokens[tokenID]; ok {
+		copyToken := *token
+		return &copyToken, nil
+	}
+	return nil, storage.ErrResumeTokenNotFound
+}
+
 // ---------------------------------------------------------------------------
 // test environment
 // ---------------------------------------------------------------------------
@@ -176,6 +242,7 @@ type testEnv struct {
 	broadcaster *service.EventBroadcaster
 	handler     *Handler
 	lastMock    *mockProvider
+	store       *inMemStore
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -184,6 +251,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		broadcaster: service.NewEventBroadcaster(100),
 	}
 	store := newInMemStore()
+	env.store = store
 	env.executor = service.NewAgentExecutor(service.ExecutorConfig{
 		Storage:         store,
 		TerminalStorage: store,
@@ -594,6 +662,38 @@ func TestListSessions_MultipleSessions(t *testing.T) {
 	}
 }
 
+func TestListSessions_UsesDerivedState(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	created := createSession(t, r, "mock", "/tmp/test")
+
+	sess, err := env.executor.GetSession(created.ID)
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+	if err := sess.TransitionTo(domain.SessionStateRunning, "test persisted state"); err != nil {
+		t.Fatalf("TransitionTo running failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp apiTypes.SessionListResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if len(resp.Sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(resp.Sessions))
+	}
+	if resp.Sessions[0].State != apiTypes.SessionStateIdle {
+		t.Fatalf("expected derived idle state, got %q", resp.Sessions[0].State)
+	}
+}
+
 func TestListSessions_SessionPersistenceAfterCreation(t *testing.T) {
 	env := newTestEnv(t)
 	r := env.router()
@@ -686,6 +786,35 @@ func TestGetSession_OK(t *testing.T) {
 	}
 	if resp.ProviderType != "mock" {
 		t.Errorf("ProviderType = %q, want %q", resp.ProviderType, "mock")
+	}
+}
+
+func TestGetSession_UsesDerivedState(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	created := createSession(t, r, "mock", "/tmp/test")
+
+	sess, err := env.executor.GetSession(created.ID)
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+	if err := sess.TransitionTo(domain.SessionStateRunning, "test persisted state"); err != nil {
+		t.Fatalf("TransitionTo running failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+created.ID, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp apiTypes.SessionStatusResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.State != apiTypes.SessionStateIdle {
+		t.Fatalf("expected derived idle state, got %q", resp.State)
 	}
 }
 
@@ -783,6 +912,74 @@ func TestStopSession_NotFound(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/sessions/{id}/resume
+// ---------------------------------------------------------------------------
+
+func TestResumeSession_InvalidToken(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	created := createSession(t, r, "mock", "/tmp")
+	body, _ := json.Marshal(apiTypes.ResumeSessionRequest{TokenID: "missing-token"})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/resume", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestResumeSession_OK_WithToken(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	created := createSession(t, r, "mock", "/tmp")
+	now := time.Now().UTC()
+	if err := env.store.SaveRunAttempt(&storage.RunAttemptMetadata{
+		AttemptID:      "attempt-resume",
+		SessionID:      created.ID,
+		ProviderType:   "mock",
+		StartedAt:      now.Add(-time.Minute),
+		HeartbeatAt:    now,
+		TerminalReason: "interrupted",
+		WaitKind:       "tool_call",
+		WaitRef:        "tool-1",
+		ResumeTokenID:  "token-ok",
+	}); err != nil {
+		t.Fatalf("SaveRunAttempt failed: %v", err)
+	}
+	if err := env.store.SaveResumeToken(&storage.ResumeTokenMetadata{
+		TokenID:   "token-ok",
+		SessionID: created.ID,
+		AttemptID: "attempt-resume",
+		CreatedAt: now,
+		ExpiresAt: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("SaveResumeToken failed: %v", err)
+	}
+
+	body, _ := json.Marshal(apiTypes.ResumeSessionRequest{TokenID: "token-ok"})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/resume", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	attempt, err := env.store.LoadRunAttempt(created.ID, "attempt-resume")
+	if err != nil {
+		t.Fatalf("LoadRunAttempt failed: %v", err)
+	}
+	if attempt.WaitKind != "" || attempt.ResumeTokenID != "" {
+		t.Fatalf("expected waiting metadata cleared, got kind=%q token=%q", attempt.WaitKind, attempt.ResumeTokenID)
 	}
 }
 

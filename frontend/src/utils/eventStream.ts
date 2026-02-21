@@ -50,7 +50,7 @@ const preflightCheck = async (url: string): Promise<PreflightResult> => {
 }
 
 export const startEventStream = (
-  url: string,
+  urlOrFactory: string | (() => string),
   callbacks: EventStreamCallbacks,
   options: EventStreamOptions = {},
 ) => {
@@ -101,6 +101,7 @@ export const startEventStream = (
 
   const connect = async () => {
     if (closed) return
+    const url = typeof urlOrFactory === "function" ? urlOrFactory() : urlOrFactory
     callbacks.onStatus?.("connecting")
     if (options.preflight !== false) {
       const result = await preflightCheck(url)

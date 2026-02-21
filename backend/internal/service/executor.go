@@ -13,12 +13,15 @@ import (
 )
 
 var (
-	ErrSessionNotFound  = errors.New("session not found")
-	ErrSessionExists    = errors.New("session already exists")
-	ErrProviderNotFound = errors.New("provider type not found")
-	ErrInvalidState     = errors.New("invalid session state for operation")
-	ErrOperationTimeout = errors.New("operation timed out")
-	ErrExecutorShutdown = errors.New("executor is shutting down")
+	ErrSessionNotFound    = errors.New("session not found")
+	ErrSessionExists      = errors.New("session already exists")
+	ErrProviderNotFound   = errors.New("provider type not found")
+	ErrInvalidState       = errors.New("invalid session state for operation")
+	ErrOperationTimeout   = errors.New("operation timed out")
+	ErrExecutorShutdown   = errors.New("executor is shutting down")
+	ErrInvalidResumeToken = errors.New("invalid resume token")
+	ErrExpiredResumeToken = errors.New("expired resume token")
+	ErrRevokedResumeToken = errors.New("revoked resume token")
 )
 
 const (
@@ -32,8 +35,27 @@ type SessionFactory func(providerType, sessionID string, config session.Config) 
 type sessionContext struct {
 	session *domain.Session
 	run     *session.Run // The active run (nil if idle)
+	runMu   sync.RWMutex
 	attempt *storage.RunAttemptMetadata
 	amMu    sync.Mutex
+}
+
+func (sc *sessionContext) getRun() *session.Run {
+	if sc == nil {
+		return nil
+	}
+	sc.runMu.RLock()
+	defer sc.runMu.RUnlock()
+	return sc.run
+}
+
+func (sc *sessionContext) setRun(run *session.Run) {
+	if sc == nil {
+		return
+	}
+	sc.runMu.Lock()
+	sc.run = run
+	sc.runMu.Unlock()
 }
 
 type AgentExecutor struct {
@@ -47,7 +69,9 @@ type AgentExecutor struct {
 	checkpointInterval time.Duration
 	terminalHubs       map[string]*TerminalHub
 	attemptStorage     storage.RunAttemptStorage
+	resumeTokenStorage storage.ResumeTokenStorage
 	bootID             string
+	resumeTokenTTL     time.Duration
 
 	recovery *recoveryManager
 
@@ -64,6 +88,8 @@ type ExecutorConfig struct {
 	OperationTimeout   time.Duration
 	CheckpointInterval time.Duration
 	RunAttemptStorage  storage.RunAttemptStorage
+	ResumeTokenStorage storage.ResumeTokenStorage
+	ResumeTokenTTL     time.Duration
 }
 
 func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
@@ -89,7 +115,9 @@ func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
 		checkpointInterval: checkpointInterval,
 		terminalHubs:       make(map[string]*TerminalHub),
 		attemptStorage:     cfg.RunAttemptStorage,
+		resumeTokenStorage: cfg.ResumeTokenStorage,
 		bootID:             newBootID(),
+		resumeTokenTTL:     cfg.ResumeTokenTTL,
 		ctx:                ctx,
 		cancel:             cancel,
 	}
@@ -100,8 +128,25 @@ func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
 		}
 	}
 
+	if exec.resumeTokenStorage == nil {
+		if ts, ok := cfg.Storage.(storage.ResumeTokenStorage); ok {
+			exec.resumeTokenStorage = ts
+		}
+	}
+
+	if exec.resumeTokenTTL <= 0 {
+		exec.resumeTokenTTL = 24 * time.Hour
+	}
+
 	exec.recovery = newRecoveryManager(exec)
 	return exec
+}
+
+func (e *AgentExecutor) Startup(ctx context.Context) error {
+	if e == nil || e.recovery == nil {
+		return nil
+	}
+	return e.recovery.OnStartup(ctx)
 }
 
 // CreateSession creates a new session in idle state without starting a provider.
@@ -205,7 +250,7 @@ func (e *AgentExecutor) GetSessionStatus(id string) (session.Status, error) {
 	}
 
 	// If there's no active run, return a default status
-	run := sc.run
+	run := sc.getRun()
 	if run == nil {
 		return session.Status{}, nil
 	}
@@ -302,7 +347,7 @@ func (e *AgentExecutor) SendInput(ctx context.Context, id string, input string, 
 		}
 	}
 
-	run := sc.run
+	run := sc.getRun()
 	if run == nil {
 		return fmt.Errorf("no active provider run for session %s", id)
 	}

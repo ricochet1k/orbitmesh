@@ -91,6 +91,11 @@ func NewJSONFileStorage(baseDir string) (*JSONFileStorage, error) {
 		return nil, fmt.Errorf("failed to create attempts directory: %w", err)
 	}
 
+	resumeTokensDir := filepath.Join(sessionsDir, "resume_tokens")
+	if err := os.MkdirAll(resumeTokensDir, 0o700); err != nil {
+		return nil, fmt.Errorf("failed to create resume_tokens directory: %w", err)
+	}
+
 	terminalsDir := filepath.Join(baseDir, "terminals")
 	if err := os.MkdirAll(terminalsDir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create terminals directory: %w", err)
@@ -116,6 +121,13 @@ func NewJSONFileStorage(baseDir string) (*JSONFileStorage, error) {
 	if err == nil {
 		if info.Mode().Perm()&0o077 != 0 {
 			_ = os.Chmod(attemptsDir, 0o700)
+		}
+	}
+
+	info, err = os.Stat(resumeTokensDir)
+	if err == nil {
+		if info.Mode().Perm()&0o077 != 0 {
+			_ = os.Chmod(resumeTokensDir, 0o700)
 		}
 	}
 
@@ -292,6 +304,20 @@ func (s *JSONFileStorage) GetMessages(id string) ([]domain.Message, error) {
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
+	messagesFromLog, logErr := s.readMessagesFromJSONLUnlocked(id)
+	if logErr == nil {
+		return messagesFromLog, nil
+	}
+
+	var corruptionErr *MessageLogCorruptionError
+	if errors.As(logErr, &corruptionErr) {
+		if len(messagesFromLog) > 0 {
+			return messagesFromLog, nil
+		}
+	} else if !errors.Is(logErr, os.ErrNotExist) && !errors.Is(logErr, ErrSessionNotFound) {
+		return nil, logErr
+	}
 
 	return s.getMessagesUnlocked(id)
 }

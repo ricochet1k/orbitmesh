@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -107,13 +109,25 @@ type mockStorage struct {
 	mu       sync.Mutex
 	sessions map[string]*domain.Session
 	attempts map[string]map[string]*storage.RunAttemptMetadata
+	tokens   map[string]*storage.ResumeTokenMetadata
+	log      []messageLogAppendCall
 	saveErr  error
+}
+
+type messageLogAppendCall struct {
+	sessionID  string
+	projection storage.MessageProjection
+	kind       domain.MessageKind
+	contents   string
+	raw        json.RawMessage
+	timestamp  time.Time
 }
 
 func newMockStorage() *mockStorage {
 	return &mockStorage{
 		sessions: make(map[string]*domain.Session),
 		attempts: make(map[string]map[string]*storage.RunAttemptMetadata),
+		tokens:   make(map[string]*storage.ResumeTokenMetadata),
 	}
 }
 
@@ -164,6 +178,20 @@ func (s *mockStorage) GetMessages(id string) ([]domain.Message, error) {
 	return nil, storage.ErrSessionNotFound
 }
 
+func (s *mockStorage) AppendMessageLog(sessionID string, projection storage.MessageProjection, kind domain.MessageKind, contents string, raw json.RawMessage, timestamp time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.log = append(s.log, messageLogAppendCall{
+		sessionID:  sessionID,
+		projection: projection,
+		kind:       kind,
+		contents:   contents,
+		raw:        raw,
+		timestamp:  timestamp,
+	})
+	return nil
+}
+
 func (s *mockStorage) SaveRunAttempt(attempt *storage.RunAttemptMetadata) error {
 	if attempt == nil {
 		return nil
@@ -205,6 +233,27 @@ func (s *mockStorage) ListRunAttempts(sessionID string) ([]*storage.RunAttemptMe
 	return out, nil
 }
 
+func (s *mockStorage) SaveResumeToken(token *storage.ResumeTokenMetadata) error {
+	if token == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	copyToken := *token
+	s.tokens[token.TokenID] = &copyToken
+	return nil
+}
+
+func (s *mockStorage) LoadResumeToken(tokenID string) (*storage.ResumeTokenMetadata, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if token, ok := s.tokens[tokenID]; ok {
+		copyToken := *token
+		return &copyToken, nil
+	}
+	return nil, storage.ErrResumeTokenNotFound
+}
+
 func createTestExecutor(prov *mockProvider) (*AgentExecutor, *mockStorage) {
 	storage := newMockStorage()
 	broadcaster := NewEventBroadcaster(100)
@@ -225,6 +274,42 @@ func createTestExecutor(prov *mockProvider) (*AgentExecutor, *mockStorage) {
 	}
 
 	return NewAgentExecutor(cfg), storage
+}
+
+func waitForRunAttempt(t *testing.T, store *mockStorage, sessionID string, requireEnded bool) *storage.RunAttemptMetadata {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		attempts, err := store.ListRunAttempts(sessionID)
+		if err == nil && len(attempts) > 0 {
+			sort.Slice(attempts, func(i, j int) bool {
+				return attempts[i].StartedAt.Before(attempts[j].StartedAt)
+			})
+			latest := attempts[len(attempts)-1]
+			if !requireEnded || latest.EndedAt != nil {
+				return latest
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for run attempt for session %s", sessionID)
+	return nil
+}
+
+func waitForRunAttemptWithToken(t *testing.T, store *mockStorage, sessionID string) *storage.RunAttemptMetadata {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		attempt := waitForRunAttempt(t, store, sessionID, true)
+		if attempt.ResumeTokenID != "" {
+			return attempt
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for run attempt token for session %s", sessionID)
+	return nil
 }
 
 func TestAgentExecutor_StartSession(t *testing.T) {
@@ -469,6 +554,208 @@ func TestAgentExecutor_GetSessionStatus(t *testing.T) {
 	_, err = executor.GetSessionStatus("nonexistent")
 	if !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("expected ErrSessionNotFound, got %v", err)
+	}
+}
+
+func TestAgentExecutor_DeriveSessionState(t *testing.T) {
+	prov := newMockProvider()
+	executor, store := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	config := session.Config{
+		ProviderType: "test",
+		WorkingDir:   "/tmp/test",
+	}
+
+	if _, err := executor.CreateSession(context.Background(), "session-derived", config); err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+
+	state, err := executor.DeriveSessionState("session-derived")
+	if err != nil {
+		t.Fatalf("DeriveSessionState failed: %v", err)
+	}
+	if state != domain.SessionStateIdle {
+		t.Fatalf("expected idle state with no run/attempts, got %s", state)
+	}
+
+	now := time.Now().UTC()
+	if err := store.SaveRunAttempt(&storage.RunAttemptMetadata{
+		AttemptID:      "attempt-old",
+		SessionID:      "session-derived",
+		StartedAt:      now.Add(-2 * time.Minute),
+		HeartbeatAt:    now.Add(-2 * time.Minute),
+		TerminalReason: "completed",
+	}); err != nil {
+		t.Fatalf("SaveRunAttempt old failed: %v", err)
+	}
+	if err := store.SaveRunAttempt(&storage.RunAttemptMetadata{
+		AttemptID:          "attempt-new",
+		SessionID:          "session-derived",
+		StartedAt:          now,
+		HeartbeatAt:        now,
+		TerminalReason:     "interrupted",
+		InterruptionReason: "waiting for tool result",
+		WaitKind:           "tool_call",
+		WaitRef:            "tool-123",
+	}); err != nil {
+		t.Fatalf("SaveRunAttempt latest failed: %v", err)
+	}
+
+	state, err = executor.DeriveSessionState("session-derived")
+	if err != nil {
+		t.Fatalf("DeriveSessionState failed with attempts: %v", err)
+	}
+	if state != domain.SessionStateSuspended {
+		t.Fatalf("expected suspended from latest waiting/interrupted attempt, got %s", state)
+	}
+
+	executor.mu.Lock()
+	executor.sessions["session-derived"].run = session.NewRun(prov, context.Background())
+	executor.mu.Unlock()
+
+	state, err = executor.DeriveSessionState("session-derived")
+	if err != nil {
+		t.Fatalf("DeriveSessionState failed with live run: %v", err)
+	}
+	if state != domain.SessionStateRunning {
+		t.Fatalf("expected running to take precedence over attempt metadata, got %s", state)
+	}
+}
+
+func TestAgentExecutor_StartupRecovery_InterruptedRunning(t *testing.T) {
+	store := newMockStorage()
+	broadcaster := NewEventBroadcaster(100)
+
+	cfg := ExecutorConfig{
+		Storage:     store,
+		Broadcaster: broadcaster,
+		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
+			return newMockProvider(), nil
+		},
+		OperationTimeout: 5 * time.Second,
+	}
+
+	if err := store.Save(domain.NewSession("recover-running", "test", "/tmp")); err != nil {
+		t.Fatalf("save session failed: %v", err)
+	}
+	if err := store.SaveRunAttempt(&storage.RunAttemptMetadata{
+		AttemptID:   "attempt-running",
+		SessionID:   "recover-running",
+		StartedAt:   time.Now().UTC().Add(-5 * time.Minute),
+		HeartbeatAt: time.Now().UTC().Add(-4 * time.Minute),
+	}); err != nil {
+		t.Fatalf("save attempt failed: %v", err)
+	}
+
+	executor := NewAgentExecutor(cfg)
+	defer executor.Shutdown(context.Background())
+
+	if err := executor.Startup(context.Background()); err != nil {
+		t.Fatalf("startup recovery failed: %v", err)
+	}
+
+	attempt, err := store.LoadRunAttempt("recover-running", "attempt-running")
+	if err != nil {
+		t.Fatalf("load attempt failed: %v", err)
+	}
+	if attempt.EndedAt == nil {
+		t.Fatal("expected recovered attempt to be terminal")
+	}
+	if attempt.TerminalReason != "interrupted" {
+		t.Fatalf("expected terminal reason interrupted, got %q", attempt.TerminalReason)
+	}
+	if attempt.InterruptionReason != "startup recovery: interrupted while running" {
+		t.Fatalf("unexpected interruption reason: %q", attempt.InterruptionReason)
+	}
+
+	store.mu.Lock()
+	if len(store.log) != 1 {
+		store.mu.Unlock()
+		t.Fatalf("expected one recovery log entry, got %d", len(store.log))
+	}
+	logEntry := store.log[0]
+	store.mu.Unlock()
+
+	if logEntry.sessionID != "recover-running" {
+		t.Fatalf("expected recovery log for session recover-running, got %q", logEntry.sessionID)
+	}
+	if logEntry.kind != domain.MessageKindSystem {
+		t.Fatalf("expected recovery log kind system, got %q", logEntry.kind)
+	}
+	if logEntry.projection != storage.MessageProjectionAppend {
+		t.Fatalf("expected append projection, got %q", logEntry.projection)
+	}
+	if !strings.Contains(logEntry.contents, "[recovery]") {
+		t.Fatalf("expected recovery marker in message, got %q", logEntry.contents)
+	}
+
+	if err := executor.Startup(context.Background()); err != nil {
+		t.Fatalf("second startup recovery failed: %v", err)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.log) != 1 {
+		t.Fatalf("expected idempotent recovery log count 1, got %d", len(store.log))
+	}
+}
+
+func TestAgentExecutor_StartupRecovery_InterruptedWaiting(t *testing.T) {
+	store := newMockStorage()
+	broadcaster := NewEventBroadcaster(100)
+
+	cfg := ExecutorConfig{
+		Storage:     store,
+		Broadcaster: broadcaster,
+		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
+			return newMockProvider(), nil
+		},
+		OperationTimeout: 5 * time.Second,
+	}
+
+	if err := store.Save(domain.NewSession("recover-waiting", "test", "/tmp")); err != nil {
+		t.Fatalf("save session failed: %v", err)
+	}
+	if err := store.SaveRunAttempt(&storage.RunAttemptMetadata{
+		AttemptID:   "attempt-waiting",
+		SessionID:   "recover-waiting",
+		StartedAt:   time.Now().UTC().Add(-3 * time.Minute),
+		HeartbeatAt: time.Now().UTC().Add(-2 * time.Minute),
+		WaitKind:    "tool_call",
+		WaitRef:     "tool-123",
+	}); err != nil {
+		t.Fatalf("save attempt failed: %v", err)
+	}
+
+	executor := NewAgentExecutor(cfg)
+	defer executor.Shutdown(context.Background())
+
+	if err := executor.Startup(context.Background()); err != nil {
+		t.Fatalf("startup recovery failed: %v", err)
+	}
+
+	attempt, err := store.LoadRunAttempt("recover-waiting", "attempt-waiting")
+	if err != nil {
+		t.Fatalf("load attempt failed: %v", err)
+	}
+	if attempt.EndedAt == nil {
+		t.Fatal("expected recovered attempt to be terminal")
+	}
+	if attempt.TerminalReason != "interrupted" {
+		t.Fatalf("expected terminal reason interrupted, got %q", attempt.TerminalReason)
+	}
+	wantReason := "startup recovery: interrupted while waiting for tool_call: tool-123"
+	if attempt.InterruptionReason != wantReason {
+		t.Fatalf("unexpected interruption reason: %q", attempt.InterruptionReason)
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.log) != 1 {
+		t.Fatalf("expected one recovery log entry, got %d", len(store.log))
+	}
+	if !strings.Contains(store.log[0].contents, "waiting for tool_call: tool-123") {
+		t.Fatalf("expected waiting recovery detail in log entry, got %q", store.log[0].contents)
 	}
 }
 
@@ -880,6 +1167,36 @@ loop:
 
 	if !receivedOutput {
 		t.Error("expected to receive output event")
+	}
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		storage.mu.Lock()
+		count := len(storage.log)
+		storage.mu.Unlock()
+		if count >= 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	storage.mu.Lock()
+	defer storage.mu.Unlock()
+	if len(storage.log) == 0 {
+		t.Fatal("expected message log appends")
+	}
+
+	foundOutputProjection := false
+	for _, call := range storage.log {
+		if call.sessionID == "event-test" && string(call.projection) == "append_raw" && call.kind == domain.MessageKindOutput {
+			foundOutputProjection = true
+			if call.timestamp.IsZero() {
+				t.Fatalf("expected timestamp on logged output projection")
+			}
+		}
+	}
+	if !foundOutputProjection {
+		t.Fatalf("expected output projection append in message log, got %#v", storage.log)
 	}
 }
 
@@ -1337,6 +1654,111 @@ func TestAgentExecutor_CancelRun_NotFound(t *testing.T) {
 	}
 }
 
+func TestAgentExecutor_RunAttemptLifecycle_Completed(t *testing.T) {
+	prov := newMockProvider()
+	executor, store := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	_, err := executor.StartSession(context.Background(), "attempt-complete", session.Config{
+		ProviderType: "test",
+		WorkingDir:   "/tmp",
+	})
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	_, err = executor.SendMessage(context.Background(), "attempt-complete", "hello", "provider-A", "")
+	if err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	close(prov.events)
+	time.Sleep(50 * time.Millisecond)
+
+	attempt := waitForRunAttempt(t, store, "attempt-complete", true)
+	if attempt.TerminalReason != "completed" {
+		t.Fatalf("expected terminal reason completed, got %q", attempt.TerminalReason)
+	}
+	if attempt.EndedAt == nil {
+		t.Fatal("expected ended_at to be set")
+	}
+	if attempt.AttemptID == "" || attempt.BootID == "" {
+		t.Fatalf("expected attempt and boot identifiers, got attempt=%q boot=%q", attempt.AttemptID, attempt.BootID)
+	}
+	if attempt.ProviderID != "provider-A" {
+		t.Fatalf("expected provider id provider-A, got %q", attempt.ProviderID)
+	}
+}
+
+func TestAgentExecutor_RunAttemptLifecycle_Cancelled(t *testing.T) {
+	prov := newMockProvider()
+	executor, store := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	_, err := executor.StartSession(context.Background(), "attempt-cancel", session.Config{
+		ProviderType: "test",
+		WorkingDir:   "/tmp",
+	})
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	_, err = executor.SendMessage(context.Background(), "attempt-cancel", "hello", "", "")
+	if err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	if err := executor.CancelRun(context.Background(), "attempt-cancel"); err != nil {
+		t.Fatalf("CancelRun failed: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	attempt := waitForRunAttempt(t, store, "attempt-cancel", true)
+	if attempt.TerminalReason != "cancelled" {
+		t.Fatalf("expected terminal reason cancelled, got %q", attempt.TerminalReason)
+	}
+	if attempt.InterruptionReason != "run cancelled by user" {
+		t.Fatalf("expected interruption reason for cancellation, got %q", attempt.InterruptionReason)
+	}
+	if attempt.EndedAt == nil {
+		t.Fatal("expected ended_at to be set")
+	}
+}
+
+func TestAgentExecutor_RunAttemptLifecycle_StartFailure(t *testing.T) {
+	prov := newMockProvider()
+	prov.startErr = errors.New("boom")
+	executor, store := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	_, err := executor.StartSession(context.Background(), "attempt-fail", session.Config{
+		ProviderType: "test",
+		WorkingDir:   "/tmp",
+	})
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	_, err = executor.SendMessage(context.Background(), "attempt-fail", "hello", "", "")
+	if err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	attempt := waitForRunAttempt(t, store, "attempt-fail", true)
+	if attempt.TerminalReason != "failed" {
+		t.Fatalf("expected terminal reason failed, got %q", attempt.TerminalReason)
+	}
+	if !strings.Contains(attempt.InterruptionReason, "boom") {
+		t.Fatalf("expected interruption reason to contain boom, got %q", attempt.InterruptionReason)
+	}
+	if attempt.EndedAt == nil {
+		t.Fatal("expected ended_at to be set")
+	}
+}
+
 func TestAgentExecutor_SuspendAndResume(t *testing.T) {
 	prov := newMockProvider()
 	executor, _ := createTestExecutor(prov)
@@ -1398,6 +1820,197 @@ func TestAgentExecutor_SuspendAndResume(t *testing.T) {
 	if sess2.GetSuspensionContext() != nil {
 		t.Error("suspension context should be cleared after resume")
 	}
+}
+
+func TestAgentExecutor_ResumeTokenMintAndConsume(t *testing.T) {
+	prov := newMockProvider()
+	executor, store := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	_, err := executor.StartSession(context.Background(), "resume-token-session", session.Config{
+		ProviderType: "test",
+		WorkingDir:   "/tmp",
+	})
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	_, err = executor.SendMessage(context.Background(), "resume-token-session", "hello", "", "")
+	if err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	executor.mu.RLock()
+	sc := executor.sessions["resume-token-session"]
+	executor.mu.RUnlock()
+	if sc == nil {
+		t.Fatal("missing session context")
+	}
+	executor.suspendSession(sc, "tool-123")
+
+	attempt := waitForRunAttemptWithToken(t, store, "resume-token-session")
+	if attempt.ResumeTokenID == "" {
+		t.Fatal("expected resume token ID on attempt")
+	}
+	tok, err := store.LoadResumeToken(attempt.ResumeTokenID)
+	if err != nil {
+		t.Fatalf("LoadResumeToken failed: %v", err)
+	}
+	if tok.SessionID != "resume-token-session" || tok.AttemptID != attempt.AttemptID {
+		t.Fatalf("token scope mismatch: %+v", tok)
+	}
+
+	_, err = executor.ResumeSessionWithToken(context.Background(), "resume-token-session", attempt.ResumeTokenID)
+	if err != nil {
+		t.Fatalf("ResumeSessionWithToken failed: %v", err)
+	}
+
+	updatedAttempt, err := store.LoadRunAttempt("resume-token-session", attempt.AttemptID)
+	if err != nil {
+		t.Fatalf("LoadRunAttempt failed: %v", err)
+	}
+	if updatedAttempt.WaitKind != "" || updatedAttempt.WaitRef != "" || updatedAttempt.ResumeTokenID != "" {
+		t.Fatalf("expected waiting metadata cleared, got kind=%q ref=%q token=%q", updatedAttempt.WaitKind, updatedAttempt.WaitRef, updatedAttempt.ResumeTokenID)
+	}
+
+	updatedToken, err := store.LoadResumeToken(tok.TokenID)
+	if err != nil {
+		t.Fatalf("LoadResumeToken after consume failed: %v", err)
+	}
+	if updatedToken.ConsumedAt == nil || updatedToken.RevokedAt == nil {
+		t.Fatalf("expected token consumed/revoked, got %+v", updatedToken)
+	}
+}
+
+func TestAgentExecutor_ResumeTokenInvalid(t *testing.T) {
+	prov := newMockProvider()
+	executor, _ := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	_, err := executor.StartSession(context.Background(), "resume-invalid", session.Config{ProviderType: "test", WorkingDir: "/tmp"})
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	_, err = executor.ResumeSessionWithToken(context.Background(), "resume-invalid", "does-not-exist")
+	if !errors.Is(err, ErrInvalidResumeToken) {
+		t.Fatalf("expected ErrInvalidResumeToken, got %v", err)
+	}
+}
+
+func TestAgentExecutor_ResumeTokenExpiredOrRevoked(t *testing.T) {
+	prov := newMockProvider()
+	executor, store := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	_, err := executor.StartSession(context.Background(), "resume-expired", session.Config{ProviderType: "test", WorkingDir: "/tmp"})
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	started := time.Now().UTC().Add(-1 * time.Minute)
+	attempt := &storage.RunAttemptMetadata{
+		AttemptID:      "attempt-expired",
+		SessionID:      "resume-expired",
+		ProviderType:   "test",
+		StartedAt:      started,
+		HeartbeatAt:    started,
+		TerminalReason: "interrupted",
+		WaitKind:       "tool_call",
+		WaitRef:        "tool-x",
+		ResumeTokenID:  "token-expired",
+	}
+	if err := store.SaveRunAttempt(attempt); err != nil {
+		t.Fatalf("SaveRunAttempt failed: %v", err)
+	}
+	if err := store.SaveResumeToken(&storage.ResumeTokenMetadata{
+		TokenID:   "token-expired",
+		SessionID: "resume-expired",
+		AttemptID: "attempt-expired",
+		CreatedAt: started,
+		ExpiresAt: started.Add(-time.Second),
+	}); err != nil {
+		t.Fatalf("SaveResumeToken expired failed: %v", err)
+	}
+
+	_, err = executor.ResumeSessionWithToken(context.Background(), "resume-expired", "token-expired")
+	if !errors.Is(err, ErrExpiredResumeToken) {
+		t.Fatalf("expected ErrExpiredResumeToken, got %v", err)
+	}
+
+	if err := store.SaveResumeToken(&storage.ResumeTokenMetadata{
+		TokenID:          "token-revoked",
+		SessionID:        "resume-expired",
+		AttemptID:        "attempt-expired",
+		CreatedAt:        started,
+		ExpiresAt:        started.Add(time.Hour),
+		RevokedAt:        ptrTime(time.Now().UTC()),
+		RevocationReason: "manual",
+	}); err != nil {
+		t.Fatalf("SaveResumeToken revoked failed: %v", err)
+	}
+	attempt.ResumeTokenID = "token-revoked"
+	if err := store.SaveRunAttempt(attempt); err != nil {
+		t.Fatalf("SaveRunAttempt update failed: %v", err)
+	}
+
+	_, err = executor.ResumeSessionWithToken(context.Background(), "resume-expired", "token-revoked")
+	if !errors.Is(err, ErrRevokedResumeToken) {
+		t.Fatalf("expected ErrRevokedResumeToken, got %v", err)
+	}
+}
+
+func TestAgentExecutor_ResumeSessionWithToken_SafePrototypePath(t *testing.T) {
+	prov := newMockProvider()
+	executor, store := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	_, err := executor.StartSession(context.Background(), "resume-prototype", session.Config{ProviderType: "test", WorkingDir: "/tmp"})
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	now := time.Now().UTC()
+	attempt := &storage.RunAttemptMetadata{
+		AttemptID:      "attempt-prototype",
+		SessionID:      "resume-prototype",
+		ProviderType:   "test",
+		StartedAt:      now.Add(-time.Minute),
+		HeartbeatAt:    now,
+		TerminalReason: "interrupted",
+		WaitKind:       "tool_call",
+		WaitRef:        "tool-abc",
+		ResumeTokenID:  "token-prototype",
+	}
+	if err := store.SaveRunAttempt(attempt); err != nil {
+		t.Fatalf("SaveRunAttempt failed: %v", err)
+	}
+	if err := store.SaveResumeToken(&storage.ResumeTokenMetadata{
+		TokenID:   "token-prototype",
+		SessionID: "resume-prototype",
+		AttemptID: "attempt-prototype",
+		CreatedAt: now.Add(-time.Minute),
+		ExpiresAt: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("SaveResumeToken failed: %v", err)
+	}
+
+	sess, err := executor.ResumeSessionWithToken(context.Background(), "resume-prototype", "token-prototype")
+	if err != nil {
+		t.Fatalf("ResumeSessionWithToken failed: %v", err)
+	}
+	if got := sess.GetState(); got != domain.SessionStateIdle {
+		t.Fatalf("expected idle state in prototype resume path, got %s", got)
+	}
+	snap := sess.Snapshot()
+	if len(snap.Messages) == 0 || !strings.Contains(snap.Messages[len(snap.Messages)-1].Contents, "[resume]") {
+		t.Fatalf("expected resume system marker message, got %#v", snap.Messages)
+	}
+}
+
+func ptrTime(t time.Time) *time.Time {
+	return &t
 }
 
 func TestAgentExecutor_ResumeNonSuspendedSession(t *testing.T) {

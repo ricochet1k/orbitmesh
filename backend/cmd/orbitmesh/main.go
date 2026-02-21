@@ -70,6 +70,9 @@ func main() {
 			return factory.CreateSession(providerType, sessionID, config)
 		},
 	})
+	if err := executor.Startup(context.Background()); err != nil {
+		log.Fatalf("executor startup recovery: %v", err)
+	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)

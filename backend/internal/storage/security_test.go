@@ -50,6 +50,11 @@ func TestSecurity_FilePermissions(t *testing.T) {
 	if info.Mode().Perm() != 0700 {
 		t.Errorf("expected terminals directory permissions 0700, got %o", info.Mode().Perm())
 	}
+	attemptsDir := filepath.Join(tmpDir, "sessions", "attempts")
+	info, _ = os.Stat(attemptsDir)
+	if info.Mode().Perm() != 0700 {
+		t.Errorf("expected attempts directory permissions 0700, got %o", info.Mode().Perm())
+	}
 
 	s := domain.NewSession("secure-perm", "test", "/tmp")
 	_ = store.Save(s)

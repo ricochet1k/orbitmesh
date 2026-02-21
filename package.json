@@ -1,4 +1,8 @@
 {
+	"scripts": {
+		"generate:realtime-types": "go run ./backend/cmd/typegen-realtime",
+		"check:realtime-types": "go run ./backend/cmd/typegen-realtime && git diff --exit-code -- frontend/src/types/generated/realtime.ts"
+	},
 	"dependencies": {
 		"@tanstack/solid-router": "^1.159.1",
 		"@tanstack/solid-router-devtools": "^1.159.1"

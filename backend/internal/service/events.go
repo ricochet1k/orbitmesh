@@ -1,6 +1,7 @@
 package service
 
 import (
+	"log"
 	"sync"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
@@ -13,12 +14,14 @@ type Subscriber struct {
 }
 
 type EventBroadcaster struct {
-	subscribers map[string]*Subscriber
-	mu          sync.RWMutex
-	bufferSize  int
-	history     map[string][]domain.Event
-	historySize int
-	nextID      int64
+	subscribers   map[string]*Subscriber
+	mu            sync.RWMutex
+	bufferSize    int
+	history       map[string][]domain.Event
+	globalHistory []domain.Event
+	historySize   int
+	nextID        int64
+	droppedEvents int64
 }
 
 func NewEventBroadcaster(bufferSize int) *EventBroadcaster {
@@ -75,9 +78,19 @@ func (b *EventBroadcaster) Broadcast(event domain.Event) {
 			select {
 			case sub.Events <- event:
 			default:
+				b.droppedEvents++
+				if b.droppedEvents%100 == 0 {
+					log.Printf("event broadcaster dropped %d events due to slow subscribers", b.droppedEvents)
+				}
 			}
 		}
 	}
+}
+
+func (b *EventBroadcaster) DroppedEventCount() int64 {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.droppedEvents
 }
 
 func (b *EventBroadcaster) SubscriberCount() int {
@@ -112,6 +125,9 @@ func (b *EventBroadcaster) subscribeLocked(subscriberID, sessionID string) *Subs
 
 func (b *EventBroadcaster) replayLocked(sessionID string, lastEventID, maxID int64) []domain.Event {
 	history := b.history[sessionID]
+	if sessionID == "" {
+		history = b.globalHistory
+	}
 	if len(history) == 0 {
 		return nil
 	}
@@ -133,4 +149,8 @@ func (b *EventBroadcaster) appendHistoryLocked(event domain.Event) {
 		history = history[len(history)-b.historySize:]
 	}
 	b.history[event.SessionID] = history
+	b.globalHistory = append(b.globalHistory, event)
+	if len(b.globalHistory) > b.historySize {
+		b.globalHistory = b.globalHistory[len(b.globalHistory)-b.historySize:]
+	}
 }

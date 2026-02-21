@@ -133,6 +133,17 @@ export interface PlanData {
   steps?: PlanStep[];
 }
 
+export interface SessionStateStreamEvent {
+  event_id: number;
+  type: "session_state";
+  timestamp: string;
+  session_id: string;
+  derived_state: SessionState;
+  reason?: string;
+  source?: string;
+  run_attempt_id?: string;
+}
+
 // Discriminated union — exhaustive switch on `.type` is now type-safe.
 export type SSEEvent =
   | { event_id: number; type: "status_change"; timestamp: string; session_id: string; data: StatusChangeData }

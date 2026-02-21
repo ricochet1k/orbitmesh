@@ -1,7 +1,13 @@
 import { createRoot, createSignal, onCleanup } from "solid-js"
-import type { SessionResponse } from "../types/api"
+import type { SessionResponse, SessionState } from "../types/api"
 import { apiClient } from "../api/client"
 import { useProjectStore } from "./project"
+import { realtimeClient } from "../realtime/client"
+import type {
+  ServerEnvelope,
+  SessionStateEvent,
+  SessionsStateSnapshot,
+} from "../types/generated/realtime"
 
 const REFRESH_INTERVAL_MS = 15000
 
@@ -25,6 +31,8 @@ const sessionStore = createRoot(() => {
   const [hasLoaded, setHasLoaded] = createSignal(cached !== undefined)
   const [error, setError] = createSignal<string | null>(null)
   let pollId: number | undefined
+  let unsubscribeRealtime: (() => void) | undefined
+  let unsubscribeRealtimeStatus: (() => void) | undefined
   let subscribers = 0
 
   const applySessions = (list: SessionResponse[]) => {
@@ -65,7 +73,85 @@ const sessionStore = createRoot(() => {
     pollId = undefined
   }
 
+  const applyStateEvent = (event: SessionStateEvent) => {
+    let found = false
+    setSessions((current) => {
+      const next = current.map((session) => {
+        if (session.id !== event.session_id) {
+          return session
+        }
+        found = true
+        return {
+          ...session,
+          state: normalizeState(event.derived_state),
+          updated_at: event.timestamp,
+        }
+      })
+      return found ? sortSessions(next) : current
+    })
+
+    if (!found) {
+      void refresh()
+    }
+  }
+
+  const applySnapshot = (snapshot: SessionsStateSnapshot) => {
+    if (!snapshot || !Array.isArray(snapshot.sessions)) return
+    const next = snapshot.sessions.map((session) => ({
+      id: session.id,
+      provider_type: session.provider_type,
+      preferred_provider_id: session.preferred_provider_id,
+      agent_id: session.agent_id,
+      session_kind: session.session_kind,
+      title: session.title,
+      state: normalizeState(session.state),
+      working_dir: session.working_dir,
+      project_id: session.project_id,
+      created_at: session.created_at,
+      updated_at: session.updated_at,
+      current_task: session.current_task,
+    }))
+    applySessions(next)
+  }
+
+  const stopRealtime = () => {
+    unsubscribeRealtime?.()
+    unsubscribeRealtime = undefined
+    unsubscribeRealtimeStatus?.()
+    unsubscribeRealtimeStatus = undefined
+  }
+
+  const startRealtime = () => {
+    if (typeof window === "undefined" || unsubscribeRealtime) return
+    if (typeof WebSocket === "undefined") {
+      startPolling()
+      return
+    }
+
+    unsubscribeRealtimeStatus = realtimeClient.onStatus((status) => {
+      if (status === "open") {
+        stopPolling()
+        return
+      }
+      startPolling()
+      if (status === "closed") {
+        void refresh()
+      }
+    })
+
+    unsubscribeRealtime = realtimeClient.subscribe("sessions.state", (message: ServerEnvelope) => {
+      if (message.type === "snapshot") {
+        applySnapshot(message.payload as SessionsStateSnapshot)
+        return
+      }
+      if (message.type === "event") {
+        applyStateEvent(message.payload as SessionStateEvent)
+      }
+    })
+  }
+
   const reset = () => {
+    stopRealtime()
     stopPolling()
     subscribers = 0
     const cachedReset = apiClient.getCachedSessions()
@@ -78,13 +164,14 @@ const sessionStore = createRoot(() => {
   const subscribe = () => {
     subscribers += 1
     if (subscribers === 1) {
-      refresh()
-      startPolling()
+      void refresh()
+      startRealtime()
     }
     onCleanup(() => {
       subscribers -= 1
       if (subscribers <= 0) {
         subscribers = 0
+        stopRealtime()
         stopPolling()
       }
     })
@@ -108,4 +195,9 @@ export const useSessionStore = () => {
 
 export const resetSessionStore = () => {
   sessionStore.reset()
+}
+
+function normalizeState(state: string): SessionState {
+  if (state === "running" || state === "suspended") return state
+  return "idle"
 }

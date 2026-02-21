@@ -21,6 +21,11 @@ func TestNewJSONFileStorage(t *testing.T) {
 		t.Error("expected sessions directory to be created")
 	}
 
+	attemptsDir := filepath.Join(tmpDir, "sessions", "attempts")
+	if _, err := os.Stat(attemptsDir); os.IsNotExist(err) {
+		t.Error("expected attempts directory to be created")
+	}
+
 	if storage.baseDir != tmpDir {
 		t.Errorf("expected baseDir %q, got %q", tmpDir, storage.baseDir)
 	}
