@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
@@ -98,6 +99,21 @@ func (e *AgentExecutor) terminalObserver() TerminalObserver {
 	return terminalObserver{executor: e}
 }
 
+func (e *AgentExecutor) RegisterTerminalObserver(observer TerminalObserver) func() {
+	if observer == nil {
+		return func() {}
+	}
+	id := atomic.AddInt64(&e.terminalObserverID, 1)
+	e.mu.Lock()
+	e.terminalObservers[id] = observer
+	e.mu.Unlock()
+	return func() {
+		e.mu.Lock()
+		delete(e.terminalObservers, id)
+		e.mu.Unlock()
+	}
+}
+
 func (e *AgentExecutor) ensureTerminalRecord(session *domain.Session) {
 	if e.terminalStorage == nil || session == nil {
 		return
@@ -168,6 +184,21 @@ func (e *AgentExecutor) updateTerminalFromEvent(sessionID string, event Terminal
 		term.LastSeq = event.Seq
 		term.LastUpdatedAt = time.Now().UTC()
 		_ = e.terminalStorage.SaveTerminal(term)
+	}
+
+	e.notifyTerminalObservers(sessionID, event)
+}
+
+func (e *AgentExecutor) notifyTerminalObservers(sessionID string, event TerminalEvent) {
+	e.mu.RLock()
+	observers := make([]TerminalObserver, 0, len(e.terminalObservers))
+	for _, observer := range e.terminalObservers {
+		observers = append(observers, observer)
+	}
+	e.mu.RUnlock()
+
+	for _, observer := range observers {
+		observer.OnTerminalEvent(sessionID, event)
 	}
 }
 

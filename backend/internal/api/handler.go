@@ -17,6 +17,7 @@ import (
 	"github.com/ricochet1k/orbitmesh/internal/service"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
+	"github.com/ricochet1k/orbitmesh/internal/terminal"
 	apiTypes "github.com/ricochet1k/orbitmesh/pkg/api"
 	realtimeTypes "github.com/ricochet1k/orbitmesh/pkg/realtime"
 )
@@ -47,7 +48,7 @@ func NewHandler(executor *service.AgentExecutor, broadcaster *service.EventBroad
 		gitDir:          resolveGitDir(),
 		dockBridge:      NewDockBridge(),
 		realtimeHub:     realtime.NewHub(),
-		snapshotter:     realtime.NewSnapshotProvider(executor),
+		snapshotter:     realtime.NewSnapshotProvider(executor, sessionStorage),
 	}
 	h.startRealtimeBridge()
 	return h
@@ -107,8 +108,18 @@ func (h *Handler) startRealtimeBridge() {
 	}
 
 	sub := h.broadcaster.Subscribe(generateID(), "")
+	if h.executor != nil {
+		h.executor.RegisterTerminalObserver(realtimeTerminalObserver{handler: h})
+	}
 	go func() {
 		for event := range sub.Events {
+			if event.SessionID != "" {
+				h.realtimeHub.Publish(realtime.TopicSessionsActivity(event.SessionID), realtimeTypes.ServerEnvelope{
+					Type:    realtimeTypes.ServerMessageTypeEvent,
+					Topic:   realtime.TopicSessionsActivity(event.SessionID),
+					Payload: h.toRealtimeSessionActivityEvent(event),
+				})
+			}
 			if event.Type != domain.EventTypeStatusChange {
 				continue
 			}
@@ -139,6 +150,119 @@ func (h *Handler) toRealtimeSessionStateEvent(event domain.Event) realtimeTypes.
 	}
 
 	return stateEvent
+}
+
+func (h *Handler) toRealtimeSessionActivityEvent(event domain.Event) realtimeTypes.SessionActivityEvent {
+	apiEvent := domainEventToAPIEvent(event)
+	return realtimeTypes.SessionActivityEvent{
+		EventID:   apiEvent.EventID,
+		Timestamp: apiEvent.Timestamp,
+		SessionID: apiEvent.SessionID,
+		Type:      string(apiEvent.Type),
+		Data:      apiEvent.Data,
+	}
+}
+
+type realtimeTerminalObserver struct {
+	handler *Handler
+}
+
+func (o realtimeTerminalObserver) OnTerminalEvent(sessionID string, event service.TerminalEvent) {
+	if o.handler == nil {
+		return
+	}
+	o.handler.publishRealtimeTerminalEvent(sessionID, event)
+}
+
+func (h *Handler) publishRealtimeTerminalEvent(sessionID string, event service.TerminalEvent) {
+	if h.realtimeHub == nil {
+		return
+	}
+
+	terminalID := sessionID
+	if term, err := h.executor.GetTerminal(sessionID); err == nil {
+		terminalID = term.ID
+		h.realtimeHub.Publish(realtime.TopicTerminalsState, realtimeTypes.ServerEnvelope{
+			Type:  realtimeTypes.ServerMessageTypeEvent,
+			Topic: realtime.TopicTerminalsState,
+			Payload: realtimeTypes.TerminalsStateEvent{
+				Action:   "upsert",
+				Terminal: realtime.TerminalStateFromDomain(term),
+			},
+		})
+	}
+
+	outputEvent, ok := toRealtimeTerminalOutputEvent(terminalID, sessionID, event)
+	if !ok {
+		return
+	}
+	topic := realtime.TopicTerminalsOutput(terminalID)
+	h.realtimeHub.Publish(topic, realtimeTypes.ServerEnvelope{
+		Type:    realtimeTypes.ServerMessageTypeEvent,
+		Topic:   topic,
+		Payload: outputEvent,
+	})
+}
+
+func toRealtimeTerminalOutputEvent(terminalID, sessionID string, event service.TerminalEvent) (realtimeTypes.TerminalOutputEvent, bool) {
+	update := event.Update
+	var (
+		messageType string
+		payload     any
+	)
+
+	switch update.Kind {
+	case terminal.UpdateSnapshot:
+		messageType = "terminal.snapshot"
+		if update.Snapshot != nil {
+			payload = map[string]any{
+				"rows":  update.Snapshot.Rows,
+				"cols":  update.Snapshot.Cols,
+				"lines": update.Snapshot.Lines,
+			}
+		}
+	case terminal.UpdateDiff:
+		messageType = "terminal.diff"
+		if update.Diff != nil {
+			payload = map[string]any{
+				"region": map[string]int{
+					"x":  update.Diff.Region.X,
+					"y":  update.Diff.Region.Y,
+					"x2": update.Diff.Region.X2,
+					"y2": update.Diff.Region.Y2,
+				},
+				"lines":  update.Diff.Lines,
+				"reason": update.Diff.Reason,
+			}
+		}
+	case terminal.UpdateCursor:
+		messageType = "terminal.cursor"
+		if update.Cursor != nil {
+			payload = map[string]int{"x": update.Cursor.X, "y": update.Cursor.Y}
+		}
+	case terminal.UpdateBell:
+		messageType = "terminal.bell"
+	case terminal.UpdateError:
+		messageType = "terminal.error"
+		if update.Error != nil {
+			payload = map[string]any{
+				"code":    update.Error.Code,
+				"message": update.Error.Message,
+				"resync":  update.Error.Resync,
+			}
+		}
+	default:
+		return realtimeTypes.TerminalOutputEvent{}, false
+	}
+
+	return realtimeTypes.TerminalOutputEvent{
+		TerminalID: terminalID,
+		SessionID:  sessionID,
+		Seq:        event.Seq,
+		Timestamp:  time.Now().UTC(),
+		Type:       messageType,
+		Data:       payload,
+	}, true
 }
 
 func (h *Handler) sendSessionInput(w http.ResponseWriter, r *http.Request) {

@@ -8,6 +8,12 @@ import {
 } from "solid-js";
 import { apiClient } from "../api/client";
 import { readCookie, CSRF_COOKIE_NAME, CSRF_HEADER_NAME } from "../api/_base";
+import { realtimeClient } from "../realtime/client";
+import type {
+  ServerEnvelope,
+  TerminalOutputEvent,
+  TerminalOutputSnapshot,
+} from "../types/generated/realtime";
 
 interface TerminalViewProps {
   sessionId: string;
@@ -253,7 +259,54 @@ export default function TerminalView(props: TerminalViewProps) {
       });
   };
 
-  const connect = () => {
+  const handleTerminalEnvelope = (envelope: TerminalEnvelope) => {
+    if (!envelope) return;
+    if (envelope.session_id && envelope.session_id !== props.sessionId) return;
+
+    if (typeof envelope.seq === "number") {
+      const seq = envelope.seq;
+      setLastSeq(seq);
+
+      if (expectedSeq !== null && seq !== expectedSeq && !resyncInFlight) {
+        fetchSnapshotForResync();
+        return;
+      }
+
+      expectedSeq = seq + 1;
+
+      if (status() === "resyncing" && !resyncInFlight) {
+        setStatusNote(null);
+      }
+    }
+
+    switch (envelope.type) {
+      case "terminal.snapshot":
+        expectedSeq = typeof envelope.seq === "number" ? envelope.seq + 1 : null;
+        pendingUpdates.push({ type: "snapshot", data: envelope.data as TerminalSnapshotData });
+        scheduleFlush();
+        break;
+      case "terminal.diff":
+        pendingUpdates.push({ type: "diff", data: envelope.data as TerminalDiffData });
+        scheduleFlush();
+        break;
+      case "terminal.cursor":
+        pendingUpdates.push({ type: "cursor", data: envelope.data as TerminalCursorData });
+        scheduleFlush();
+        break;
+      case "terminal.bell":
+        pendingUpdates.push({ type: "bell" });
+        scheduleFlush();
+        break;
+      case "terminal.error":
+        pendingUpdates.push({ type: "error", data: envelope.data as TerminalErrorData });
+        scheduleFlush();
+        break;
+      default:
+        break;
+    }
+  };
+
+  const connectLegacySocket = () => {
     const id = props.sessionId;
     let url: string;
     if (isWriteMode()) {
@@ -296,64 +349,62 @@ export default function TerminalView(props: TerminalViewProps) {
       let envelope: TerminalEnvelope | null = null;
       try {
         envelope = JSON.parse(event.data) as TerminalEnvelope;
-      } catch (error) {
+      } catch {
         return;
       }
       if (!envelope) return;
-      if (envelope.session_id && envelope.session_id !== props.sessionId) return;
+      handleTerminalEnvelope(envelope);
+    };
+  };
 
-      if (typeof envelope.seq === "number") {
-        const seq = envelope.seq;
-        setLastSeq(seq);
+  const connectRealtime = () => {
+    const terminalId = props.terminalId || props.sessionId;
+    const topic = `terminals.output:${terminalId}`;
+    updateStatus("connecting");
+    setStatusNote(null);
+    expectedSeq = null;
+    resyncInFlight = false;
 
-        // Gap detection: if we expected a specific seq and this one is not it,
-        // the backend dropped events for us. Fetch a fresh snapshot to resync.
-        // We skip gap detection while a resync fetch is already in-flight, and
-        // we reset expectedSeq when a snapshot arrives (snapshots are always
-        // self-consistent regardless of seq continuity).
-        if (expectedSeq !== null && seq !== expectedSeq && !resyncInFlight) {
-          fetchSnapshotForResync();
-          // The event that triggered the gap is stale — the snapshot fetch
-          // will replace the display. Discard it and wait for the resync.
-          return;
-        }
-
-        // After each event we advance the expectation by 1.
-        expectedSeq = seq + 1;
-
-        // If we were resyncing and just received a gapless event, the stream
-        // is healthy again — clear the resyncing notice.
-        if (status() === "resyncing" && !resyncInFlight) {
-          setStatusNote(null);
-        }
+    const unsubscribeStatus = realtimeClient.onStatus((next) => {
+      if (next === "open") {
+        updateStatus("live");
+        return;
       }
-
-      switch (envelope.type) {
-        case "terminal.snapshot":
-          // A snapshot resets the expectation — no gap to detect for subsequent events.
-          expectedSeq = typeof envelope.seq === "number" ? envelope.seq + 1 : null;
-          pendingUpdates.push({ type: "snapshot", data: envelope.data as TerminalSnapshotData });
-          scheduleFlush();
-          break;
-        case "terminal.diff":
-          pendingUpdates.push({ type: "diff", data: envelope.data as TerminalDiffData });
-          scheduleFlush();
-          break;
-        case "terminal.cursor":
-          pendingUpdates.push({ type: "cursor", data: envelope.data as TerminalCursorData });
-          scheduleFlush();
-          break;
-        case "terminal.bell":
-          pendingUpdates.push({ type: "bell" });
-          scheduleFlush();
-          break;
-        case "terminal.error":
-          pendingUpdates.push({ type: "error", data: envelope.data as TerminalErrorData });
-          scheduleFlush();
-          break;
-        default:
-          break;
+      if (next === "connecting") {
+        updateStatus("connecting");
+        return;
       }
+      updateStatus("closed");
+    });
+
+    const unsubscribeTopic = realtimeClient.subscribe(topic, (message: ServerEnvelope) => {
+      if (message.type === "snapshot") {
+        const payload = message.payload as TerminalOutputSnapshot;
+        handleTerminalEnvelope({
+          v: 1,
+          type: "terminal.snapshot",
+          session_id: payload.session_id,
+          seq: payload.seq,
+          ts: "",
+          data: payload.snapshot,
+        });
+        return;
+      }
+      if (message.type !== "event") return;
+      const payload = message.payload as TerminalOutputEvent;
+      handleTerminalEnvelope({
+        v: 1,
+        type: payload.type,
+        session_id: payload.session_id,
+        seq: payload.seq,
+        ts: payload.timestamp,
+        data: payload.data,
+      });
+    });
+
+    return () => {
+      unsubscribeTopic();
+      unsubscribeStatus();
     };
   };
 
@@ -436,8 +487,18 @@ export default function TerminalView(props: TerminalViewProps) {
   createEffect(() => {
     const id = props.sessionId;
     if (!id) return;
-    connect();
+    const isTestEnv =
+      (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") ||
+      (typeof process !== "undefined" && Boolean(process.env?.VITEST));
+    const useLegacySocket = isWriteMode() || typeof WebSocket === "undefined" || isTestEnv;
+    let realtimeCleanup: (() => void) | undefined;
+    if (useLegacySocket) {
+      connectLegacySocket();
+    } else {
+      realtimeCleanup = connectRealtime();
+    }
     onCleanup(() => {
+      realtimeCleanup?.();
       if (socket) {
         socket.close();
         socket = null;

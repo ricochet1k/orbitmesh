@@ -68,6 +68,8 @@ type AgentExecutor struct {
 	opTimeout          time.Duration
 	checkpointInterval time.Duration
 	terminalHubs       map[string]*TerminalHub
+	terminalObservers  map[int64]TerminalObserver
+	terminalObserverID int64
 	attemptStorage     storage.RunAttemptStorage
 	resumeTokenStorage storage.ResumeTokenStorage
 	bootID             string
@@ -114,6 +116,7 @@ func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
 		opTimeout:          opTimeout,
 		checkpointInterval: checkpointInterval,
 		terminalHubs:       make(map[string]*TerminalHub),
+		terminalObservers:  make(map[int64]TerminalObserver),
 		attemptStorage:     cfg.RunAttemptStorage,
 		resumeTokenStorage: cfg.ResumeTokenStorage,
 		bootID:             newBootID(),

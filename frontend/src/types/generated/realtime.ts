@@ -46,3 +46,66 @@ export interface SessionStateEvent {
   derived_state: string;
   reason?: string;
 }
+export interface SessionActivitySnapshot {
+  session_id: string;
+  entries: SessionActivityEntry[];
+  messages: SessionMessage[];
+}
+export interface SessionActivityEntry {
+  id: string;
+  session_id: string;
+  kind: string;
+  ts: string;
+  rev: number /* int */;
+  open: boolean;
+  data?: { [key: string]: any};
+  event_id?: number /* int64 */;
+}
+export interface SessionMessage {
+  id: string;
+  kind: string;
+  contents: string;
+  timestamp: string;
+}
+export interface SessionActivityEvent {
+  event_id: number /* int64 */;
+  timestamp: string;
+  session_id: string;
+  type: string;
+  data: any;
+}
+export interface TerminalsStateSnapshot {
+  terminals: TerminalState[];
+}
+export interface TerminalState {
+  id: string;
+  session_id?: string;
+  terminal_kind: string;
+  created_at: string;
+  last_updated_at: string;
+  last_seq?: number /* int64 */;
+  last_snapshot?: TerminalSnapshot;
+}
+export interface TerminalSnapshot {
+  rows: number /* int */;
+  cols: number /* int */;
+  lines: string[];
+}
+export interface TerminalsStateEvent {
+  action: string;
+  terminal: TerminalState;
+}
+export interface TerminalOutputSnapshot {
+  terminal_id: string;
+  session_id: string;
+  seq: number /* int64 */;
+  snapshot: TerminalSnapshot;
+}
+export interface TerminalOutputEvent {
+  terminal_id: string;
+  session_id: string;
+  seq: number /* int64 */;
+  timestamp: string;
+  type: string;
+  data?: any;
+}

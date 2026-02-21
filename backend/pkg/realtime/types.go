@@ -57,3 +57,76 @@ type SessionStateEvent struct {
 	DerivedState string    `json:"derived_state"`
 	Reason       string    `json:"reason,omitempty"`
 }
+
+type SessionActivitySnapshot struct {
+	SessionID string                 `json:"session_id"`
+	Entries   []SessionActivityEntry `json:"entries"`
+	Messages  []SessionMessage       `json:"messages"`
+}
+
+type SessionActivityEntry struct {
+	ID        string         `json:"id"`
+	SessionID string         `json:"session_id"`
+	Kind      string         `json:"kind"`
+	TS        time.Time      `json:"ts"`
+	Rev       int            `json:"rev"`
+	Open      bool           `json:"open"`
+	Data      map[string]any `json:"data,omitempty"`
+	EventID   int64          `json:"event_id,omitempty"`
+}
+
+type SessionMessage struct {
+	ID        string    `json:"id"`
+	Kind      string    `json:"kind"`
+	Contents  string    `json:"contents"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+type SessionActivityEvent struct {
+	EventID   int64     `json:"event_id"`
+	Timestamp time.Time `json:"timestamp"`
+	SessionID string    `json:"session_id"`
+	Type      string    `json:"type"`
+	Data      any       `json:"data"`
+}
+
+type TerminalsStateSnapshot struct {
+	Terminals []TerminalState `json:"terminals"`
+}
+
+type TerminalState struct {
+	ID            string            `json:"id"`
+	SessionID     string            `json:"session_id,omitempty"`
+	TerminalKind  string            `json:"terminal_kind"`
+	CreatedAt     time.Time         `json:"created_at"`
+	LastUpdatedAt time.Time         `json:"last_updated_at"`
+	LastSeq       int64             `json:"last_seq,omitempty"`
+	LastSnapshot  *TerminalSnapshot `json:"last_snapshot,omitempty"`
+}
+
+type TerminalSnapshot struct {
+	Rows  int      `json:"rows"`
+	Cols  int      `json:"cols"`
+	Lines []string `json:"lines"`
+}
+
+type TerminalsStateEvent struct {
+	Action   string        `json:"action"`
+	Terminal TerminalState `json:"terminal"`
+}
+
+type TerminalOutputSnapshot struct {
+	TerminalID string           `json:"terminal_id"`
+	SessionID  string           `json:"session_id"`
+	Seq        int64            `json:"seq"`
+	Snapshot   TerminalSnapshot `json:"snapshot"`
+}
+
+type TerminalOutputEvent struct {
+	TerminalID string    `json:"terminal_id"`
+	SessionID  string    `json:"session_id"`
+	Seq        int64     `json:"seq"`
+	Timestamp  time.Time `json:"timestamp"`
+	Type       string    `json:"type"`
+	Data       any       `json:"data,omitempty"`
+}

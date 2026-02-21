@@ -11,6 +11,12 @@ import { formatActivityContent } from "../utils/activityFormatting"
 import { startEventStream } from "../utils/eventStream"
 import { TIMEOUTS } from "../constants/timeouts"
 import type { StreamOptions } from "./useSessionStream"
+import { realtimeClient } from "../realtime/client"
+import type {
+  ServerEnvelope,
+  SessionActivityEvent,
+  SessionActivitySnapshot,
+} from "../types/generated/realtime"
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -275,6 +281,34 @@ export function useSessionData({
     }
   }
 
+  const applyRealtimeSnapshot = (snapshot: SessionActivitySnapshot) => {
+    if (!snapshot) return
+    const entryMessages = Array.isArray(snapshot.entries)
+      ? snapshot.entries.map((entry) => toActivityMessage({
+        id: entry.id,
+        session_id: entry.session_id,
+        kind: entry.kind,
+        ts: entry.ts,
+        rev: entry.rev,
+        open: entry.open,
+        data: entry.data ?? {},
+        event_id: entry.event_id,
+      }))
+      : []
+    const transcriptMessages = Array.isArray(snapshot.messages)
+      ? snapshot.messages.map(toTranscriptFromSessionMessage)
+      : []
+    mergeMessages([...entryMessages, ...transcriptMessages], { sort: true })
+  }
+
+  const applyRealtimeEvent = (payload: SessionActivityEvent) => {
+    if (!payload || typeof payload.type !== "string") return
+    const event = new MessageEvent("message", {
+      data: JSON.stringify(payload),
+    })
+    applyStreamEvent(payload.type, event)
+  }
+
   // ── Section 2: Pagination signals ─────────────────────────────────────────
 
   // undefined = not yet ready to fetch; null = fetch latest page; string = fetch that page
@@ -322,85 +356,128 @@ export function useSessionData({
     // ── Per-run coordination variables ─────────────────────────────────────
     let historySettled = false
     let buffer: Array<{ type: string; event: MessageEvent }> = []
+    let pendingRealtimeSnapshot: SessionActivitySnapshot | null = null
 
     onCleanup(() => {
       historySettled = false
       buffer = []
+      pendingRealtimeSnapshot = null
     })
 
     // ── Start stream ───────────────────────────────────────────────────────
-    let lastHeartbeatAt: number | null = null
-    let heartbeatInterval: number | null = null
+    const prefersRealtime = typeof window !== "undefined" && typeof WebSocket !== "undefined"
+    let closeStream = () => { }
 
-    if (streamOptions.trackHeartbeat) {
-      const timeoutMs = streamOptions.heartbeatTimeoutMs ?? TIMEOUTS.HEARTBEAT_TIMEOUT_MS
-      const checkMs = TIMEOUTS.HEARTBEAT_CHECK_MS
-      heartbeatInterval = window.setInterval(() => {
-        if (!lastHeartbeatAt) return
-        if (Date.now() - lastHeartbeatAt > timeoutMs) {
-          setStreamStatus("disconnected")
-        }
-      }, checkMs)
-    }
-
-    const stream = startEventStream(
-      eventsUrl(),
-      {
-        onStatus: (status) => {
-          if (status === "connecting") {
-            setStreamStatus("connecting")
-          } else if (status === "backoff") {
-            setStreamStatus("reconnecting")
-          } else if (status === "not_found") {
-            setStreamStatus("error")
-          }
-        },
-        onOpen: () => {
+    if (prefersRealtime) {
+      const topic = `sessions.activity:${id}`
+      const unsubscribeStatus = realtimeClient.onStatus((status) => {
+        if (status === "open") {
           setStreamStatus("live")
-        },
-        onTimeout: () => {
-          setStreamStatus("error")
-        },
-        onError: (httpStatus) => {
-          if (httpStatus === 404) {
-            setStreamStatus("error")
-            return
-          }
-          if (streamStatus() === "connecting") {
-            setStreamStatus("error")
+          return
+        }
+        if (status === "connecting") {
+          setStreamStatus("connecting")
+          return
+        }
+        setStreamStatus("disconnected")
+      })
+      const unsubscribeTopic = realtimeClient.subscribe(topic, (message: ServerEnvelope) => {
+        if (message.type === "snapshot") {
+          if (historySettled) {
+            applyRealtimeSnapshot(message.payload as SessionActivitySnapshot)
           } else {
+            pendingRealtimeSnapshot = message.payload as SessionActivitySnapshot
+          }
+          return
+        }
+        if (message.type !== "event") return
+        const payload = message.payload as SessionActivityEvent
+        const event = new MessageEvent("message", { data: JSON.stringify(payload) })
+        if (!historySettled) {
+          buffer.push({ type: payload.type, event })
+          return
+        }
+        applyRealtimeEvent(payload)
+      })
+      closeStream = () => {
+        unsubscribeTopic()
+        unsubscribeStatus()
+      }
+    } else {
+      let lastHeartbeatAt: number | null = null
+      let heartbeatInterval: number | null = null
+
+      if (streamOptions.trackHeartbeat) {
+        const timeoutMs = streamOptions.heartbeatTimeoutMs ?? TIMEOUTS.HEARTBEAT_TIMEOUT_MS
+        const checkMs = TIMEOUTS.HEARTBEAT_CHECK_MS
+        heartbeatInterval = window.setInterval(() => {
+          if (!lastHeartbeatAt) return
+          if (Date.now() - lastHeartbeatAt > timeoutMs) {
             setStreamStatus("disconnected")
           }
-        },
-        onEventSource: (source) => {
-          for (const type of STREAM_EVENT_TYPES) {
-            source.addEventListener(type, (rawEvent) => {
-              const event = rawEvent as MessageEvent
-              // Mark as live the first time we receive any event — mirrors
-              // markStreamActive() behaviour even if onOpen never fired.
+        }, checkMs)
+      }
+
+      const stream = startEventStream(
+        eventsUrl(),
+        {
+          onStatus: (status) => {
+            if (status === "connecting") {
+              setStreamStatus("connecting")
+            } else if (status === "backoff") {
+              setStreamStatus("reconnecting")
+            } else if (status === "not_found") {
+              setStreamStatus("error")
+            }
+          },
+          onOpen: () => {
+            setStreamStatus("live")
+          },
+          onTimeout: () => {
+            setStreamStatus("error")
+          },
+          onError: (httpStatus) => {
+            if (httpStatus === 404) {
+              setStreamStatus("error")
+              return
+            }
+            if (streamStatus() === "connecting") {
+              setStreamStatus("error")
+            } else {
+              setStreamStatus("disconnected")
+            }
+          },
+          onEventSource: (source) => {
+            for (const type of STREAM_EVENT_TYPES) {
+              source.addEventListener(type, (rawEvent) => {
+                const event = rawEvent as MessageEvent
+                if (streamStatus() !== "live") setStreamStatus("live")
+                if (!historySettled) {
+                  buffer.push({ type, event })
+                } else {
+                  applyStreamEvent(type, event)
+                }
+              })
+            }
+            source.addEventListener("heartbeat", () => {
+              lastHeartbeatAt = Date.now()
               if (streamStatus() !== "live") setStreamStatus("live")
-              if (!historySettled) {
-                buffer.push({ type, event })
-              } else {
-                applyStreamEvent(type, event)
-              }
             })
-          }
-          source.addEventListener("heartbeat", () => {
-            lastHeartbeatAt = Date.now()
-            if (streamStatus() !== "live") setStreamStatus("live")
-          })
+          },
         },
-      },
-      {
-        connectionTimeoutMs: streamOptions.connectionTimeoutMs ?? TIMEOUTS.STREAM_CONNECTION_MS,
-        preflight: streamOptions.preflight,
-      },
-    )
+        {
+          connectionTimeoutMs: streamOptions.connectionTimeoutMs ?? TIMEOUTS.STREAM_CONNECTION_MS,
+          preflight: streamOptions.preflight,
+        },
+      )
+      closeStream = () => {
+        stream.close()
+        if (heartbeatInterval !== null) window.clearInterval(heartbeatInterval)
+      }
+    }
 
     onCleanup(() => {
-      stream.close()
-      if (heartbeatInterval !== null) window.clearInterval(heartbeatInterval)
+      closeStream()
     })
 
     // ── History fetch ────────────────────────────────-
@@ -445,6 +522,11 @@ export function useSessionData({
         mergeMessages(entries.map(toActivityMessage), { sort: true })
       }
 
+      if (pendingRealtimeSnapshot) {
+        applyRealtimeSnapshot(pendingRealtimeSnapshot)
+        pendingRealtimeSnapshot = null
+      }
+
       historySettled = true
 
       // Drain buffer: replay events whose event_id > watermark
@@ -486,6 +568,15 @@ export function useSessionData({
 }
 
 // ── Activity entry helpers ────────────────────────────────────────────────────
+
+function toTranscriptFromSessionMessage(message: SessionActivitySnapshot["messages"][number]): TranscriptMessage {
+  return {
+    id: `message:${message.id || message.timestamp}`,
+    type: mapActivityKindToType(message.kind),
+    timestamp: message.timestamp,
+    content: message.contents,
+  }
+}
 
 function toActivityMessage(entry: ActivityEntry): TranscriptMessage {
   return {

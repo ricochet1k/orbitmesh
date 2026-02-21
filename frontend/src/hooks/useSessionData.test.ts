@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { createRoot, createSignal } from "solid-js"
 import { useSessionData } from "./useSessionData"
 import { apiClient } from "../api/client"
+import type { ServerEnvelope } from "../types/generated/realtime"
 
 // ── EventSource mock ──────────────────────────────────────────────────────────
 
@@ -36,6 +37,8 @@ class MockEventSource {
 }
 
 const mockEventSources: MockEventSource[] = []
+let realtimeHandler: ((message: ServerEnvelope) => void) | undefined
+let realtimeStatusHandler: ((status: "connecting" | "open" | "closed") => void) | undefined
 
 // ── API client mock ───────────────────────────────────────────────────────────
 
@@ -43,6 +46,23 @@ vi.mock("../api/client", () => ({
   apiClient: {
     getActivityEntries: vi.fn(),
     getEventsUrl: vi.fn((id: string) => `/events/${id}`),
+  },
+}))
+
+vi.mock("../realtime/client", () => ({
+  realtimeClient: {
+    subscribe: vi.fn((_topic: string, handler: (message: ServerEnvelope) => void) => {
+      realtimeHandler = handler
+      return () => {
+        realtimeHandler = undefined
+      }
+    }),
+    onStatus: vi.fn((handler: (status: "connecting" | "open" | "closed") => void) => {
+      realtimeStatusHandler = handler
+      return () => {
+        realtimeStatusHandler = undefined
+      }
+    }),
   },
 }))
 
@@ -85,7 +105,10 @@ describe("useSessionData", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockEventSources.splice(0, mockEventSources.length)
+    realtimeHandler = undefined
+    realtimeStatusHandler = undefined
     vi.stubGlobal("EventSource", MockEventSource as never)
+    vi.stubGlobal("WebSocket", undefined as never)
     ;(apiClient.getActivityEntries as ReturnType<typeof vi.fn>).mockResolvedValue({
       entries: [],
       next_cursor: null,
@@ -508,6 +531,59 @@ describe("useSessionData", () => {
 
     // After effect fires, status should be connecting (EventSource created)
     await vi.waitFor(() => expect(data!.streamStatus()).not.toBe("idle"))
+  })
+
+  it("consumes realtime activity snapshot and events when websocket is available", async () => {
+    vi.stubGlobal("WebSocket", class MockWebSocket {} as never)
+
+    let data: ReturnType<typeof useSessionData> | undefined
+    createRoot((d) => {
+      dispose = d
+      const [sessionId] = createSignal("session-1")
+      const [canInspect] = createSignal<boolean | null>(false)
+      data = useSessionData({
+        sessionId,
+        canInspect,
+        eventsUrl: () => `/events/session-1`,
+        streamOptions: noPreflightOpts,
+      })
+    })
+
+    expect(mockEventSources).toHaveLength(0)
+
+    realtimeStatusHandler?.("open")
+    realtimeHandler?.({
+      type: "snapshot",
+      topic: "sessions.activity:session-1",
+      payload: {
+        session_id: "session-1",
+        entries: [],
+        messages: [
+          {
+            id: "m1",
+            kind: "assistant",
+            contents: "from snapshot",
+            timestamp: "2026-02-05T12:00:00Z",
+          },
+        ],
+      },
+    })
+
+    await vi.waitFor(() => expect(data!.messages().some((m) => m.content === "from snapshot")).toBe(true))
+
+    realtimeHandler?.({
+      type: "event",
+      topic: "sessions.activity:session-1",
+      payload: {
+        event_id: 33,
+        type: "output",
+        timestamp: "2026-02-05T12:00:01Z",
+        session_id: "session-1",
+        data: { content: "from realtime event" },
+      },
+    })
+
+    await vi.waitFor(() => expect(data!.messages().some((m) => m.content === "from realtime event")).toBe(true))
   })
 
   // ── filter & autoScroll ───────────────────────────────────────────────────
