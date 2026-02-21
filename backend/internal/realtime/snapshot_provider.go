@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 
+	"github.com/ricochet1k/orbitmesh/internal/presentation"
 	"github.com/ricochet1k/orbitmesh/internal/provider/pty"
 	"github.com/ricochet1k/orbitmesh/internal/service"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
@@ -45,26 +46,13 @@ func (p *SnapshotProvider) Snapshot(topic string) (any, error) {
 
 func (p *SnapshotProvider) sessionsStateSnapshot() realtimeTypes.SessionsStateSnapshot {
 	sessions := p.executor.ListSessions()
-	out := make([]realtimeTypes.SessionState, len(sessions))
+	out := make([]realtimeTypes.Session, len(sessions))
 	for i, s := range sessions {
 		snap := s.Snapshot()
 		if derived, err := p.executor.DeriveSessionState(s.ID); err == nil {
 			snap.State = derived
 		}
-		out[i] = realtimeTypes.SessionState{
-			ID:                  snap.ID,
-			ProviderType:        snap.ProviderType,
-			PreferredProviderID: snap.PreferredProviderID,
-			AgentID:             snap.AgentID,
-			SessionKind:         snap.Kind,
-			Title:               snap.Title,
-			State:               snap.State.String(),
-			WorkingDir:          snap.WorkingDir,
-			ProjectID:           snap.ProjectID,
-			CreatedAt:           snap.CreatedAt,
-			UpdatedAt:           snap.UpdatedAt,
-			CurrentTask:         snap.CurrentTask,
-		}
+		out[i] = presentation.SessionResponseFromSnapshot(snap)
 	}
 	return realtimeTypes.SessionsStateSnapshot{Sessions: out}
 }

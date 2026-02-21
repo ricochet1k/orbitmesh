@@ -1,6 +1,10 @@
 package realtime
 
-import "time"
+import (
+	"time"
+
+	apiTypes "github.com/ricochet1k/orbitmesh/pkg/api"
+)
 
 type ClientMessageType string
 
@@ -32,23 +36,10 @@ type ServerEnvelope struct {
 }
 
 type SessionsStateSnapshot struct {
-	Sessions []SessionState `json:"sessions"`
+	Sessions []Session `json:"sessions"`
 }
 
-type SessionState struct {
-	ID                  string    `json:"id"`
-	ProviderType        string    `json:"provider_type"`
-	PreferredProviderID string    `json:"preferred_provider_id,omitempty"`
-	AgentID             string    `json:"agent_id,omitempty"`
-	SessionKind         string    `json:"session_kind,omitempty"`
-	Title               string    `json:"title,omitempty"`
-	State               string    `json:"state"`
-	WorkingDir          string    `json:"working_dir"`
-	ProjectID           string    `json:"project_id,omitempty"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
-	CurrentTask         string    `json:"current_task,omitempty"`
-}
+type Session = apiTypes.SessionResponse
 
 type SessionStateEvent struct {
 	EventID      int64     `json:"event_id"`
