@@ -151,11 +151,11 @@ func (s *mockStorage) List() ([]*domain.Session, error) {
 	return sessions, nil
 }
 
-func (s *mockStorage) GetMessages(id string) ([]any, error) {
+func (s *mockStorage) GetMessages(id string) ([]domain.Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if session, ok := s.sessions[id]; ok {
-		messages := make([]any, len(session.Messages))
+		messages := make([]domain.Message, len(session.Messages))
 		copy(messages, session.Messages)
 		return messages, nil
 	}
@@ -1247,12 +1247,12 @@ func TestAgentExecutor_CancelRun_Running(t *testing.T) {
 	if len(snapshot.Messages) == 0 {
 		t.Errorf("expected system message to be appended, got none")
 	} else {
-		msg := snapshot.Messages[0].(map[string]interface{})
-		if msg["kind"] != "system" {
-			t.Errorf("expected message kind 'system', got %v", msg["kind"])
+		msg := snapshot.Messages[0]
+		if msg.Kind != domain.MessageKindSystem {
+			t.Errorf("expected message kind %q, got %q", domain.MessageKindSystem, msg.Kind)
 		}
-		if !strings.Contains(msg["contents"].(string), "cancelled") {
-			t.Errorf("expected message content to mention 'cancelled', got %v", msg["contents"])
+		if !strings.Contains(msg.Contents, "cancelled") {
+			t.Errorf("expected message content to mention 'cancelled', got %q", msg.Contents)
 		}
 	}
 }
@@ -1463,11 +1463,11 @@ func TestAgentExecutor_MidRunCrashRecoveryWithCheckpoints(t *testing.T) {
 		t.Fatalf("failed to load session from storage: %v", err)
 	}
 
-	if storedSess.Output == "" {
-		t.Fatal("expected stored session to have output")
+	if len(storedSess.Messages) == 0 {
+		t.Fatal("expected stored session to have messages")
 	}
 
-	t.Logf("Session output persisted to storage: %s", storedSess.Output)
+	t.Logf("Session messages persisted to storage: %d messages", len(storedSess.Messages))
 
 	// Now test crash recovery by killing the provider
 	prov.Kill()
@@ -1480,11 +1480,11 @@ func TestAgentExecutor_MidRunCrashRecoveryWithCheckpoints(t *testing.T) {
 	}
 
 	// Verify session was persisted
-	if recoveredSess.Output == "" {
-		t.Fatal("expected recovered session to have output from checkpoints")
+	if len(recoveredSess.Messages) == 0 {
+		t.Fatal("expected recovered session to have messages from checkpoints")
 	}
 
-	t.Logf("Successfully recovered session from checkpoint: %s", recoveredSess.Output)
+	t.Logf("Successfully recovered session from checkpoint: %d messages", len(recoveredSess.Messages))
 	t.Log("Checkpoint mechanism working: periodic snapshots prevent data loss on crash")
 }
 

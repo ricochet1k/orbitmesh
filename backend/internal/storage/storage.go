@@ -28,13 +28,15 @@ type Storage interface {
 	Load(id string) (*domain.Session, error)
 	Delete(id string) error
 	List() ([]*domain.Session, error)
-	GetMessages(id string) ([]any, error)
+	GetMessages(id string) ([]domain.Message, error)
 }
 
 type messageData struct {
-	ID       string `json:"id"`
-	Kind     string `json:"kind"`
-	Contents string `json:"contents"`
+	ID        string          `json:"id"`
+	Kind      string          `json:"kind"`
+	Contents  string          `json:"contents"`
+	Timestamp time.Time       `json:"timestamp"`
+	Raw       json.RawMessage `json:"raw,omitempty"`
 }
 
 type sessionData struct {
@@ -49,8 +51,6 @@ type sessionData struct {
 	CreatedAt      time.Time        `json:"created_at"`
 	UpdatedAt      time.Time        `json:"updated_at"`
 	CurrentTask    string           `json:"current_task,omitempty"`
-	Output         string           `json:"output,omitempty"`
-	ErrorMessage   string           `json:"error_message,omitempty"`
 	Transitions    []transitionData `json:"transitions"`
 	Messages       []messageData    `json:"messages,omitempty"`
 }
@@ -272,7 +272,7 @@ func (s *JSONFileStorage) List() ([]*domain.Session, error) {
 	return sessions, nil
 }
 
-func (s *JSONFileStorage) GetMessages(id string) ([]any, error) {
+func (s *JSONFileStorage) GetMessages(id string) ([]domain.Message, error) {
 	if err := validateSessionID(id); err != nil {
 		return nil, err
 	}
@@ -283,7 +283,7 @@ func (s *JSONFileStorage) GetMessages(id string) ([]any, error) {
 	return s.getMessagesUnlocked(id)
 }
 
-func (s *JSONFileStorage) getMessagesUnlocked(id string) ([]any, error) {
+func (s *JSONFileStorage) getMessagesUnlocked(id string) ([]domain.Message, error) {
 	filePath := s.sessionPath(id)
 
 	info, err := os.Lstat(filePath)
@@ -312,12 +312,14 @@ func (s *JSONFileStorage) getMessagesUnlocked(id string) ([]any, error) {
 		return nil, err
 	}
 
-	messages := make([]any, len(sd.Messages))
+	messages := make([]domain.Message, len(sd.Messages))
 	for i, m := range sd.Messages {
-		messages[i] = map[string]interface{}{
-			"id":       m.ID,
-			"kind":     m.Kind,
-			"contents": m.Contents,
+		messages[i] = domain.Message{
+			ID:        m.ID,
+			Kind:      domain.MessageKind(m.Kind),
+			Contents:  m.Contents,
+			Timestamp: m.Timestamp,
+			Raw:       m.Raw,
 		}
 	}
 
@@ -369,14 +371,12 @@ func snapshotToData(snap domain.SessionSnapshot) *sessionData {
 
 	messages := make([]messageData, len(snap.Messages))
 	for i, m := range snap.Messages {
-		// Messages are stored as generic any, but expected to be json.RawMessage or map[string]any
-		// We'll marshal and unmarshal to ensure correct structure
-		if msgMap, ok := m.(map[string]interface{}); ok {
-			messages[i] = messageData{
-				ID:       toString(msgMap["id"]),
-				Kind:     toString(msgMap["kind"]),
-				Contents: toString(msgMap["contents"]),
-			}
+		messages[i] = messageData{
+			ID:        m.ID,
+			Kind:      string(m.Kind),
+			Contents:  m.Contents,
+			Timestamp: m.Timestamp,
+			Raw:       m.Raw,
 		}
 	}
 
@@ -392,8 +392,6 @@ func snapshotToData(snap domain.SessionSnapshot) *sessionData {
 		CreatedAt:      snap.CreatedAt,
 		UpdatedAt:      snap.UpdatedAt,
 		CurrentTask:    snap.CurrentTask,
-		Output:         snap.Output,
-		ErrorMessage:   snap.ErrorMessage,
 		Transitions:    transitions,
 		Messages:       messages,
 	}
@@ -430,12 +428,14 @@ func dataToSession(data *sessionData) (*domain.Session, error) {
 		}
 	}
 
-	messages := make([]any, len(data.Messages))
+	messages := make([]domain.Message, len(data.Messages))
 	for i, m := range data.Messages {
-		messages[i] = map[string]interface{}{
-			"id":       m.ID,
-			"kind":     m.Kind,
-			"contents": m.Contents,
+		messages[i] = domain.Message{
+			ID:        m.ID,
+			Kind:      domain.MessageKind(m.Kind),
+			Contents:  m.Contents,
+			Timestamp: m.Timestamp,
+			Raw:       m.Raw,
 		}
 	}
 
@@ -451,8 +451,6 @@ func dataToSession(data *sessionData) (*domain.Session, error) {
 		CreatedAt:      data.CreatedAt,
 		UpdatedAt:      data.UpdatedAt,
 		CurrentTask:    data.CurrentTask,
-		Output:         data.Output,
-		ErrorMessage:   data.ErrorMessage,
 		Transitions:    transitions,
 		Messages:       messages,
 	}, nil

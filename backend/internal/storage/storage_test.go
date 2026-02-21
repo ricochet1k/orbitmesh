@@ -50,7 +50,7 @@ func TestJSONFileStorage_SaveAndLoad(t *testing.T) {
 
 	session := domain.NewSession("test-session-1", "claude", "/path/to/work")
 	session.CurrentTask = "task-123"
-	session.Output = "some output"
+	session.AppendMessage(domain.MessageKindOutput, "some output")
 
 	_ = session.TransitionTo(domain.SessionStateRunning, "started")
 
@@ -83,8 +83,8 @@ func TestJSONFileStorage_SaveAndLoad(t *testing.T) {
 	if loaded.CurrentTask != session.CurrentTask {
 		t.Errorf("expected CurrentTask %q, got %q", session.CurrentTask, loaded.CurrentTask)
 	}
-	if loaded.Output != session.Output {
-		t.Errorf("expected Output %q, got %q", session.Output, loaded.Output)
+	if len(loaded.Messages) != 1 || loaded.Messages[0].Contents != "some output" {
+		t.Errorf("expected output message to be persisted")
 	}
 	if len(loaded.Transitions) != len(session.Transitions) {
 		t.Errorf("expected %d transitions, got %d", len(session.Transitions), len(loaded.Transitions))
@@ -277,23 +277,9 @@ func TestJSONFileStorage_MessagePersistence(t *testing.T) {
 
 	// Create a session with messages
 	session := domain.NewSession("test-msg-session", "pty", "/tmp")
-	session.Messages = []any{
-		map[string]interface{}{
-			"id":       "msg-1",
-			"kind":     "user",
-			"contents": "Hello, AI!",
-		},
-		map[string]interface{}{
-			"id":       "msg-2",
-			"kind":     "assistant",
-			"contents": "Hello! How can I help?",
-		},
-		map[string]interface{}{
-			"id":       "msg-3",
-			"kind":     "user",
-			"contents": "Tell me about Go",
-		},
-	}
+	session.AppendMessage(domain.MessageKindUser, "Hello, AI!")
+	session.AppendMessage(domain.MessageKindOutput, "Hello! How can I help?")
+	session.AppendMessage(domain.MessageKindUser, "Tell me about Go")
 
 	// Save the session
 	if err := storage.Save(session); err != nil {
@@ -312,30 +298,19 @@ func TestJSONFileStorage_MessagePersistence(t *testing.T) {
 	}
 
 	// Check first message
-	msg1, ok := loaded.Messages[0].(map[string]interface{})
-	if !ok {
-		t.Errorf("expected message to be map[string]interface{}, got %T", loaded.Messages[0])
+	if loaded.Messages[0].Kind != domain.MessageKindUser {
+		t.Errorf("expected kind %q, got %q", domain.MessageKindUser, loaded.Messages[0].Kind)
 	}
-	if msg1["id"] != "msg-1" {
-		t.Errorf("expected id 'msg-1', got %v", msg1["id"])
-	}
-	if msg1["kind"] != "user" {
-		t.Errorf("expected kind 'user', got %v", msg1["kind"])
-	}
-	if msg1["contents"] != "Hello, AI!" {
-		t.Errorf("expected contents 'Hello, AI!', got %v", msg1["contents"])
+	if loaded.Messages[0].Contents != "Hello, AI!" {
+		t.Errorf("expected contents 'Hello, AI!', got %q", loaded.Messages[0].Contents)
 	}
 
 	// Check last message
-	msg3, ok := loaded.Messages[2].(map[string]interface{})
-	if !ok {
-		t.Errorf("expected message to be map[string]interface{}, got %T", loaded.Messages[2])
+	if loaded.Messages[2].Kind != domain.MessageKindUser {
+		t.Errorf("expected kind %q, got %q", domain.MessageKindUser, loaded.Messages[2].Kind)
 	}
-	if msg3["id"] != "msg-3" {
-		t.Errorf("expected id 'msg-3', got %v", msg3["id"])
-	}
-	if msg3["kind"] != "user" {
-		t.Errorf("expected kind 'user', got %v", msg3["kind"])
+	if loaded.Messages[2].Contents != "Tell me about Go" {
+		t.Errorf("expected contents 'Tell me about Go', got %q", loaded.Messages[2].Contents)
 	}
 }
 
@@ -345,13 +320,7 @@ func TestJSONFileStorage_GetMessages(t *testing.T) {
 
 	// Create and save a session with messages
 	session := domain.NewSession("test-get-msgs", "pty", "/tmp")
-	session.Messages = []any{
-		map[string]interface{}{
-			"id":       "msg-1",
-			"kind":     "system",
-			"contents": "You are a helpful assistant",
-		},
-	}
+	session.AppendMessage(domain.MessageKindSystem, "You are a helpful assistant")
 
 	if err := storage.Save(session); err != nil {
 		t.Fatalf("Save failed: %v", err)
@@ -366,13 +335,11 @@ func TestJSONFileStorage_GetMessages(t *testing.T) {
 	if len(messages) != 1 {
 		t.Errorf("expected 1 message, got %d", len(messages))
 	}
-
-	msg, ok := messages[0].(map[string]interface{})
-	if !ok {
-		t.Errorf("expected message to be map[string]interface{}, got %T", messages[0])
+	if messages[0].Kind != domain.MessageKindSystem {
+		t.Errorf("expected kind %q, got %q", domain.MessageKindSystem, messages[0].Kind)
 	}
-	if msg["id"] != "msg-1" {
-		t.Errorf("expected id 'msg-1', got %v", msg["id"])
+	if messages[0].Contents != "You are a helpful assistant" {
+		t.Errorf("expected contents 'You are a helpful assistant', got %q", messages[0].Contents)
 	}
 }
 
@@ -383,13 +350,7 @@ func TestJSONFileStorage_MessageSurvivesRestart(t *testing.T) {
 	{
 		storage, _ := NewJSONFileStorage(tmpDir)
 		session := domain.NewSession("restart-test", "pty", "/tmp")
-		session.Messages = []any{
-			map[string]interface{}{
-				"id":       "pre-restart",
-				"kind":     "assistant",
-				"contents": "This message should survive restart",
-			},
-		}
+		session.AppendMessage(domain.MessageKindOutput, "This message should survive restart")
 
 		if err := storage.Save(session); err != nil {
 			t.Fatalf("Save failed: %v", err)
@@ -407,16 +368,8 @@ func TestJSONFileStorage_MessageSurvivesRestart(t *testing.T) {
 		if len(loaded.Messages) != 1 {
 			t.Errorf("expected 1 message after restart, got %d", len(loaded.Messages))
 		}
-
-		msg, ok := loaded.Messages[0].(map[string]interface{})
-		if !ok {
-			t.Errorf("expected message to be map[string]interface{}, got %T", loaded.Messages[0])
-		}
-		if msg["id"] != "pre-restart" {
-			t.Errorf("expected id 'pre-restart', got %v", msg["id"])
-		}
-		if msg["contents"] != "This message should survive restart" {
-			t.Errorf("expected contents 'This message should survive restart', got %v", msg["contents"])
+		if loaded.Messages[0].Contents != "This message should survive restart" {
+			t.Errorf("expected contents 'This message should survive restart', got %q", loaded.Messages[0].Contents)
 		}
 	}
 }

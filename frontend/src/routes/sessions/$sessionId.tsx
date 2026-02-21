@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/solid-router'
-import { createResource, createSignal, createEffect } from 'solid-js'
+import { createResource, createSignal, createEffect, createMemo } from 'solid-js'
 import { apiClient } from '../../api/client'
 import { listProviders } from '../../api/providers'
 import type { SessionState } from '../../types/api'
@@ -7,8 +7,7 @@ import { dockSessionId, setDockSessionId } from '../../state/agentDock'
 import { isTestEnv } from '../../utils/env'
 import { TIMEOUTS } from '../../constants/timeouts'
 import { useSessionActions } from '../../hooks/useSessionActions'
-import { useSessionStream } from '../../hooks/useSessionStream'
-import { useSessionTranscript } from '../../hooks/useSessionTranscript'
+import { useSessionData } from '../../hooks/useSessionData'
 import SessionToolbar from '../../components/SessionToolbar'
 import SessionMetrics from '../../components/SessionMetrics'
 import SessionTranscript from '../../components/SessionTranscript'
@@ -38,19 +37,29 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   const [terminalStatus, setTerminalStatus] = createSignal<
     "connecting" | "live" | "closed" | "error" | "resyncing"
   >("closed")
-  const [streamStatus, setStreamStatus] = createSignal("connecting")
   const [sessionStateOverride, setSessionStateOverride] = createSignal<SessionState | null>(null)
   const [actionNotice, setActionNotice] = createSignal<{ tone: "error" | "success"; message: string } | null>(null)
   const [composerError, setComposerError] = createSignal<string | null>(null)
   const [composerPending, setComposerPending] = createSignal<string | null>(null)
   let transcriptRef: HTMLDivElement | undefined
 
-  const transcript = useSessionTranscript({
+  // canInspect: null while permissions are loading, then boolean
+  const canInspect = createMemo<boolean | null>(() => {
+    if (permissions.loading) return null
+    return permissions()?.can_inspect_sessions ?? false
+  })
+
+  const data = useSessionData({
     sessionId,
-    session,
-    permissions,
-    refetchSession,
+    canInspect,
+    eventsUrl: () => apiClient.getEventsUrl(sessionId()),
+    streamOptions: {
+      connectionTimeoutMs: TIMEOUTS.STREAM_CONNECTION_MS,
+      preflight: !isTestEnv(),
+      trackHeartbeat: true,
+    },
     onStatusChange: (state) => setSessionStateOverride(state),
+    onSessionRefetchNeeded: () => void refetchSession(),
   })
 
   const actions = useSessionActions(sessionId, {
@@ -66,17 +75,10 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
 
   const sessionState = () => sessionStateOverride() ?? session()?.state ?? "idle"
   const providerType = () => session()?.provider_type ?? ""
-  const canInspect = () => permissions()?.can_inspect_sessions ?? false
   const canManage = () => permissions()?.can_initiate_bulk_actions ?? false
 
   const isRunning = () => sessionState() === "running"
   const canSendMessage = () => sessionState() === "idle" || sessionState() === "suspended"
-
-  const markStreamActive = () => {
-    if (streamStatus() !== "live") {
-      setStreamStatus("live")
-    }
-  }
 
   const scrollToBottom = () => {
     if (!transcriptRef) return
@@ -85,64 +87,15 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
 
   // Session state sync effect
   createEffect(() => {
-    const data = session()
-    if (!data) return
-    setSessionStateOverride(data.state)
-  })
-
-  // Stream setup
-  createEffect(() => {
-    if (permissions.loading) return
-    if (!canInspect()) return
-    useSessionStream(
-      apiClient.getEventsUrl(sessionId()),
-      {
-        onEvent: (type, event) => {
-          markStreamActive()
-          transcript.handleEvent(type, event)
-        },
-        onHeartbeat: () => markStreamActive(),
-        onStatus: (status) => {
-          if (status === "connecting") {
-            setStreamStatus("connecting")
-          } else if (status === "backoff") {
-            setStreamStatus("reconnecting")
-          } else if (status === "not_found") {
-            setStreamStatus("connection_failed")
-          }
-        },
-        onOpen: () => {
-          markStreamActive()
-        },
-        onTimeout: () => {
-          setStreamStatus("connection_timeout")
-        },
-        onError: (status) => {
-          if (status === 404) {
-            setStreamStatus("connection_failed")
-            return
-          }
-          if (streamStatus() === "connection_timeout") return
-          if (streamStatus() === "connecting") {
-            setStreamStatus("connection_failed")
-          } else {
-            setStreamStatus("disconnected")
-          }
-        },
-      },
-      {
-        connectionTimeoutMs: TIMEOUTS.STREAM_CONNECTION_MS,
-        preflight: !isTestEnv(),
-        trackHeartbeat: true,
-        onHeartbeatTimeout: () => setStreamStatus("disconnected"),
-      },
-    )
+    const d = session()
+    if (!d) return
+    setSessionStateOverride(d.state)
   })
 
   // Auto-scroll effect
   createEffect(() => {
-    transcript.messages()
-    if (!transcript.autoScroll()) return
+    data.messages()
+    if (!data.autoScroll()) return
     scrollToBottom()
   })
 
@@ -151,9 +104,9 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     const buffer = 80
     const distance = transcriptRef.scrollHeight - transcriptRef.scrollTop - transcriptRef.clientHeight
     if (distance <= buffer) {
-      transcript.setAutoScroll(true)
-    } else if (transcript.autoScroll()) {
-      transcript.setAutoScroll(false)
+      data.setAutoScroll(true)
+    } else if (data.autoScroll()) {
+      data.setAutoScroll(false)
     }
   }
 
@@ -169,7 +122,6 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     setComposerError(null)
     setComposerPending("send")
     try {
-      // Use new /messages endpoint for all session states (idle, running, suspended)
       await apiClient.sendMessage(sessionId(), text, { providerId })
     } catch (err) {
       setComposerError(err instanceof Error ? err.message : "Failed to send message")
@@ -191,12 +143,12 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   }
 
   const exportTranscript = (format: "json" | "markdown") => {
-    const data = transcript.messages()
+    const msgs = data.messages()
     if (format === "json") {
-      downloadFile(`${sessionId()}-transcript.json`, JSON.stringify(data, null, 2))
+      downloadFile(`${sessionId()}-transcript.json`, JSON.stringify(msgs, null, 2))
       return
     }
-    const markdown = data
+    const markdown = msgs
       .map((msg) => `### ${msg.type.toUpperCase()} · ${msg.timestamp}\n\n${msg.content}\n`)
       .join("\n")
     downloadFile(`${sessionId()}-transcript.md`, markdown)
@@ -223,11 +175,14 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     navigate({ to: "/sessions" })
   }
 
+  // Map useSessionData streamStatus to the string union used by SessionToolbar
+  const streamStatusStr = () => data.streamStatus()
+
   return (
     <div class="session-viewer">
       <SessionToolbar
         sessionState={sessionState}
-        streamStatus={streamStatus}
+        streamStatus={streamStatusStr}
         terminalStatus={terminalStatus}
         providerType={providerType}
         pendingAction={pendingAction}
@@ -252,38 +207,38 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
                 <button
                   type="button"
                   class="neutral"
-                  onClick={transcript.handleLoadEarlier}
-                  disabled={!transcript.activityCursor() || transcript.activityHistoryLoading()}
+                  onClick={data.loadEarlier}
+                  disabled={!data.historyCursor() || data.historyLoading()}
                   data-testid="session-load-earlier"
                 >
-                  {transcript.activityHistoryLoading() ? "Loading…" : "Load earlier"}
+                  {data.historyLoading() ? "Loading…" : "Load earlier"}
                 </button>
                 <input
                   type="search"
                   placeholder="Search transcript"
-                  value={transcript.filter()}
-                  onInput={(e) => transcript.setFilter(e.currentTarget.value)}
+                  value={data.filter()}
+                  onInput={(e) => data.setFilter(e.currentTarget.value)}
                 />
                 <button
                   type="button"
                   class="neutral"
-                  onClick={() => transcript.setAutoScroll(true)}
-                  classList={{ active: transcript.autoScroll() }}
+                  onClick={() => data.setAutoScroll(true)}
+                  classList={{ active: data.autoScroll() }}
                 >
-                  {transcript.autoScroll() ? "Auto-scroll on" : "Auto-scroll off"}
+                  {data.autoScroll() ? "Auto-scroll on" : "Auto-scroll off"}
                 </button>
               </div>
             </div>
 
             <SessionTranscript
-              messages={transcript.filteredMessages}
-              filter={transcript.filter}
-              setFilter={transcript.setFilter}
-              autoScroll={transcript.autoScroll}
-              setAutoScroll={transcript.setAutoScroll}
-              activityCursor={transcript.activityCursor}
-              activityHistoryLoading={transcript.activityHistoryLoading}
-              onLoadEarlier={transcript.handleLoadEarlier}
+              messages={data.filteredMessages}
+              filter={data.filter}
+              setFilter={data.setFilter}
+              autoScroll={data.autoScroll}
+              setAutoScroll={data.setAutoScroll}
+              activityCursor={data.historyCursor}
+              activityHistoryLoading={data.historyLoading}
+              onLoadEarlier={data.loadEarlier}
               onRef={(el) => { transcriptRef = el }}
               onScroll={handleScroll}
             />

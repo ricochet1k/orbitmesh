@@ -9,48 +9,57 @@ import (
 
 // TranslateToOrbitMeshEvent converts a Claude streaming message to an OrbitMesh domain event.
 // Returns (event, true) if the message should be emitted as an event, or (event, false) if not.
+// The returned event always carries event.Raw with the original provider JSON.
 func TranslateToOrbitMeshEvent(sessionID string, msg Message) (domain.Event, bool) {
+	var event domain.Event
+	var ok bool
+
 	switch msg.Type {
 	case MessageTypeMessageStart:
-		return handleMessageStart(sessionID, msg)
+		event, ok = handleMessageStart(sessionID, msg)
 
 	case MessageTypeContentBlockStart:
-		return handleContentBlockStart(sessionID, msg)
+		event, ok = handleContentBlockStart(sessionID, msg)
 
 	case MessageTypeContentBlockDelta:
-		return handleContentBlockDelta(sessionID, msg)
+		event, ok = handleContentBlockDelta(sessionID, msg)
 
 	case MessageTypeContentBlockStop:
-		return handleContentBlockStop(sessionID, msg)
+		event, ok = handleContentBlockStop(sessionID, msg)
 
 	case MessageTypeMessageDelta:
-		return handleMessageDelta(sessionID, msg)
+		event, ok = handleMessageDelta(sessionID, msg)
 
 	case MessageTypeMessageStop:
-		return handleMessageStop(sessionID, msg)
+		event, ok = handleMessageStop(sessionID, msg)
 
 	case MessageTypeError:
-		return handleError(sessionID, msg)
+		event, ok = handleError(sessionID, msg)
 
 	case MessageTypePing:
 		return domain.Event{}, false
 
 	case "system":
-		return handleSystemMessage(sessionID, msg)
+		event, ok = handleSystemMessage(sessionID, msg)
 
 	case "user":
-		return handleUserMessage(sessionID, msg)
+		event, ok = handleUserMessage(sessionID, msg)
 
 	case "assistant":
-		return handleAssistantMessage(sessionID, msg)
+		event, ok = handleAssistantMessage(sessionID, msg)
 
 	default:
 		// Unknown message type - emit as metadata for debugging
-		return domain.NewMetadataEvent(sessionID, "unknown_message_type", map[string]any{
+		event, ok = domain.NewMetadataEvent(sessionID, "unknown_message_type", map[string]any{
 			"type": string(msg.Type),
 			"data": msg.Data,
 		}), true
 	}
+
+	if ok {
+		event.Raw = msg.Raw()
+	}
+	return event, ok
 }
 
 // handleMessageStart processes message_start events.

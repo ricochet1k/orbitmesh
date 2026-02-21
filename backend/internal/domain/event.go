@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type EventType int
 
@@ -10,9 +13,9 @@ const (
 	EventTypeMetric
 	EventTypeError
 	EventTypeMetadata
-	EventTypeToolCall  // Structured tool call information
-	EventTypeThought   // Agent reasoning/thinking
-	EventTypePlan      // Agent execution plans
+	EventTypeToolCall // Structured tool call information
+	EventTypeThought  // Agent reasoning/thinking
+	EventTypePlan     // Agent execution plans
 )
 
 func (t EventType) String() string {
@@ -44,6 +47,8 @@ type Event struct {
 	Timestamp time.Time
 	SessionID string
 	Data      any
+	// Raw holds the original provider bytes that produced this event, if any.
+	Raw json.RawMessage
 }
 
 type StatusChangeData struct {

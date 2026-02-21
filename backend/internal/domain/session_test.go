@@ -191,22 +191,48 @@ func TestSessionSetCurrentTask(t *testing.T) {
 	}
 }
 
-func TestSessionSetOutput(t *testing.T) {
+func TestSessionAppendMessage(t *testing.T) {
 	s := NewSession("test-id", "claude", "/work")
 
-	s.SetOutput("some output text")
+	s.AppendMessage(MessageKindOutput, "some output text")
 
-	if s.Output != "some output text" {
-		t.Errorf("expected Output 'some output text', got %q", s.Output)
+	if len(s.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(s.Messages))
+	}
+	if s.Messages[0].Kind != MessageKindOutput {
+		t.Errorf("expected kind %q, got %q", MessageKindOutput, s.Messages[0].Kind)
+	}
+	if s.Messages[0].Contents != "some output text" {
+		t.Errorf("expected contents 'some output text', got %q", s.Messages[0].Contents)
 	}
 }
 
-func TestSessionSetError(t *testing.T) {
+func TestSessionAppendOutputDelta(t *testing.T) {
 	s := NewSession("test-id", "claude", "/work")
 
-	s.SetError("something went wrong")
+	s.AppendOutputDelta("hello ")
+	s.AppendOutputDelta("world")
 
-	if s.ErrorMessage != "something went wrong" {
-		t.Errorf("expected ErrorMessage 'something went wrong', got %q", s.ErrorMessage)
+	if len(s.Messages) != 1 {
+		t.Fatalf("expected deltas merged into 1 message, got %d", len(s.Messages))
+	}
+	if s.Messages[0].Contents != "hello world" {
+		t.Errorf("expected 'hello world', got %q", s.Messages[0].Contents)
+	}
+}
+
+func TestSessionAppendErrorMessage(t *testing.T) {
+	s := NewSession("test-id", "claude", "/work")
+
+	s.AppendMessage(MessageKindError, "something went wrong")
+
+	if len(s.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(s.Messages))
+	}
+	if s.Messages[0].Kind != MessageKindError {
+		t.Errorf("expected kind %q, got %q", MessageKindError, s.Messages[0].Kind)
+	}
+	if s.Messages[0].Contents != "something went wrong" {
+		t.Errorf("expected 'something went wrong', got %q", s.Messages[0].Contents)
 	}
 }

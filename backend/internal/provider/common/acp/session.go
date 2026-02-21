@@ -475,23 +475,29 @@ func (s *Session) handlePromptResponse(resp acpsdk.PromptResponse) {
 	// Note: Token usage is tracked via agent-specific means (e.g., session updates)
 	// The base ACP PromptResponse doesn't include usage stats
 
+	// Marshal the full response as raw for all events derived from it.
+	e := s.events.MarshalRaw(resp)
+
 	// StopReason is a string, not a pointer
-	s.events.EmitMetadata("stop_reason", map[string]any{
+	e.EmitMetadata("stop_reason", map[string]any{
 		"reason": resp.StopReason,
 	})
 }
 
 // handleContentBlock processes an ACP content block.
 func (s *Session) handleContentBlock(block acpsdk.ContentBlock) {
+	// Marshal the content block as raw for all events derived from it.
+	e := s.events.MarshalRaw(block)
+
 	switch {
 	case block.Text != nil:
 		// Text output
 		s.state.SetOutput(block.Text.Text)
-		s.events.EmitOutput(block.Text.Text)
+		e.EmitOutput(block.Text.Text)
 
 	case block.Image != nil:
 		// Image output (emit as metadata)
-		s.events.EmitMetadata("image", map[string]any{
+		e.EmitMetadata("image", map[string]any{
 			"source": block.Image,
 		})
 	}

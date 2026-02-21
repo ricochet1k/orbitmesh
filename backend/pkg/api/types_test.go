@@ -97,8 +97,6 @@ func TestSessionResponse_JSONMarshal(t *testing.T) {
 		CreatedAt:    now,
 		UpdatedAt:    now,
 		CurrentTask:  "task-456",
-		Output:       "Hello, world!",
-		ErrorMessage: "",
 	}
 
 	data, err := json.Marshal(resp)

@@ -172,6 +172,8 @@ export interface ActivityEntry {
   rev: number;
   open: boolean;
   data: Record<string, any>;
+  /** SSE event_id that created this entry; 0 / absent when not yet tracked. */
+  event_id?: number;
 }
 
 export interface ActivityEntryMutation {

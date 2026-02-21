@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,9 +31,6 @@ const (
 
 // SessionFactory creates a session runner for the given provider type.
 type SessionFactory func(providerType, sessionID string, config session.Config) (session.Session, error)
-
-// ProviderFactory is a deprecated alias for SessionFactory kept for call-site compatibility.
-type ProviderFactory = SessionFactory
 
 type sessionContext struct {
 	session *domain.Session
@@ -60,7 +58,6 @@ type ExecutorConfig struct {
 	TerminalStorage    storage.TerminalStorage
 	Broadcaster        *EventBroadcaster
 	ProviderFactory    SessionFactory
-	HealthInterval     time.Duration // Deprecated: no longer used; kept for config compatibility
 	OperationTimeout   time.Duration
 	CheckpointInterval time.Duration
 }
@@ -127,12 +124,12 @@ func (e *AgentExecutor) CreateSession(ctx context.Context, id string, config ses
 
 	// Set messages if provided for resumption
 	if len(config.ResumeMessages) > 0 {
-		messages := make([]any, len(config.ResumeMessages))
+		messages := make([]domain.Message, len(config.ResumeMessages))
 		for i, msg := range config.ResumeMessages {
-			messages[i] = map[string]interface{}{
-				"id":       msg.ID,
-				"kind":     msg.Kind,
-				"contents": msg.Contents,
+			messages[i] = domain.Message{
+				ID:       msg.ID,
+				Kind:     domain.MessageKind(msg.Kind),
+				Contents: msg.Contents,
 			}
 		}
 		session.SetMessages(messages)
@@ -184,27 +181,17 @@ func (e *AgentExecutor) handleEvents(ctx context.Context, sc *sessionContext, ru
 	defer checkpointTicker.Stop()
 
 	var checkpointMu sync.Mutex
-	checkpointRunning := false
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-checkpointTicker.C:
-			checkpointMu.Lock()
-			if !checkpointRunning {
-				checkpointRunning = true
-				checkpointMu.Unlock()
-				e.wg.Add(1)
-				go func() {
-					defer e.wg.Done()
+			if checkpointMu.TryLock() {
+				e.wg.Go(func() {
 					e.checkpointSession(sc)
-					checkpointMu.Lock()
-					checkpointRunning = false
 					checkpointMu.Unlock()
-				}()
-			} else {
-				checkpointMu.Unlock()
+				})
 			}
 		case event, ok := <-events:
 			if !ok {
@@ -326,7 +313,7 @@ func (e *AgentExecutor) CancelRun(ctx context.Context, id string) error {
 	e.closeTerminalHub(id)
 
 	// Append system message indicating run was cancelled
-	sc.session.AppendSystemMessage("Run cancelled by user")
+	sc.session.AppendMessage(domain.MessageKindSystem, "Run cancelled by user")
 
 	// Transition to idle
 	e.transitionWithSave(sc, domain.SessionStateIdle, "run cancelled by user")
@@ -648,11 +635,15 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 	run := session.NewProviderRun(prov, e.ctx)
 	sc.run = run
 
+	// Record the user's message in the session history before starting the run.
+	sess.AppendMessage(domain.MessageKindUser, content)
+	if e.storage != nil {
+		_ = e.storage.Save(sess)
+	}
+
 	// Start the session asynchronously: call SendInput (which also starts the runner),
 	// then pump events until the channel closes.
-	e.wg.Add(1)
-	go func() {
-		defer e.wg.Done()
+	e.wg.Go(func() {
 		defer func() {
 			if r := recover(); r != nil {
 				e.handlePanic(sc, r)
@@ -669,7 +660,7 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 		if err != nil {
 			errMsg := fmt.Sprintf("Provider failed to start: %v", err)
 			log.Printf("SESSION START FAILED: %v", errMsg)
-			sc.session.AppendErrorMessage(errMsg, pType)
+			sc.session.AppendMessage(domain.MessageKindError, errMsg)
 			run.SetError(err)
 
 			if e.storage != nil {
@@ -699,7 +690,7 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 		e.mu.Lock()
 		sc.run = nil
 		e.mu.Unlock()
-	}()
+	})
 
 	return sess, nil
 }
@@ -828,21 +819,47 @@ func (e *AgentExecutor) broadcastStateChange(session *domain.Session, oldState, 
 func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.Event) {
 	switch data := event.Data.(type) {
 	case domain.OutputData:
-		sc.session.SetOutput(data.Content)
+		if data.IsDelta {
+			// Deltas are merged into the previous output message; raw bytes are not
+			// stored per-delta (they would be redundant and large).
+			sc.session.AppendOutputDelta(data.Content)
+		} else {
+			sc.session.AppendMessageRaw(domain.MessageKindOutput, data.Content, event.Raw)
+		}
+	case domain.ThoughtData:
+		sc.session.AppendMessageRaw(domain.MessageKindThought, data.Content, event.Raw)
 	case domain.ErrorData:
-		sc.session.SetError(data.Message)
+		sc.session.AppendMessageRaw(domain.MessageKindError, data.Message, event.Raw)
+	case domain.ToolCallData:
+		sc.session.AppendMessageRaw(domain.MessageKindToolUse, fmt.Sprintf("%s: %s", data.Name, data.ID), event.Raw)
+		// Check if this tool call requires waiting for an external response
+		if data.Status == "pending" || data.Status == "waiting" {
+			e.suspendSession(sc, data.ID)
+		}
 	case domain.MetadataData:
+		// Side-effect: keep current_task in sync on the session object.
 		if data.Key == "current_task" {
 			if task, ok := data.Value.(string); ok {
 				sc.session.SetCurrentTask(task)
 			}
 		}
-	case domain.ToolCallData:
-		// Check if this tool call requires waiting for an external response
-		if data.Status == "pending" || data.Status == "waiting" {
-			// Suspend the session to await the tool result
-			e.suspendSession(sc, data.ID)
+		sc.session.AppendMessageRaw(domain.MessageKindSystem, data.Key, event.Raw)
+	case domain.MetricData:
+		sc.session.AppendMessageRaw(domain.MessageKindMetric,
+			fmt.Sprintf("in=%d out=%d requests=%d", data.TokensIn, data.TokensOut, data.RequestCount), event.Raw)
+	case domain.StatusChangeData:
+		sc.session.AppendMessageRaw(domain.MessageKindSystem,
+			fmt.Sprintf("status: %s -> %s", data.OldState, data.NewState), event.Raw)
+	case domain.PlanData:
+		steps := make([]string, 0, len(data.Steps))
+		for _, step := range data.Steps {
+			steps = append(steps, fmt.Sprintf("%s: %s", step.ID, step.Description))
 		}
+		content := data.Description
+		if len(steps) > 0 {
+			content = fmt.Sprintf("%s\n%s", data.Description, strings.Join(steps, "\n"))
+		}
+		sc.session.AppendMessageRaw(domain.MessageKindPlan, content, event.Raw)
 	}
 
 	if e.storage != nil {
@@ -896,7 +913,7 @@ func (e *AgentExecutor) handlePanic(sc *sessionContext, r any) {
 	log.Printf("PANIC: %v", errMsg)
 
 	// Append error to message history instead of setting ErrorMessage
-	sc.session.AppendErrorMessage(errMsg, sc.session.ProviderType)
+	sc.session.AppendMessage(domain.MessageKindError, errMsg)
 
 	// On panic, transition to idle state (per design: errors don't block session)
 	// The panic is recorded in the message history and session becomes idle again

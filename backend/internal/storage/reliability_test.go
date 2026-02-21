@@ -21,7 +21,7 @@ func TestSessionSnapshotDataRace(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < 1000; i++ {
 			s.SetCurrentTask(fmt.Sprintf("task-%d", i))
-			s.SetOutput(fmt.Sprintf("output-%d", i))
+			s.AppendMessage(domain.MessageKindOutput, fmt.Sprintf("output-%d", i))
 		}
 	}()
 

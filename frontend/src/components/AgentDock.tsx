@@ -11,11 +11,9 @@ import {
 import { useNavigate } from "@tanstack/solid-router"
 import { apiClient } from "../api/client"
 import type { SessionState } from "../types/api"
-import { parseSSEEvent } from "../types/api"
 import { clearDockSessionId, dockSessionId } from "../state/agentDock"
 import { TIMEOUTS } from "../constants/timeouts"
-import { useSessionStream } from "../hooks/useSessionStream"
-import { useSessionTranscript } from "../hooks/useSessionTranscript"
+import { useSessionData } from "../hooks/useSessionData"
 import { useSessionActions } from "../hooks/useSessionActions"
 import { useAgentDockSession } from "../hooks/useAgentDockSession"
 import { useAgentDockMcp } from "../hooks/useAgentDockMcp"
@@ -38,12 +36,8 @@ export default function AgentDock(props: AgentDockProps) {
   const [permissions] = createResource(apiClient.getPermissions)
   const [providers] = createResource(apiClient.listProviders)
 
-  const [dockLoadState, setDockLoadState] = createSignal<"empty" | "loading" | "error" | "live">("empty")
   const [dockError, setDockError] = createSignal<string | null>(null)
   const [isExpanded, setIsExpanded] = createSignal(false)
-  const [streamStatus, setStreamStatus] = createSignal<
-    "idle" | "connecting" | "reconnecting" | "live" | "disconnected" | "error"
-  >("idle")
   const [lastAction, setLastAction] = createSignal<
     { label: string; detail?: string; tone?: "info" | "error" } | null
   >(null)
@@ -85,6 +79,102 @@ export default function AgentDock(props: AgentDockProps) {
     return () => document.removeEventListener("mousedown", handler)
   })
 
+  const formatShort = (value: unknown, limit = 120) => {
+    if (value === null || value === undefined) return ""
+    const raw = typeof value === "string" ? value : JSON.stringify(value)
+    return raw.length <= limit ? raw : `${raw.slice(0, limit - 3)}...`
+  }
+
+  // Session data hook — owns the full stream + history lifecycle
+  const data = useSessionData({
+    sessionId,
+    eventsUrl: () => apiClient.getEventsUrl(sessionId()),
+    streamOptions: {
+      connectionTimeoutMs: TIMEOUTS.DOCK_STREAM_CONNECTION_MS,
+      preflight: false,
+    },
+    onStatusChange: (state) => setSessionStateOverride(state),
+    onSessionRefetchNeeded: () => void refetchSession(),
+  })
+
+  // Update lastAction from the most recent SSE event
+  createEffect(() => {
+    const payload = data.lastEvent()
+    if (!payload) return
+    switch (payload.type) {
+      case "output":
+        setLastAction({ label: "Output", detail: formatShort(payload.data.content) })
+        break
+      case "status_change":
+        setLastAction({ label: "Status change", detail: `${payload.data.old_state} -> ${payload.data.new_state}` })
+        break
+      case "metadata":
+        setLastAction({ label: `Metadata: ${payload.data.key}`, detail: formatShort(payload.data.value) })
+        break
+      case "tool_call":
+        setLastAction({ label: `Tool: ${payload.data.title || payload.data.name}` })
+        break
+      case "thought":
+        setLastAction({ label: "Thinking…", detail: formatShort(payload.data.content) })
+        break
+      case "plan":
+        setLastAction({ label: "Plan", detail: payload.data.description })
+        break
+      case "error":
+        setLastAction({ label: "Error", detail: payload.data.message, tone: "error" })
+        break
+      case "metric":
+        setLastAction({ label: "Metrics", detail: `in ${payload.data.tokens_in} · out ${payload.data.tokens_out}` })
+        break
+    }
+  })
+
+  // Derive dockLoadState from streamStatus + sessionId
+  const dockLoadState = createMemo<"empty" | "loading" | "error" | "live">(() => {
+    if (!hasSession()) return "empty"
+    const status = data.streamStatus()
+    switch (status) {
+      case "idle":
+        return "empty"
+      case "connecting":
+        return session.loading && !session() ? "loading" : "loading"
+      case "live":
+        return "live"
+      case "reconnecting":
+        return "error"
+      case "disconnected":
+        return "error"
+      case "error":
+        return "error"
+      default:
+        return "empty"
+    }
+  })
+
+  // Update dock error message based on stream status
+  createEffect(() => {
+    const status = data.streamStatus()
+    switch (status) {
+      case "reconnecting":
+        setDockError("Connection lost. Reconnecting…")
+        break
+      case "error":
+        setDockError("Stream error. Check connection.")
+        break
+      case "live":
+        setDockError(null)
+        break
+      default:
+        break
+    }
+  })
+
+  // Reset lastAction when session changes
+  createEffect(() => {
+    sessionId()  // track changes
+    setLastAction(null)
+  })
+
   const hasError = () => dockLoadState() === "error" && Boolean(dockError())
 
   const lastActionLabel = createMemo(() => {
@@ -94,155 +184,15 @@ export default function AgentDock(props: AgentDockProps) {
 
   const lastActionDetail = createMemo(() => lastAction()?.detail ?? "")
 
-  const formatShort = (value: unknown, limit = 120) => {
-    if (value === null || value === undefined) return ""
-    const raw = typeof value === "string" ? value : JSON.stringify(value)
-    return raw.length <= limit ? raw : `${raw.slice(0, limit - 3)}...`
-  }
-
-  const markStreamActive = () => {
-    if (streamStatus() !== "live") setStreamStatus("live")
-  }
-
-  // Transcript hook — provides full history, merge, filter, auto-scroll
-  const transcript = useSessionTranscript({
-    sessionId,
-    session: session as any,
-    permissions,
-    refetchSession,
-    onStatusChange: (state) => setSessionStateOverride(state),
-  })
-
   // Session actions hook
   const actions = useSessionActions(sessionId, {
     onError: (_action, msg) => setComposerError(msg),
   })
 
-  // Track when session is confirmed to exist (at least one successful fetch).
-  const [sessionReady, setSessionReady] = createSignal(false)
-
-  // Session load state management
-  createEffect(() => {
-    const activeSessionId = sessionId()
-    if (!activeSessionId) {
-      setDockLoadState("empty")
-      setDockError(null)
-      setStreamStatus("idle")
-      setLastAction(null)
-      setSessionReady(false)
-      return
-    }
-
-    if (session.loading) {
-      if (untrack(() => !sessionReady())) {
-        setDockLoadState("loading")
-        setStreamStatus("connecting")
-      }
-      return
-    }
-
-    if (session.error) {
-      if (untrack(() => !sessionReady())) {
-        setDockLoadState("error")
-        setDockError("Failed to connect to session.")
-        setStreamStatus("error")
-      }
-      return
-    }
-
-    const sess = session()
-    if (!sess) {
-      setDockLoadState("empty")
-      setStreamStatus("idle")
-      setSessionReady(false)
-      return
-    }
-
-    setSessionReady(true)
-  })
-
-  // Stream management
-  createEffect(() => {
-    const activeSessionId = sessionId()
-    if (!activeSessionId || !sessionReady()) return
-
-    setDockLoadState("live")
-    setStreamStatus("connecting")
-    setLastAction(null)
-
-    useSessionStream(
-      apiClient.getEventsUrl(activeSessionId),
-      {
-        onEvent: (eventType, event) => {
-          markStreamActive()
-          transcript.handleEvent(eventType, event)
-
-          const payload = parseSSEEvent(eventType, event)
-          if (!payload) return
-          switch (payload.type) {
-            case "output":
-              setLastAction({ label: "Output", detail: formatShort(payload.data.content) })
-              break
-            case "status_change":
-              setLastAction({ label: "Status change", detail: `${payload.data.old_state} -> ${payload.data.new_state}` })
-              break
-            case "metadata":
-              setLastAction({ label: `Metadata: ${payload.data.key}`, detail: formatShort(payload.data.value) })
-              break
-            case "tool_call":
-              setLastAction({ label: `Tool: ${payload.data.title || payload.data.name}` })
-              break
-            case "thought":
-              setLastAction({ label: "Thinking…", detail: formatShort(payload.data.content) })
-              break
-            case "plan":
-              setLastAction({ label: "Plan", detail: payload.data.description })
-              break
-            case "error":
-              setLastAction({ label: "Error", detail: payload.data.message, tone: "error" })
-              break
-            case "metric":
-              setLastAction({ label: "Metrics", detail: `in ${payload.data.tokens_in} · out ${payload.data.tokens_out}` })
-              break
-          }
-        },
-        onHeartbeat: () => markStreamActive(),
-        onStatus: (status) => {
-          if (status === "connecting") {
-            setStreamStatus("connecting")
-          } else if (status === "backoff") {
-            setStreamStatus("reconnecting")
-            setDockLoadState("error")
-            setDockError("Connection lost. Reconnecting…")
-          } else if (status === "not_found") {
-            setStreamStatus("error")
-            setDockLoadState("error")
-            setDockError("Stream endpoint not found.")
-          }
-        },
-        onOpen: () => {
-          setStreamStatus("live")
-          setDockLoadState("live")
-          setDockError(null)
-        },
-        onError: (status) => {
-          if (status === 404) {
-            setStreamStatus("error")
-            setDockLoadState("error")
-            setDockError("Stream endpoint not found.")
-            return
-          }
-          setStreamStatus("disconnected")
-        },
-      },
-      { connectionTimeoutMs: TIMEOUTS.DOCK_STREAM_CONNECTION_MS, preflight: false },
-    )
-  })
-
   // Auto-scroll when new messages arrive
   createEffect(() => {
-    transcript.messages()
-    if (!transcript.autoScroll() || !transcriptContainerRef) return
+    data.messages()
+    if (!data.autoScroll() || !transcriptContainerRef) return
     requestAnimationFrame(() => {
       if (transcriptContainerRef) {
         transcriptContainerRef.scrollTop = transcriptContainerRef.scrollHeight
@@ -256,8 +206,6 @@ export default function AgentDock(props: AgentDockProps) {
     try {
       let activeSessionId: string | null = sessionId() || null
       if (!activeSessionId) {
-        setDockLoadState("loading")
-        setStreamStatus("connecting")
         const pid = selectedProviderId()
         activeSessionId = await ensureDockSessionId(pid ? { providerId: pid } : {})
       }
@@ -285,15 +233,11 @@ export default function AgentDock(props: AgentDockProps) {
 
   const handleNewSession = async () => {
     clearDockSessionId()
-    setDockLoadState("loading")
-    setStreamStatus("connecting")
     setDockError(null)
-    setSessionReady(false)
     closeMenu()
     const pid = selectedProviderId()
     const newId = await ensureDockSessionId(pid ? { providerId: pid } : {})
     if (!newId) {
-      setDockLoadState("error")
       setDockError("Failed to create a new session.")
     }
   }
@@ -431,14 +375,14 @@ export default function AgentDock(props: AgentDockProps) {
           <Show when={dockLoadState() === "live"}>
             <div class="agent-dock-transcript-area">
               <SessionTranscript
-                messages={transcript.filteredMessages}
-                filter={transcript.filter}
-                setFilter={transcript.setFilter}
-                autoScroll={transcript.autoScroll}
-                setAutoScroll={transcript.setAutoScroll}
-                activityCursor={transcript.activityCursor}
-                activityHistoryLoading={transcript.activityHistoryLoading}
-                onLoadEarlier={transcript.handleLoadEarlier}
+                messages={data.filteredMessages}
+                filter={data.filter}
+                setFilter={data.setFilter}
+                autoScroll={data.autoScroll}
+                setAutoScroll={data.setAutoScroll}
+                activityCursor={data.historyCursor}
+                activityHistoryLoading={data.historyLoading}
+                onLoadEarlier={data.loadEarlier}
                 onRef={(el) => { transcriptContainerRef = el }}
                 emptyLabel="Waiting for agent activity…"
               />

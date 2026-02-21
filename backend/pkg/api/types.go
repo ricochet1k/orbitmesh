@@ -56,8 +56,6 @@ type SessionResponse struct {
 	CreatedAt           time.Time    `json:"created_at"`
 	UpdatedAt           time.Time    `json:"updated_at"`
 	CurrentTask         string       `json:"current_task,omitempty"`
-	Output              string       `json:"output,omitempty"`
-	ErrorMessage        string       `json:"error_message,omitempty"`
 }
 
 // ProjectRequest is the body for create/update project endpoints.
@@ -181,6 +179,10 @@ type ActivityEntry struct {
 	Rev       int            `json:"rev"`
 	Open      bool           `json:"open"`
 	Data      map[string]any `json:"data,omitempty"`
+	// EventID is the monotonic SSE event_id of the stream event that created
+	// this entry. Zero means the entry predates event-ID tracking (safe to
+	// treat as "no watermark"). Added for frontend deduplication.
+	EventID int64 `json:"event_id,omitempty"`
 }
 
 type ActivityHistoryResponse struct {

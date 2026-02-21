@@ -21,9 +21,9 @@ const (
 
 // Message represents a parsed JSON message from Claude's streaming output.
 type Message struct {
-	Type  MessageType        `json:"type"`
-	Data  map[string]any     `json:"-"` // Raw data for flexible access
-	raw   []byte             // Original JSON for debugging
+	Type MessageType    `json:"type"`
+	Data map[string]any `json:"-"` // Raw data for flexible access
+	raw  []byte         // Original JSON for debugging
 }
 
 // ParseMessage parses a single line of JSON from Claude's stream output.
@@ -227,9 +227,9 @@ const (
 
 // ContentBlock represents a content block in the streaming response.
 type ContentBlock struct {
-	Type  ContentBlockType
-	Index int
-	Text  string
+	Type        ContentBlockType
+	Index       int
+	Text        string
 	ToolUseName string
 	ToolUseID   string
 	ToolInput   map[string]any

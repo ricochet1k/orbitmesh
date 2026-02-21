@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -67,6 +68,31 @@ type StateTransition struct {
 	Timestamp time.Time
 }
 
+// MessageKind identifies the type of a persisted session message.
+type MessageKind string
+
+const (
+	MessageKindUser    MessageKind = "user"
+	MessageKindOutput  MessageKind = "output"
+	MessageKindThought MessageKind = "thought"
+	MessageKindToolUse MessageKind = "tool_use"
+	MessageKindError   MessageKind = "error"
+	MessageKindSystem  MessageKind = "system"
+	MessageKindPlan    MessageKind = "plan"
+	MessageKindMetric  MessageKind = "metric"
+)
+
+// Message is a single entry in a session's conversation history.
+type Message struct {
+	ID        string      `json:"id"`
+	Kind      MessageKind `json:"kind"`
+	Contents  string      `json:"contents"`
+	Timestamp time.Time   `json:"timestamp"`
+	// Raw holds the original provider-specific bytes that produced this message,
+	// preserved verbatim so callers can re-parse fields not originally extracted.
+	Raw json.RawMessage `json:"raw,omitempty"`
+}
+
 type Session struct {
 	ID                  string
 	ProviderType        string
@@ -83,11 +109,9 @@ type Session struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	CurrentTask       string
-	Output            string
-	ErrorMessage      string
 	Transitions       []StateTransition
-	Messages          []any // []session.Message
-	SuspensionContext any   // *session.SuspensionContext (to avoid circular import)
+	Messages          []Message
+	SuspensionContext any // *session.SuspensionContext (to avoid circular import)
 
 	mu sync.RWMutex
 }
@@ -102,7 +126,7 @@ func NewSession(id, providerType, workingDir string) *Session {
 		CreatedAt:    now,
 		UpdatedAt:    now,
 		Transitions:  make([]StateTransition, 0),
-		Messages:     make([]any, 0),
+		Messages:     make([]Message, 0),
 	}
 }
 
@@ -155,31 +179,6 @@ func (s *Session) SetTitle(title string) {
 	s.UpdatedAt = time.Now()
 }
 
-func (s *Session) SetOutput(output string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.Output = output
-	s.UpdatedAt = time.Now()
-}
-
-func (s *Session) SetError(message string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.ErrorMessage = message
-	s.UpdatedAt = time.Now()
-}
-
-func (s *Session) SetMessages(messages []any) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if messages == nil {
-		s.Messages = make([]any, 0)
-	} else {
-		s.Messages = messages
-	}
-	s.UpdatedAt = time.Now()
-}
-
 func (s *Session) SetPreferredProviderID(providerID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -187,38 +186,53 @@ func (s *Session) SetPreferredProviderID(providerID string) {
 	s.UpdatedAt = time.Now()
 }
 
-// AppendErrorMessage appends an error message to the session's message history.
-// The error is recorded as a system message that can be replayed in the transcript.
-func (s *Session) AppendErrorMessage(errorMsg string, providerType string) {
+// AppendMessage appends a message to the session's conversation history.
+func (s *Session) AppendMessage(kind MessageKind, contents string) {
+	s.AppendMessageRaw(kind, contents, nil)
+}
+
+// AppendMessageRaw appends a message with optional raw provider bytes preserved.
+func (s *Session) AppendMessageRaw(kind MessageKind, contents string, raw json.RawMessage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	message := map[string]interface{}{
-		"id":            fmt.Sprintf("error_%d", time.Now().UnixNano()),
-		"kind":          "error",
-		"provider_type": providerType,
-		"contents":      errorMsg,
-		"timestamp":     time.Now().UTC().Format(time.RFC3339),
-	}
-
-	s.Messages = append(s.Messages, message)
+	s.Messages = append(s.Messages, Message{
+		ID:        fmt.Sprintf("%s_%d", kind, time.Now().UnixNano()),
+		Kind:      kind,
+		Contents:  contents,
+		Timestamp: time.Now(),
+		Raw:       raw,
+	})
 	s.UpdatedAt = time.Now()
 }
 
-// AppendSystemMessage appends a system message to the session's message history.
-// The message is recorded with kind "system" and can be replayed in the transcript.
-func (s *Session) AppendSystemMessage(content string) {
+// AppendOutputDelta appends streaming text to the last output message if one
+// exists, or creates a new output message. This accumulates delta chunks into a
+// single coherent message rather than producing one entry per chunk.
+func (s *Session) AppendOutputDelta(delta string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	message := map[string]interface{}{
-		"id":        fmt.Sprintf("system_%d", time.Now().UnixNano()),
-		"kind":      "system",
-		"contents":  content,
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	if n := len(s.Messages); n > 0 && s.Messages[n-1].Kind == MessageKindOutput {
+		s.Messages[n-1].Contents += delta
+	} else {
+		s.Messages = append(s.Messages, Message{
+			ID:        fmt.Sprintf("%s_%d", MessageKindOutput, time.Now().UnixNano()),
+			Kind:      MessageKindOutput,
+			Contents:  delta,
+			Timestamp: time.Now(),
+		})
 	}
+	s.UpdatedAt = time.Now()
+}
 
-	s.Messages = append(s.Messages, message)
+// SetMessages replaces the full message history (used when loading from storage).
+func (s *Session) SetMessages(messages []Message) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if messages == nil {
+		s.Messages = make([]Message, 0)
+	} else {
+		s.Messages = messages
+	}
 	s.UpdatedAt = time.Now()
 }
 
@@ -251,11 +265,9 @@ type SessionSnapshot struct {
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 	CurrentTask         string
-	Output              string
-	ErrorMessage        string
 	Transitions         []StateTransition
-	Messages            []any // []session.Message
-	SuspensionContext   any   // *session.SuspensionContext
+	Messages            []Message
+	SuspensionContext   any // *session.SuspensionContext
 }
 
 // Snapshot returns an atomic copy of the session under its read lock.
@@ -266,7 +278,7 @@ func (s *Session) Snapshot() SessionSnapshot {
 	transitions := make([]StateTransition, len(s.Transitions))
 	copy(transitions, s.Transitions)
 
-	messages := make([]any, len(s.Messages))
+	messages := make([]Message, len(s.Messages))
 	copy(messages, s.Messages)
 
 	return SessionSnapshot{
@@ -282,8 +294,6 @@ func (s *Session) Snapshot() SessionSnapshot {
 		CreatedAt:           s.CreatedAt,
 		UpdatedAt:           s.UpdatedAt,
 		CurrentTask:         s.CurrentTask,
-		Output:              s.Output,
-		ErrorMessage:        s.ErrorMessage,
 		Transitions:         transitions,
 		Messages:            messages,
 		SuspensionContext:   s.SuspensionContext,

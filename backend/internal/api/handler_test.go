@@ -121,14 +121,14 @@ func (s *inMemStore) List() ([]*domain.Session, error) {
 	return out, nil
 }
 
-func (s *inMemStore) GetMessages(id string) ([]any, error) {
+func (s *inMemStore) GetMessages(id string) ([]domain.Message, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	sess, ok := s.sessions[id]
 	if !ok {
 		return nil, storage.ErrSessionNotFound
 	}
-	messages := make([]any, len(sess.Messages))
+	messages := make([]domain.Message, len(sess.Messages))
 	copy(messages, sess.Messages)
 	return messages, nil
 }

@@ -1,6 +1,7 @@
 package native
 
 import (
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -65,6 +66,52 @@ func (a *EventAdapter) emit(event domain.Event) {
 	case a.events <- event:
 	default:
 	}
+}
+
+// WithRaw returns a ScopedEmitter that attaches raw provider bytes to every
+// event it emits. Use it at the point where the raw bytes are available:
+//
+//	a.WithRaw(rawBytes).EmitMetadata("key", value)
+func (a *EventAdapter) WithRaw(raw []byte) *ScopedEmitter {
+	return &ScopedEmitter{adapter: a, raw: raw}
+}
+
+// MarshalRaw JSON-encodes v and returns a ScopedEmitter with those bytes.
+// Useful for Go SDK structs that have no wire representation.
+func (a *EventAdapter) MarshalRaw(v any) *ScopedEmitter {
+	b, _ := json.Marshal(v)
+	return &ScopedEmitter{adapter: a, raw: b}
+}
+
+// ScopedEmitter wraps EventAdapter and tags every emitted event with raw bytes.
+type ScopedEmitter struct {
+	adapter *EventAdapter
+	raw     []byte
+}
+
+func (s *ScopedEmitter) emit(event domain.Event) {
+	event.Raw = s.raw
+	s.adapter.emit(event)
+}
+
+func (s *ScopedEmitter) EmitStatusChange(oldState, newState domain.SessionState, reason string) {
+	s.emit(domain.NewStatusChangeEvent(s.adapter.sessionID, oldState, newState, reason))
+}
+
+func (s *ScopedEmitter) EmitOutput(content string) {
+	s.emit(domain.NewOutputEvent(s.adapter.sessionID, content))
+}
+
+func (s *ScopedEmitter) EmitMetric(tokensIn, tokensOut, requestCount int64) {
+	s.emit(domain.NewMetricEvent(s.adapter.sessionID, tokensIn, tokensOut, requestCount))
+}
+
+func (s *ScopedEmitter) EmitError(message, code string) {
+	s.emit(domain.NewErrorEvent(s.adapter.sessionID, message, code))
+}
+
+func (s *ScopedEmitter) EmitMetadata(key string, value any) {
+	s.emit(domain.NewMetadataEvent(s.adapter.sessionID, key, value))
 }
 
 func (a *EventAdapter) Close() {

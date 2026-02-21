@@ -413,32 +413,16 @@ func (h *Handler) getSessionMessages(w http.ResponseWriter, r *http.Request) {
 	// Convert messages to API format and filter by timestamp if needed
 	apiMessages := make([]apiTypes.Message, 0, len(messages))
 	for _, msg := range messages {
-		msgMap, ok := msg.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		apiMsg := apiTypes.Message{
-			ID:       toStringValue(msgMap["id"]),
-			Kind:     toStringValue(msgMap["kind"]),
-			Contents: toStringValue(msgMap["contents"]),
-		}
-
-		// Parse timestamp if present
-		if ts, ok := msgMap["timestamp"]; ok {
-			if tsStr, ok := ts.(string); ok {
-				if t, err := time.Parse(time.RFC3339, tsStr); err == nil {
-					apiMsg.Timestamp = t
-				}
-			}
-		}
-
 		// Filter by since timestamp if provided
-		if sinceTime != nil && !apiMsg.Timestamp.IsZero() && apiMsg.Timestamp.Before(*sinceTime) {
+		if sinceTime != nil && !msg.Timestamp.IsZero() && msg.Timestamp.Before(*sinceTime) {
 			continue
 		}
-
-		apiMessages = append(apiMessages, apiMsg)
+		apiMessages = append(apiMessages, apiTypes.Message{
+			ID:        msg.ID,
+			Kind:      string(msg.Kind),
+			Contents:  msg.Contents,
+			Timestamp: msg.Timestamp,
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -446,14 +430,6 @@ func (h *Handler) getSessionMessages(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(apiTypes.MessageListResponse{
 		Messages: apiMessages,
 	})
-}
-
-// toStringValue converts a value to string, returning empty string if not a string
-func toStringValue(v interface{}) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return ""
 }
 
 func (h *Handler) cancelSession(w http.ResponseWriter, r *http.Request) {
@@ -512,8 +488,6 @@ func sessionToResponse(s domain.SessionSnapshot) apiTypes.SessionResponse {
 		CreatedAt:           s.CreatedAt,
 		UpdatedAt:           s.UpdatedAt,
 		CurrentTask:         s.CurrentTask,
-		Output:              s.Output,
-		ErrorMessage:        s.ErrorMessage,
 	}
 }
 

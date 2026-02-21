@@ -301,18 +301,21 @@ func (p *ADKSession) afterModelCallback(ctx agent.CallbackContext, resp *model.L
 		return resp, err
 	}
 
+	// Marshal the full response once; attach it to every event from this callback.
+	e := p.events.MarshalRaw(resp)
+
 	if resp.UsageMetadata != nil {
 		tokensIn := int64(resp.UsageMetadata.PromptTokenCount)
 		tokensOut := int64(resp.UsageMetadata.CandidatesTokenCount)
 		p.state.AddTokens(tokensIn, tokensOut)
-		p.events.EmitMetric(tokensIn, tokensOut, 1)
+		e.EmitMetric(tokensIn, tokensOut, 1)
 	}
 
 	if resp.Content != nil {
 		for _, part := range resp.Content.Parts {
 			if part.Text != "" {
 				p.state.SetOutput(part.Text)
-				p.events.EmitOutput(part.Text)
+				e.EmitOutput(part.Text)
 			}
 		}
 	}
@@ -364,22 +367,25 @@ func (p *ADKSession) RunPrompt(ctx context.Context, prompt string) error {
 }
 
 func (p *ADKSession) processEvent(event *adksession.Event) {
+	// Marshal the ADK event once; attach to every emitted event from it.
+	e := p.events.MarshalRaw(event)
+
 	if event.Partial {
 		if event.Content != nil {
 			for _, part := range event.Content.Parts {
 				if part.Text != "" {
-					p.events.EmitOutput(part.Text)
+					e.EmitOutput(part.Text)
 				}
 			}
 		}
 	}
 
 	if event.TurnComplete {
-		p.events.EmitMetadata("turn_complete", true)
+		e.EmitMetadata("turn_complete", true)
 	}
 
 	if event.Actions.StateDelta != nil {
-		p.events.EmitMetadata("state_delta", event.Actions.StateDelta)
+		e.EmitMetadata("state_delta", event.Actions.StateDelta)
 	}
 }
 
