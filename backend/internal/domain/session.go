@@ -33,6 +33,43 @@ func (s SessionState) String() string {
 	}
 }
 
+func (s SessionState) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.String())
+}
+
+func (s *SessionState) UnmarshalJSON(data []byte) error {
+	var raw string
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	parsed, err := ParseSessionState(raw)
+	if err != nil {
+		return err
+	}
+	*s = parsed
+	return nil
+}
+
+func ParseSessionState(raw string) (SessionState, error) {
+	switch raw {
+	case "idle":
+		return SessionStateIdle, nil
+	case "running":
+		return SessionStateRunning, nil
+	case "suspended":
+		return SessionStateSuspended, nil
+	case "created", "starting":
+		return SessionStateIdle, nil
+	case "paused":
+		return SessionStateSuspended, nil
+	case "stopping", "stopped", "error":
+		return SessionStateIdle, nil
+	default:
+		return SessionStateIdle, fmt.Errorf("invalid session state: %s", raw)
+	}
+}
+
 var (
 	ErrInvalidTransition = errors.New("invalid state transition")
 	ErrNotSupported      = errors.New("operation not supported")
@@ -62,10 +99,10 @@ func CanTransition(from, to SessionState) bool {
 }
 
 type StateTransition struct {
-	From      SessionState
-	To        SessionState
-	Reason    string
-	Timestamp time.Time
+	From      SessionState `json:"from"`
+	To        SessionState `json:"to"`
+	Reason    string       `json:"reason"`
+	Timestamp time.Time    `json:"timestamp"`
 }
 
 // MessageKind identifies the type of a persisted session message.
@@ -255,23 +292,23 @@ func (s *Session) GetSuspensionContext() any {
 
 // SessionSnapshot is a point-in-time, lock-free copy of a Session's fields.
 type SessionSnapshot struct {
-	ID                  string
-	ProviderType        string
-	PreferredProviderID string
+	ID                  string `json:"id"`
+	ProviderType        string `json:"provider_type"`
+	PreferredProviderID string `json:"preferred_provider_id,omitempty"`
 	// AgentID is the ID of the AgentConfig applied to this session (if any).
-	AgentID           string
-	Kind              string
-	Title             string
-	State             SessionState
-	WorkingDir        string
-	ProjectID         string
-	ProviderCustom    map[string]any
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	CurrentTask       string
-	Transitions       []StateTransition
-	Messages          []Message
-	SuspensionContext any // *session.SuspensionContext
+	AgentID           string            `json:"agent_id,omitempty"`
+	Kind              string            `json:"kind,omitempty"`
+	Title             string            `json:"title,omitempty"`
+	State             SessionState      `json:"state"`
+	WorkingDir        string            `json:"working_dir"`
+	ProjectID         string            `json:"project_id,omitempty"`
+	ProviderCustom    map[string]any    `json:"provider_custom,omitempty"`
+	CreatedAt         time.Time         `json:"created_at"`
+	UpdatedAt         time.Time         `json:"updated_at"`
+	CurrentTask       string            `json:"current_task,omitempty"`
+	Transitions       []StateTransition `json:"transitions"`
+	Messages          []Message         `json:"messages,omitempty"`
+	SuspensionContext any               `json:"-"` // *session.SuspensionContext
 }
 
 // Snapshot returns an atomic copy of the session under its read lock.

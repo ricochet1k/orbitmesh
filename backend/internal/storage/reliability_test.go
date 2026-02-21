@@ -77,7 +77,7 @@ func TestStorage_ListErrorSurfacing(t *testing.T) {
 }
 
 func TestParseSessionState_Error(t *testing.T) {
-	state, err := parseSessionState("unknown")
+	state, err := domain.ParseSessionState("unknown")
 	if err == nil {
 		t.Error("expected error for unknown state, got nil")
 	}

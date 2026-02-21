@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sync"
-	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
 )
@@ -31,46 +30,13 @@ type Storage interface {
 	GetMessages(id string) ([]domain.Message, error)
 }
 
-type messageData struct {
-	ID        string          `json:"id"`
-	Kind      string          `json:"kind"`
-	Contents  string          `json:"contents"`
-	Timestamp time.Time       `json:"timestamp"`
-	Raw       json.RawMessage `json:"raw,omitempty"`
-}
-
-type sessionData struct {
-	ID             string           `json:"id"`
-	ProviderType   string           `json:"provider_type"`
-	AgentID        string           `json:"agent_id,omitempty"`
-	Kind           string           `json:"kind,omitempty"`
-	Title          string           `json:"title,omitempty"`
-	State          string           `json:"state"`
-	WorkingDir     string           `json:"working_dir"`
-	ProjectID      string           `json:"project_id,omitempty"`
-	ProviderCustom map[string]any   `json:"provider_custom,omitempty"`
-	CreatedAt      time.Time        `json:"created_at"`
-	UpdatedAt      time.Time        `json:"updated_at"`
-	CurrentTask    string           `json:"current_task,omitempty"`
-	Transitions    []transitionData `json:"transitions"`
-	Messages       []messageData    `json:"messages,omitempty"`
-}
-
-type transitionData struct {
-	From      string    `json:"from"`
-	To        string    `json:"to"`
-	Reason    string    `json:"reason"`
-	Timestamp time.Time `json:"timestamp"`
-}
-
 type JSONFileStorage struct {
 	baseDir string
 	mu      sync.RWMutex
 }
 
 var (
-	ErrInvalidSessionState = errors.New("invalid session state")
-	sessionIDRegex         = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+	sessionIDRegex = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 )
 
 func validateSessionID(id string) error {
@@ -163,8 +129,7 @@ func (s *JSONFileStorage) Save(session *domain.Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data := snapshotToData(snap)
-	jsonData, err := json.MarshalIndent(data, "", "  ")
+	jsonData, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal session: %w", err)
 	}
@@ -346,23 +311,16 @@ func (s *JSONFileStorage) getMessagesUnlocked(id string) ([]domain.Message, erro
 		return nil, err
 	}
 
-	var sd sessionData
-	if err := json.Unmarshal(data, &sd); err != nil {
+	var snap domain.SessionSnapshot
+	if err := json.Unmarshal(data, &snap); err != nil {
 		return nil, err
 	}
 
-	messages := make([]domain.Message, len(sd.Messages))
-	for i, m := range sd.Messages {
-		messages[i] = domain.Message{
-			ID:        m.ID,
-			Kind:      domain.MessageKind(m.Kind),
-			Contents:  m.Contents,
-			Timestamp: m.Timestamp,
-			Raw:       m.Raw,
-		}
+	if snap.Messages == nil {
+		return []domain.Message{}, nil
 	}
 
-	return messages, nil
+	return snap.Messages, nil
 }
 
 func (s *JSONFileStorage) loadUnlocked(id string) (*domain.Session, error) {
@@ -389,130 +347,30 @@ func (s *JSONFileStorage) loadUnlocked(id string) (*domain.Session, error) {
 		return nil, err
 	}
 
-	var sd sessionData
-	if err := json.Unmarshal(data, &sd); err != nil {
+	var snap domain.SessionSnapshot
+	if err := json.Unmarshal(data, &snap); err != nil {
 		return nil, err
 	}
 
-	return dataToSession(&sd)
+	return snapshotToSession(snap), nil
 }
 
-func snapshotToData(snap domain.SessionSnapshot) *sessionData {
-	transitions := make([]transitionData, len(snap.Transitions))
-	for i, t := range snap.Transitions {
-		transitions[i] = transitionData{
-			From:      t.From.String(),
-			To:        t.To.String(),
-			Reason:    t.Reason,
-			Timestamp: t.Timestamp,
-		}
-	}
-
-	messages := make([]messageData, len(snap.Messages))
-	for i, m := range snap.Messages {
-		messages[i] = messageData{
-			ID:        m.ID,
-			Kind:      string(m.Kind),
-			Contents:  m.Contents,
-			Timestamp: m.Timestamp,
-			Raw:       m.Raw,
-		}
-	}
-
-	return &sessionData{
-		ID:             snap.ID,
-		ProviderType:   snap.ProviderType,
-		AgentID:        snap.AgentID,
-		Kind:           snap.Kind,
-		Title:          snap.Title,
-		State:          snap.State.String(),
-		WorkingDir:     snap.WorkingDir,
-		ProjectID:      snap.ProjectID,
-		ProviderCustom: snap.ProviderCustom,
-		CreatedAt:      snap.CreatedAt,
-		UpdatedAt:      snap.UpdatedAt,
-		CurrentTask:    snap.CurrentTask,
-		Transitions:    transitions,
-		Messages:       messages,
-	}
-}
-
-func toString(v interface{}) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return ""
-}
-
-func dataToSession(data *sessionData) (*domain.Session, error) {
-	state, err := parseSessionState(data.State)
-	if err != nil {
-		return nil, err
-	}
-
-	transitions := make([]domain.StateTransition, len(data.Transitions))
-	for i, t := range data.Transitions {
-		from, err := parseSessionState(t.From)
-		if err != nil {
-			return nil, fmt.Errorf("transition %d from state: %w", i, err)
-		}
-		to, err := parseSessionState(t.To)
-		if err != nil {
-			return nil, fmt.Errorf("transition %d to state: %w", i, err)
-		}
-		transitions[i] = domain.StateTransition{
-			From:      from,
-			To:        to,
-			Reason:    t.Reason,
-			Timestamp: t.Timestamp,
-		}
-	}
-
-	messages := make([]domain.Message, len(data.Messages))
-	for i, m := range data.Messages {
-		messages[i] = domain.Message{
-			ID:        m.ID,
-			Kind:      domain.MessageKind(m.Kind),
-			Contents:  m.Contents,
-			Timestamp: m.Timestamp,
-			Raw:       m.Raw,
-		}
-	}
-
+func snapshotToSession(snap domain.SessionSnapshot) *domain.Session {
 	return &domain.Session{
-		ID:             data.ID,
-		ProviderType:   data.ProviderType,
-		AgentID:        data.AgentID,
-		Kind:           data.Kind,
-		Title:          data.Title,
-		State:          state,
-		WorkingDir:     data.WorkingDir,
-		ProjectID:      data.ProjectID,
-		ProviderCustom: data.ProviderCustom,
-		CreatedAt:      data.CreatedAt,
-		UpdatedAt:      data.UpdatedAt,
-		CurrentTask:    data.CurrentTask,
-		Transitions:    transitions,
-		Messages:       messages,
-	}, nil
-}
-
-func parseSessionState(s string) (domain.SessionState, error) {
-	switch s {
-	case "idle":
-		return domain.SessionStateIdle, nil
-	case "running":
-		return domain.SessionStateRunning, nil
-	case "suspended":
-		return domain.SessionStateSuspended, nil
-	// Handle legacy state names for backward compatibility
-	case "created", "starting":
-		return domain.SessionStateIdle, nil
-	case "paused":
-		return domain.SessionStateSuspended, nil
-	case "stopping", "stopped", "error":
-		return domain.SessionStateIdle, nil
-	default:
-		return domain.SessionStateIdle, fmt.Errorf("%w: %s", ErrInvalidSessionState, s)
+		ID:                  snap.ID,
+		ProviderType:        snap.ProviderType,
+		PreferredProviderID: snap.PreferredProviderID,
+		AgentID:             snap.AgentID,
+		Kind:                snap.Kind,
+		Title:               snap.Title,
+		State:               snap.State,
+		WorkingDir:          snap.WorkingDir,
+		ProjectID:           snap.ProjectID,
+		ProviderCustom:      snap.ProviderCustom,
+		CreatedAt:           snap.CreatedAt,
+		UpdatedAt:           snap.UpdatedAt,
+		CurrentTask:         snap.CurrentTask,
+		Transitions:         snap.Transitions,
+		Messages:            snap.Messages,
 	}
 }
