@@ -352,25 +352,5 @@ func (s *JSONFileStorage) loadUnlocked(id string) (*domain.Session, error) {
 		return nil, err
 	}
 
-	return snapshotToSession(snap), nil
-}
-
-func snapshotToSession(snap domain.SessionSnapshot) *domain.Session {
-	return &domain.Session{
-		ID:                  snap.ID,
-		ProviderType:        snap.ProviderType,
-		PreferredProviderID: snap.PreferredProviderID,
-		AgentID:             snap.AgentID,
-		Kind:                snap.Kind,
-		Title:               snap.Title,
-		State:               snap.State,
-		WorkingDir:          snap.WorkingDir,
-		ProjectID:           snap.ProjectID,
-		ProviderCustom:      snap.ProviderCustom,
-		CreatedAt:           snap.CreatedAt,
-		UpdatedAt:           snap.UpdatedAt,
-		CurrentTask:         snap.CurrentTask,
-		Transitions:         snap.Transitions,
-		Messages:            snap.Messages,
-	}
+	return domain.SessionFromSnapshot(snap), nil
 }
