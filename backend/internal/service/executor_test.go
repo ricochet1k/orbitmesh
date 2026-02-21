@@ -106,12 +106,14 @@ func (m *mockProvider) Resume(ctx context.Context, suspensionContext *session.Su
 type mockStorage struct {
 	mu       sync.Mutex
 	sessions map[string]*domain.Session
+	attempts map[string]map[string]*storage.RunAttemptMetadata
 	saveErr  error
 }
 
 func newMockStorage() *mockStorage {
 	return &mockStorage{
 		sessions: make(map[string]*domain.Session),
+		attempts: make(map[string]map[string]*storage.RunAttemptMetadata),
 	}
 }
 
@@ -162,6 +164,47 @@ func (s *mockStorage) GetMessages(id string) ([]domain.Message, error) {
 	return nil, storage.ErrSessionNotFound
 }
 
+func (s *mockStorage) SaveRunAttempt(attempt *storage.RunAttemptMetadata) error {
+	if attempt == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.attempts[attempt.SessionID]; !ok {
+		s.attempts[attempt.SessionID] = make(map[string]*storage.RunAttemptMetadata)
+	}
+	copyAttempt := *attempt
+	s.attempts[attempt.SessionID][attempt.AttemptID] = &copyAttempt
+	return nil
+}
+
+func (s *mockStorage) LoadRunAttempt(sessionID, attemptID string) (*storage.RunAttemptMetadata, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if bySession, ok := s.attempts[sessionID]; ok {
+		if attempt, ok := bySession[attemptID]; ok {
+			copyAttempt := *attempt
+			return &copyAttempt, nil
+		}
+	}
+	return nil, storage.ErrRunAttemptNotFound
+}
+
+func (s *mockStorage) ListRunAttempts(sessionID string) ([]*storage.RunAttemptMetadata, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	bySession, ok := s.attempts[sessionID]
+	if !ok {
+		return []*storage.RunAttemptMetadata{}, nil
+	}
+	out := make([]*storage.RunAttemptMetadata, 0, len(bySession))
+	for _, attempt := range bySession {
+		copyAttempt := *attempt
+		out = append(out, &copyAttempt)
+	}
+	return out, nil
+}
+
 func createTestExecutor(prov *mockProvider) (*AgentExecutor, *mockStorage) {
 	storage := newMockStorage()
 	broadcaster := NewEventBroadcaster(100)
@@ -178,7 +221,6 @@ func createTestExecutor(prov *mockProvider) (*AgentExecutor, *mockStorage) {
 		Storage:          storage,
 		Broadcaster:      broadcaster,
 		ProviderFactory:  factory,
-		HealthInterval:   100 * time.Millisecond,
 		OperationTimeout: 5 * time.Second,
 	}
 
@@ -461,7 +503,6 @@ func TestAgentExecutor_ListSessions_IncludesStoredSessions(t *testing.T) {
 		Storage:          storage,
 		Broadcaster:      broadcaster,
 		ProviderFactory:  factory,
-		HealthInterval:   100 * time.Millisecond,
 		OperationTimeout: 5 * time.Second,
 	})
 	defer executor.Shutdown(context.Background())
@@ -492,7 +533,6 @@ func TestAgentExecutor_GetSession_LoadsStoredSessions(t *testing.T) {
 		Storage:          storage,
 		Broadcaster:      broadcaster,
 		ProviderFactory:  factory,
-		HealthInterval:   100 * time.Millisecond,
 		OperationTimeout: 5 * time.Second,
 	})
 	defer executor.Shutdown(context.Background())
@@ -524,7 +564,6 @@ func TestAgentExecutor_EventBroadcasting(t *testing.T) {
 		Storage:          storage,
 		Broadcaster:      broadcaster,
 		ProviderFactory:  factory,
-		HealthInterval:   100 * time.Millisecond,
 		OperationTimeout: 5 * time.Second,
 	}
 
@@ -677,7 +716,6 @@ func TestAgentExecutor_MultipleConcurrentSessions(t *testing.T) {
 		Storage:          storage,
 		Broadcaster:      broadcaster,
 		ProviderFactory:  factory,
-		HealthInterval:   100 * time.Millisecond,
 		OperationTimeout: 5 * time.Second,
 	}
 
@@ -755,7 +793,6 @@ func TestAgentExecutor_SessionPersistence(t *testing.T) {
 		Storage:          storage,
 		Broadcaster:      broadcaster,
 		ProviderFactory:  factory,
-		HealthInterval:   100 * time.Millisecond,
 		OperationTimeout: 5 * time.Second,
 	}
 
@@ -800,7 +837,6 @@ func TestAgentExecutor_EventHandling(t *testing.T) {
 		Storage:          storage,
 		Broadcaster:      broadcaster,
 		ProviderFactory:  factory,
-		HealthInterval:   100 * time.Millisecond,
 		OperationTimeout: 5 * time.Second,
 	}
 
@@ -887,7 +923,6 @@ func TestAgentExecutor_PTYHubAutoCreated(t *testing.T) {
 			}
 			return terminalProvider, nil
 		},
-		HealthInterval:   100 * time.Millisecond,
 		OperationTimeout: 5 * time.Second,
 	})
 	defer executor.Shutdown(context.Background())
@@ -961,7 +996,6 @@ func TestAgentExecutor_LoadTest_TenConcurrentAgents(t *testing.T) {
 		Storage:          storage,
 		Broadcaster:      broadcaster,
 		ProviderFactory:  factory,
-		HealthInterval:   100 * time.Millisecond,
 		OperationTimeout: 10 * time.Second,
 	}
 
@@ -1242,12 +1276,12 @@ func TestAgentExecutor_CancelRun_Running(t *testing.T) {
 		t.Errorf("expected state Idle, got %s", sess.GetState())
 	}
 
-	// Check that a system message was appended
+	// Check that a system message was appended (it is the last message)
 	snapshot := sess.Snapshot()
 	if len(snapshot.Messages) == 0 {
 		t.Errorf("expected system message to be appended, got none")
 	} else {
-		msg := snapshot.Messages[0]
+		msg := snapshot.Messages[len(snapshot.Messages)-1]
 		if msg.Kind != domain.MessageKindSystem {
 			t.Errorf("expected message kind %q, got %q", domain.MessageKindSystem, msg.Kind)
 		}
@@ -1419,7 +1453,6 @@ func TestAgentExecutor_MidRunCrashRecoveryWithCheckpoints(t *testing.T) {
 		Storage:            storage,
 		Broadcaster:        broadcaster,
 		ProviderFactory:    factory,
-		HealthInterval:     100 * time.Millisecond,
 		OperationTimeout:   5 * time.Second,
 		CheckpointInterval: 10 * time.Millisecond,
 	}

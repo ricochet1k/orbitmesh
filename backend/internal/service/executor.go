@@ -4,15 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
-	"github.com/ricochet1k/orbitmesh/internal/terminal"
 )
 
 var (
@@ -35,6 +32,8 @@ type SessionFactory func(providerType, sessionID string, config session.Config) 
 type sessionContext struct {
 	session *domain.Session
 	run     *session.Run // The active run (nil if idle)
+	attempt *storage.RunAttemptMetadata
+	amMu    sync.Mutex
 }
 
 type AgentExecutor struct {
@@ -47,6 +46,10 @@ type AgentExecutor struct {
 	opTimeout          time.Duration
 	checkpointInterval time.Duration
 	terminalHubs       map[string]*TerminalHub
+	attemptStorage     storage.RunAttemptStorage
+	bootID             string
+
+	recovery *recoveryManager
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -60,6 +63,7 @@ type ExecutorConfig struct {
 	ProviderFactory    SessionFactory
 	OperationTimeout   time.Duration
 	CheckpointInterval time.Duration
+	RunAttemptStorage  storage.RunAttemptStorage
 }
 
 func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
@@ -75,7 +79,7 @@ func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
 		checkpointInterval = DefaultCheckpointInterval
 	}
 
-	return &AgentExecutor{
+	exec := &AgentExecutor{
 		sessions:           make(map[string]*sessionContext),
 		storage:            cfg.Storage,
 		terminalStorage:    cfg.TerminalStorage,
@@ -84,9 +88,20 @@ func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
 		opTimeout:          opTimeout,
 		checkpointInterval: checkpointInterval,
 		terminalHubs:       make(map[string]*TerminalHub),
+		attemptStorage:     cfg.RunAttemptStorage,
+		bootID:             newBootID(),
 		ctx:                ctx,
 		cancel:             cancel,
 	}
+
+	if exec.attemptStorage == nil {
+		if as, ok := cfg.Storage.(storage.RunAttemptStorage); ok {
+			exec.attemptStorage = as
+		}
+	}
+
+	exec.recovery = newRecoveryManager(exec)
+	return exec
 }
 
 // CreateSession creates a new session in idle state without starting a provider.
@@ -138,22 +153,13 @@ func (e *AgentExecutor) CreateSession(ctx context.Context, id string, config ses
 		session.SetMessages(messages)
 	}
 
-	// Session is created in idle state by NewSession(), no need to transition
-
 	if e.storage != nil {
 		if err := e.storage.Save(session); err != nil {
 			return nil, fmt.Errorf("failed to save session: %w", err)
 		}
 	}
 
-	// Note: Sessions are created in idle state. We don't broadcast the initial idle state
-	// since there's no state change. State changes will be broadcast when the session
-	// transitions to running or suspended.
-
-	sc := &sessionContext{
-		session: session,
-		run:     nil, // Will be set when first message is sent
-	}
+	sc := &sessionContext{session: session, run: nil}
 	e.sessions[id] = sc
 
 	return session, nil
@@ -163,224 +169,6 @@ func (e *AgentExecutor) CreateSession(ctx context.Context, id string, config ses
 // This method is kept for backward compatibility but now delegates to CreateSession.
 func (e *AgentExecutor) StartSession(ctx context.Context, id string, config session.Config) (*domain.Session, error) {
 	return e.CreateSession(ctx, id, config)
-}
-
-func (e *AgentExecutor) handleEvents(ctx context.Context, sc *sessionContext, run *session.Run, events <-chan domain.Event) {
-	defer e.wg.Done()
-	defer close(run.EventsDone)
-	defer func() {
-		if r := recover(); r != nil {
-			e.handlePanic(sc, r)
-		}
-	}()
-
-	if events == nil {
-		return
-	}
-
-	// Create a checkpoint ticker for periodic message history persistence.
-	// A mutex-guarded bool prevents pile-up if checkpoints are slow.
-	checkpointTicker := time.NewTicker(e.checkpointInterval)
-	defer checkpointTicker.Stop()
-
-	var checkpointMu sync.Mutex
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-checkpointTicker.C:
-			if checkpointMu.TryLock() {
-				e.wg.Go(func() {
-					e.checkpointSession(sc)
-					checkpointMu.Unlock()
-				})
-			}
-		case event, ok := <-events:
-			if !ok {
-				return
-			}
-			e.broadcaster.Broadcast(event)
-			e.updateSessionFromEvent(sc, event)
-		}
-	}
-}
-
-// checkpointSession saves the current session state to storage.
-func (e *AgentExecutor) checkpointSession(sc *sessionContext) {
-	if e.storage == nil || sc == nil || sc.session == nil {
-		return
-	}
-	_ = e.storage.Save(sc.session)
-}
-
-func (e *AgentExecutor) StopSession(ctx context.Context, id string) error {
-	e.mu.RLock()
-	sc, exists := e.sessions[id]
-	e.mu.RUnlock()
-
-	if !exists {
-		return ErrSessionNotFound
-	}
-
-	currentState := sc.session.GetState()
-
-	// If already idle, nothing to stop
-	if currentState == domain.SessionStateIdle {
-		return nil
-	}
-
-	// Cancel the active run if any
-	if currentState == domain.SessionStateRunning || currentState == domain.SessionStateSuspended {
-		run := sc.run
-		var stopErr error
-		if run != nil {
-			stopCtx, cancel := context.WithTimeout(ctx, e.opTimeout)
-			defer cancel()
-
-			stopErr = run.Session.Stop(stopCtx)
-			run.Cancel()
-		}
-		e.closeTerminalHub(id)
-
-		// Transition to idle
-		e.transitionWithSave(sc, domain.SessionStateIdle, "session stopped")
-
-		return stopErr
-	}
-
-	return nil
-}
-
-func (e *AgentExecutor) KillSession(id string) error {
-	e.mu.RLock()
-	sc, exists := e.sessions[id]
-	e.mu.RUnlock()
-
-	if !exists {
-		return ErrSessionNotFound
-	}
-
-	currentState := sc.session.GetState()
-
-	// If already idle, nothing to kill
-	if currentState == domain.SessionStateIdle {
-		return nil
-	}
-
-	// Kill the active provider run
-	run := sc.run
-	if run != nil {
-		if err := run.Session.Kill(); err != nil {
-			return fmt.Errorf("failed to kill provider: %w", err)
-		}
-		run.Cancel()
-	}
-
-	e.closeTerminalHub(id)
-
-	// Transition to idle
-	e.transitionWithSave(sc, domain.SessionStateIdle, "session killed")
-	return nil
-}
-
-// CancelRun cancels the active run and returns the session to idle.
-// - If session is running: cancels the provider run, transitions to idle.
-// - If session is suspended: releases the suspension, transitions to idle.
-// - If session is already idle: returns 409 (nothing to cancel).
-func (e *AgentExecutor) CancelRun(ctx context.Context, id string) error {
-	e.mu.RLock()
-	sc, exists := e.sessions[id]
-	e.mu.RUnlock()
-
-	if !exists {
-		return ErrSessionNotFound
-	}
-
-	currentState := sc.session.GetState()
-
-	// If already idle, nothing to cancel
-	if currentState == domain.SessionStateIdle {
-		return fmt.Errorf("%w: session is already idle", ErrInvalidState)
-	}
-
-	// Cancel the active provider run context
-	run := sc.run
-	if run != nil {
-		run.Cancel()
-		if err := run.Session.Kill(); err != nil {
-			return fmt.Errorf("failed to cancel provider: %w", err)
-		}
-	}
-
-	e.closeTerminalHub(id)
-
-	// Append system message indicating run was cancelled
-	sc.session.AppendMessage(domain.MessageKindSystem, "Run cancelled by user")
-
-	// Transition to idle
-	e.transitionWithSave(sc, domain.SessionStateIdle, "run cancelled by user")
-	return nil
-}
-
-// ResumeSession resumes a suspended session by calling the provider's Resume method.
-func (e *AgentExecutor) ResumeSession(ctx context.Context, id string) (*domain.Session, error) {
-	e.mu.RLock()
-	sc, exists := e.sessions[id]
-	e.mu.RUnlock()
-
-	if !exists {
-		return nil, ErrSessionNotFound
-	}
-
-	currentState := sc.session.GetState()
-
-	// Only suspended sessions can be resumed
-	if currentState != domain.SessionStateSuspended {
-		return nil, fmt.Errorf("%w: session is not suspended (current state: %s)", ErrInvalidState, currentState)
-	}
-
-	// Get the stored suspension context
-	suspensionCtx := sc.session.GetSuspensionContext()
-	if suspensionCtx == nil {
-		return nil, fmt.Errorf("no suspension context found for session %s", id)
-	}
-
-	// Cast the stored context back to the proper type
-	// Note: This uses interface{} to avoid circular imports
-	var providerSuspensionCtx *session.SuspensionContext
-	if ctx, ok := suspensionCtx.(*session.SuspensionContext); ok {
-		providerSuspensionCtx = ctx
-	} else {
-		return nil, fmt.Errorf("invalid suspension context type")
-	}
-
-	// If there's an active run, try to resume the provider
-	if sc.run != nil {
-		suspendable, ok := sc.run.Session.(session.Suspendable)
-		if !ok {
-			return nil, fmt.Errorf("provider does not support resumption")
-		}
-
-		if err := suspendable.Resume(ctx, providerSuspensionCtx); err != nil {
-			return nil, fmt.Errorf("failed to resume provider: %w", err)
-		}
-	}
-
-	// Clear the suspension context and transition back to running
-	sc.session.SetSuspensionContext(nil)
-	if err := sc.session.TransitionTo(domain.SessionStateRunning, "resumed from suspension"); err != nil {
-		return nil, fmt.Errorf("failed to transition session state: %w", err)
-	}
-
-	// Persist the updated session
-	if e.storage != nil {
-		if err := e.storage.Save(sc.session); err != nil {
-			return nil, fmt.Errorf("failed to save session: %w", err)
-		}
-	}
-
-	return sc.session, nil
 }
 
 func (e *AgentExecutor) GetSession(id string) (*domain.Session, error) {
@@ -547,8 +335,6 @@ func (e *AgentExecutor) SendMessage(ctx context.Context, id string, content stri
 		if err != nil {
 			return nil, err
 		}
-		// Session loaded from storage - it's idle by definition
-		// We need to re-register it in memory and start a new run
 	} else {
 		sess = sc.session
 	}
@@ -573,188 +359,6 @@ func (e *AgentExecutor) SendMessage(ctx context.Context, id string, content stri
 	default:
 		return sess, fmt.Errorf("invalid session state: %v", state)
 	}
-}
-
-// startRunWithMessage starts a new provider run for an idle session with the given message as first input.
-func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess *domain.Session, content string, providerID string, providerType string) (*domain.Session, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	// Check if session was already started in another goroutine
-	if sc, exists := e.sessions[id]; exists && sc.run != nil {
-		return sess, fmt.Errorf("session is already running")
-	}
-
-	// Determine provider type: explicit parameter > preferred > session default
-	pType := sess.ProviderType
-	if providerType != "" {
-		pType = providerType
-	}
-
-	// Store provider preference if specified
-	if providerID != "" {
-		sess.SetPreferredProviderID(providerID)
-		if e.storage != nil {
-			if err := e.storage.Save(sess); err != nil {
-				return sess, fmt.Errorf("failed to save session with provider preference: %w", err)
-			}
-		}
-	}
-
-	// Create provider run configuration, restoring the original provider-specific
-	// config so providers that rely on Custom fields (e.g. acp_command for the
-	// ACP provider) can initialise correctly.
-	config := session.Config{
-		ProviderType: pType,
-		WorkingDir:   sess.WorkingDir,
-		ProjectID:    sess.ProjectID,
-		SessionKind:  sess.Kind,
-		Title:        sess.Title,
-		Custom:       sess.ProviderCustom,
-		// Note: We don't pass the full messages list as ResumeMessages here;
-		// that would be for full resumption. For SendMessage on idle sessions,
-		// the provider should reconstruct context from the session if needed.
-	}
-
-	// Create provider instance
-	prov, err := e.sessionFactory(pType, id, config)
-	if err != nil {
-		return sess, fmt.Errorf("%w: %s", ErrProviderNotFound, pType)
-	}
-
-	// Register session context if not already registered
-	if _, exists := e.sessions[id]; !exists {
-		sc := &sessionContext{
-			session: sess,
-			run:     nil,
-		}
-		e.sessions[id] = sc
-	}
-
-	// Get the session context
-	sc := e.sessions[id]
-
-	// Create and register provider run
-	run := session.NewProviderRun(prov, e.ctx)
-	sc.run = run
-
-	// Record the user's message in the session history before starting the run.
-	sess.AppendMessage(domain.MessageKindUser, content)
-	if e.storage != nil {
-		_ = e.storage.Save(sess)
-	}
-
-	// Start the session asynchronously: call SendInput (which also starts the runner),
-	// then pump events until the channel closes.
-	e.wg.Go(func() {
-		defer func() {
-			if r := recover(); r != nil {
-				e.handlePanic(sc, r)
-			}
-		}()
-
-		log.Printf("STARTING SESSION %s with provider %s", id, pType)
-
-		startCtx, startCancel := context.WithTimeout(run.Ctx, e.opTimeout)
-		defer startCancel()
-
-		// SendInput both starts the runner and sends the first message.
-		events, err := run.Session.SendInput(startCtx, config, content)
-		if err != nil {
-			errMsg := fmt.Sprintf("Provider failed to start: %v", err)
-			log.Printf("SESSION START FAILED: %v", errMsg)
-			sc.session.AppendMessage(domain.MessageKindError, errMsg)
-			run.SetError(err)
-
-			if e.storage != nil {
-				_ = e.storage.Save(sc.session)
-			}
-
-			// Broadcast the error so the frontend knows
-			e.broadcaster.Broadcast(domain.NewErrorEvent(id, errMsg, "SESSION_START_FAILED"))
-
-			e.mu.Lock()
-			sc.run = nil
-			e.mu.Unlock()
-			return
-		}
-
-		run.MarkActive()
-		e.transitionWithSave(sc, domain.SessionStateRunning, "session started")
-		e.ensureTerminalHubForPTY(sc)
-
-		// handleEvents blocks until the events channel closes (runner done).
-		e.wg.Add(1)
-		e.handleEvents(run.Ctx, sc, run, events)
-
-		// Run completed - return session to idle state
-		e.transitionWithSave(sc, domain.SessionStateIdle, "session run completed")
-
-		e.mu.Lock()
-		sc.run = nil
-		e.mu.Unlock()
-	})
-
-	return sess, nil
-}
-
-func (e *AgentExecutor) TerminalHub(id string) (*TerminalHub, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	sc, exists := e.sessions[id]
-	if !exists {
-		return nil, ErrSessionNotFound
-	}
-
-	if hub, ok := e.terminalHubs[id]; ok {
-		return hub, nil
-	}
-
-	run := sc.run
-	if run == nil {
-		return nil, fmt.Errorf("no active provider run for session %s", id)
-	}
-
-	provider, ok := run.Session.(TerminalProvider)
-	if !ok {
-		return nil, ErrTerminalNotSupported
-	}
-
-	e.ensureTerminalRecord(sc.session)
-	hub := NewTerminalHub(id, provider, e.terminalObserver())
-	e.terminalHubs[id] = hub
-	return hub, nil
-}
-
-func (e *AgentExecutor) TerminalSnapshot(id string) (terminal.Snapshot, error) {
-	if e.terminalStorage != nil {
-		if term, err := e.terminalStorage.LoadTerminal(id); err == nil {
-			if term.LastSnapshot != nil {
-				return *term.LastSnapshot, nil
-			}
-		}
-	}
-
-	e.mu.RLock()
-	sc, exists := e.sessions[id]
-	e.mu.RUnlock()
-
-	if !exists {
-		return terminal.Snapshot{}, ErrSessionNotFound
-	}
-
-	run := sc.run
-	if run == nil {
-		return terminal.Snapshot{}, fmt.Errorf("no active provider run for session %s", id)
-	}
-
-	provider, ok := run.Session.(TerminalProvider)
-	if !ok {
-		return terminal.Snapshot{}, ErrTerminalNotSupported
-	}
-
-	return provider.TerminalSnapshot()
 }
 
 func (e *AgentExecutor) Shutdown(ctx context.Context) error {
@@ -786,259 +390,6 @@ func (e *AgentExecutor) Shutdown(ctx context.Context) error {
 		}
 		return ctx.Err()
 	}
-}
-
-func (e *AgentExecutor) transitionWithSave(sc *sessionContext, newState domain.SessionState, reason string) {
-	oldState := sc.session.GetState()
-
-	if err := sc.session.TransitionTo(newState, reason); err != nil {
-		return
-	}
-
-	if e.storage != nil {
-		_ = e.storage.Save(sc.session)
-	}
-
-	e.broadcastStateChange(sc.session, oldState, newState, reason)
-}
-
-func (e *AgentExecutor) closeTerminalHub(id string) {
-	e.mu.Lock()
-	hub, ok := e.terminalHubs[id]
-	if ok {
-		delete(e.terminalHubs, id)
-	}
-	e.mu.Unlock()
-	if ok {
-		hub.Close()
-	}
-}
-
-func (e *AgentExecutor) broadcastStateChange(session *domain.Session, oldState, newState domain.SessionState, reason string) {
-	event := domain.NewStatusChangeEvent(session.ID, oldState, newState, reason)
-	e.broadcaster.Broadcast(event)
-}
-
-func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.Event) {
-	switch data := event.Data.(type) {
-	case domain.OutputData:
-		if data.IsDelta {
-			// Deltas are merged into the previous output message; raw bytes are not
-			// stored per-delta (they would be redundant and large).
-			sc.session.AppendOutputDelta(data.Content)
-		} else {
-			sc.session.AppendMessageRaw(domain.MessageKindOutput, data.Content, event.Raw)
-		}
-	case domain.ThoughtData:
-		sc.session.AppendMessageRaw(domain.MessageKindThought, data.Content, event.Raw)
-	case domain.ErrorData:
-		sc.session.AppendMessageRaw(domain.MessageKindError, data.Message, event.Raw)
-	case domain.ToolCallData:
-		sc.session.AppendMessageRaw(domain.MessageKindToolUse, fmt.Sprintf("%s: %s", data.Name, data.ID), event.Raw)
-		// Check if this tool call requires waiting for an external response
-		if data.Status == "pending" || data.Status == "waiting" {
-			e.suspendSession(sc, data.ID)
-		}
-	case domain.MetadataData:
-		// Side-effect: keep current_task in sync on the session object.
-		if data.Key == "current_task" {
-			if task, ok := data.Value.(string); ok {
-				sc.session.SetCurrentTask(task)
-			}
-		}
-		sc.session.AppendMessageRaw(domain.MessageKindSystem, data.Key, event.Raw)
-	case domain.MetricData:
-		sc.session.AppendMessageRaw(domain.MessageKindMetric,
-			fmt.Sprintf("in=%d out=%d requests=%d", data.TokensIn, data.TokensOut, data.RequestCount), event.Raw)
-	case domain.StatusChangeData:
-		sc.session.AppendMessageRaw(domain.MessageKindSystem,
-			fmt.Sprintf("status: %s -> %s", data.OldState, data.NewState), event.Raw)
-	case domain.PlanData:
-		steps := make([]string, 0, len(data.Steps))
-		for _, step := range data.Steps {
-			steps = append(steps, fmt.Sprintf("%s: %s", step.ID, step.Description))
-		}
-		content := data.Description
-		if len(steps) > 0 {
-			content = fmt.Sprintf("%s\n%s", data.Description, strings.Join(steps, "\n"))
-		}
-		sc.session.AppendMessageRaw(domain.MessageKindPlan, content, event.Raw)
-	}
-
-	if e.storage != nil {
-		_ = e.storage.Save(sc.session)
-	}
-}
-
-func (e *AgentExecutor) suspendSession(sc *sessionContext, toolCallID string) {
-	if sc == nil || sc.session == nil || sc.run == nil {
-		return
-	}
-
-	// Check if provider implements Suspendable interface
-	suspendable, ok := sc.run.Session.(session.Suspendable)
-	if !ok {
-		// Provider doesn't support suspension, cannot suspend
-		return
-	}
-
-	// Call Suspend on the provider to capture its state
-	suspensionCtx, err := suspendable.Suspend(context.Background())
-	if err != nil {
-		// Log error but don't fail; session stays running
-		return
-	}
-
-	// If we got a suspension context, set the tool call ID
-	if suspensionCtx != nil && toolCallID != "" {
-		suspensionCtx.ToolCallID = toolCallID
-	}
-
-	// Store the suspension context on the domain session
-	sc.session.SetSuspensionContext(suspensionCtx)
-
-	// Transition to suspended state
-	_ = sc.session.TransitionTo(domain.SessionStateSuspended, fmt.Sprintf("waiting for tool result: %s", toolCallID))
-
-	// Persist the session with suspension context
-	if e.storage != nil {
-		_ = e.storage.Save(sc.session)
-	}
-
-	// Cancel the current run to stop provider execution
-	if sc.run != nil {
-		sc.run.Cancel()
-	}
-}
-
-func (e *AgentExecutor) handlePanic(sc *sessionContext, r any) {
-	errMsg := fmt.Sprintf("Panic recovered: %v", r)
-	log.Printf("PANIC: %v", errMsg)
-
-	// Append error to message history instead of setting ErrorMessage
-	sc.session.AppendMessage(domain.MessageKindError, errMsg)
-
-	// On panic, transition to idle state (per design: errors don't block session)
-	// The panic is recorded in the message history and session becomes idle again
-	_ = sc.session.TransitionTo(domain.SessionStateIdle, errMsg)
-
-	if e.storage != nil {
-		_ = e.storage.Save(sc.session)
-	}
-
-	event := domain.NewErrorEvent(sc.session.ID, errMsg, "PANIC")
-	e.broadcaster.Broadcast(event)
-}
-
-func (e *AgentExecutor) ListTerminals() []*domain.Terminal {
-	if e.terminalStorage == nil {
-		return []*domain.Terminal{}
-	}
-	terms, _ := e.terminalStorage.ListTerminals()
-	return terms
-}
-
-func (e *AgentExecutor) GetTerminal(id string) (*domain.Terminal, error) {
-	if e.terminalStorage == nil {
-		return nil, storage.ErrTerminalNotFound
-	}
-	term, err := e.terminalStorage.LoadTerminal(id)
-	if err != nil {
-		if errors.Is(err, storage.ErrTerminalNotFound) {
-			return nil, storage.ErrTerminalNotFound
-		}
-		return nil, err
-	}
-	return term, nil
-}
-
-func (e *AgentExecutor) terminalObserver() TerminalObserver {
-	if e.terminalStorage == nil {
-		return nil
-	}
-	return terminalObserver{executor: e}
-}
-
-func (e *AgentExecutor) ensureTerminalRecord(session *domain.Session) {
-	if e.terminalStorage == nil || session == nil {
-		return
-	}
-	if _, err := e.terminalStorage.LoadTerminal(session.ID); err == nil {
-		return
-	} else if !errors.Is(err, storage.ErrTerminalNotFound) {
-		return
-	}
-
-	term := domain.NewTerminal(session.ID, session.ID, terminalKindForSession(session))
-	_ = e.terminalStorage.SaveTerminal(term)
-}
-
-func (e *AgentExecutor) ensureTerminalHubForPTY(sc *sessionContext) {
-	if sc == nil || sc.session == nil {
-		return
-	}
-	if sc.session.ProviderType != "pty" {
-		return
-	}
-
-	run := sc.run
-	if run == nil {
-		return
-	}
-
-	if _, ok := run.Session.(TerminalProvider); !ok {
-		return
-	}
-	_, _ = e.TerminalHub(sc.session.ID)
-}
-
-func (e *AgentExecutor) updateTerminalFromEvent(sessionID string, event TerminalEvent) {
-	if e.terminalStorage == nil {
-		return
-	}
-
-	term, err := e.terminalStorage.LoadTerminal(sessionID)
-	if err != nil {
-		if !errors.Is(err, storage.ErrTerminalNotFound) {
-			return
-		}
-		kind := domain.TerminalKindAdHoc
-		e.mu.RLock()
-		if sc, ok := e.sessions[sessionID]; ok {
-			kind = terminalKindForSession(sc.session)
-		}
-		e.mu.RUnlock()
-		term = domain.NewTerminal(sessionID, sessionID, kind)
-	}
-
-	if event.Update.Kind == terminal.UpdateSnapshot && event.Update.Snapshot != nil {
-		snapshot := *event.Update.Snapshot
-		term.LastSnapshot = &snapshot
-		term.LastSeq = event.Seq
-		term.LastUpdatedAt = time.Now().UTC()
-		_ = e.terminalStorage.SaveTerminal(term)
-	}
-}
-
-func terminalKindForSession(session *domain.Session) domain.TerminalKind {
-	if session == nil {
-		return domain.TerminalKindAdHoc
-	}
-	if session.ProviderType == "pty" {
-		return domain.TerminalKindPTY
-	}
-	return domain.TerminalKindAdHoc
-}
-
-type terminalObserver struct {
-	executor *AgentExecutor
-}
-
-func (t terminalObserver) OnTerminalEvent(sessionID string, event TerminalEvent) {
-	if t.executor == nil {
-		return
-	}
-	t.executor.updateTerminalFromEvent(sessionID, event)
 }
 
 func formatTaskReference(id, title string) string {

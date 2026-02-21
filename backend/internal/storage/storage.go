@@ -86,6 +86,11 @@ func NewJSONFileStorage(baseDir string) (*JSONFileStorage, error) {
 		return nil, fmt.Errorf("failed to create sessions directory: %w", err)
 	}
 
+	attemptsDir := filepath.Join(sessionsDir, "attempts")
+	if err := os.MkdirAll(attemptsDir, 0o700); err != nil {
+		return nil, fmt.Errorf("failed to create attempts directory: %w", err)
+	}
+
 	terminalsDir := filepath.Join(baseDir, "terminals")
 	if err := os.MkdirAll(terminalsDir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create terminals directory: %w", err)
@@ -104,6 +109,13 @@ func NewJSONFileStorage(baseDir string) (*JSONFileStorage, error) {
 	if err == nil {
 		if info.Mode().Perm()&0o077 != 0 {
 			_ = os.Chmod(terminalsDir, 0o700)
+		}
+	}
+
+	info, err = os.Stat(attemptsDir)
+	if err == nil {
+		if info.Mode().Perm()&0o077 != 0 {
+			_ = os.Chmod(attemptsDir, 0o700)
 		}
 	}
 

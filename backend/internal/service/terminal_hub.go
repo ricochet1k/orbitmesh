@@ -5,7 +5,6 @@ import (
 	"errors"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/terminal"
 )
@@ -32,37 +31,35 @@ type TerminalObserver interface {
 	OnTerminalEvent(sessionID string, event TerminalEvent)
 }
 
+// TerminalHub fans out updates from a single TerminalProvider to N subscribers.
+//
+// Slow subscribers are handled with a simple drop policy: if a subscriber's
+// channel is full the event is silently discarded. The client detects gaps
+// by checking that event.Seq == lastSeen+1; a gap means it should request a
+// fresh snapshot via the REST snapshot endpoint and resume from there.
 type TerminalHub struct {
 	sessionID string
 	provider  TerminalProvider
+	observer  TerminalObserver
 
-	mu          sync.Mutex
-	subscribers map[int64]*terminalSubscriber
-	seq         int64
-	subSeq      int64
-	closed      bool
+	mu     sync.Mutex
+	subs   map[int64]chan TerminalEvent
+	seq    int64
+	subSeq int64
+	closed bool
 
 	lastSnapshot    terminal.Snapshot
 	lastSnapshotSet bool
 
 	updateCancel func()
-	observer     TerminalObserver
-}
-
-type terminalSubscriber struct {
-	id           int64
-	updates      chan TerminalEvent
-	pending      []TerminalEvent
-	needsResync  bool
-	lastActivity time.Time
 }
 
 func NewTerminalHub(sessionID string, provider TerminalProvider, observer TerminalObserver) *TerminalHub {
 	h := &TerminalHub{
-		sessionID:   sessionID,
-		provider:    provider,
-		subscribers: make(map[int64]*terminalSubscriber),
-		observer:    observer,
+		sessionID: sessionID,
+		provider:  provider,
+		observer:  observer,
+		subs:      make(map[int64]chan TerminalEvent),
 	}
 	updates, cancel := provider.SubscribeTerminalUpdates(terminalHubUpdateBuffer)
 	h.updateCancel = cancel
@@ -78,70 +75,72 @@ func (h *TerminalHub) run(updates <-chan terminal.Update) {
 }
 
 func (h *TerminalHub) Close() {
-	var (
-		finalEvent   *TerminalEvent
-		observer     TerminalObserver
-		updateCancel func()
-		subs         map[int64]*terminalSubscriber
-	)
-
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
 		return
 	}
-	observer = h.observer
-	if observer != nil {
-		if snap, err := h.snapshotLocked(); err == nil {
-			event := TerminalEvent{Seq: h.nextSeqLocked(), Update: terminal.Update{Kind: terminal.UpdateSnapshot, Snapshot: &snap}}
-			finalEvent = &event
-		}
-	}
 	h.closed = true
-	updateCancel = h.updateCancel
+	updateCancel := h.updateCancel
 	h.updateCancel = nil
-	subs = h.subscribers
-	h.subscribers = make(map[int64]*terminalSubscriber)
+	subs := h.subs
+	h.subs = make(map[int64]chan TerminalEvent)
+	observer := h.observer
 	h.mu.Unlock()
 
 	if updateCancel != nil {
 		updateCancel()
 	}
-	for _, sub := range subs {
-		close(sub.updates)
+	for _, ch := range subs {
+		close(ch)
 	}
-	if finalEvent != nil && observer != nil {
-		observer.OnTerminalEvent(h.sessionID, *finalEvent)
+
+	// Notify the observer with a final snapshot so persistent storage is
+	// up to date when the hub shuts down.
+	if observer != nil {
+		h.mu.Lock()
+		snap, err := h.snapshotLocked()
+		seq := h.nextSeqLocked()
+		h.mu.Unlock()
+		if err == nil {
+			event := TerminalEvent{Seq: seq, Update: terminal.Update{Kind: terminal.UpdateSnapshot, Snapshot: &snap}}
+			observer.OnTerminalEvent(h.sessionID, event)
+		}
 	}
 }
 
+// Subscribe returns a channel of sequenced terminal events and an unsubscribe
+// function. The first event on the channel is always an UpdateSnapshot so the
+// caller starts with a complete picture of the current terminal state.
+//
+// If buffer <= 0 the default buffer size is used. When the channel is full
+// subsequent events are dropped; clients should detect sequence gaps and fetch
+// a fresh snapshot from the REST endpoint to resync.
 func (h *TerminalHub) Subscribe(buffer int) (<-chan TerminalEvent, func()) {
 	if buffer <= 0 {
 		buffer = terminalHubSubscriberBuff
 	}
 	id := atomic.AddInt64(&h.subSeq, 1)
-	updates := make(chan TerminalEvent, buffer)
-	sub := &terminalSubscriber{
-		id:           id,
-		updates:      updates,
-		lastActivity: time.Now(),
-	}
+	ch := make(chan TerminalEvent, buffer)
 
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
-		close(updates)
-		return updates, func() {}
+		close(ch)
+		return ch, func() {}
 	}
-	h.subscribers[id] = sub
-	initial, err := h.snapshotLocked()
+	h.subs[id] = ch
+	snap, snapErr := h.snapshotLocked()
 	var initialEvent *TerminalEvent
-	if err == nil {
-		event := TerminalEvent{Seq: h.nextSeqLocked(), Update: terminal.Update{Kind: terminal.UpdateSnapshot, Snapshot: &initial}}
-		sub.pending = append(sub.pending, event)
-		initialEvent = &event
+	if snapErr == nil {
+		seq := h.nextSeqLocked()
+		ev := TerminalEvent{Seq: seq, Update: terminal.Update{Kind: terminal.UpdateSnapshot, Snapshot: &snap}}
+		initialEvent = &ev
+		select {
+		case ch <- ev:
+		default:
+		}
 	}
-	h.flushPendingLocked(sub)
 	observer := h.observer
 	h.mu.Unlock()
 
@@ -149,11 +148,11 @@ func (h *TerminalHub) Subscribe(buffer int) (<-chan TerminalEvent, func()) {
 		observer.OnTerminalEvent(h.sessionID, *initialEvent)
 	}
 
-	return updates, func() {
+	return ch, func() {
 		h.mu.Lock()
-		if existing, ok := h.subscribers[id]; ok {
-			delete(h.subscribers, id)
-			close(existing.updates)
+		if existing, ok := h.subs[id]; ok {
+			delete(h.subs, id)
+			close(existing)
 		}
 		h.mu.Unlock()
 	}
@@ -166,7 +165,7 @@ func (h *TerminalHub) HandleInput(ctx context.Context, input terminal.Input) err
 func (h *TerminalHub) SubscriberCount() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return len(h.subscribers)
+	return len(h.subs)
 }
 
 func (h *TerminalHub) NextSeq() int64 {
@@ -187,10 +186,12 @@ func (h *TerminalHub) broadcast(update terminal.Update) {
 	}
 	seq := h.nextSeqLocked()
 	event := TerminalEvent{Seq: seq, Update: update}
-	for _, sub := range h.subscribers {
-		h.flushPendingLocked(sub)
-		if !h.trySendLocked(sub, event) {
-			h.markOverflowLocked(sub)
+	for _, ch := range h.subs {
+		select {
+		case ch <- event:
+		default:
+			// Subscriber is slow; drop the event. The client detects the
+			// sequence gap and fetches a fresh snapshot to resync.
 		}
 	}
 	observer := h.observer
@@ -199,32 +200,6 @@ func (h *TerminalHub) broadcast(update terminal.Update) {
 	if observer != nil {
 		observer.OnTerminalEvent(h.sessionID, event)
 	}
-}
-
-func (h *TerminalHub) markOverflowLocked(sub *terminalSubscriber) {
-	if sub.needsResync {
-		return
-	}
-	sub.needsResync = true
-	resync := terminal.Update{Kind: terminal.UpdateError, Error: &terminal.Error{Code: "overflow", Message: "terminal backlog overflow", Resync: true}}
-	resyncEvent := TerminalEvent{Seq: h.nextSeqLocked(), Update: resync}
-	snap, err := h.snapshotLocked()
-	if err != nil {
-		sub.pending = append(sub.pending, resyncEvent)
-		return
-	}
-	snapshotEvent := TerminalEvent{Seq: h.nextSeqLocked(), Update: terminal.Update{Kind: terminal.UpdateSnapshot, Snapshot: &snap}}
-	if !h.trySendLocked(sub, resyncEvent) {
-		select {
-		case <-sub.updates:
-		default:
-		}
-		if !h.trySendLocked(sub, resyncEvent) {
-			sub.pending = append(sub.pending, resyncEvent, snapshotEvent)
-			return
-		}
-	}
-	sub.pending = append(sub.pending, snapshotEvent)
 }
 
 func (h *TerminalHub) snapshotLocked() (terminal.Snapshot, error) {
@@ -238,29 +213,6 @@ func (h *TerminalHub) snapshotLocked() (terminal.Snapshot, error) {
 	h.lastSnapshot = snap
 	h.lastSnapshotSet = true
 	return snap, nil
-}
-
-func (h *TerminalHub) flushPendingLocked(sub *terminalSubscriber) {
-	if len(sub.pending) == 0 {
-		return
-	}
-	for len(sub.pending) > 0 {
-		if !h.trySendLocked(sub, sub.pending[0]) {
-			return
-		}
-		sub.pending = sub.pending[1:]
-	}
-	sub.needsResync = false
-}
-
-func (h *TerminalHub) trySendLocked(sub *terminalSubscriber, event TerminalEvent) bool {
-	select {
-	case sub.updates <- event:
-		sub.lastActivity = time.Now()
-		return true
-	default:
-		return false
-	}
 }
 
 func (h *TerminalHub) nextSeqLocked() int64 {

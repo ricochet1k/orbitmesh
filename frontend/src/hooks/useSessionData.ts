@@ -24,6 +24,12 @@ export type StreamStatus =
 
 export interface SessionDataOptions {
   sessionId: Accessor<string>
+  /**
+   * null = permissions still loading (hold off opening stream and history).
+   * false = open stream but skip history fetch.
+   * true (default) = open stream and fetch history.
+   */
+  canInspect?: Accessor<boolean | null>
   eventsUrl: Accessor<string>
   streamOptions?: Pick<
     StreamOptions,
@@ -68,6 +74,7 @@ const STREAM_EVENT_TYPES = [
 
 export function useSessionData({
   sessionId,
+  canInspect = () => true,
   eventsUrl,
   streamOptions = {},
   onStatusChange,
@@ -301,9 +308,10 @@ export function useSessionData({
 
   createEffect(() => {
     const id = sessionId()
+    const inspect = canInspect()
 
-    // Wait until both are non-null
-    if (!id) return
+    // Wait until sessionId is set and permissions have resolved (null = still loading)
+    if (!id || inspect === null) return
 
     // Reset message state and pagination for the new session
     setMessages([])
@@ -396,8 +404,15 @@ export function useSessionData({
     })
 
     // ── History fetch ────────────────────────────────-
-    // Kick off history fetch: paginationCursor undefined → null
-    setPaginationCursor(null)
+    // Only fetch history when the user has inspect permission.
+    // canInspect === false means the stream runs but history is skipped;
+    // in that case leave paginationCursor undefined so activityPage never fires,
+    // and mark historySettled immediately so buffered events are applied live.
+    if (inspect) {
+      setPaginationCursor(null)
+    } else {
+      historySettled = true
+    }
 
     // ── Watch for history page resolution ─────────────────────────────────
     // Use a nested createEffect so we only track activityPage inside it.

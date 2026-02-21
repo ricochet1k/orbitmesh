@@ -76,7 +76,7 @@ describe("Sidebar Navigation", () => {
     const terminalsLink = screen.getByTestId("link-/terminals") as HTMLAnchorElement;
     expect(terminalsLink.href).toContain("/terminals");
 
-    const settingsLink = screen.getByTestId("link-/settings") as HTMLAnchorElement;
+    const settingsLink = screen.getByTestId("link-/settings/providers") as HTMLAnchorElement;
     expect(settingsLink.href).toContain("/settings");
   });
 

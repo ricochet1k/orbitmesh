@@ -194,7 +194,8 @@ describe("AgentDock", () => {
     screen.getByTestId("agent-dock-menu").click();
 
     await waitFor(() => {
-      expect(screen.getByText("Cancel session")).toBeDefined();
+      const btn = screen.getByText("Cancel session") as HTMLButtonElement;
+      expect(btn.disabled).toBe(false);
     });
 
     (screen.getByText("Cancel session") as HTMLButtonElement).click();

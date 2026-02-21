@@ -37,12 +37,16 @@ class MockWebSocket {
 }
 
 const mockDeleteTerminal = vi.fn().mockResolvedValue(undefined);
+const mockGetTerminalSnapshotById = vi.fn();
+const mockGetTerminalSnapshot = vi.fn();
 
 vi.mock("../api/client", () => ({
   apiClient: {
     getTerminalWsUrl: (_id: string, opts?: { write?: boolean }) =>
       opts?.write ? "ws://test/terminal?write=true" : "ws://test/terminal",
     deleteTerminal: (...args: unknown[]) => mockDeleteTerminal(...args),
+    getTerminalSnapshotById: (...args: unknown[]) => mockGetTerminalSnapshotById(...args),
+    getTerminalSnapshot: (...args: unknown[]) => mockGetTerminalSnapshot(...args),
   },
 }));
 
@@ -73,6 +77,14 @@ describe("TerminalView", () => {
     }
     mockDeleteTerminal.mockReset();
     mockDeleteTerminal.mockResolvedValue(undefined);
+    mockGetTerminalSnapshotById.mockReset();
+    mockGetTerminalSnapshotById.mockResolvedValue({
+      rows: 2, cols: 10, lines: ["resynced", ""],
+    });
+    mockGetTerminalSnapshot.mockReset();
+    mockGetTerminalSnapshot.mockResolvedValue({
+      rows: 2, cols: 10, lines: ["fallback", ""],
+    });
   });
 
   it("renders snapshots and applies diff patches", async () => {
@@ -324,6 +336,92 @@ describe("TerminalView", () => {
 
       const killBtn = screen.getByTestId("terminal-kill-btn") as HTMLButtonElement;
       expect(killBtn.disabled).toBe(true);
+    });
+  });
+
+  describe("seq gap detection", () => {
+    it("does not fetch snapshot when seqs are consecutive", async () => {
+      render(() => <TerminalView sessionId="session-1" terminalId="terminal-1" />);
+      const socket = sockets[0];
+
+      // seq 1 → snapshot (sets expectedSeq = 2)
+      socket.emit({ v: 1, type: "terminal.snapshot", session_id: "session-1", seq: 1, ts: "", data: { rows: 1, cols: 10, lines: ["a"] } });
+      await screen.findByText("a");
+
+      // seq 2 → diff (no gap)
+      socket.emit({ v: 1, type: "terminal.diff", session_id: "session-1", seq: 2, ts: "", data: { region: { x: 0, y: 0, x2: 10, y2: 1 }, lines: ["b"] } });
+      await screen.findByText("b");
+
+      expect(mockGetTerminalSnapshotById).not.toHaveBeenCalled();
+    });
+
+    it("fetches snapshot and applies it when a seq gap is detected", async () => {
+      render(() => <TerminalView sessionId="session-1" terminalId="terminal-1" />);
+      const socket = sockets[0];
+
+      // seq 1 → snapshot (sets expectedSeq = 2)
+      socket.emit({ v: 1, type: "terminal.snapshot", session_id: "session-1", seq: 1, ts: "", data: { rows: 1, cols: 10, lines: ["original"] } });
+      await screen.findByText("original");
+
+      // seq 5 arrives — gap from 2 to 5 → should trigger resync fetch
+      socket.emit({ v: 1, type: "terminal.diff", session_id: "session-1", seq: 5, ts: "", data: { region: { x: 0, y: 0, x2: 10, y2: 1 }, lines: ["after-gap"] } });
+
+      // Wait for the async snapshot fetch to resolve and be applied
+      await screen.findByText("resynced");
+      expect(mockGetTerminalSnapshotById).toHaveBeenCalledWith("terminal-1");
+    });
+
+    it("uses sessionId as fallback when getTerminalSnapshotById fails", async () => {
+      mockGetTerminalSnapshotById.mockRejectedValue(new Error("not found"));
+
+      render(() => <TerminalView sessionId="session-1" terminalId="terminal-1" />);
+      const socket = sockets[0];
+
+      socket.emit({ v: 1, type: "terminal.snapshot", session_id: "session-1", seq: 1, ts: "", data: { rows: 1, cols: 10, lines: ["original"] } });
+      await screen.findByText("original");
+
+      // Trigger a gap
+      socket.emit({ v: 1, type: "terminal.diff", session_id: "session-1", seq: 10, ts: "", data: { region: { x: 0, y: 0, x2: 10, y2: 1 }, lines: ["x"] } });
+
+      await screen.findByText("fallback");
+      expect(mockGetTerminalSnapshot).toHaveBeenCalledWith("session-1");
+    });
+
+    it("does not issue concurrent snapshot fetches for multiple gap events", async () => {
+      render(() => <TerminalView sessionId="session-1" terminalId="terminal-1" />);
+      const socket = sockets[0];
+
+      socket.emit({ v: 1, type: "terminal.snapshot", session_id: "session-1", seq: 1, ts: "", data: { rows: 1, cols: 10, lines: ["original"] } });
+      await screen.findByText("original");
+
+      // Emit two events both with seq gaps — only one fetch should fire
+      socket.emit({ v: 1, type: "terminal.diff", session_id: "session-1", seq: 5, ts: "", data: { region: { x: 0, y: 0, x2: 10, y2: 1 }, lines: ["x"] } });
+      socket.emit({ v: 1, type: "terminal.diff", session_id: "session-1", seq: 6, ts: "", data: { region: { x: 0, y: 0, x2: 10, y2: 1 }, lines: ["y"] } });
+
+      await screen.findByText("resynced");
+      expect(mockGetTerminalSnapshotById).toHaveBeenCalledTimes(1);
+    });
+
+    it("sets status to resyncing while snapshot fetch is in-flight", async () => {
+      let resolveSnap!: (v: unknown) => void;
+      mockGetTerminalSnapshotById.mockReturnValue(new Promise((r) => { resolveSnap = r; }));
+
+      render(() => <TerminalView sessionId="session-1" terminalId="terminal-1" />);
+      const socket = sockets[0];
+
+      socket.emit({ v: 1, type: "terminal.snapshot", session_id: "session-1", seq: 1, ts: "", data: { rows: 1, cols: 10, lines: ["original"] } });
+      await screen.findByText("original");
+
+      // Trigger gap
+      socket.emit({ v: 1, type: "terminal.diff", session_id: "session-1", seq: 9, ts: "", data: { region: { x: 0, y: 0, x2: 10, y2: 1 }, lines: ["x"] } });
+      await Promise.resolve();
+
+      const statusEl = document.querySelector(".terminal-status");
+      expect(statusEl?.textContent).toBe("resyncing");
+
+      // Now resolve the fetch
+      resolveSnap({ rows: 1, cols: 10, lines: ["done"] });
+      await screen.findByText("done");
     });
   });
 });

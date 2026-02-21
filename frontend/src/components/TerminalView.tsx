@@ -15,7 +15,7 @@ interface TerminalViewProps {
   onStatusChange?: (status: TerminalStatus) => void;
   /** Enable write mode: opens websocket with write=true and shows input controls */
   writeMode?: boolean;
-  /** Terminal entity ID (used for kill action). Falls back to sessionId if not provided. */
+  /** Terminal entity ID (used for kill action and snapshot fetches). Falls back to sessionId if not provided. */
   terminalId?: string;
 }
 
@@ -45,6 +45,10 @@ type TerminalSnapshotData = {
 };
 
 type TerminalStatus = "connecting" | "live" | "closed" | "error" | "resyncing";
+
+// Sentinel used to indicate that a snapshot fetch is already in-flight so we
+// don't issue concurrent requests for the same gap.
+const RESYNC_IN_FLIGHT = Symbol("resync_in_flight");
 
 type TerminalDiffData = {
   region?: { x: number; y: number; x2: number; y2: number };
@@ -89,6 +93,12 @@ export default function TerminalView(props: TerminalViewProps) {
   let rafId: number | null = null;
   let bellTimer: number | null = null;
   const pendingUpdates: TerminalUpdate[] = [];
+  // The seq value we expect on the next incoming envelope. null means we
+  // haven't received any events yet (no expectation established).
+  let expectedSeq: number | null = null;
+  // True while a snapshot fetch triggered by gap detection is in-flight,
+  // preventing duplicate concurrent fetches.
+  let resyncInFlight: boolean | typeof RESYNC_IN_FLIGHT = false;
 
   const [lines, setLines] = createSignal<TerminalLine[]>([]);
   const [dimensions, setDimensions] = createSignal({ rows: 0, cols: 0 });
@@ -214,6 +224,35 @@ export default function TerminalView(props: TerminalViewProps) {
     return url.toString();
   };
 
+  // Fetch a fresh snapshot from the REST API and inject it as a synthetic
+  // snapshot update. Called when a seq gap is detected, meaning the backend
+  // dropped events for this subscriber.
+  const fetchSnapshotForResync = () => {
+    if (resyncInFlight) return;
+    resyncInFlight = RESYNC_IN_FLIGHT;
+    updateStatus("resyncing");
+    setStatusNote("Sequence gap detected — fetching snapshot");
+
+    const id = props.terminalId || props.sessionId;
+    apiClient
+      .getTerminalSnapshotById(id)
+      .catch(() => apiClient.getTerminalSnapshot(props.sessionId))
+      .then((snap) => {
+        // Reset the expected seq — the next server event after reconnect may
+        // not be contiguous with whatever seq was on the snapshot REST response.
+        expectedSeq = null;
+        pendingUpdates.push({ type: "snapshot", data: snap as TerminalSnapshotData });
+        scheduleFlush();
+      })
+      .catch(() => {
+        setStatusNote("Snapshot fetch failed — display may be stale");
+        updateStatus("error");
+      })
+      .finally(() => {
+        resyncInFlight = false;
+      });
+  };
+
   const connect = () => {
     const id = props.sessionId;
     let url: string;
@@ -225,6 +264,8 @@ export default function TerminalView(props: TerminalViewProps) {
     if (!url) return;
     updateStatus("connecting");
     setStatusNote(null);
+    expectedSeq = null;
+    resyncInFlight = false;
     socket = new WebSocket(url);
 
     // Inject CSRF header for write mode where browser allows it.
@@ -260,11 +301,37 @@ export default function TerminalView(props: TerminalViewProps) {
       }
       if (!envelope) return;
       if (envelope.session_id && envelope.session_id !== props.sessionId) return;
+
       if (typeof envelope.seq === "number") {
-        setLastSeq(envelope.seq);
+        const seq = envelope.seq;
+        setLastSeq(seq);
+
+        // Gap detection: if we expected a specific seq and this one is not it,
+        // the backend dropped events for us. Fetch a fresh snapshot to resync.
+        // We skip gap detection while a resync fetch is already in-flight, and
+        // we reset expectedSeq when a snapshot arrives (snapshots are always
+        // self-consistent regardless of seq continuity).
+        if (expectedSeq !== null && seq !== expectedSeq && !resyncInFlight) {
+          fetchSnapshotForResync();
+          // The event that triggered the gap is stale — the snapshot fetch
+          // will replace the display. Discard it and wait for the resync.
+          return;
+        }
+
+        // After each event we advance the expectation by 1.
+        expectedSeq = seq + 1;
+
+        // If we were resyncing and just received a gapless event, the stream
+        // is healthy again — clear the resyncing notice.
+        if (status() === "resyncing" && !resyncInFlight) {
+          setStatusNote(null);
+        }
       }
+
       switch (envelope.type) {
         case "terminal.snapshot":
+          // A snapshot resets the expectation — no gap to detect for subsequent events.
+          expectedSeq = typeof envelope.seq === "number" ? envelope.seq + 1 : null;
           pendingUpdates.push({ type: "snapshot", data: envelope.data as TerminalSnapshotData });
           scheduleFlush();
           break;

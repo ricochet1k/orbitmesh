@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@solidjs/testing-library"
+import { render, screen, fireEvent, waitFor } from "@solidjs/testing-library"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import SessionViewer from "./SessionViewer"
 import { apiClient } from "../api/client"
@@ -96,15 +96,31 @@ describe("SessionViewer", () => {
   })
 
   it("renders initial output and streams new transcript messages", async () => {
-    (apiClient.getSession as any).mockResolvedValue(makeSession({ output: "Initial output" }))
+    (apiClient.getSession as any).mockResolvedValue(baseSession)
+    ;(apiClient.getActivityEntries as any).mockResolvedValue({
+      entries: [
+        {
+          id: "entry-1",
+          session_id: "session-1",
+          kind: "assistant",
+          ts: "2026-02-05T12:01:00Z",
+          rev: 1,
+          open: false,
+          event_id: 1,
+          data: { content: "Initial output" },
+        },
+      ],
+      next_cursor: null,
+    })
 
     render(() => <SessionViewer sessionId="session-1" />)
 
-    expect(await screen.findByText("Session session-1 - native - running")).toBeDefined()
+    await waitFor(() => expect(eventSources.length).toBeGreaterThan(0))
     expect(await screen.findByText("Initial output")).toBeDefined()
 
     eventSources[0]?.emit("output", {
       type: "output",
+      event_id: 2,
       timestamp: "2026-02-05T12:02:00Z",
       session_id: "session-1",
       data: { content: "Streaming output" },
@@ -118,47 +134,30 @@ describe("SessionViewer", () => {
 
     render(() => <SessionViewer sessionId="session-1" />)
 
-    await screen.findByText("Session session-1 - native - running")
+    await waitFor(() => expect(eventSources.length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getByTestId("session-state-badge").textContent).toContain("running"))
 
-    eventSources[0]?.emit("activity_entry", {
-      type: "activity_entry",
+    // Emit a tool_call event (running) — uses stable id "tool:tool-act-1"
+    eventSources[0]?.emit("tool_call", {
+      type: "tool_call",
+      event_id: 10,
       timestamp: "2026-02-05T12:02:00Z",
       session_id: "session-1",
-      data: {
-        action: "upsert",
-        entry: {
-          id: "act-1",
-          session_id: "session-1",
-          kind: "agent_message",
-          ts: "2026-02-05T12:02:00Z",
-          rev: 1,
-          open: true,
-          data: { text: "First entry" },
-        },
-      },
+      data: { id: "tool-act-1", name: "bash", status: "running", title: "First entry" },
     })
 
     expect(await screen.findByText("First entry")).toBeDefined()
 
-    eventSources[0]?.emit("activity_entry", {
-      type: "activity_entry",
+    // Emit updated tool_call (completed) with same id — should replace, not duplicate
+    eventSources[0]?.emit("tool_call", {
+      type: "tool_call",
+      event_id: 11,
       timestamp: "2026-02-05T12:02:05Z",
       session_id: "session-1",
-      data: {
-        action: "finalize",
-        entry: {
-          id: "act-1",
-          session_id: "session-1",
-          kind: "agent_message",
-          ts: "2026-02-05T12:02:05Z",
-          rev: 2,
-          open: false,
-          data: { text: "Updated entry" },
-        },
-      },
+      data: { id: "tool-act-1", name: "bash", status: "done", title: "Updated entry", output: "done" },
     })
 
-    expect(await screen.findByText("Updated entry")).toBeDefined()
+    expect(await screen.findByText("Updated entry: done")).toBeDefined()
     expect(screen.queryByText("First entry")).toBeNull()
   })
 
@@ -167,7 +166,7 @@ describe("SessionViewer", () => {
 
     render(() => <SessionViewer sessionId="session-1" />)
 
-    await screen.findByText("Session session-1 - pty - running")
+    await waitFor(() => expect(screen.getByTestId("session-state-badge").textContent).toContain("running"))
     expect(await screen.findByTestId("terminal-view")).toBeDefined()
     const activityStatus = await screen.findByTestId("activity-stream-status")
     const terminalStatus = await screen.findByTestId("terminal-stream-status")
@@ -180,7 +179,8 @@ describe("SessionViewer", () => {
 
     render(() => <SessionViewer sessionId="session-1" />)
 
-    await screen.findByText("Session session-1 - pty - running")
+    await waitFor(() => expect(eventSources.length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getByTestId("session-state-badge").textContent).toContain("running"))
 
     eventSources[0]?.emit("output", {
       type: "output",
@@ -198,7 +198,11 @@ describe("SessionViewer", () => {
 
     render(() => <SessionViewer sessionId="session-1" />)
 
-    await screen.findByText("Session session-1 - native - running")
+    // Wait for session to load and cancel button to be enabled
+    await waitFor(() => {
+      const btn = screen.getByText("Cancel") as HTMLButtonElement
+      expect(btn.disabled).toBe(false)
+    })
     fireEvent.click(screen.getByText("Cancel"))
     expect(apiClient.cancelSession).toHaveBeenCalledWith("session-1")
   })
@@ -209,7 +213,7 @@ describe("SessionViewer", () => {
 
     render(() => <SessionViewer sessionId="session-1" onClose={onClose} />)
 
-    await screen.findByText("Session session-1 - native - running")
+    await waitFor(() => expect(screen.getByTestId("session-state-badge").textContent).toContain("running"))
     fireEvent.click(screen.getByTitle("Close session viewer"))
     expect(onClose).toHaveBeenCalled()
   })
@@ -221,8 +225,8 @@ describe("SessionViewer", () => {
 
     render(() => <SessionViewer sessionId="session-1" />)
 
-    await screen.findByText("Session session-1 - native - suspended")
-    const stateBadge = await screen.findByTestId("session-state-badge")
+    await waitFor(() => expect(screen.getByTestId("session-state-badge").textContent).toContain("suspended"))
+    const stateBadge = screen.getByTestId("session-state-badge")
     expect(stateBadge.textContent).toContain("suspended")
 
     // Cancel button should be disabled when not running
@@ -237,7 +241,11 @@ describe("SessionViewer", () => {
 
     render(() => <SessionViewer sessionId="session-1" />)
 
-    await screen.findByText("Session session-1 - native - running")
+    // Wait for session to load and cancel button to be enabled
+    await waitFor(() => {
+      const btn = screen.getByText("Cancel") as HTMLButtonElement
+      expect(btn.disabled).toBe(false)
+    })
 
     // Click cancel to start action
     const cancelButton = screen.getByText("Cancel") as HTMLButtonElement
@@ -253,8 +261,9 @@ describe("SessionViewer", () => {
 
     render(() => <SessionViewer sessionId="session-1" />)
 
-    await screen.findByText("Session session-1 - native - running")
-    const stateBadge = await screen.findByTestId("session-state-badge")
+    await waitFor(() => expect(eventSources.length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getByTestId("session-state-badge").textContent).toContain("running"))
+    const stateBadge = screen.getByTestId("session-state-badge")
     expect(stateBadge.textContent).toContain("running")
 
     eventSources[0]?.emit("status_change", {
