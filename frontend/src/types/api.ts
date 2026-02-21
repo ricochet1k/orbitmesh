@@ -10,6 +10,9 @@ export interface MCPServerConfig {
 export interface SessionRequest {
   provider_type: string;
   provider_id?: string;
+  /** References a saved AgentConfig; its system_prompt, mcp_servers and custom
+   *  fields are merged as defaults when the session is created. */
+  agent_id?: string;
   working_dir?: string;
   project_id?: string;
   environment?: Record<string, string>;
@@ -30,6 +33,8 @@ export interface SessionResponse {
   id: string;
   provider_type: string;
   preferred_provider_id?: string;
+  /** ID of the AgentConfig applied to this session (if any). */
+  agent_id?: string;
   session_kind?: string;
   title?: string;
   state: SessionState;
@@ -414,6 +419,31 @@ export interface ProviderConfigResponse {
 
 export interface ProviderConfigListResponse {
   providers: ProviderConfigResponse[];
+}
+
+// ── Agent configuration (decoupled from Provider) ─────────────────────────
+// An AgentConfig defines what an agent does (system prompt, tools) and can be
+// paired with any Provider (which LLM backend to use) at session-creation time.
+
+export interface AgentConfigRequest {
+  /** Omit to auto-generate an ID on create. */
+  id?: string;
+  name: string;
+  system_prompt?: string;
+  mcp_servers?: MCPServerConfig[];
+  custom?: Record<string, any>;
+}
+
+export interface AgentConfigResponse {
+  id: string;
+  name: string;
+  system_prompt?: string;
+  mcp_servers?: MCPServerConfig[];
+  custom?: Record<string, any>;
+}
+
+export interface AgentConfigListResponse {
+  agents: AgentConfigResponse[];
 }
 
 export interface TranscriptMessage {

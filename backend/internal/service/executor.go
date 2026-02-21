@@ -108,6 +108,9 @@ func (e *AgentExecutor) CreateSession(ctx context.Context, id string, config ses
 	// Create session in idle state without instantiating a provider
 	session := domain.NewSession(id, config.ProviderType, config.WorkingDir)
 	session.ProjectID = config.ProjectID
+	if config.AgentID != "" {
+		session.AgentID = config.AgentID
+	}
 	// Preserve provider-specific config so it can be recovered on SendMessage.
 	if len(config.Custom) > 0 {
 		session.ProviderCustom = config.Custom

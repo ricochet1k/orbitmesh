@@ -97,11 +97,13 @@ type Session struct {
 	ID                  string
 	ProviderType        string
 	PreferredProviderID string
-	Kind                string
-	Title               string
-	State               SessionState
-	WorkingDir          string
-	ProjectID           string
+	// AgentID is the ID of the AgentConfig applied to this session, if any.
+	AgentID    string
+	Kind       string
+	Title      string
+	State      SessionState
+	WorkingDir string
+	ProjectID  string
 	// ProviderCustom preserves the original provider-specific config (e.g.
 	// acp_command) so it can be re-supplied when starting a new run on an
 	// idle session via SendMessage.
@@ -256,18 +258,20 @@ type SessionSnapshot struct {
 	ID                  string
 	ProviderType        string
 	PreferredProviderID string
-	Kind                string
-	Title               string
-	State               SessionState
-	WorkingDir          string
-	ProjectID           string
-	ProviderCustom      map[string]any
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
-	CurrentTask         string
-	Transitions         []StateTransition
-	Messages            []Message
-	SuspensionContext   any // *session.SuspensionContext
+	// AgentID is the ID of the AgentConfig applied to this session (if any).
+	AgentID           string
+	Kind              string
+	Title             string
+	State             SessionState
+	WorkingDir        string
+	ProjectID         string
+	ProviderCustom    map[string]any
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	CurrentTask       string
+	Transitions       []StateTransition
+	Messages          []Message
+	SuspensionContext any // *session.SuspensionContext
 }
 
 // Snapshot returns an atomic copy of the session under its read lock.
@@ -285,6 +289,7 @@ func (s *Session) Snapshot() SessionSnapshot {
 		ID:                  s.ID,
 		ProviderType:        s.ProviderType,
 		PreferredProviderID: s.PreferredProviderID,
+		AgentID:             s.AgentID,
 		Kind:                s.Kind,
 		Title:               s.Title,
 		State:               s.State,

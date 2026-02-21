@@ -46,7 +46,9 @@ type MCPServerConfig struct {
 }
 
 type Config struct {
-	ProviderType   string
+	ProviderType string
+	// AgentID is the ID of the AgentConfig applied to this session (if any).
+	AgentID        string
 	WorkingDir     string
 	ProjectID      string
 	Environment    map[string]string

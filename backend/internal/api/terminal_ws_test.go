@@ -132,7 +132,7 @@ func newTerminalTestEnv(t *testing.T) *terminalTestEnv {
 
 	providerStorage := storage.NewProviderConfigStorage(t.TempDir())
 	sessionStore := newInMemStore()
-	env.handler = NewHandler(env.executor, env.broadcaster, sessionStore, providerStorage, nil)
+	env.handler = NewHandler(env.executor, env.broadcaster, sessionStore, providerStorage, nil, nil)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()

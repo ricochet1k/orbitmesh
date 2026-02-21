@@ -25,18 +25,20 @@ type Handler struct {
 	broadcaster     *service.EventBroadcaster
 	sessionStorage  storage.Storage
 	providerStorage *storage.ProviderConfigStorage
+	agentStorage    *storage.AgentConfigStorage
 	projectStorage  *storage.ProjectStorage
 	gitDir          string
 	dockBridge      *DockBridge
 }
 
 // NewHandler creates a Handler backed by the given executor and broadcaster.
-func NewHandler(executor *service.AgentExecutor, broadcaster *service.EventBroadcaster, sessionStorage storage.Storage, providerStorage *storage.ProviderConfigStorage, projectStorage *storage.ProjectStorage) *Handler {
+func NewHandler(executor *service.AgentExecutor, broadcaster *service.EventBroadcaster, sessionStorage storage.Storage, providerStorage *storage.ProviderConfigStorage, agentStorage *storage.AgentConfigStorage, projectStorage *storage.ProjectStorage) *Handler {
 	return &Handler{
 		executor:        executor,
 		broadcaster:     broadcaster,
 		sessionStorage:  sessionStorage,
 		providerStorage: providerStorage,
+		agentStorage:    agentStorage,
 		projectStorage:  projectStorage,
 		gitDir:          resolveGitDir(),
 		dockBridge:      NewDockBridge(),
@@ -77,6 +79,11 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/v1/providers/{id}", h.getProvider)
 	r.Put("/api/v1/providers/{id}", h.updateProvider)
 	r.Delete("/api/v1/providers/{id}", h.deleteProvider)
+	r.Get("/api/v1/agents", h.listAgents)
+	r.Post("/api/v1/agents", h.createAgent)
+	r.Get("/api/v1/agents/{id}", h.getAgent)
+	r.Put("/api/v1/agents/{id}", h.updateAgent)
+	r.Delete("/api/v1/agents/{id}", h.deleteAgent)
 	r.Get("/api/v1/projects", h.listProjects)
 	r.Post("/api/v1/projects", h.createProject)
 	r.Get("/api/v1/projects/{id}", h.getProject)
@@ -192,10 +199,22 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve optional agent config — merge its values as defaults (request fields take priority).
+	var agentConfig *storage.AgentConfig
+	if req.AgentID != "" && h.agentStorage != nil {
+		cfg, err := h.agentStorage.Get(req.AgentID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "agent not found", err.Error())
+			return
+		}
+		agentConfig = cfg
+	}
+
 	id := generateID()
 
 	config := session.Config{
 		ProviderType: req.ProviderType,
+		AgentID:      req.AgentID,
 		WorkingDir:   workingDir,
 		ProjectID:    projectID,
 		Environment:  req.Environment,
@@ -206,6 +225,29 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		SessionKind:  sessionKind,
 		Title:        req.Title,
 	}
+
+	// Apply agent config defaults (agent values only fill gaps left by the request).
+	if agentConfig != nil {
+		if config.SystemPrompt == "" && agentConfig.SystemPrompt != "" {
+			config.SystemPrompt = agentConfig.SystemPrompt
+		}
+		if len(agentConfig.Custom) > 0 {
+			if config.Custom == nil {
+				config.Custom = map[string]any{}
+			}
+			for k, v := range agentConfig.Custom {
+				if _, ok := config.Custom[k]; !ok {
+					config.Custom[k] = v
+				}
+			}
+		}
+		// Agent MCP servers are only used when the request doesn't supply its own list
+		// and the session is not a dock session (dock servers are always overridden below).
+		if len(req.MCPServers) == 0 && sessionKind != domain.SessionKindDock && len(agentConfig.MCPServers) > 0 {
+			config.MCPServers = agentConfig.MCPServers
+		}
+	}
+
 	if providerConfig != nil {
 		if len(providerConfig.Env) > 0 {
 			if config.Environment == nil {
@@ -480,6 +522,7 @@ func sessionToResponse(s domain.SessionSnapshot) apiTypes.SessionResponse {
 		ID:                  s.ID,
 		ProviderType:        s.ProviderType,
 		PreferredProviderID: s.PreferredProviderID,
+		AgentID:             s.AgentID,
 		SessionKind:         s.Kind,
 		Title:               s.Title,
 		State:               apiTypes.SessionState(s.State.String()),

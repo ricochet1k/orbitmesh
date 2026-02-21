@@ -198,7 +198,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	})
 
 	providerStorage := storage.NewProviderConfigStorage(t.TempDir())
-	env.handler = NewHandler(env.executor, env.broadcaster, store, providerStorage, nil)
+	env.handler = NewHandler(env.executor, env.broadcaster, store, providerStorage, nil, nil)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()

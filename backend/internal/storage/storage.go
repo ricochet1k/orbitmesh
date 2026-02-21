@@ -42,6 +42,7 @@ type messageData struct {
 type sessionData struct {
 	ID             string           `json:"id"`
 	ProviderType   string           `json:"provider_type"`
+	AgentID        string           `json:"agent_id,omitempty"`
 	Kind           string           `json:"kind,omitempty"`
 	Title          string           `json:"title,omitempty"`
 	State          string           `json:"state"`
@@ -383,6 +384,7 @@ func snapshotToData(snap domain.SessionSnapshot) *sessionData {
 	return &sessionData{
 		ID:             snap.ID,
 		ProviderType:   snap.ProviderType,
+		AgentID:        snap.AgentID,
 		Kind:           snap.Kind,
 		Title:          snap.Title,
 		State:          snap.State.String(),
@@ -442,6 +444,7 @@ func dataToSession(data *sessionData) (*domain.Session, error) {
 	return &domain.Session{
 		ID:             data.ID,
 		ProviderType:   data.ProviderType,
+		AgentID:        data.AgentID,
 		Kind:           data.Kind,
 		Title:          data.Title,
 		State:          state,

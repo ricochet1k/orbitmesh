@@ -37,7 +37,7 @@ func TestSessionCreationAndEvents(t *testing.T) {
 
 	providerStorage := storage.NewProviderConfigStorage(t.TempDir())
 	sessionStore := newInMemStore()
-	handler := NewHandler(executor, broadcaster, sessionStore, providerStorage, nil)
+	handler := NewHandler(executor, broadcaster, sessionStore, providerStorage, nil, nil)
 	r := chi.NewRouter()
 	r.Use(CORSMiddleware)
 	r.Use(CSRFMiddleware)
@@ -230,7 +230,7 @@ func TestSessionErrorHandling(t *testing.T) {
 
 	providerStorage := storage.NewProviderConfigStorage(t.TempDir())
 	sessionStore := newInMemStore()
-	handler := NewHandler(executor, broadcaster, sessionStore, providerStorage, nil)
+	handler := NewHandler(executor, broadcaster, sessionStore, providerStorage, nil, nil)
 	r := chi.NewRouter()
 	r.Use(CORSMiddleware)
 	r.Use(CSRFMiddleware)
@@ -338,7 +338,7 @@ func TestSessionLifecycle(t *testing.T) {
 
 	providerStorage := storage.NewProviderConfigStorage(t.TempDir())
 	sessionStore := newInMemStore()
-	handler := NewHandler(executor, broadcaster, sessionStore, providerStorage, nil)
+	handler := NewHandler(executor, broadcaster, sessionStore, providerStorage, nil, nil)
 	r := chi.NewRouter()
 	r.Use(CORSMiddleware)
 	r.Use(CSRFMiddleware)

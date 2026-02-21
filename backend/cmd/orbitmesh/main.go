@@ -38,6 +38,7 @@ func main() {
 	}
 
 	providerStorage := storage.NewProviderConfigStorage(baseDir)
+	agentStorage := storage.NewAgentConfigStorage(baseDir)
 	projectStorage := storage.NewProjectStorage(baseDir)
 
 	factory := provider.NewDefaultFactory()
@@ -76,7 +77,7 @@ func main() {
 	r.Use(api.CORSMiddleware)
 	r.Use(api.CSRFMiddleware)
 
-	handler := api.NewHandler(executor, broadcaster, store, providerStorage, projectStorage)
+	handler := api.NewHandler(executor, broadcaster, store, providerStorage, agentStorage, projectStorage)
 	handler.Mount(r)
 
 	srv := &http.Server{

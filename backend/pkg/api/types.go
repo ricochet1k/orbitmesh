@@ -11,8 +11,12 @@ const (
 )
 
 type SessionRequest struct {
-	ProviderType string            `json:"provider_type,omitempty"`
-	ProviderID   string            `json:"provider_id,omitempty"`
+	ProviderType string `json:"provider_type,omitempty"`
+	ProviderID   string `json:"provider_id,omitempty"`
+	// AgentID references a saved AgentConfig whose system_prompt, mcp_servers
+	// and custom fields are merged into the session at creation time.  Values
+	// supplied directly in the request take precedence over the agent defaults.
+	AgentID      string            `json:"agent_id,omitempty"`
 	WorkingDir   string            `json:"working_dir,omitempty"`
 	ProjectID    string            `json:"project_id,omitempty"`
 	Environment  map[string]string `json:"environment,omitempty"`
@@ -45,17 +49,19 @@ type MCPServerConfig struct {
 }
 
 type SessionResponse struct {
-	ID                  string       `json:"id"`
-	ProviderType        string       `json:"provider_type"`
-	PreferredProviderID string       `json:"preferred_provider_id,omitempty"`
-	SessionKind         string       `json:"session_kind,omitempty"`
-	Title               string       `json:"title,omitempty"`
-	State               SessionState `json:"state"`
-	WorkingDir          string       `json:"working_dir"`
-	ProjectID           string       `json:"project_id,omitempty"`
-	CreatedAt           time.Time    `json:"created_at"`
-	UpdatedAt           time.Time    `json:"updated_at"`
-	CurrentTask         string       `json:"current_task,omitempty"`
+	ID                  string `json:"id"`
+	ProviderType        string `json:"provider_type"`
+	PreferredProviderID string `json:"preferred_provider_id,omitempty"`
+	// AgentID is the ID of the AgentConfig applied to this session (if any).
+	AgentID     string       `json:"agent_id,omitempty"`
+	SessionKind string       `json:"session_kind,omitempty"`
+	Title       string       `json:"title,omitempty"`
+	State       SessionState `json:"state"`
+	WorkingDir  string       `json:"working_dir"`
+	ProjectID   string       `json:"project_id,omitempty"`
+	CreatedAt   time.Time    `json:"created_at"`
+	UpdatedAt   time.Time    `json:"updated_at"`
+	CurrentTask string       `json:"current_task,omitempty"`
 }
 
 // ProjectRequest is the body for create/update project endpoints.
@@ -450,3 +456,35 @@ type Message struct {
 type MessageListResponse struct {
 	Messages []Message `json:"messages"`
 }
+
+// AgentConfigRequest is the request body for create/update agent endpoints.
+type AgentConfigRequest struct {
+	// ID is optional on create; a random ID is generated when omitted.
+	ID           string            `json:"id,omitempty"`
+	Name         string            `json:"name"`
+	SystemPrompt string            `json:"system_prompt,omitempty"`
+	MCPServers   []MCPServerConfig `json:"mcp_servers,omitempty"`
+	Custom       map[string]any    `json:"custom,omitempty"`
+}
+
+// AgentConfigResponse is returned by agent endpoints.
+type AgentConfigResponse struct {
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	SystemPrompt string            `json:"system_prompt,omitempty"`
+	MCPServers   []MCPServerConfig `json:"mcp_servers,omitempty"`
+	Custom       map[string]any    `json:"custom,omitempty"`
+}
+
+// AgentConfigListResponse wraps a list of agent configs.
+type AgentConfigListResponse struct {
+	Agents []AgentConfigResponse `json:"agents"`
+}
+
+// SessionResponse now also surfaces which agent was used.
+// We embed AgentID on SessionResponse via the extended field below so that the
+// response wire format includes it without breaking existing fields.
+
+// SessionAgentID is the optional agent ID stored on a session.
+// It is included in SessionResponse as agent_id.
+type SessionAgentID = string
