@@ -25,35 +25,6 @@ import http from "node:http";
 
 const backendURL = process.env.E2E_BACKEND_URL ?? "http://localhost:8080";
 
-/**
- * Make a GET request using Node's built-in `http` module with no connection
- * pooling (agent: false).  This avoids undici / Playwright request context
- * connection-pool stalls that block poll loops when keep-alive connections are
- * not promptly released.
- */
-function httpGet(url: string, timeoutMs = 4_000): Promise<{ status: number; body: string }> {
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(url);
-    const req = http.request(
-      {
-        hostname: parsed.hostname,
-        port: parsed.port,
-        path: parsed.pathname + parsed.search,
-        method: "GET",
-        headers: { Accept: "application/json", Connection: "close" },
-        agent: false, // new TCP connection per request — no pooling
-      },
-      (res) => {
-        let body = "";
-        res.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-        res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
-      },
-    );
-    req.setTimeout(timeoutMs, () => { req.destroy(); reject(new Error(`httpGet timed out: ${url}`)); });
-    req.on("error", reject);
-    req.end();
-  });
-}
 
 /** Navigate to "/" and return the CSRF token from the cookie. */
 async function getCsrfToken(page: Page): Promise<string> {
@@ -182,62 +153,18 @@ async function stopSession(
   });
 }
 
-/**
- * Poll the REST API via the Playwright request context until the session output
- * contains the expected text.
- *
- * Using `request` (Node.js-level HTTP) instead of `page.evaluate` (browser
- * fetch) is essential here: after the page navigates, the browser holds an SSE
- * connection and a 20-second dock-MCP long-poll open, exhausting the browser's
- * HTTP/1.1 connection-per-origin limit (6 connections to 127.0.0.1:4173 via
- * the Vite proxy).  Subsequent browser fetch calls are queued behind these
- * connections, causing the poll to wait 20+ seconds even when the backend
- * already has the output ready.
- */
-async function pollForOutput(
-  _request: APIRequestContext,
-  sessionId: string,
-  expectedText: string,
-  timeoutMs = 20_000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  let lastOutput = "";
-  while (Date.now() < deadline) {
-    try {
-      // Use Node's http module with agent:false (no connection pooling).
-      // Playwright's APIRequestContext and Node's global fetch (undici) can
-      // both stall on keep-alive connection reuse when the connection pool is
-      // exhausted or not promptly released.  A fresh TCP connection per poll
-      // is slightly slower but completely reliable.
-      const { status, body } = await httpGet(`${backendURL}/api/sessions/${sessionId}`);
-      if (status === 200) {
-        const json = JSON.parse(body) as { output?: string };
-        lastOutput = json.output ?? "";
-        if (lastOutput.includes(expectedText)) return;
-      }
-    } catch {
-      // network error or timeout — retry
-    }
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  throw new Error(
-    `pollForOutput timed out after ${timeoutMs}ms waiting for "${expectedText}". ` +
-    `Last output was: ${JSON.stringify(lastOutput)}`,
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 test.describe("AgentDock with acp-echo provider", () => {
   test(
-    "@smoke agent-dock receives and displays an echo response",
+    "@smoke fake acp output streams to both agent dock and session viewer",
     async ({ page, request }) => {
-      // Creates a dock session, sends a message via the REST API (bypassing
-      // the SSE-dependent send button), and verifies the acp-echo agent
-      // produces output.  The dock widget must be present in the layout.
-      test.setTimeout(45_000);
+      // Creates one fake ACP dock session, opens both surfaces that consume
+      // the stream (dock + session viewer), sends a message through the API,
+      // and verifies both surfaces render the streamed output.
+      test.setTimeout(60_000);
 
       const acpEchoBin = process.env.ACP_ECHO_BIN;
       if (!acpEchoBin) {
@@ -249,45 +176,61 @@ test.describe("AgentDock with acp-echo provider", () => {
       await page.goto("/");
       const csrfToken = await getCsrfToken(page);
 
-      // Create an ACP echo session marked as a dock session.
-      const sessionId = await createSession(page, csrfToken, {
-        provider_type: "acp",
-        working_dir: "/tmp",
-        session_kind: "dock",
-        custom: { acp_command: acpEchoBin },
-      });
+      let sessionId = "";
+      let viewerPage: Page | null = null;
+      try {
+        // Create an ACP echo session marked as a dock session.
+        sessionId = await createSession(page, csrfToken, {
+          provider_type: "acp",
+          working_dir: "/tmp",
+          session_kind: "dock",
+          custom: { acp_command: acpEchoBin },
+        });
 
-      // Wire this session to the dock via localStorage so the dock component
-      // picks it up on the next load.
-      await page.evaluate((id) => {
-        window.localStorage.setItem("orbitmesh:dock-session-id", id);
-      }, sessionId);
+        // Wire this session to the dock via localStorage so the dock component
+        // picks it up on the next load.
+        await page.evaluate((id) => {
+          window.localStorage.setItem("orbitmesh:dock-session-id", id);
+        }, sessionId);
 
-      // Hard-navigate so the dock re-initialises with the stored session ID.
-      await page.goto("/");
+        // Hard-navigate so the dock re-initialises with the stored session ID.
+        await page.goto("/");
 
-      // The dock widget must be present in the layout.
-      await expect(page.getByTestId("agent-dock")).toBeVisible();
+        // The dock widget must be present in the layout.
+        await expect(page.getByTestId("agent-dock")).toBeVisible();
 
-      // Send a message via the REST API (Node.js request, not browser fetch).
-      // The browser's connection limit is saturated by SSE + dock-MCP long-poll
-      // by this point, so browser fetch would queue indefinitely.
-      await sendMessage(request, sessionId, csrfToken, "hello from e2e test");
+        const dockToggle = page.getByTestId("agent-dock-toggle");
+        if ((await dockToggle.getAttribute("aria-expanded")) !== "true") {
+          await dockToggle.click();
+        }
 
-      // The acp-echo agent echoes: {"echo":"hello from e2e test"}
-      await pollForOutput(request, sessionId, "hello from e2e test", 20_000);
+        viewerPage = await page.context().newPage();
+        await viewerPage.goto(`/sessions/${sessionId}`);
+        await expect(viewerPage.getByTestId("session-viewer-heading")).toBeVisible();
 
-      // Clean up.
-      await stopSession(request, sessionId, csrfToken);
+        const prompt = `stream-check-${Date.now()}`;
+
+        // Send a message via the REST API (Node.js request, not browser fetch).
+        // The browser's connection limit is saturated by SSE + dock-MCP long-poll
+        // by this point, so browser fetch would queue indefinitely.
+        await sendMessage(request, sessionId, csrfToken, prompt);
+
+        // Both consumers should receive the same streamed output.
+        await expect(page.locator(".agent-dock .transcript").getByText(prompt)).toBeVisible({ timeout: 20_000 });
+        await expect(viewerPage.locator(".session-viewer .transcript").getByText(prompt)).toBeVisible({ timeout: 20_000 });
+      } finally {
+        if (viewerPage) await viewerPage.close();
+        if (sessionId) await stopSession(request, sessionId, csrfToken);
+      }
     },
   );
 
   test(
-    "agent-dock creates a session and shows echo in session output",
+    "session viewer reload restores all persisted fake acp messages",
     async ({ page, request }) => {
-      // Creates a plain (non-dock) ACP session, sends a message via the API,
-      // and verifies the echo appears in the session output.
-      test.setTimeout(30_000);
+      // Creates a plain ACP session, sends two messages, verifies they are
+      // visible, reloads the page, and verifies both messages rehydrate.
+      test.setTimeout(60_000);
 
       const acpEchoBin = process.env.ACP_ECHO_BIN;
       if (!acpEchoBin) {
@@ -299,24 +242,39 @@ test.describe("AgentDock with acp-echo provider", () => {
       await page.goto("/");
       const csrfToken = await getCsrfToken(page);
 
-      // Create a plain (non-dock) acp session.
-      const sessionId = await createSession(page, csrfToken, {
-        provider_type: "acp",
-        working_dir: "/tmp",
-        custom: { acp_command: acpEchoBin },
-      });
+      let sessionId = "";
+      try {
+        // Create a plain (non-dock) acp session.
+        sessionId = await createSession(page, csrfToken, {
+          provider_type: "acp",
+          working_dir: "/tmp",
+          custom: { acp_command: acpEchoBin },
+        });
 
-      // Send a message via the API (Node.js request, not browser fetch).
-      await sendMessage(request, sessionId, csrfToken, "ping");
+        await page.goto(`/sessions/${sessionId}`);
+        await expect(page.getByTestId("session-viewer-heading")).toBeVisible();
 
-      // Poll until the session output contains the echoed text.
-      // ACP sessions stay in "running" state between turns (the process is
-      // kept alive), so we poll the output field directly rather than waiting
-      // for state === "idle".
-      await pollForOutput(request, sessionId, "ping", 20_000);
+        const prompt = `reload-check-${Date.now()}`;
 
-      // Clean up.
-      await stopSession(request, sessionId, csrfToken);
+        // Send one message and wait for persisted transcript content.
+        await sendMessage(request, sessionId, csrfToken, prompt);
+        await expect(page.locator(".session-viewer .transcript")).toContainText(prompt, { timeout: 20_000 });
+
+        await expect
+          .poll(() => page.locator(".session-viewer .transcript .transcript-item").count(), { timeout: 20_000 })
+          .toBeGreaterThanOrEqual(2);
+        const beforeReloadCount = await page.locator(".session-viewer .transcript .transcript-item").count();
+
+        // Reload and ensure transcript history is loaded from storage/API.
+        await page.reload();
+        await expect(page.getByTestId("session-viewer-heading")).toBeVisible();
+        await expect(page.locator(".session-viewer .transcript")).toContainText(prompt, { timeout: 20_000 });
+
+        const afterReloadCount = await page.locator(".session-viewer .transcript .transcript-item").count();
+        expect(afterReloadCount).toBeGreaterThanOrEqual(beforeReloadCount);
+      } finally {
+        if (sessionId) await stopSession(request, sessionId, csrfToken);
+      }
     },
   );
 });

@@ -51,6 +51,23 @@ async function createPtySession(
   return response.data.id as string;
 }
 
+async function triggerSessionStart(page: Page, sessionId: string) {
+  const csrfToken = await getCsrfToken(page);
+  const status = await page.evaluate(async (payload) => {
+    const resp = await fetch(`/api/sessions/${payload.sessionId}/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": payload.csrfToken,
+      },
+      body: JSON.stringify({ content: "start" }),
+    });
+    return resp.status;
+  }, { sessionId, csrfToken });
+
+  expect(status).toBe(202);
+}
+
 test("@smoke dashboard loads critical panels", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("dashboard-view")).toBeVisible();
@@ -70,7 +87,8 @@ test("@smoke sessions directory lists new session", async ({ page }) => {
 });
 
 test("@smoke session viewer shows live terminal output", async ({ page }) => {
-  const sessionId = await createPtySession(page, "sh", ["-c", "echo smoke-ready; sleep 8"]);
+  const sessionId = await createPtySession(page, "sh", ["-c", "sleep 1; echo smoke-ready; sleep 8"]);
+  await triggerSessionStart(page, sessionId);
 
   await page.goto(`/sessions/${sessionId}`);
   await expect(page.locator(".terminal-shell")).toBeVisible({ timeout: 10000 });
@@ -84,7 +102,7 @@ test("@smoke session viewer shows live terminal output", async ({ page }) => {
             el.textContent?.includes("smoke-ready"),
           ),
         ),
-      { timeout: 5000 },
+      { timeout: 12000 },
     )
     .toBeTruthy();
 });

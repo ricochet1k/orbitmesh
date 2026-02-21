@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,9 +27,19 @@ import (
 )
 
 const (
-	listenAddr      = ":8080"
+	defaultPort     = "8080"
 	shutdownTimeout = 5 * time.Second
 )
+
+func listenAddr() string {
+	if raw := strings.TrimSpace(os.Getenv("E2E_BACKEND_PORT")); raw != "" {
+		return ":" + strings.TrimPrefix(raw, ":")
+	}
+	if raw := strings.TrimSpace(os.Getenv("PORT")); raw != "" {
+		return ":" + strings.TrimPrefix(raw, ":")
+	}
+	return ":" + defaultPort
+}
 
 func main() {
 	baseDir := storage.DefaultBaseDir()
@@ -82,9 +93,10 @@ func main() {
 
 	handler := api.NewHandler(executor, broadcaster, store, providerStorage, agentStorage, projectStorage)
 	handler.Mount(r)
+	addr := listenAddr()
 
 	srv := &http.Server{
-		Addr:    listenAddr,
+		Addr:    addr,
 		Handler: r,
 	}
 
@@ -92,7 +104,7 @@ func main() {
 	defer stop()
 
 	go func() {
-		fmt.Printf("OrbitMesh listening on %s\n", listenAddr)
+		fmt.Printf("OrbitMesh listening on %s\n", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server: %v", err)
 		}

@@ -91,13 +91,16 @@ async function stopProcess(proc: ManagedProcess) {
     proc.child.once("exit", () => resolve());
   });
 
-  const timeout = delay(5_000).then(() => {
-    if (proc.child.exitCode === null && !proc.child.killed) {
-      proc.child.kill("SIGKILL");
-    }
-  });
+  const exitedGracefully = await Promise.race([
+    exitPromise.then(() => true),
+    delay(5_000).then(() => false),
+  ]);
 
-  await Promise.race([exitPromise, timeout]);
+  if (!exitedGracefully) {
+    proc.child.kill("SIGKILL");
+    await Promise.race([exitPromise, delay(2_000)]);
+  }
+
   proc.logStream.end();
 }
 
@@ -145,6 +148,20 @@ export default async function globalSetup() {
 
   let backend: ManagedProcess | null = null;
   let frontend: ManagedProcess | null = null;
+  let cleanupStarted = false;
+
+  const cleanup = async () => {
+    if (cleanupStarted) return;
+    cleanupStarted = true;
+    if (frontend) {
+      await stopProcess(frontend);
+      frontend = null;
+    }
+    if (backend) {
+      await stopProcess(backend);
+      backend = null;
+    }
+  };
 
   try {
     backend = startProcess(
@@ -184,21 +201,23 @@ export default async function globalSetup() {
     );
     await waitForUrl(`http://127.0.0.1:${frontendPort}`, STARTUP_TIMEOUT_MS);
   } catch (error) {
-    if (frontend) {
-      await stopProcess(frontend);
-    }
-    if (backend) {
-      await stopProcess(backend);
-    }
+    await cleanup();
     throw error;
   }
 
+  const sigintHandler = () => {
+    void cleanup().finally(() => process.exit(130));
+  };
+  const sigtermHandler = () => {
+    void cleanup().finally(() => process.exit(143));
+  };
+
+  process.once("SIGINT", sigintHandler);
+  process.once("SIGTERM", sigtermHandler);
+
   return async () => {
-    if (frontend) {
-      await stopProcess(frontend);
-    }
-    if (backend) {
-      await stopProcess(backend);
-    }
+    process.off("SIGINT", sigintHandler);
+    process.off("SIGTERM", sigtermHandler);
+    await cleanup();
   };
 }
