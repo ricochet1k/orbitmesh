@@ -102,6 +102,9 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/v1/projects/{id}", h.getProject)
 	r.Put("/api/v1/projects/{id}", h.updateProject)
 	r.Delete("/api/v1/projects/{id}", h.deleteProject)
+	r.Get("/api/v1/projects/{id}/files", h.listProjectFiles)
+	r.Get("/api/v1/projects/{id}/files/*", h.readProjectFile)
+	r.Put("/api/v1/projects/{id}/files/*", h.writeProjectFile)
 }
 
 func (h *Handler) startRealtimeBridge() {

@@ -14,6 +14,7 @@
 @import "./styles/components/empty-state.css";
 @import "./styles/components/skeleton.css";
 @import "./styles/components/mcp.css";
+@import "./styles/components/file-viewer.css";
 
 /* Animation & motion primitives */
 @import "./styles/animations.css";
@@ -25,6 +26,7 @@
 }
 
 :root {
+  color-scheme: light;
   color: #0b1220;
   background-color: #f4f6f9;
   --font-sans: "IBM Plex Sans", "Segoe UI", "Helvetica Neue", sans-serif;
@@ -76,6 +78,65 @@
   --graph-selected: #0b1220;
 }
 
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  color: #e5e7eb;
+  background-color: #0b1220;
+  --ink-1: #e5e7eb;
+  --ink-2: #cbd5e1;
+  --ink-3: #94a3b8;
+  --surface-1: #0b1220;
+  --surface-2: #141b2a;
+  --surface-3: #1b2435;
+  --surface-4: #e5e7eb;
+  --border: #2f3b4f;
+  --border-strong: #475569;
+  --graph-link: rgba(148, 163, 184, 0.5);
+  --graph-text: #cbd5e1;
+  --graph-stroke: #0f1624;
+  --graph-selected: #f1f5f9;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    color: #e5e7eb;
+    background-color: #0b1220;
+    --ink-1: #e5e7eb;
+    --ink-2: #cbd5e1;
+    --ink-3: #94a3b8;
+    --surface-1: #0b1220;
+    --surface-2: #141b2a;
+    --surface-3: #1b2435;
+    --surface-4: #e5e7eb;
+    --border: #2f3b4f;
+    --border-strong: #475569;
+    --graph-link: rgba(148, 163, 184, 0.5);
+    --graph-text: #cbd5e1;
+    --graph-stroke: #0f1624;
+    --graph-selected: #f1f5f9;
+  }
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+}
+
+.app-shell > *,
+.dashboard-layout > *,
+.task-tree-layout > *,
+.commit-layout > *,
+.session-layout > *,
+.sessions-layout > *,
+.terminals-layout > *,
+.extractor-layout > *,
+.settings-layout > * {
+  min-width: 0;
+}
+
 body {
   font-family: var(--font-sans);
   font-size: 14px;
@@ -87,6 +148,7 @@ body {
     var(--surface-1);
   color: var(--ink-1);
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 h1,
@@ -124,12 +186,14 @@ textarea:focus-visible {
 #root,
 .app-container {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
 
 .app-shell {
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   grid-template-columns: minmax(220px, 260px) 1fr;
 }
@@ -138,6 +202,7 @@ textarea:focus-visible {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .app-content {
@@ -163,7 +228,7 @@ textarea:focus-visible {
 }
 
 .sidebar {
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--surface-2);
   border-right: 1px solid var(--border);
   padding: 1.4rem 1.1rem;
   display: flex;
@@ -192,7 +257,7 @@ textarea:focus-visible {
   gap: 0.45rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
-  background: #fff;
+  background: var(--surface-1);
   color: var(--ink-2);
   padding: 0.35rem 0.65rem;
   font-size: 0.78rem;
@@ -348,7 +413,7 @@ textarea:focus-visible {
   top: calc(100% + 0.25rem);
   left: 0;
   right: 0;
-  background: #fff;
+  background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: var(--radius-3);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
@@ -403,7 +468,7 @@ textarea:focus-visible {
   border: 1px solid var(--border);
   font-size: 0.82rem;
   color: var(--ink-1);
-  background: #fff;
+  background: var(--surface-1);
   outline: none;
 }
 
@@ -462,7 +527,7 @@ textarea:focus-visible {
   justify-content: space-between;
   padding: 0.85rem 1.5rem;
   border-bottom: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--surface-2);
   backdrop-filter: blur(10px);
   position: sticky;
   top: 0;
@@ -525,7 +590,7 @@ textarea:focus-visible {
   justify-content: space-between;
   align-items: center;
   padding: 0.75rem 1.75rem;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--surface-2);
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(10px);
   position: sticky;
@@ -583,7 +648,7 @@ textarea:focus-visible {
 
 .app-header {
   padding: 1.6rem 1.75rem 1.25rem;
-  background: rgba(255, 255, 255, 0.88);
+  background: var(--surface-2);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: flex-end;
@@ -594,7 +659,7 @@ textarea:focus-visible {
 
 .view-header {
   padding: 1.5rem 1.75rem 1.1rem;
-  background: rgba(255, 255, 255, 0.88);
+  background: var(--surface-2);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: flex-end;
@@ -623,14 +688,16 @@ textarea:focus-visible {
   max-width: 38rem;
 }
 
-.header-meta {
+.header-meta,
+.stats-bubbles {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
   align-items: center;
 }
 
-.header-meta .meta-card {
+.header-meta .meta-card,
+.stats-bubbles .stat-bubble {
   flex: 1 1 140px;
 }
 
@@ -639,7 +706,8 @@ textarea:focus-visible {
   align-self: flex-start;
 }
 
-.meta-card {
+.meta-card,
+.stat-bubble {
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-3);
@@ -650,14 +718,16 @@ textarea:focus-visible {
   font-size: 0.85rem;
 }
 
-.meta-card p {
+.meta-card p,
+.stat-bubble p {
   color: var(--ink-3);
   font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.2em;
 }
 
-.meta-card strong {
+.meta-card strong,
+.stat-bubble strong {
   font-size: 1rem;
   color: var(--ink-1);
 }
@@ -768,7 +838,7 @@ textarea:focus-visible {
   padding: 0.45rem 0.65rem;
   border-radius: var(--radius-2);
   border: 1px solid var(--border);
-  background: #f9fafc;
+  background: var(--surface-1);
   font-size: 0.8rem;
   color: var(--ink-2);
 }
@@ -802,7 +872,7 @@ textarea:focus-visible {
 .session-launch-card {
   border-radius: var(--radius-3);
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--surface-1);
   padding: 0.85rem;
   display: grid;
   gap: 0.6rem;
@@ -838,38 +908,38 @@ textarea:focus-visible {
 .task-tree-controls {
   display: grid;
   grid-template-columns: 1fr 170px 170px;
-  gap: 0.6rem;
-  margin-bottom: 0.75rem;
+  gap: 0.45rem;
+  margin-bottom: 0.55rem;
 }
 
 .task-tree-controls input,
 .task-tree-controls select {
-  padding: 0.45rem 0.65rem;
+  padding: 0.38rem 0.55rem;
   border-radius: var(--radius-2);
   border: 1px solid var(--border);
-  background: #f9fafc;
-  font-size: 0.8rem;
+  background: var(--surface-1);
+  font-size: 0.76rem;
   color: var(--ink-2);
 }
 
 .task-tree {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.3rem;
   max-height: 580px;
   overflow: auto;
-  padding-right: 0.35rem;
+  padding-right: 0.15rem;
 }
 
 .task-node {
   display: grid;
-  grid-template-columns: 28px 1fr auto;
+  grid-template-columns: 24px 1fr auto;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.6rem;
+  gap: 0.4rem;
+  padding: 0.36rem 0.45rem;
   border-radius: var(--radius-3);
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--border);
+  background: var(--surface-1);
   cursor: pointer;
   transition: background var(--motion-fast) var(--easing-standard),
     border var(--motion-fast) var(--easing-standard),
@@ -883,15 +953,15 @@ textarea:focus-visible {
 }
 
 .task-node:hover {
-  background: rgba(37, 99, 235, 0.06);
+  background: var(--color-interactive-hover);
 }
 
 .expand-toggle {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   border-radius: var(--radius-2);
   border: 1px solid var(--border);
-  background: #f5f7fb;
+  background: var(--surface-2);
   color: var(--ink-2);
   font-weight: 600;
   cursor: pointer;
@@ -914,22 +984,22 @@ textarea:focus-visible {
 }
 
 .task-node-info p {
-  font-size: 0.88rem;
+  font-size: 0.8rem;
   color: var(--ink-1);
 }
 
 .task-meta {
-  font-size: 0.68rem;
+  font-size: 0.62rem;
   text-transform: uppercase;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.14em;
   color: var(--ink-3);
 }
 
 .task-status {
-  padding: 0.25rem 0.6rem;
+  padding: 0.18rem 0.45rem;
   border-radius: var(--radius-pill);
-  font-size: 0.62rem;
-  letter-spacing: 0.14em;
+  font-size: 0.56rem;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   font-weight: 600;
 }
@@ -1116,7 +1186,7 @@ textarea:focus-visible {
 }
 
 .graph-view.compact {
-  min-height: 420px;
+  min-height: 360px;
 }
 
 .muted {
@@ -1133,7 +1203,7 @@ textarea:focus-visible {
 
 .graph-view {
   grid-area: graph;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(233, 238, 245, 0.95));
+  background: linear-gradient(180deg, var(--surface-1), var(--surface-2));
   display: flex;
   flex-direction: column;
   gap: 0.8rem;
@@ -1342,14 +1412,14 @@ tbody tr:hover {
 #graph-container {
   flex: 1;
   border-radius: var(--radius-4);
-  border: 1px dashed rgba(15, 23, 42, 0.25);
-  background: radial-gradient(circle at 20% 20%, rgba(37, 99, 235, 0.08), transparent 55%),
-    radial-gradient(circle at 80% 0%, rgba(14, 165, 233, 0.08), transparent 45%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(233, 238, 245, 0.9));
+  border: 1px dashed var(--border-strong);
+  background: radial-gradient(circle at 20% 20%, rgba(37, 99, 235, 0.12), transparent 55%),
+    radial-gradient(circle at 80% 0%, rgba(14, 165, 233, 0.1), transparent 45%),
+    linear-gradient(180deg, var(--surface-1), var(--surface-2));
   display: flex;
   /* align-items: center; */
   /* justify-content: center; */
-  min-height: 360px;
+  min-height: 320px;
   overflow: hidden;
 }
 
@@ -1373,7 +1443,7 @@ tbody tr:hover {
 
 .session-compact-header {
   padding: 1rem 1.25rem;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--surface-2);
   border-bottom: 1px solid var(--border);
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr) auto;
@@ -1442,7 +1512,7 @@ tbody tr:hover {
   height: 28px;
   border: 1px solid var(--border);
   border-radius: var(--radius-2);
-  background: #fff;
+  background: var(--surface-1);
   color: var(--ink-2);
   display: inline-flex;
   align-items: center;
@@ -1461,9 +1531,10 @@ tbody tr:hover {
   right: 0;
   top: calc(100% + 6px);
   min-width: 220px;
+  max-width: min(92vw, 320px);
   border: 1px solid var(--border);
   border-radius: var(--radius-3);
-  background: #fff;
+  background: var(--surface-1);
   box-shadow: var(--shadow-2);
   padding: 0.45rem;
   display: flex;
@@ -2024,7 +2095,7 @@ tbody tr:hover {
   display: flex;
   gap: 0.8rem;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   padding: 0.4rem 0.2rem;
 }
@@ -2040,7 +2111,7 @@ tbody tr:hover {
 
 .session-filters select {
   border-radius: var(--radius-pill);
-  border: 1px solid rgba(15, 23, 42, 0.2);
+  border: 1px solid var(--border);
   background: var(--surface-2);
   color: var(--ink-2);
   padding: 0.3rem 0.6rem;
@@ -2050,7 +2121,7 @@ tbody tr:hover {
 .session-card {
   border-radius: var(--radius-3);
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--surface-1);
   display: grid;
   gap: 0.45rem;
   padding: 0.75rem;
@@ -2064,7 +2135,7 @@ tbody tr:hover {
 .terminal-card {
   border-radius: var(--radius-3);
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--surface-1);
   display: grid;
   gap: 0.45rem;
   padding: 0.75rem;
@@ -2295,6 +2366,7 @@ tbody tr:hover {
   display: flex;
   gap: 0.5rem;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .panel-tools input,
@@ -2302,15 +2374,17 @@ tbody tr:hover {
   padding: 0.4rem 0.6rem;
   border-radius: var(--radius-2);
   border: 1px solid var(--border);
-  background: #f9fafc;
+  background: var(--surface-1);
   font-size: 0.8rem;
   color: var(--ink-2);
-  min-width: 200px;
+  min-width: 0;
+  flex: 1 1 200px;
+  max-width: 100%;
 }
 
 .panel-tools button {
   border: 1px solid var(--border);
-  background: #f8fafc;
+  background: var(--surface-1);
   padding: 0.35rem 0.7rem;
   border-radius: var(--radius-pill);
   font-size: 0.72rem;
@@ -2540,7 +2614,54 @@ tbody tr:hover {
 }
 
 .session-composer-input-wrap.floating .session-composer-input {
-  padding-right: 5.6rem;
+  padding-right: 7.5rem;
+}
+
+.session-composer-float-controls {
+  position: absolute;
+  right: 0.45rem;
+  bottom: 0.45rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.session-composer-connection-indicator {
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  border: 1px solid transparent;
+  background: var(--color-border-strong);
+}
+
+.session-composer-connection-indicator.connecting {
+  color: #fef3c7;
+  border-color: rgba(245, 158, 11, 0.55);
+  background: rgba(180, 83, 9, 0.55);
+}
+
+.session-composer-connection-indicator.reconnecting {
+  color: #dbeafe;
+  border-color: rgba(59, 130, 246, 0.5);
+  background: rgba(30, 64, 175, 0.55);
+}
+
+.session-composer-connection-indicator.disconnected {
+  color: #e2e8f0;
+  border-color: rgba(100, 116, 139, 0.45);
+  background: rgba(51, 65, 85, 0.62);
+}
+
+.session-composer-connection-indicator.error {
+  color: #fee2e2;
+  border-color: rgba(239, 68, 68, 0.55);
+  background: rgba(127, 29, 29, 0.68);
 }
 
 .session-composer-input {
@@ -2559,9 +2680,7 @@ tbody tr:hover {
 .session-composer-input:focus { outline: none; border-color: var(--accent); }
 
 .session-composer-float-btn {
-  position: absolute;
-  right: 0.45rem;
-  bottom: 0.45rem;
+  position: relative;
   border: none;
   border-radius: var(--radius-pill);
   background: var(--accent);
@@ -3081,7 +3200,8 @@ tbody tr:hover {
   .task-tree-layout,
   .commit-layout {
     grid-template-columns: 1fr;
-    padding: 1.5rem;
+    padding: 0.65rem;
+    gap: 0.65rem;
   }
 
   .commit-layout {
@@ -3101,14 +3221,95 @@ tbody tr:hover {
 
   .session-layout {
     grid-template-columns: 1fr;
-    padding: 1.5rem;
+    padding: 0;
+    gap: 0;
   }
 
   .sessions-layout,
   .settings-layout,
   .extractor-layout {
     grid-template-columns: 1fr;
-    padding: 1.5rem;
+    padding: 0.9rem;
+  }
+
+  .task-tree-view .view-header {
+    padding: 0.7rem 0.85rem;
+  }
+
+  .task-tree-view .dashboard-subtitle {
+    display: none;
+  }
+
+  .task-tree-view .header-meta {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.4rem;
+  }
+
+  .task-tree-view .meta-card {
+    padding: 0.45rem 0.55rem;
+  }
+
+  .task-tree-view .meta-card p {
+    font-size: 0.56rem;
+    letter-spacing: 0.1em;
+  }
+
+  .task-tree-view .meta-card strong {
+    font-size: 0.82rem;
+  }
+
+  .task-tree-view .dashboard-panel {
+    padding: 0.75rem;
+    border-radius: var(--radius-3);
+  }
+
+  .task-tree-view .graph-view.compact {
+    min-height: 260px;
+  }
+
+  .task-tree-view #graph-container {
+    min-height: 220px;
+  }
+
+  .task-tree-controls {
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+    margin-bottom: 0.45rem;
+  }
+
+  .task-tree {
+    max-height: none;
+    padding-right: 0;
+  }
+
+  .task-node {
+    grid-template-columns: 20px 1fr auto;
+    padding: 0.28rem 0.35rem;
+    gap: 0.28rem;
+  }
+
+  .expand-toggle {
+    width: 18px;
+    height: 18px;
+    font-size: 0.72rem;
+  }
+
+  .task-node-info p {
+    font-size: 0.74rem;
+    line-height: 1.25;
+  }
+
+  .task-meta {
+    font-size: 0.55rem;
+    letter-spacing: 0.08em;
+  }
+
+  .task-status {
+    padding: 0.13rem 0.32rem;
+    font-size: 0.5rem;
+    letter-spacing: 0.06em;
   }
 
   .extractor-panel.wide {
@@ -3120,7 +3321,15 @@ tbody tr:hover {
   }
 
   .session-compact-header {
-    padding: 0.85rem 1rem;
+    padding: 0.8rem 0.9rem;
+    gap: 0.65rem;
+  }
+
+  .session-panel,
+  .session-side-panels {
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
   }
 
   .session-compact-title-wrap h1 {
@@ -3129,6 +3338,20 @@ tbody tr:hover {
 
   .session-compact-subtitle {
     font-size: 0.66rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .panel-tools input,
+  .panel-tools select,
+  .session-filters label,
+  .session-filters select {
+    width: 100%;
+  }
+
+  .session-viewer-menu {
+    min-width: 0;
+    width: min(92vw, 300px);
   }
 }
 

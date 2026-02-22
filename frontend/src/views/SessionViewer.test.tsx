@@ -171,10 +171,8 @@ describe("SessionViewer", () => {
 
     await waitFor(() => expect(screen.getByTestId("session-state-badge").textContent).toContain("running"))
     expect(await screen.findByTestId("terminal-view")).toBeDefined()
-    const activityStatus = await screen.findByTestId("activity-stream-status")
-    const terminalStatus = await screen.findByTestId("terminal-stream-status")
-    expect(activityStatus.textContent).toContain("Activity")
-    expect(terminalStatus.textContent).toContain("Terminal live")
+    expect(screen.queryByTestId("activity-stream-status")).toBeNull()
+    expect(screen.queryByTestId("terminal-stream-status")).toBeNull()
   })
 
   it("does not render raw output for PTY sessions", async () => {

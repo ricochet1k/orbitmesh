@@ -9,7 +9,7 @@
   --dock-header-h: 36px;       /* closed height */
   --dock-open-h: 440px;        /* expanded height on desktop */
   --dock-width: 380px;
-  --dock-z: 100;
+  --dock-z: 300;
 }
 
 /* ──────────────────────────────────────────
@@ -17,8 +17,8 @@
    ────────────────────────────────────────── */
 .agent-dock {
   position: fixed;
-  bottom: 0;
-  right: 24px;
+  bottom: max(env(safe-area-inset-bottom, 0px), 0px);
+  right: max(16px, env(safe-area-inset-right, 0px));
   width: var(--dock-width);
   height: var(--dock-open-h);
 
@@ -415,9 +415,9 @@
   }
 
   .agent-dock {
-    right: 0;
-    left: 0;
-    width: 100%;
+    right: env(safe-area-inset-right, 0px);
+    left: env(safe-area-inset-left, 0px);
+    width: auto;
     border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     border-left: none;
     border-right: none;
@@ -425,12 +425,12 @@
 
   /* Push page content up by the header height so the dock doesn't overlap */
   body {
-    padding-bottom: var(--dock-header-h);
+    padding-bottom: calc(var(--dock-header-h) + env(safe-area-inset-bottom, 0px));
   }
 
   /* When expanded, push content up more */
   body:has(.agent-dock:not(.minimized)) {
-    padding-bottom: var(--dock-open-h);
+    padding-bottom: calc(var(--dock-open-h) + env(safe-area-inset-bottom, 0px));
   }
 
   .agent-dock-header {

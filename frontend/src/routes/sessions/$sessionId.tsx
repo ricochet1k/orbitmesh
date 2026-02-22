@@ -13,7 +13,6 @@ import SessionMetrics from '../../components/SessionMetrics'
 import SessionTranscript from '../../components/SessionTranscript'
 import SessionComposer from '../../components/SessionComposer'
 import SessionTerminals from '../../components/SessionTerminals'
-import { getStreamStatusLabel, getTerminalStatusLabel } from '../../utils/statusLabels'
 
 export const Route = createFileRoute('/sessions/$sessionId')({
   component: SessionViewer,
@@ -269,6 +268,23 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
 
   // Map useSessionData streamStatus to the string union used by SessionToolbar
   const streamStatusStr = () => data.streamStatus()
+  const connectionIndicator = (): "connecting" | "reconnecting" | "disconnected" | "error" | null => {
+    const stream = streamStatusStr()
+    let streamState: "connecting" | "reconnecting" | "disconnected" | "error" | null = null
+    if (stream === "connecting") streamState = "connecting"
+    if (stream === "reconnecting") streamState = "reconnecting"
+    if (stream === "disconnected") streamState = "disconnected"
+    if (stream === "error") streamState = "error"
+
+    if (providerType() !== "pty") return streamState
+
+    const terminal = terminalStatus()
+    if (terminal === "error") return "error"
+    if (terminal === "resyncing") return "reconnecting"
+    if (terminal === "connecting") return streamState === "error" ? "error" : "connecting"
+    if (terminal === "closed") return streamState === "error" ? "error" : "disconnected"
+    return streamState
+  }
   const stateLabel = () => sessionState().replace("_", " ")
   const cancelDisabled = () => !canManage() || sessionState() !== "running" || pendingAction() === "cancel"
   const cancelTitle = () => {
@@ -291,14 +307,6 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
           <span class={`state-badge ${sessionState()}`} data-testid="session-state-badge">
             {stateLabel()}
           </span>
-          <span class={`stream-pill ${streamStatusStr()}`} data-testid="activity-stream-status">
-            Activity {getStreamStatusLabel(streamStatusStr())}
-          </span>
-          <Show when={providerType() === "pty"}>
-            <span class={`stream-pill ${terminalStatus()}`} data-testid="terminal-stream-status">
-              Terminal {getTerminalStatusLabel(terminalStatus())}
-            </span>
-          </Show>
           <span class="session-intel-chip">Provider {providerType() || "unknown"}</span>
           <Show when={session()?.current_task}>
             <span class="session-intel-chip">Task {session()?.current_task}</span>
@@ -333,39 +341,37 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
                 <div class="session-viewer-menu-divider" />
               </Show>
 
-              <Show when={agentList().length > 0}>
-                <div class="session-viewer-menu-section">
-                  <label class="session-viewer-menu-label">Agent</label>
-                  <select
-                    class="session-viewer-menu-select"
-                    value={selectedAgentId() ?? ""}
-                    onChange={(e) => setSelectedAgentId(e.currentTarget.value || null)}
-                  >
-                    <option value="">Session default</option>
-                    <For each={agentList()}>
-                      {(agent) => <option value={agent.id}>{agent.name}</option>}
-                    </For>
-                  </select>
-                </div>
-                <div class="session-viewer-menu-divider" />
-              </Show>
+              <div class="session-viewer-menu-section">
+                <label class="session-viewer-menu-label">Agent</label>
+                <select
+                  class="session-viewer-menu-select"
+                  value={selectedAgentId() ?? ""}
+                  onChange={(e) => setSelectedAgentId(e.currentTarget.value || null)}
+                  disabled={agents.loading || agentList().length === 0}
+                >
+                  <option value="">Session default</option>
+                  <For each={agentList()}>
+                    {(agent) => <option value={agent.id}>{agent.name}</option>}
+                  </For>
+                </select>
+              </div>
+              <div class="session-viewer-menu-divider" />
 
-              <Show when={modelOptions().length > 0}>
-                <div class="session-viewer-menu-section">
-                  <label class="session-viewer-menu-label">Model</label>
-                  <select
-                    class="session-viewer-menu-select"
-                    value={selectedModel()}
-                    onChange={(e) => setSelectedModel(e.currentTarget.value)}
-                  >
-                    <option value="">Session/provider default</option>
-                    <For each={modelOptions()}>
-                      {(model) => <option value={model}>{model}</option>}
-                    </For>
-                  </select>
-                </div>
-                <div class="session-viewer-menu-divider" />
-              </Show>
+              <div class="session-viewer-menu-section">
+                <label class="session-viewer-menu-label">Model</label>
+                <select
+                  class="session-viewer-menu-select"
+                  value={selectedModel()}
+                  onChange={(e) => setSelectedModel(e.currentTarget.value)}
+                  disabled={modelOptions().length === 0}
+                >
+                  <option value="">Session/provider default</option>
+                  <For each={modelOptions()}>
+                    {(model) => <option value={model}>{model}</option>}
+                  </For>
+                </select>
+              </div>
+              <div class="session-viewer-menu-divider" />
 
               <button
                 type="button"
@@ -425,15 +431,11 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
       <main class="session-layout">
         <section class="session-panel">
 
-          <div class="session-transcript-wrap">
-            <div class="panel-header">
-              <div>
-                <p class="panel-kicker">Live transcript</p>
-                <h2>Activity Feed</h2>
-              </div>
-              <div class="panel-tools">
-                <button
-                  type="button"
+            <div class="session-transcript-wrap">
+              <div class="panel-header">
+                <div class="panel-tools">
+                  <button
+                    type="button"
                   class="neutral"
                   onClick={data.loadEarlier}
                   disabled={!data.historyCursor() || data.historyLoading()}
@@ -480,6 +482,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
             onSend={handleSend}
             onInterrupt={handleInterrupt}
             error={composerError}
+            connectionIndicator={connectionIndicator}
             floatingAction
           />
         </section >

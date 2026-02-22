@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/solid-router"
-import { BsSliders, BsViewList, BsTerminal } from "solid-icons/bs"
+import { BsSliders, BsViewList, BsTerminal, BsFolder } from "solid-icons/bs"
 import { FaSolidTasks } from "solid-icons/fa"
 import { IoSettingsSharp } from "solid-icons/io"
 import { RiSystemDashboardHorizontalFill } from "solid-icons/ri"
@@ -190,6 +190,10 @@ export default function Sidebar() {
           <Link to="/" class={`nav-item`} onClick={closeMobileMenu}>
             <RiSystemDashboardHorizontalFill class="nav-icon" />
             <span class="nav-label">Dashboard</span>
+          </Link>
+          <Link to="/files" class={`nav-item`} onClick={closeMobileMenu}>
+            <BsFolder class="nav-icon" />
+            <span class="nav-label">Files</span>
           </Link>
           <Link to="/tasks" class={`nav-item`} onClick={closeMobileMenu}>
             <FaSolidTasks class="nav-icon" />

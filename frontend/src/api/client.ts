@@ -7,6 +7,7 @@ import * as providerApi from "./providers";
 import * as agentApi from "./agents";
 import * as taskApi from "./tasks";
 import * as projectApi from "./projects";
+import * as fileApi from "./files";
 
 /**
  * Unified API client. All methods are grouped by domain in separate modules
@@ -61,6 +62,11 @@ export const apiClient = {
   createProject: projectApi.createProject,
   updateProject: projectApi.updateProject,
   deleteProject: projectApi.deleteProject,
+
+  // Files
+  listFiles: fileApi.listFiles,
+  readFile: fileApi.readFile,
+  writeFile: fileApi.writeFile,
 
   // Tasks, commits, permissions, extractors
   getPermissions: taskApi.getPermissions,

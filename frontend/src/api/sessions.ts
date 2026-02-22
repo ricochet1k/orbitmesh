@@ -87,12 +87,14 @@ export async function createTaskSession(params: {
   taskTitle: string;
   providerType?: string;
   providerId?: string;
+  agentId?: string;
   workingDir?: string;
 }): Promise<SessionResponse> {
-  const { taskId, taskTitle, providerType, providerId, workingDir } = params;
+  const { taskId, taskTitle, providerType, providerId, agentId, workingDir } = params;
   return createSession({
     provider_type: providerType ?? DEFAULT_PROVIDER,
     provider_id: providerId,
+    agent_id: agentId,
     working_dir: workingDir,
     task_id: taskId,
     task_title: taskTitle,

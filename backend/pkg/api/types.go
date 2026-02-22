@@ -510,3 +510,22 @@ type AgentConfigListResponse struct {
 // SessionAgentID is the optional agent ID stored on a session.
 // It is included in SessionResponse as agent_id.
 type SessionAgentID = string
+
+// FileEntry describes a single file or directory within a project's filesystem.
+type FileEntry struct {
+	Name     string    `json:"name"`
+	Path     string    `json:"path"`
+	IsDir    bool      `json:"is_dir"`
+	Size     int64     `json:"size"`
+	MimeType string    `json:"mime_type,omitempty"`
+	Modified time.Time `json:"modified"`
+}
+
+// FileReadResponse is returned when reading a file's contents.
+// Encoding is "utf8" for text files and "base64" for binary/image files.
+type FileReadResponse struct {
+	Path     string `json:"path"`
+	MimeType string `json:"mime_type"`
+	Encoding string `json:"encoding"` // "utf8" or "base64"
+	Content  string `json:"content"`
+}

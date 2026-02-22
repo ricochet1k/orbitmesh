@@ -1,0 +1,277 @@
+/**
+ * File Viewer Component Styles
+ *
+ * Covers the full-page file browser, split-panel shell, file tree,
+ * editor toolbar, CodeMirror/ProseMirror wrappers, image viewer,
+ * and shared state classes.
+ */
+
+/* ========================================
+   LAYOUT
+   ======================================== */
+
+.files-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.file-viewer-shell {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  min-height: 0; /* critical for overflow to work inside a flex parent */
+}
+
+.file-tree-panel {
+  width: 280px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.file-editor-panel {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ========================================
+   FILE TREE
+   ======================================== */
+
+.file-tree {
+  padding: var(--space-2);
+  font-size: var(--font-size-sm, 0.875rem);
+}
+
+.file-tree-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+  border-radius: var(--radius-2);
+  user-select: none;
+  transition: background var(--motion-fast) var(--easing-standard);
+}
+
+.file-tree-item:hover {
+  background: var(--surface-3);
+}
+
+.file-tree-item.selected {
+  background: var(--accent-1);
+  color: #fff;
+}
+
+.file-tree-item.dir {
+  font-weight: 500;
+}
+
+.file-tree-icon {
+  display: inline-flex;
+  width: 1em;
+  flex-shrink: 0;
+}
+
+.file-tree-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* .file-tree-children — indentation handled via inline depth * 16px style */
+.file-tree-children {
+  /* no additional styles needed */
+}
+
+.file-tree-loading {
+  color: var(--ink-3);
+  font-style: italic;
+  padding-left: 1rem;
+}
+
+/* ========================================
+   EDITOR SHARED TOOLBAR
+   ======================================== */
+
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  gap: var(--space-2);
+  font-size: var(--font-size-sm, 0.875rem);
+  min-height: 40px;
+  flex-shrink: 0;
+}
+
+.editor-breadcrumb {
+  font-family: var(--font-mono);
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.editor-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.btn-save {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-2);
+  border: 1px solid rgba(37, 99, 235, 0.6);
+  background: var(--accent-1);
+  color: #fff;
+  font-size: var(--font-size-sm, 0.875rem);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--easing-standard),
+    box-shadow var(--motion-fast) var(--easing-standard);
+}
+
+.btn-save:hover:not(:disabled) {
+  background: #1d4ed8;
+  box-shadow: var(--shadow-1);
+}
+
+.btn-save:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.mode-toggle {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-2);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink-3);
+  font-size: var(--font-size-sm, 0.875rem);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--easing-standard),
+    color var(--motion-fast) var(--easing-standard),
+    border-color var(--motion-fast) var(--easing-standard);
+}
+
+.mode-toggle:hover {
+  background: var(--surface-3);
+  color: var(--ink-2);
+}
+
+.mode-toggle.active {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+  color: var(--ink-1);
+  font-weight: 500;
+}
+
+/* ========================================
+   CODEMIRROR / PROSEMIRROR CONTAINERS
+   ======================================== */
+
+.cm-editor-container {
+  flex: 1;
+  overflow: auto;
+  height: 100%;
+}
+
+.pm-editor-container {
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-4);
+}
+
+.pm-editor-container .ProseMirror {
+  outline: none;
+  min-height: 100%;
+  font-family: var(--font-sans);
+  line-height: 1.6;
+}
+
+.code-editor-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.markdown-editor-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* ========================================
+   IMAGE VIEWER
+   ======================================== */
+
+.image-viewer-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.image-viewer-canvas {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: var(--space-4);
+  /* Checkerboard transparency grid */
+  background:
+    repeating-conic-gradient(
+      rgba(0, 0, 0, 0.06) 0% 25%,
+      transparent 0% 50%
+    )
+    0 0 / 20px 20px,
+    var(--surface-1);
+}
+
+.image-viewer-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.image-viewer-path {
+  font-family: var(--font-mono);
+  color: var(--ink-3);
+}
+
+.image-viewer-meta {
+  color: var(--ink-3);
+  font-size: var(--font-size-sm, 0.875rem);
+}
+
+/* ========================================
+   STATES
+   ======================================== */
+
+.file-editor-loading {
+  padding: var(--space-4);
+  color: var(--ink-3);
+}
+
+.file-editor-error {
+  padding: var(--space-4);
+  color: var(--danger);
+}
+
+.file-editor-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}

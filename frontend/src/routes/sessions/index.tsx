@@ -240,27 +240,20 @@ function SessionsView(props: SessionsViewProps) {
   return (
     <div class="sessions-view" data-testid="sessions-view">
       <header class="view-header">
-        <div>
-          <p class="eyebrow">Session directory</p>
-          <h1 data-testid="sessions-heading">Sessions</h1>
-          <p class="dashboard-subtitle">
-            Review active and recent sessions, then open a live viewer for deeper inspection.
-          </p>
-        </div>
-        <div class="header-meta">
-          <div class="meta-card" data-testid="sessions-meta-total">
+        <div class="header-meta stats-bubbles">
+          <div class="meta-card stat-bubble" data-testid="sessions-meta-total">
             <p>Total sessions</p>
             <Show when={hasLoaded()} fallback={<span>Loading...</span>}>
               <strong>{sessionList().length}</strong>
             </Show>
           </div>
-          <div class="meta-card" data-testid="sessions-meta-running">
+          <div class="meta-card stat-bubble" data-testid="sessions-meta-running">
             <p>Running</p>
             <Show when={hasLoaded()} fallback={<span>Loading...</span>}>
               <strong>{stateCounts().get("running") ?? 0}</strong>
             </Show>
           </div>
-          <div class="meta-card" data-testid="sessions-meta-needs-attention">
+          <div class="meta-card stat-bubble" data-testid="sessions-meta-needs-attention">
             <p>Needs attention</p>
             <Show when={hasLoaded()} fallback={<span>Loading...</span>}>
               <strong>{stateCounts().get("error") ?? 0}</strong>

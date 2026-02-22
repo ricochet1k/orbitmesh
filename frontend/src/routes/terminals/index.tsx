@@ -106,27 +106,20 @@ export function TerminalsView(props: TerminalsViewProps) {
   return (
     <div class="terminals-view" data-testid="terminals-view">
       <header class="view-header">
-        <div>
-          <p class="eyebrow">Terminal directory</p>
-          <h1 data-testid="terminals-heading">Terminals</h1>
-          <p class="dashboard-subtitle">
-            Track active terminals, linked sessions, and recent snapshot activity.
-          </p>
-        </div>
-        <div class="header-meta">
-          <div class="meta-card" data-testid="terminals-meta-total">
+        <div class="header-meta stats-bubbles">
+          <div class="meta-card stat-bubble" data-testid="terminals-meta-total">
             <p>Total terminals</p>
             <Show when={hasLoaded()} fallback={<span>Loading...</span>}>
               <strong>{terminalList().length}</strong>
             </Show>
           </div>
-          <div class="meta-card" data-testid="terminals-meta-attached">
+          <div class="meta-card stat-bubble" data-testid="terminals-meta-attached">
             <p>Attached</p>
             <Show when={hasLoaded()} fallback={<span>Loading...</span>}>
               <strong>{attachedCount()}</strong>
             </Show>
           </div>
-          <div class="meta-card" data-testid="terminals-meta-detached">
+          <div class="meta-card stat-bubble" data-testid="terminals-meta-detached">
             <p>Detached</p>
             <Show when={hasLoaded()} fallback={<span>Loading...</span>}>
               <strong>{detachedCount()}</strong>

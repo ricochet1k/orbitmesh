@@ -24,6 +24,8 @@ export interface SessionComposerProps {
   defaultProviderId?: string
   /** Renders a compact floating submit/stop action on the textarea */
   floatingAction?: boolean
+  /** Optional inline connection indicator state for the floating action */
+  connectionIndicator?: Accessor<"connecting" | "reconnecting" | "disconnected" | "error" | null>
 }
 
 export default function SessionComposer(props: SessionComposerProps) {
@@ -102,6 +104,21 @@ export default function SessionComposer(props: SessionComposerProps) {
     return !value().trim() || !props.canSend()
   }
 
+  const indicatorTitle = () => {
+    switch (props.connectionIndicator?.()) {
+      case "connecting":
+        return "Connecting"
+      case "reconnecting":
+        return "Reconnecting"
+      case "disconnected":
+        return "Disconnected"
+      case "error":
+        return "Connection error"
+      default:
+        return ""
+    }
+  }
+
   return (
     <div class="session-composer">
       <Show when={props.error?.()}>
@@ -121,17 +138,28 @@ export default function SessionComposer(props: SessionComposerProps) {
             rows={2}
           />
           <Show when={props.floatingAction}>
-            <button
-              type="button"
-              class="session-composer-float-btn"
-              classList={{ stop: props.isRunning() && !!props.onInterrupt }}
-              data-testid="session-composer-primary"
-              onClick={handlePrimaryAction}
-              disabled={primaryDisabled()}
-              title={props.isRunning() ? "Send interrupt signal (Ctrl+C)" : "Submit message"}
-            >
-              {primaryLabel()}
-            </button>
+            <div class="session-composer-float-controls">
+              <Show when={props.connectionIndicator?.()}>
+                <span
+                  class={`session-composer-connection-indicator ${props.connectionIndicator?.()}`}
+                  aria-label={indicatorTitle()}
+                  title={indicatorTitle()}
+                >
+                  !
+                </span>
+              </Show>
+              <button
+                type="button"
+                class="session-composer-float-btn"
+                classList={{ stop: props.isRunning() && !!props.onInterrupt }}
+                data-testid="session-composer-primary"
+                onClick={handlePrimaryAction}
+                disabled={primaryDisabled()}
+                title={props.isRunning() ? "Send interrupt signal (Ctrl+C)" : "Submit message"}
+              >
+                {primaryLabel()}
+              </button>
+            </div>
           </Show>
         </div>
         <Show when={!props.floatingAction}>

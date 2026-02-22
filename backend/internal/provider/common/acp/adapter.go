@@ -184,18 +184,18 @@ func (a *acpClientAdapter) SessionUpdate(ctx context.Context, notif acpsdk.Sessi
 	switch {
 	case update.UserMessageChunk != nil:
 		// User message echo - useful for confirmation
-		a.handleContentBlock(sess, update.UserMessageChunk.Content)
+		a.handleContentBlock(sess, update.UserMessageChunk.Content, true)
 		a.emitMetadata(sess, "user_message_chunk", map[string]any{
 			"content": update.UserMessageChunk.Content,
 		})
 
 	case update.AgentMessageChunk != nil:
 		// Streaming agent message chunk
-		a.handleContentBlock(sess, update.AgentMessageChunk.Content)
+		a.handleContentBlock(sess, update.AgentMessageChunk.Content, true)
 
 	case update.AgentThoughtChunk != nil:
 		// Internal reasoning/thinking process
-		a.handleContentBlock(sess, update.AgentThoughtChunk.Content)
+		a.handleContentBlock(sess, update.AgentThoughtChunk.Content, false)
 		raw, _ := json.Marshal(update.AgentThoughtChunk)
 		if update.AgentThoughtChunk.Content.Text != nil {
 			sess.events.Emit(domain.NewThoughtEvent(sess.sessionID, update.AgentThoughtChunk.Content.Text.Text, raw))
@@ -358,12 +358,18 @@ func (a *acpClientAdapter) ReleaseTerminal(ctx context.Context, req acpsdk.Relea
 }
 
 // handleContentBlock processes an ACP content block from session updates.
-func (a *acpClientAdapter) handleContentBlock(sess *Session, block acpsdk.ContentBlock) {
+func (a *acpClientAdapter) handleContentBlock(sess *Session, block acpsdk.ContentBlock, emitOutput bool) {
+	raw, _ := json.Marshal(block)
+
 	switch {
 	case block.Text != nil:
+		if !emitOutput {
+			return
+		}
+
 		// Text output
 		sess.state.SetOutput(block.Text.Text)
-		sess.events.Emit(domain.NewOutputEvent(sess.sessionID, block.Text.Text, nil))
+		sess.events.Emit(domain.NewOutputEvent(sess.sessionID, block.Text.Text, raw))
 
 		// Track assistant message for snapshots
 		sess.mu.Lock()
@@ -376,9 +382,9 @@ func (a *acpClientAdapter) handleContentBlock(sess *Session, block acpsdk.Conten
 
 	case block.Image != nil:
 		// Image output (emit as metadata)
-		a.emitMetadata(sess, "image", map[string]any{
+		sess.events.Emit(domain.NewMetadataEvent(sess.sessionID, "image", map[string]any{
 			"source": block.Image,
-		})
+		}, raw))
 	}
 }
 

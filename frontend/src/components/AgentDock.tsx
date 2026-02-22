@@ -36,6 +36,7 @@ export default function AgentDock(props: AgentDockProps) {
   )
   const [permissions] = createResource(apiClient.getPermissions)
   const [providers] = createResource(apiClient.listProviders)
+  const [agents] = createResource(apiClient.listAgents)
 
   const [dockError, setDockError] = createSignal<string | null>(null)
   const [isExpanded, setIsExpanded] = createSignal(false)
@@ -46,6 +47,8 @@ export default function AgentDock(props: AgentDockProps) {
   const [composerPending, setComposerPending] = createSignal<string | null>(null)
   const [sessionStateOverride, setSessionStateOverride] = createSignal<SessionState | null>(null)
   const [selectedProviderId, setSelectedProviderId] = createSignal<string | null>(null)
+  const [selectedAgentId, setSelectedAgentId] = createSignal<string | null>(null)
+  const [selectedModel, setSelectedModel] = createSignal<string>("")
 
   let transcriptContainerRef: HTMLDivElement | undefined
 
@@ -196,7 +199,14 @@ export default function AgentDock(props: AgentDockProps) {
         activeSessionId = await ensureDockSessionId(pid ? { providerId: pid } : {})
       }
       if (!activeSessionId) throw new Error("Unable to start dock session.")
-      await apiClient.sendMessage(activeSessionId!, text)
+      const providerId = selectedProvider()?.id
+      const agentId = selectedAgentId() ?? undefined
+      const model = selectedModel().trim() || undefined
+      const sendOptions =
+        providerId || agentId || model
+          ? { providerId, agentId, model }
+          : undefined
+      await apiClient.sendMessage(activeSessionId!, text, sendOptions)
       setLastAction({ label: "Input", detail: text.slice(0, 80) })
     } catch (err) {
       setComposerError(err instanceof Error ? err.message : "Failed to send message")
@@ -238,11 +248,61 @@ export default function AgentDock(props: AgentDockProps) {
   }
 
   const providerList = () => providers()?.providers ?? []
+  const agentList = () => agents()?.agents ?? []
   const selectedProvider = () => {
     const pid = selectedProviderId()
     if (!pid) return providerList()[0] ?? null
     return providerList().find((p) => p.id === pid) ?? providerList()[0] ?? null
   }
+
+  const selectedAgent = () => {
+    const aid = selectedAgentId()
+    if (!aid) return null
+    return agentList().find((a) => a.id === aid) ?? null
+  }
+
+  const selectedAgentDefaultModel = createMemo(() => {
+    const value = selectedAgent()?.custom?.["model"]
+    return typeof value === "string" ? value : ""
+  })
+
+  const selectedProviderDefaultModel = createMemo(() => {
+    const value = selectedProvider()?.custom?.["model"]
+    return typeof value === "string" ? value : ""
+  })
+
+  const modelOptions = createMemo(() => {
+    const set = new Set<string>()
+    const fromAgent = selectedAgentDefaultModel().trim()
+    if (fromAgent) set.add(fromAgent)
+    const fromProvider = selectedProviderDefaultModel().trim()
+    if (fromProvider) set.add(fromProvider)
+    providerList().forEach((provider) => {
+      const value = provider.custom?.["model"]
+      if (typeof value === "string" && value.trim()) set.add(value.trim())
+    })
+    if (selectedModel().trim()) set.add(selectedModel().trim())
+    return Array.from(set)
+  })
+
+  createEffect(() => {
+    if (selectedAgentId() !== null) return
+    const sessionAgentId = session()?.agent_id
+    if (sessionAgentId) setSelectedAgentId(sessionAgentId)
+  })
+
+  createEffect(() => {
+    if (selectedModel().trim()) return
+    const fromAgent = selectedAgentDefaultModel().trim()
+    if (fromAgent) {
+      setSelectedModel(fromAgent)
+      return
+    }
+    const fromProvider = selectedProviderDefaultModel().trim()
+    if (fromProvider) {
+      setSelectedModel(fromProvider)
+    }
+  })
 
   return (
     <div
@@ -288,6 +348,38 @@ export default function AgentDock(props: AgentDockProps) {
                 </div>
                 <div class="agent-dock-menu-divider" />
               </Show>
+
+              <div class="agent-dock-menu-section">
+                <label class="agent-dock-menu-label">Agent</label>
+                <select
+                  class="agent-dock-menu-select"
+                  value={selectedAgentId() ?? ""}
+                  onChange={(e) => setSelectedAgentId(e.currentTarget.value || null)}
+                  disabled={agents.loading || agentList().length === 0}
+                >
+                  <option value="">Session default</option>
+                  <For each={agentList()}>
+                    {(a) => <option value={a.id}>{a.name}</option>}
+                  </For>
+                </select>
+              </div>
+              <div class="agent-dock-menu-divider" />
+
+              <div class="agent-dock-menu-section">
+                <label class="agent-dock-menu-label">Model</label>
+                <select
+                  class="agent-dock-menu-select"
+                  value={selectedModel()}
+                  onChange={(e) => setSelectedModel(e.currentTarget.value)}
+                  disabled={modelOptions().length === 0}
+                >
+                  <option value="">Session/provider default</option>
+                  <For each={modelOptions()}>
+                    {(model) => <option value={model}>{model}</option>}
+                  </For>
+                </select>
+              </div>
+              <div class="agent-dock-menu-divider" />
 
               <button
                 type="button"

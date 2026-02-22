@@ -128,8 +128,14 @@ func setupGitRepo(t *testing.T) (string, string) {
 
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	// Prepend -c flags to disable GPG/SSH commit signing so the test does not
+	// block waiting for an interactive signing agent (e.g. 1Password).
+	fullArgs := append([]string{"-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"}, args...)
+	cmd := exec.Command("git", fullArgs...)
 	cmd.Dir = dir
+	// GIT_CONFIG_NOSYSTEM prevents the system-level git config (which may also
+	// enable signing) from being loaded during the test.
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
