@@ -27,7 +27,7 @@ func TestEventTypeString(t *testing.T) {
 
 func TestNewStatusChangeEvent(t *testing.T) {
 	before := time.Now()
-	e := NewStatusChangeEvent("session-123", SessionStateRunning, SessionStateSuspended, "waiting for tool result")
+	e := NewStatusChangeEvent("session-123", SessionStateRunning, SessionStateSuspended, "waiting for tool result", nil)
 	after := time.Now()
 
 	if e.Type != EventTypeStatusChange {
@@ -56,7 +56,7 @@ func TestNewStatusChangeEvent(t *testing.T) {
 }
 
 func TestNewOutputEvent(t *testing.T) {
-	e := NewOutputEvent("session-123", "Hello, world!")
+	e := NewOutputEvent("session-123", "Hello, world!", nil)
 
 	if e.Type != EventTypeOutput {
 		t.Errorf("expected EventTypeOutput, got %v", e.Type)
@@ -75,7 +75,7 @@ func TestNewOutputEvent(t *testing.T) {
 }
 
 func TestNewMetricEvent(t *testing.T) {
-	e := NewMetricEvent("session-123", 100, 200, 5)
+	e := NewMetricEvent("session-123", 100, 200, 5, nil)
 
 	if e.Type != EventTypeMetric {
 		t.Errorf("expected EventTypeMetric, got %v", e.Type)
@@ -100,7 +100,7 @@ func TestNewMetricEvent(t *testing.T) {
 }
 
 func TestNewErrorEvent(t *testing.T) {
-	e := NewErrorEvent("session-123", "connection failed", "E001")
+	e := NewErrorEvent("session-123", "connection failed", "E001", nil)
 
 	if e.Type != EventTypeError {
 		t.Errorf("expected EventTypeError, got %v", e.Type)
@@ -122,7 +122,7 @@ func TestNewErrorEvent(t *testing.T) {
 }
 
 func TestNewMetadataEvent(t *testing.T) {
-	e := NewMetadataEvent("session-123", "custom_key", map[string]int{"count": 42})
+	e := NewMetadataEvent("session-123", "custom_key", map[string]int{"count": 42}, nil)
 
 	if e.Type != EventTypeMetadata {
 		t.Errorf("expected EventTypeMetadata, got %v", e.Type)

@@ -21,35 +21,35 @@ func TestEventAdapter_EmitEvents(t *testing.T) {
 		{
 			name: "StatusChange",
 			emit: func() {
-				adapter.EmitStatusChange(domain.SessionStateIdle, domain.SessionStateRunning, "test reason")
+				adapter.Emit(domain.NewStatusChangeEvent("test-session", domain.SessionStateIdle, domain.SessionStateRunning, "test reason", nil))
 			},
 			expected: domain.EventTypeStatusChange,
 		},
 		{
 			name: "Output",
 			emit: func() {
-				adapter.EmitOutput("test output")
+				adapter.Emit(domain.NewOutputEvent("test-session", "test output", nil))
 			},
 			expected: domain.EventTypeOutput,
 		},
 		{
 			name: "Metric",
 			emit: func() {
-				adapter.EmitMetric(100, 50, 1)
+				adapter.Emit(domain.NewMetricEvent("test-session", 100, 50, 1, nil))
 			},
 			expected: domain.EventTypeMetric,
 		},
 		{
 			name: "Error",
 			emit: func() {
-				adapter.EmitError("test error", "TEST_ERR")
+				adapter.Emit(domain.NewErrorEvent("test-session", "test error", "TEST_ERR", nil))
 			},
 			expected: domain.EventTypeError,
 		},
 		{
 			name: "Metadata",
 			emit: func() {
-				adapter.EmitMetadata("key", "value")
+				adapter.Emit(domain.NewMetadataEvent("test-session", "key", "value", nil))
 			},
 			expected: domain.EventTypeMetadata,
 		},
@@ -77,13 +77,13 @@ func TestEventAdapter_EmitEvents(t *testing.T) {
 func TestEventAdapter_Close(t *testing.T) {
 	adapter := NewEventAdapter("test-session", 10)
 
-	adapter.EmitOutput("before close")
+	adapter.Emit(domain.NewOutputEvent("test-session", "before close", nil))
 	<-adapter.Events()
 
 	adapter.Close()
 
 	// After Close(), emitting should be a no-op (no panic).
-	adapter.EmitOutput("after close")
+	adapter.Emit(domain.NewOutputEvent("test-session", "after close", nil))
 
 	// The events channel should be closed: reads return immediately with ok=false.
 	select {
@@ -101,9 +101,9 @@ func TestEventAdapter_BufferOverflow(t *testing.T) {
 	adapter := NewEventAdapter("test-session", 2)
 	defer adapter.Close()
 
-	adapter.EmitOutput("1")
-	adapter.EmitOutput("2")
-	adapter.EmitOutput("3")
+	adapter.Emit(domain.NewOutputEvent("test-session", "1", nil))
+	adapter.Emit(domain.NewOutputEvent("test-session", "2", nil))
+	adapter.Emit(domain.NewOutputEvent("test-session", "3", nil))
 
 	count := 0
 	timeout := time.After(100 * time.Millisecond)
@@ -130,7 +130,7 @@ func TestEventAdapter_ConcurrentEmit(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
-				adapter.EmitOutput("test")
+				adapter.Emit(domain.NewOutputEvent("test-session", "test", nil))
 			}
 		}(i)
 	}
@@ -245,7 +245,7 @@ func TestEventAdapter_DefaultBufferSize(t *testing.T) {
 	defer adapter.Close()
 
 	for i := 0; i < 100; i++ {
-		adapter.EmitOutput("test")
+		adapter.Emit(domain.NewOutputEvent("test-session", "test", nil))
 	}
 
 	count := 0
@@ -267,7 +267,7 @@ func TestEventAdapter_NegativeBufferSize(t *testing.T) {
 	adapter := NewEventAdapter("test-session", -5)
 	defer adapter.Close()
 
-	adapter.EmitOutput("test")
+	adapter.Emit(domain.NewOutputEvent("test-session", "test", nil))
 
 	select {
 	case <-adapter.Events():
@@ -289,11 +289,11 @@ func TestEventAdapter_EmitAfterDoneChannelClosed(t *testing.T) {
 
 	adapter.Close()
 
-	adapter.EmitStatusChange(domain.SessionStateSuspended, domain.SessionStateRunning, "reason")
-	adapter.EmitOutput("output")
-	adapter.EmitMetric(1, 1, 1)
-	adapter.EmitError("error", "CODE")
-	adapter.EmitMetadata("key", "value")
+	adapter.Emit(domain.NewStatusChangeEvent("test-session", domain.SessionStateSuspended, domain.SessionStateRunning, "reason", nil))
+	adapter.Emit(domain.NewOutputEvent("test-session", "output", nil))
+	adapter.Emit(domain.NewMetricEvent("test-session", 1, 1, 1, nil))
+	adapter.Emit(domain.NewErrorEvent("test-session", "error", "CODE", nil))
+	adapter.Emit(domain.NewMetadataEvent("test-session", "key", "value", nil))
 }
 
 func TestProviderState_StatusSnapshot(t *testing.T) {
@@ -374,7 +374,7 @@ func TestEventAdapter_EventContent(t *testing.T) {
 	adapter := NewEventAdapter("sess-123", 10)
 	defer adapter.Close()
 
-	adapter.EmitStatusChange(domain.SessionStateIdle, domain.SessionStateRunning, "test reason")
+	adapter.Emit(domain.NewStatusChangeEvent("sess-123", domain.SessionStateIdle, domain.SessionStateRunning, "test reason", nil))
 
 	event := <-adapter.Events()
 
@@ -404,7 +404,7 @@ func TestEventAdapter_MetricEventContent(t *testing.T) {
 	adapter := NewEventAdapter("sess-123", 10)
 	defer adapter.Close()
 
-	adapter.EmitMetric(100, 50, 3)
+	adapter.Emit(domain.NewMetricEvent("sess-123", 100, 50, 3, nil))
 
 	event := <-adapter.Events()
 
@@ -431,7 +431,7 @@ func TestEventAdapter_ErrorEventContent(t *testing.T) {
 	adapter := NewEventAdapter("sess-123", 10)
 	defer adapter.Close()
 
-	adapter.EmitError("something failed", "ERR_FAILED")
+	adapter.Emit(domain.NewErrorEvent("sess-123", "something failed", "ERR_FAILED", nil))
 
 	event := <-adapter.Events()
 
@@ -455,7 +455,7 @@ func TestEventAdapter_MetadataEventContent(t *testing.T) {
 	adapter := NewEventAdapter("sess-123", 10)
 	defer adapter.Close()
 
-	adapter.EmitMetadata("model", "gemini-2.5-flash")
+	adapter.Emit(domain.NewMetadataEvent("sess-123", "model", "gemini-2.5-flash", nil))
 
 	event := <-adapter.Events()
 
@@ -479,7 +479,7 @@ func TestEventAdapter_OutputEventContent(t *testing.T) {
 	adapter := NewEventAdapter("sess-123", 10)
 	defer adapter.Close()
 
-	adapter.EmitOutput("Hello, world!")
+	adapter.Emit(domain.NewOutputEvent("sess-123", "Hello, world!", nil))
 
 	event := <-adapter.Events()
 
@@ -502,7 +502,7 @@ func TestEventAdapter_EmitRaceWithClose(t *testing.T) {
 
 		go func() {
 			for j := 0; j < 10; j++ {
-				adapter.EmitOutput("test")
+				adapter.Emit(domain.NewOutputEvent("test-session", "test", nil))
 			}
 		}()
 
@@ -519,8 +519,8 @@ func TestEventAdapter_FullBufferDropsEvents(t *testing.T) {
 	adapter := NewEventAdapter("test-session", 1)
 	defer adapter.Close()
 
-	adapter.EmitOutput("first")
-	adapter.EmitOutput("second - should be dropped")
+	adapter.Emit(domain.NewOutputEvent("test-session", "first", nil))
+	adapter.Emit(domain.NewOutputEvent("test-session", "second - should be dropped", nil))
 
 	select {
 	case event := <-adapter.Events():

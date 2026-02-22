@@ -107,15 +107,15 @@ func TestClaudeCodeProvider_EmitEvent(t *testing.T) {
 	}{
 		{
 			name:  "output event",
-			event: domain.NewOutputEvent("test-session", "test output"),
+			event: domain.NewOutputEvent("test-session", "test output", nil),
 		},
 		{
 			name:  "metric event",
-			event: domain.NewMetricEvent("test-session", 10, 5, 1),
+			event: domain.NewMetricEvent("test-session", 10, 5, 1, nil),
 		},
 		{
 			name:  "error event",
-			event: domain.NewErrorEvent("test-session", "test error", "TEST_ERROR"),
+			event: domain.NewErrorEvent("test-session", "test error", "TEST_ERROR", nil),
 		},
 	}
 

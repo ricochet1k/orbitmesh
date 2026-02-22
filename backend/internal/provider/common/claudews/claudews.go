@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"maps"
 	"os"
 	"strings"
@@ -118,7 +119,7 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) err
 	p.ctx, p.cancel = context.WithCancel(context.WithoutCancel(ctx))
 
 	p.state.SetState(session.StateStarting)
-	p.events.EmitStatusChange(domain.SessionStateIdle, domain.SessionStateRunning, "starting claudews provider")
+	p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateIdle, domain.SessionStateRunning, "starting claudews provider", nil))
 
 	// ── 1. Start the WebSocket server ────────────────────────────────────────
 	srv, err := newWSServer(p.handleConnection)
@@ -128,6 +129,7 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) err
 	}
 	p.wsServer = srv
 	srv.Serve(p.ctx)
+	log.Printf("[claudews] Listening on %v", srv.ln.Addr())
 
 	// ── 2. Build command arguments ───────────────────────────────────────────
 	args, err := buildWSCommandArgs(srv.Addr(), config)
@@ -145,6 +147,8 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) err
 	}
 	maps.Copy(env, config.Environment)
 
+	log.Printf("[claudews] Starting claude in %q with args %q", config.WorkingDir, args)
+
 	// ── 4. Spawn the CLI process ─────────────────────────────────────────────
 	mgr, err := process.Start(p.ctx, process.Config{
 		Command:     "claude",
@@ -159,8 +163,7 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) err
 	p.processMgr = mgr
 
 	// Drain stderr in a goroutine so the process doesn't block.
-	p.wg.Add(1)
-	go p.drainStderr()
+	p.wg.Go(p.drainStderr)
 
 	// ── 5. Wait for the CLI to connect (up to 15 s) ──────────────────────────
 	select {
@@ -174,8 +177,7 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) err
 	}
 
 	// ── 6. Start the input forwarding goroutine ───────────────────────────────
-	p.wg.Add(1)
-	go p.processInput()
+	p.wg.Go(p.processInput)
 
 	p.state.SetState(session.StateRunning)
 	// Already emitted idle->running at startup
@@ -194,7 +196,7 @@ func (p *ClaudeWSProvider) Stop(ctx context.Context) error {
 	}
 
 	p.state.SetState(session.StateStopping)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateIdle, "stopping claudews provider")
+	p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateRunning, domain.SessionStateIdle, "stopping claudews provider", nil))
 
 	if p.cancel != nil {
 		p.cancel()
@@ -236,7 +238,7 @@ func (p *ClaudeWSProvider) Kill() error {
 	}
 
 	p.state.SetState(session.StateStopped)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateIdle, "claudews provider killed")
+	p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateRunning, domain.SessionStateIdle, "claudews provider killed", nil))
 	p.events.Close()
 	return nil
 }
@@ -295,7 +297,7 @@ func (p *ClaudeWSProvider) handleConnection(conn *wsConn) {
 			if p.ctx.Err() != nil {
 				return // normal shutdown
 			}
-			p.events.EmitError(err.Error(), "WS_READ_ERROR")
+			p.events.Emit(domain.NewErrorEvent(p.sessionID, err.Error(), "WS_READ_ERROR", nil))
 			return
 		}
 
@@ -311,10 +313,7 @@ func (p *ClaudeWSProvider) handleConnection(conn *wsConn) {
 func (p *ClaudeWSProvider) dispatchMessage(data []byte) {
 	rm, err := unmarshalRaw(data)
 	if err != nil {
-		p.events.WithRaw(data).EmitMetadata("parse_error", map[string]any{
-			"error": err.Error(),
-			"data":  string(data),
-		})
+		p.events.Emit(domain.NewErrorEvent(p.sessionID, err.Error(), "WS_PARSE_ERROR", data))
 		return
 	}
 
@@ -338,20 +337,19 @@ func (p *ClaudeWSProvider) dispatchMessage(data []byte) {
 	case "keep_alive":
 		// no-op
 	default:
-		p.events.WithRaw(rm.Raw).EmitMetadata("unknown_ws_message", map[string]any{
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "unknown_ws_message", map[string]any{
 			"type":    rm.Type,
 			"subtype": rm.Subtype,
-		})
+		}, rm.Raw))
 	}
 }
 
 func (p *ClaudeWSProvider) handleSystemMsg(rm RawMessage) {
-	e := p.events.WithRaw(rm.Raw)
 	switch rm.Subtype {
 	case "init":
 		var msg SystemInitMessage
 		if err := json.Unmarshal(rm.Raw, &msg); err != nil {
-			e.EmitError(err.Error(), "WS_PARSE_ERROR")
+			p.events.Emit(domain.NewErrorEvent(p.sessionID, err.Error(), "WS_PARSE_ERROR", rm.Raw))
 			return
 		}
 		p.mu.Lock()
@@ -366,7 +364,7 @@ func (p *ClaudeWSProvider) handleSystemMsg(rm RawMessage) {
 		for i, s := range msg.MCPServers {
 			mcpServers[i] = map[string]any{"name": s.Name, "status": s.Status}
 		}
-		e.EmitMetadata("system_init", map[string]any{
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "system_init", map[string]any{
 			"subtype":             "init",
 			"claude_session_id":   msg.SessionID,
 			"working_dir":         msg.CWD,
@@ -376,7 +374,7 @@ func (p *ClaudeWSProvider) handleSystemMsg(rm RawMessage) {
 			"api_key_source":      msg.APIKeySource,
 			"tools":               tools,
 			"mcp_servers":         mcpServers,
-		})
+		}, rm.Raw))
 
 	case "status":
 		var msg SystemStatusMessage
@@ -387,35 +385,34 @@ func (p *ClaudeWSProvider) handleSystemMsg(rm RawMessage) {
 		if msg.Status != nil {
 			status = *msg.Status
 		}
-		e.EmitMetadata("system_status", map[string]any{
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "system_status", map[string]any{
 			"status": status,
-		})
+		}, rm.Raw))
 
 	case "compact_boundary":
-		e.EmitMetadata("compact_boundary", map[string]any{
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "compact_boundary", map[string]any{
 			"raw": string(rm.Raw),
-		})
+		}, rm.Raw))
 
 	case "task_notification":
-		e.EmitMetadata("task_notification", map[string]any{
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "task_notification", map[string]any{
 			"raw": string(rm.Raw),
-		})
+		}, rm.Raw))
 
 	default:
-		e.EmitMetadata("system_message", map[string]any{
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "system_message", map[string]any{
 			"subtype": rm.Subtype,
 			"raw":     string(rm.Raw),
-		})
+		}, rm.Raw))
 	}
 }
 
 func (p *ClaudeWSProvider) handleAssistantMsg(rm RawMessage) {
-	e := p.events.WithRaw(rm.Raw)
 	// The assistant message mirrors the top-level format from the stdin/stdout
 	// protocol.  Re-use the shared claude stream_parser via a shim.
 	var msg AssistantMessage
 	if err := json.Unmarshal(rm.Raw, &msg); err != nil {
-		e.EmitError(err.Error(), "WS_PARSE_ERROR")
+		p.events.Emit(domain.NewErrorEvent(p.sessionID, err.Error(), "WS_PARSE_ERROR", rm.Raw))
 		return
 	}
 
@@ -456,7 +453,7 @@ func (p *ClaudeWSProvider) handleAssistantMsg(rm RawMessage) {
 		}
 	}
 
-	e.EmitMetadata("assistant_snapshot", metadata)
+	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "assistant_snapshot", metadata, rm.Raw))
 }
 
 func (p *ClaudeWSProvider) handleStreamEvent(rm RawMessage) {
@@ -491,14 +488,13 @@ func (p *ClaudeWSProvider) handleStreamEvent(rm RawMessage) {
 // dispatchInnerStreamEvent handles the unwrapped Anthropic streaming event types.
 // raw is the original wire bytes (outer WS message) to attach to every emitted event.
 func (p *ClaudeWSProvider) dispatchInnerStreamEvent(eventType string, data map[string]any, raw []byte) {
-	e := p.events.WithRaw(raw)
 	switch eventType {
 	case "content_block_delta":
 		// Extract text delta for real-time streaming output.
 		if delta, ok := data["delta"].(map[string]any); ok {
 			if deltaType, ok := delta["type"].(string); ok && deltaType == "text_delta" {
 				if text, ok := delta["text"].(string); ok && text != "" {
-					p.emitEvent(domain.NewDeltaOutputEvent(p.sessionID, text), raw)
+					p.emitEvent(domain.NewDeltaOutputEvent(p.sessionID, text, raw), raw)
 				}
 			}
 		}
@@ -507,19 +503,21 @@ func (p *ClaudeWSProvider) dispatchInnerStreamEvent(eventType string, data map[s
 		if cb, ok := data["content_block"].(map[string]any); ok {
 			if cbType, ok := cb["type"].(string); ok && cbType == "tool_use" {
 				idx, _ := data["index"].(float64)
-				e.EmitMetadata("tool_use_start", map[string]any{
-					"tool_name": cb["name"],
-					"tool_id":   cb["id"],
-					"index":     int64(idx),
-				})
+				p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+					ID:     fmt.Sprint(cb["id"]),
+					Name:   fmt.Sprint(cb["name"]),
+					Status: "started",
+					Title:  fmt.Sprintf("tool #%d", int64(idx)),
+					Input:  cb["input"],
+				}, raw))
 			}
 		}
 
 	case "content_block_stop":
 		if idx, ok := data["index"].(float64); ok {
-			e.EmitMetadata("content_block_stop", map[string]any{
+			p.events.Emit(domain.NewMetadataEvent(p.sessionID, "content_block_stop", map[string]any{
 				"index": int64(idx),
-			})
+			}, raw))
 		}
 
 	case "message_start":
@@ -528,7 +526,7 @@ func (p *ClaudeWSProvider) dispatchInnerStreamEvent(eventType string, data map[s
 				in, _ := usageMap["input_tokens"].(float64)
 				out, _ := usageMap["output_tokens"].(float64)
 				if in > 0 || out > 0 {
-					p.emitEvent(domain.NewMetricEvent(p.sessionID, int64(in), int64(out), 1), raw)
+					p.emitEvent(domain.NewMetricEvent(p.sessionID, int64(in), int64(out), 1, raw), raw)
 				}
 			}
 		}
@@ -537,23 +535,23 @@ func (p *ClaudeWSProvider) dispatchInnerStreamEvent(eventType string, data map[s
 		if usageMap, ok := data["usage"].(map[string]any); ok {
 			out, _ := usageMap["output_tokens"].(float64)
 			if out > 0 {
-				p.emitEvent(domain.NewMetricEvent(p.sessionID, 0, int64(out), 0), raw)
+				p.emitEvent(domain.NewMetricEvent(p.sessionID, 0, int64(out), 0, raw), raw)
 			}
 		}
 		if delta, ok := data["delta"].(map[string]any); ok {
 			if reason, ok := delta["stop_reason"].(string); ok {
-				e.EmitMetadata("stop_reason", map[string]any{"reason": reason})
+				p.events.Emit(domain.NewMetadataEvent(p.sessionID, "stop_reason", map[string]any{"reason": reason}, raw))
 			}
 		}
 
 	case "message_stop":
-		e.EmitMetadata("message_complete", map[string]any{"type": "message_stop"})
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "message_complete", map[string]any{"type": "message_stop"}, raw))
 
 	case "error":
 		if errMap, ok := data["error"].(map[string]any); ok {
 			msg, _ := errMap["message"].(string)
 			errType, _ := errMap["type"].(string)
-			p.emitEvent(domain.NewErrorEvent(p.sessionID, msg, errType), raw)
+			p.emitEvent(domain.NewErrorEvent(p.sessionID, msg, errType, raw), raw)
 		}
 
 	case "ping":
@@ -565,16 +563,15 @@ func (p *ClaudeWSProvider) dispatchInnerStreamEvent(eventType string, data map[s
 }
 
 func (p *ClaudeWSProvider) handleResultMsg(rm RawMessage) {
-	e := p.events.WithRaw(rm.Raw)
 	var msg ResultMessage
 	if err := json.Unmarshal(rm.Raw, &msg); err != nil {
-		e.EmitError(err.Error(), "WS_PARSE_ERROR")
+		p.events.Emit(domain.NewErrorEvent(p.sessionID, err.Error(), "WS_PARSE_ERROR", rm.Raw))
 		return
 	}
 
 	// Emit final token metrics.
 	if msg.Usage.InputTokens > 0 || msg.Usage.OutputTokens > 0 {
-		p.emitEvent(domain.NewMetricEvent(p.sessionID, msg.Usage.InputTokens, msg.Usage.OutputTokens, 0), rm.Raw)
+		p.emitEvent(domain.NewMetricEvent(p.sessionID, msg.Usage.InputTokens, msg.Usage.OutputTokens, 0, rm.Raw), rm.Raw)
 	}
 
 	metadata := map[string]any{
@@ -600,14 +597,13 @@ func (p *ClaudeWSProvider) handleResultMsg(rm RawMessage) {
 		if errText == "" {
 			errText = msg.Subtype
 		}
-		p.emitEvent(domain.NewErrorEvent(p.sessionID, errText, msg.Subtype), rm.Raw)
+		p.emitEvent(domain.NewErrorEvent(p.sessionID, errText, msg.Subtype, rm.Raw), rm.Raw)
 	}
 
-	e.EmitMetadata("query_result", metadata)
+	p.events.Emit(domain.NewPlanEvent(p.sessionID, domain.PlanData{Description: fmt.Sprint(metadata)}, rm.Raw))
 }
 
 func (p *ClaudeWSProvider) handleControlRequest(rm RawMessage) {
-	e := p.events.WithRaw(rm.Raw)
 	var req ControlRequest
 	if err := json.Unmarshal(rm.Raw, &req); err != nil {
 		return
@@ -626,16 +622,15 @@ func (p *ClaudeWSProvider) handleControlRequest(rm RawMessage) {
 		p.handleCanUseTool(req, rm.Raw)
 	default:
 		// Unknown control subtype — emit as metadata, send empty success.
-		e.EmitMetadata("unknown_control_request", map[string]any{
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "unknown_control_request", map[string]any{
 			"subtype":    inner.Subtype,
 			"request_id": req.RequestID,
-		})
+		}, rm.Raw))
 		_ = p.sendControlSuccess(req.RequestID, nil)
 	}
 }
 
 func (p *ClaudeWSProvider) handleCanUseTool(req ControlRequest, raw []byte) {
-	e := p.events.WithRaw(raw)
 	var toolReq CanUseToolRequest
 	if err := json.Unmarshal(req.Request, &toolReq); err != nil {
 		_ = p.sendControlError(req.RequestID, "failed to parse can_use_tool request")
@@ -643,12 +638,13 @@ func (p *ClaudeWSProvider) handleCanUseTool(req ControlRequest, raw []byte) {
 	}
 
 	// Emit the permission request as a metadata event so callers can observe it.
-	e.EmitMetadata("tool_permission_request", map[string]any{
-		"request_id":  req.RequestID,
-		"tool_name":   toolReq.ToolName,
-		"tool_use_id": toolReq.ToolUseID,
-		"input":       toolReq.Input,
-	})
+	p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+		ID:     req.RequestID,
+		Name:   toolReq.ToolName,
+		Status: "permission_request",
+		Title:  "tool permission request",
+		Input:  toolReq.Input,
+	}, raw))
 
 	var (
 		allow        = true
@@ -665,51 +661,51 @@ func (p *ClaudeWSProvider) handleCanUseTool(req ControlRequest, raw []byte) {
 			updatedInput = toolReq.Input
 		}
 		_ = p.wsConn.Send(AllowResponse(req.RequestID, updatedInput))
-		e.EmitMetadata("tool_permission_granted", map[string]any{
-			"request_id": req.RequestID,
-			"tool_name":  toolReq.ToolName,
-		})
+		p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+			ID:     req.RequestID,
+			Name:   toolReq.ToolName,
+			Status: "permission_granted",
+			Title:  "tool permission granted",
+		}, raw))
 	} else {
 		if reason == "" {
 			reason = "denied by policy"
 		}
 		_ = p.wsConn.Send(DenyResponse(req.RequestID, reason))
-		e.EmitMetadata("tool_permission_denied", map[string]any{
-			"request_id": req.RequestID,
-			"tool_name":  toolReq.ToolName,
-			"reason":     reason,
-		})
+		p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+			ID:     req.RequestID,
+			Name:   toolReq.ToolName,
+			Status: "permission_denied",
+			Title:  reason,
+		}, raw))
 	}
 }
 
 func (p *ClaudeWSProvider) handleToolProgress(rm RawMessage) {
-	e := p.events.WithRaw(rm.Raw)
 	var msg ToolProgressMessage
 	if err := json.Unmarshal(rm.Raw, &msg); err != nil {
 		return
 	}
-	e.EmitMetadata("tool_progress", map[string]any{
+	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "tool_progress", map[string]any{
 		"tool_name":            msg.ToolName,
 		"tool_use_id":          msg.ToolUseID,
 		"elapsed_time_seconds": msg.ElapsedTimeSeconds,
-	})
+	}, rm.Raw))
 }
 
 func (p *ClaudeWSProvider) handleToolUseSummary(rm RawMessage) {
-	e := p.events.WithRaw(rm.Raw)
 	var v struct {
 		Summary string `json:"summary"`
 	}
 	if err := json.Unmarshal(rm.Raw, &v); err != nil {
 		return
 	}
-	e.EmitMetadata("tool_use_summary", map[string]any{
+	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "tool_use_summary", map[string]any{
 		"summary": v.Summary,
-	})
+	}, rm.Raw))
 }
 
 func (p *ClaudeWSProvider) handleAuthStatus(rm RawMessage) {
-	e := p.events.WithRaw(rm.Raw)
 	var v struct {
 		IsAuthenticating bool     `json:"isAuthenticating"`
 		Output           []string `json:"output"`
@@ -718,11 +714,11 @@ func (p *ClaudeWSProvider) handleAuthStatus(rm RawMessage) {
 	if err := json.Unmarshal(rm.Raw, &v); err != nil {
 		return
 	}
-	e.EmitMetadata("auth_status", map[string]any{
+	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "auth_status", map[string]any{
 		"is_authenticating": v.IsAuthenticating,
 		"output":            v.Output,
 		"error":             v.Error,
-	})
+	}, rm.Raw))
 }
 
 // processInput reads from the input buffer and sends user messages over WS.
@@ -743,7 +739,7 @@ func (p *ClaudeWSProvider) processInput() {
 				continue
 			}
 			if err := conn.Send(NewUserMessage(input, sid)); err != nil {
-				p.events.EmitError(err.Error(), "WS_SEND_ERROR")
+				p.events.Emit(domain.NewErrorEvent(p.sessionID, err.Error(), "WS_SEND_ERROR", nil))
 				return
 			}
 		}
@@ -759,7 +755,6 @@ func (p *ClaudeWSProvider) drainStderr() {
 	}
 
 	buf := make([]byte, 4096)
-	var line strings.Builder
 	for {
 		select {
 		case <-p.ctx.Done():
@@ -768,16 +763,7 @@ func (p *ClaudeWSProvider) drainStderr() {
 		}
 		n, err := p.processMgr.Stderr().Read(buf)
 		if n > 0 {
-			for _, b := range buf[:n] {
-				if b == '\n' {
-					if s := line.String(); s != "" {
-						p.events.EmitMetadata("stderr", map[string]any{"line": s})
-					}
-					line.Reset()
-				} else {
-					line.WriteByte(b)
-				}
-			}
+			p.events.Emit(domain.NewMetadataEvent(p.sessionID, "stderr", map[string]any{"stderr": string(buf[:n])}, nil))
 		}
 		if err != nil {
 			return
@@ -787,27 +773,26 @@ func (p *ClaudeWSProvider) drainStderr() {
 
 // emitEvent sends a domain event and updates internal state.
 func (p *ClaudeWSProvider) emitEvent(event domain.Event, raw []byte) {
-	e := p.events.WithRaw(raw)
 	switch event.Type {
 	case domain.EventTypeOutput:
 		if data, ok := event.Output(); ok {
 			p.state.SetOutput(data.Content)
 			// Preserve IsDelta flag via the appropriate constructor.
 			if data.IsDelta {
-				e.EmitMetadata("delta_output", map[string]any{"content": data.Content})
+				p.events.Emit(domain.NewMetadataEvent(p.sessionID, "delta_output", map[string]any{"content": data.Content}, raw))
 			} else {
-				e.EmitOutput(data.Content)
+				p.events.Emit(domain.NewOutputEvent(p.sessionID, data.Content, raw))
 			}
 		}
 	case domain.EventTypeMetric:
 		if data, ok := event.Metric(); ok {
 			p.state.AddTokens(data.TokensIn, data.TokensOut)
-			e.EmitMetric(data.TokensIn, data.TokensOut, data.RequestCount)
+			p.events.Emit(domain.NewMetricEvent(p.sessionID, data.TokensIn, data.TokensOut, data.RequestCount, raw))
 		}
 	case domain.EventTypeError:
 		if data, ok := event.Error(); ok {
 			p.state.SetError(errors.New(data.Message))
-			e.EmitError(data.Message, data.Code)
+			p.events.Emit(domain.NewErrorEvent(p.sessionID, data.Message, data.Code, raw))
 		}
 	}
 }
@@ -841,12 +826,12 @@ func (p *ClaudeWSProvider) sendControlError(requestID, errMsg string) error {
 // handleFailure records a circuit-breaker failure and sets error state.
 func (p *ClaudeWSProvider) handleFailure(err error) {
 	if p.circuitBreaker.RecordFailure() {
-		p.events.EmitMetadata("circuit_breaker_cooldown", map[string]any{
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "circuit_breaker_cooldown", map[string]any{
 			"cooldown_duration": p.circuitBreaker.CooldownRemaining().String(),
-		})
+		}, nil))
 	}
 	p.state.SetError(err)
-	p.events.EmitError(err.Error(), "CLAUDEWS_FAILURE")
+	p.events.Emit(domain.NewErrorEvent(p.sessionID, err.Error(), "CLAUDEWS_FAILURE", nil))
 }
 
 // Suspend captures the ClaudeWS provider state for persistence (minimal stub).

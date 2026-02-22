@@ -2,6 +2,7 @@ package native
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -120,7 +121,7 @@ func (p *ADKSession) SendInput(ctx context.Context, config session.Config, input
 	// so we can return the channel immediately.
 	go func() {
 		if err := p.RunPrompt(ctx, input); err != nil {
-			p.events.EmitError(err.Error(), "ADK_PROMPT_ERROR")
+			p.events.Emit(domain.NewErrorEvent(p.sessionID, err.Error(), "ADK_PROMPT_ERROR", nil))
 		}
 	}()
 	return p.events.Events(), nil
@@ -148,13 +149,13 @@ func (p *ADKSession) start(config session.Config) error {
 	p.runCtx, p.runCancel = context.WithCancel(p.ctx)
 
 	p.state.SetState(session.StateStarting)
-	p.events.EmitStatusChange(domain.SessionStateIdle, domain.SessionStateRunning, "starting provider")
+	p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateIdle, domain.SessionStateRunning, "starting provider", nil))
 
 	llm, err := p.createModel(apiKey)
 	if err != nil {
 		sanitizedErr := p.sanitizeError(err, apiKey)
 		p.state.SetError(sanitizedErr)
-		p.events.EmitError(fmt.Sprintf("failed to create model: %v", sanitizedErr), "MODEL_INIT_ERROR")
+		p.events.Emit(domain.NewErrorEvent(p.sessionID, fmt.Sprintf("failed to create model: %v", sanitizedErr), "MODEL_INIT_ERROR", nil))
 		return fmt.Errorf("%w: %v", ErrModelCreate, sanitizedErr)
 	}
 	p.model = llm
@@ -162,7 +163,7 @@ func (p *ADKSession) start(config session.Config) error {
 	toolsets, err := p.setupMCPToolsets(config)
 	if err != nil {
 		p.state.SetError(err)
-		p.events.EmitError(fmt.Sprintf("failed to setup tools: %v", err), "TOOL_SETUP_ERROR")
+		p.events.Emit(domain.NewErrorEvent(p.sessionID, fmt.Sprintf("failed to setup tools: %v", err), "TOOL_SETUP_ERROR", nil))
 		return fmt.Errorf("failed to setup tools: %w", err)
 	}
 
@@ -180,7 +181,7 @@ func (p *ADKSession) start(config session.Config) error {
 	a, err := llmagent.New(agentCfg)
 	if err != nil {
 		p.state.SetError(err)
-		p.events.EmitError(fmt.Sprintf("failed to create agent: %v", err), "AGENT_INIT_ERROR")
+		p.events.Emit(domain.NewErrorEvent(p.sessionID, fmt.Sprintf("failed to create agent: %v", err), "AGENT_INIT_ERROR", nil))
 		return fmt.Errorf("failed to create agent: %w", err)
 	}
 	p.agent = a
@@ -194,7 +195,7 @@ func (p *ADKSession) start(config session.Config) error {
 	})
 	if err != nil {
 		p.state.SetError(err)
-		p.events.EmitError(fmt.Sprintf("failed to create runner: %v", err), "RUNNER_INIT_ERROR")
+		p.events.Emit(domain.NewErrorEvent(p.sessionID, fmt.Sprintf("failed to create runner: %v", err), "RUNNER_INIT_ERROR", nil))
 		return fmt.Errorf("failed to create runner: %w", err)
 	}
 	p.runner = r
@@ -205,7 +206,7 @@ func (p *ADKSession) start(config session.Config) error {
 	})
 	if err != nil {
 		p.state.SetError(err)
-		p.events.EmitError(fmt.Sprintf("failed to create ADK session: %v", err), "SESSION_INIT_ERROR")
+		p.events.Emit(domain.NewErrorEvent(p.sessionID, fmt.Sprintf("failed to create ADK session: %v", err), "SESSION_INIT_ERROR", nil))
 		return fmt.Errorf("failed to create ADK session: %w", err)
 	}
 	p.adkUserID = DefaultUserID
@@ -213,7 +214,7 @@ func (p *ADKSession) start(config session.Config) error {
 
 	p.state.SetState(session.StateRunning)
 	// Provider is now running; we've already emitted idle->running at startup
-	p.events.EmitMetadata("model", p.config.Model)
+	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "model", p.config.Model, nil))
 	p.started = true
 
 	return nil
@@ -293,7 +294,7 @@ func (p *ADKSession) afterModelCallback(ctx agent.CallbackContext, resp *model.L
 		p.mu.RUnlock()
 
 		sanitizedErr := p.sanitizeError(err, apiKey)
-		p.events.EmitError(fmt.Sprintf("model error: %v", sanitizedErr), "MODEL_ERROR")
+		p.events.Emit(domain.NewErrorEvent(p.sessionID, fmt.Sprintf("model error: %v", sanitizedErr), "MODEL_ERROR", nil))
 		return resp, sanitizedErr
 	}
 
@@ -301,21 +302,20 @@ func (p *ADKSession) afterModelCallback(ctx agent.CallbackContext, resp *model.L
 		return resp, err
 	}
 
-	// Marshal the full response once; attach it to every event from this callback.
-	e := p.events.MarshalRaw(resp)
+	raw, _ := json.Marshal(resp)
 
 	if resp.UsageMetadata != nil {
 		tokensIn := int64(resp.UsageMetadata.PromptTokenCount)
 		tokensOut := int64(resp.UsageMetadata.CandidatesTokenCount)
 		p.state.AddTokens(tokensIn, tokensOut)
-		e.EmitMetric(tokensIn, tokensOut, 1)
+		p.events.Emit(domain.NewMetricEvent(p.sessionID, tokensIn, tokensOut, 1, raw))
 	}
 
 	if resp.Content != nil {
 		for _, part := range resp.Content.Parts {
 			if part.Text != "" {
 				p.state.SetOutput(part.Text)
-				e.EmitOutput(part.Text)
+				p.events.Emit(domain.NewOutputEvent(p.sessionID, part.Text, raw))
 			}
 		}
 	}
@@ -342,7 +342,7 @@ func (p *ADKSession) RunPrompt(ctx context.Context, prompt string) error {
 		StreamingMode: agent.StreamingModeSSE,
 	}) {
 		if err != nil {
-			p.events.EmitError(fmt.Sprintf("run error: %v", err), "RUN_ERROR")
+			p.events.Emit(domain.NewErrorEvent(p.sessionID, fmt.Sprintf("run error: %v", err), "RUN_ERROR", nil))
 			return err
 		}
 
@@ -367,25 +367,24 @@ func (p *ADKSession) RunPrompt(ctx context.Context, prompt string) error {
 }
 
 func (p *ADKSession) processEvent(event *adksession.Event) {
-	// Marshal the ADK event once; attach to every emitted event from it.
-	e := p.events.MarshalRaw(event)
+	raw, _ := json.Marshal(event)
 
 	if event.Partial {
 		if event.Content != nil {
 			for _, part := range event.Content.Parts {
 				if part.Text != "" {
-					e.EmitOutput(part.Text)
+					p.events.Emit(domain.NewOutputEvent(p.sessionID, part.Text, raw))
 				}
 			}
 		}
 	}
 
 	if event.TurnComplete {
-		e.EmitMetadata("turn_complete", true)
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "turn_complete", true, raw))
 	}
 
 	if event.Actions.StateDelta != nil {
-		e.EmitMetadata("state_delta", event.Actions.StateDelta)
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "state_delta", event.Actions.StateDelta, raw))
 	}
 }
 
@@ -407,7 +406,7 @@ func (p *ADKSession) Stop(ctx context.Context) error {
 	}
 
 	p.state.SetState(session.StateStopping)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateIdle, "stopping provider")
+	p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateRunning, domain.SessionStateIdle, "stopping provider", nil))
 
 	if p.runCancel != nil {
 		p.runCancel()
@@ -467,7 +466,7 @@ func (p *ADKSession) Kill() error {
 	p.pauseMu.Unlock()
 
 	p.state.SetState(session.StateStopped)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateIdle, "session killed")
+	p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateRunning, domain.SessionStateIdle, "session killed", nil))
 	p.events.Close()
 
 	return nil
@@ -506,7 +505,7 @@ func (p *ADKSession) handleFailure(err error) {
 
 	sanitizedErr := p.sanitizeError(err, apiKey)
 	p.state.SetError(sanitizedErr)
-	p.events.EmitError(sanitizedErr.Error(), "PTY_FAILURE")
+	p.events.Emit(domain.NewErrorEvent(p.sessionID, sanitizedErr.Error(), "PTY_FAILURE", nil))
 }
 
 var _ session.Session = (*ADKSession)(nil)

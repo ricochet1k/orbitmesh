@@ -396,7 +396,7 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 				_ = e.storage.Save(sc.session)
 			}
 
-			e.broadcaster.Broadcast(domain.NewErrorEvent(id, errMsg, "SESSION_START_FAILED"))
+			e.broadcaster.Broadcast(domain.NewErrorEvent(id, errMsg, "SESSION_START_FAILED", nil))
 
 			e.mu.Lock()
 			sc.setRun(nil)
@@ -439,7 +439,7 @@ func (e *AgentExecutor) transitionWithSave(sc *sessionContext, newState domain.S
 }
 
 func (e *AgentExecutor) broadcastStateChange(session *domain.Session, oldState, newState domain.SessionState, reason string) {
-	event := domain.NewStatusChangeEvent(session.ID, oldState, newState, reason)
+	event := domain.NewStatusChangeEvent(session.ID, oldState, newState, reason, nil)
 	e.broadcaster.Broadcast(event)
 }
 
@@ -489,6 +489,6 @@ func (e *AgentExecutor) handlePanic(sc *sessionContext, r any) {
 		_ = e.storage.Save(sc.session)
 	}
 
-	event := domain.NewErrorEvent(sc.session.ID, errMsg, "PANIC")
+	event := domain.NewErrorEvent(sc.session.ID, errMsg, "PANIC", nil)
 	e.broadcaster.Broadcast(event)
 }

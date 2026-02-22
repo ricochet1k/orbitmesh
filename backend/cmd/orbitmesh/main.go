@@ -32,10 +32,7 @@ const (
 )
 
 func listenAddr() string {
-	if raw := strings.TrimSpace(os.Getenv("E2E_BACKEND_PORT")); raw != "" {
-		return ":" + strings.TrimPrefix(raw, ":")
-	}
-	if raw := strings.TrimSpace(os.Getenv("PORT")); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv("ORBITMESH_PORT")); raw != "" {
 		return ":" + strings.TrimPrefix(raw, ":")
 	}
 	return ":" + defaultPort

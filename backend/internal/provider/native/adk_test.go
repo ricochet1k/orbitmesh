@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ricochet1k/orbitmesh/internal/domain"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 )
 
@@ -441,7 +442,7 @@ func TestADKProvider_EventsChannel(t *testing.T) {
 		t.Error("events channel should not be nil")
 	}
 
-	p.events.EmitOutput("test output")
+	p.events.Emit(domain.NewOutputEvent(p.sessionID, "test output", nil))
 
 	select {
 	case event := <-ch:

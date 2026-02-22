@@ -459,7 +459,7 @@ export interface AgentConfigListResponse {
 
 export interface TranscriptMessage {
   id: string;
-  type: "agent" | "user" | "system" | "error";
+  type: TranscriptMessageType;
   timestamp: string;
   content: string;
   /** Activity entry identifier (used in SessionViewer for merge dedup) */
@@ -468,6 +468,8 @@ export interface TranscriptMessage {
   revision?: number;
   /** Whether the entry is still open/streaming */
   open?: boolean;
-  /** Activity kind (e.g. "tool_use", "assistant") */
+  /** Activity/event kind (e.g. "tool_use", "assistant", "status_change") */
   kind?: string;
 }
+
+export type TranscriptMessageType = "agent" | "user" | "system" | "error";

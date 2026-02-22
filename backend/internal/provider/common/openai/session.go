@@ -16,6 +16,7 @@ import (
 
 type Session struct {
 	provider     *Provider
+	sessionID    string
 	model        string
 	conversation []*session.Message
 
@@ -37,6 +38,7 @@ func (s *Session) SendInput(ctx context.Context, config session.Config, input st
 		if sessID == "" {
 			sessID = "openai"
 		}
+		s.sessionID = sessID
 		s.events = native.NewEventAdapter(sessID, 100)
 	}
 	s.mu.Unlock()
@@ -89,7 +91,7 @@ func (s *Session) handleStream(stream *ssestream.Stream[responses.ResponseStream
 				ID:       messageId,
 				Contents: data.Delta,
 			})
-			s.events.EmitOutput(data.Delta)
+			s.events.Emit(domain.NewOutputEvent(s.sessionID, data.Delta, nil))
 		case responses.ResponseTextDoneEvent:
 			currentMessage.Contents = data.Text
 			s.liveStream.MessageReplace(session.Message{
@@ -114,7 +116,7 @@ func (s *Session) handleStream(stream *ssestream.Stream[responses.ResponseStream
 		}
 		s.conversation = append(s.conversation, &errMsg)
 		s.liveStream.MessageNew(errMsg)
-		s.events.EmitError(err.Error(), "OPENAI_STREAM_ERROR")
+		s.events.Emit(domain.NewErrorEvent(s.sessionID, err.Error(), "OPENAI_STREAM_ERROR", nil))
 	}
 }
 

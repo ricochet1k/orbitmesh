@@ -76,7 +76,7 @@ func TestEventBroadcaster_Broadcast(t *testing.T) {
 	sub3 := b.Subscribe("sub3", "session2")
 	subAll := b.Subscribe("subAll", "")
 
-	event := domain.NewOutputEvent("session1", "test output")
+	event := domain.NewOutputEvent("session1", "test output", nil)
 	b.Broadcast(event)
 
 	timeout := time.After(100 * time.Millisecond)
@@ -120,9 +120,9 @@ func TestEventBroadcaster_BroadcastNonBlocking(t *testing.T) {
 
 	sub := b.Subscribe("sub1", "session1")
 
-	event1 := domain.NewOutputEvent("session1", "event1")
-	event2 := domain.NewOutputEvent("session1", "event2")
-	event3 := domain.NewOutputEvent("session1", "event3")
+	event1 := domain.NewOutputEvent("session1", "event1", nil)
+	event2 := domain.NewOutputEvent("session1", "event2", nil)
+	event3 := domain.NewOutputEvent("session1", "event3", nil)
 
 	b.Broadcast(event1)
 	b.Broadcast(event2)
@@ -154,7 +154,7 @@ func TestEventBroadcaster_ConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			event := domain.NewOutputEvent("session1", "test")
+			event := domain.NewOutputEvent("session1", "test", nil)
 			b.Broadcast(event)
 		}(i)
 	}
@@ -181,9 +181,9 @@ func TestEventBroadcaster_SubscribeWithReplay(t *testing.T) {
 		b := NewEventBroadcaster(10)
 
 		// Broadcast three events without any subscriber
-		e1 := domain.NewOutputEvent("session1", "first")
-		e2 := domain.NewOutputEvent("session1", "second")
-		e3 := domain.NewOutputEvent("session1", "third")
+		e1 := domain.NewOutputEvent("session1", "first", nil)
+		e2 := domain.NewOutputEvent("session1", "second", nil)
+		e3 := domain.NewOutputEvent("session1", "third", nil)
 		b.Broadcast(e1)
 		b.Broadcast(e2)
 		b.Broadcast(e3)
@@ -204,7 +204,7 @@ func TestEventBroadcaster_SubscribeWithReplay(t *testing.T) {
 	t.Run("lastEventID at current returns no replay", func(t *testing.T) {
 		b := NewEventBroadcaster(10)
 
-		e := domain.NewOutputEvent("session1", "only")
+		e := domain.NewOutputEvent("session1", "only", nil)
 		b.Broadcast(e)
 
 		// lastEventID >= nextID means nothing to replay
@@ -220,9 +220,9 @@ func TestEventBroadcaster_SubscribeWithReplay(t *testing.T) {
 	t.Run("replays only matching session events", func(t *testing.T) {
 		b := NewEventBroadcaster(10)
 
-		b.Broadcast(domain.NewOutputEvent("session1", "s1 event"))
-		b.Broadcast(domain.NewOutputEvent("session2", "s2 event"))
-		b.Broadcast(domain.NewOutputEvent("session1", "s1 event 2"))
+		b.Broadcast(domain.NewOutputEvent("session1", "s1 event", nil))
+		b.Broadcast(domain.NewOutputEvent("session2", "s2 event", nil))
+		b.Broadcast(domain.NewOutputEvent("session1", "s1 event 2", nil))
 
 		_, replay := b.SubscribeWithReplay("sub1", "session1", 0)
 		for _, ev := range replay {
@@ -239,7 +239,7 @@ func TestEventBroadcaster_SubscribeWithReplay(t *testing.T) {
 		b := NewEventBroadcaster(3)
 
 		for i := 0; i < 5; i++ {
-			b.Broadcast(domain.NewOutputEvent("session1", "event"))
+			b.Broadcast(domain.NewOutputEvent("session1", "event", nil))
 		}
 
 		_, replay := b.SubscribeWithReplay("sub1", "session1", 0)
@@ -252,9 +252,9 @@ func TestEventBroadcaster_SubscribeWithReplay(t *testing.T) {
 	t.Run("wildcard replay uses global history", func(t *testing.T) {
 		b := NewEventBroadcaster(10)
 
-		b.Broadcast(domain.NewOutputEvent("session1", "s1 first"))
-		b.Broadcast(domain.NewOutputEvent("session2", "s2 first"))
-		b.Broadcast(domain.NewOutputEvent("session1", "s1 second"))
+		b.Broadcast(domain.NewOutputEvent("session1", "s1 first", nil))
+		b.Broadcast(domain.NewOutputEvent("session2", "s2 first", nil))
+		b.Broadcast(domain.NewOutputEvent("session1", "s1 second", nil))
 
 		_, replay := b.SubscribeWithReplay("sub-global", "", 1)
 		if len(replay) != 2 {

@@ -93,7 +93,7 @@ func (p *ClaudeCodeProvider) start(config session.Config) error {
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 
 	p.state.SetState(session.StateStarting)
-	p.events.EmitStatusChange(domain.SessionStateIdle, domain.SessionStateRunning, "starting claude provider")
+	p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateIdle, domain.SessionStateRunning, "starting claude provider", nil))
 
 	// Build command arguments from config
 	args, err := buildCommandArgs(config)
@@ -154,7 +154,7 @@ func (p *ClaudeCodeProvider) Stop(ctx context.Context) error {
 	}
 
 	p.state.SetState(session.StateStopping)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateIdle, "stopping claude provider")
+	p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateRunning, domain.SessionStateIdle, "stopping claude provider", nil))
 
 	// Cancel context to signal goroutines to stop
 	if p.cancel != nil {
@@ -192,7 +192,7 @@ func (p *ClaudeCodeProvider) Kill() error {
 	}
 
 	p.state.SetState(session.StateStopped)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateIdle, "claude provider killed")
+	p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateRunning, domain.SessionStateIdle, "claude provider killed", nil))
 	p.events.Close()
 
 	return nil
@@ -233,10 +233,10 @@ func (p *ClaudeCodeProvider) processStdout() {
 		// Parse the JSON message
 		msg, err := ParseMessage(line)
 		if err != nil {
-			p.events.EmitMetadata("parse_error", map[string]any{
+			p.events.Emit(domain.NewMetadataEvent(p.sessionID, "parse_error", map[string]any{
 				"error": err.Error(),
 				"line":  string(line),
-			})
+			}, line))
 			continue
 		}
 
@@ -250,7 +250,7 @@ func (p *ClaudeCodeProvider) processStdout() {
 	}
 
 	if err := scanner.Err(); err != nil {
-		p.events.EmitError(err.Error(), "STDOUT_SCAN_ERROR")
+		p.events.Emit(domain.NewErrorEvent(p.sessionID, err.Error(), "STDOUT_SCAN_ERROR", nil))
 	}
 }
 
@@ -276,9 +276,9 @@ func (p *ClaudeCodeProvider) processStderr() {
 		}
 
 		// Emit stderr output as metadata
-		p.events.EmitMetadata("stderr", map[string]any{
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "stderr", map[string]any{
 			"line": line,
-		})
+		}, nil))
 	}
 }
 
@@ -297,7 +297,7 @@ func (p *ClaudeCodeProvider) processInput() {
 				return
 			}
 			if _, err := p.processMgr.Stdin().Write([]byte(jsonMsg + "\n")); err != nil {
-				p.events.EmitError(err.Error(), "STDIN_WRITE_ERROR")
+				p.events.Emit(domain.NewErrorEvent(p.sessionID, err.Error(), "STDIN_WRITE_ERROR", nil))
 				return
 			}
 		}
@@ -306,6 +306,8 @@ func (p *ClaudeCodeProvider) processInput() {
 
 // emitEvent safely emits an event to the event channel.
 func (p *ClaudeCodeProvider) emitEvent(event domain.Event) {
+	p.events.Emit(event)
+
 	// Update internal state based on event type
 	switch event.Type {
 	case domain.EventTypeOutput:
@@ -341,12 +343,12 @@ func (p *ClaudeCodeProvider) updateStateFromMessage(msg Message) {
 func (p *ClaudeCodeProvider) handleFailure(err error) {
 	if p.circuitBreaker.RecordFailure() {
 		remaining := p.circuitBreaker.CooldownRemaining()
-		p.events.EmitMetadata("circuit_breaker_cooldown", map[string]any{
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "circuit_breaker_cooldown", map[string]any{
 			"cooldown_duration": remaining.String(),
-		})
+		}, nil))
 	}
 	p.state.SetError(err)
-	p.events.EmitError(err.Error(), "CLAUDE_FAILURE")
+	p.events.Emit(domain.NewErrorEvent(p.sessionID, err.Error(), "CLAUDE_FAILURE", nil))
 }
 
 // Suspend captures the Claude provider state for persistence (minimal stub).

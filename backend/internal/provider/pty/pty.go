@@ -100,7 +100,7 @@ func (p *PTYProvider) start(config session.Config) error {
 	}
 
 	p.state.SetState(session.StateStarting)
-	p.events.EmitStatusChange(domain.SessionStateIdle, domain.SessionStateRunning, "starting provider")
+	p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateIdle, domain.SessionStateRunning, "starting provider", nil))
 
 	command, args, err := resolvePTYCommand(config)
 	if err != nil {
@@ -157,7 +157,7 @@ func (p *PTYProvider) start(config session.Config) error {
 	p.wg.Add(1)
 	go p.processTerminalEvents()
 	if err := p.startActivityExtractor(command, args); err != nil {
-		p.events.EmitMetadata("extractor_warning", map[string]any{"error": err.Error()})
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "extractor_warning", map[string]any{"error": err.Error()}, nil))
 	}
 
 	// Close the events channel when the process exits.
@@ -298,7 +298,9 @@ func (p *PTYProvider) startActivityExtractor(command string, args []string) erro
 		_ = activityLog.Close()
 		return err
 	}
-	emitter := NewActivityEmitter(p.sessionID, activityLog, state, defaultOpenWindow, p.events.EmitMetadata)
+	emitter := NewActivityEmitter(p.sessionID, activityLog, state, defaultOpenWindow, func(key string, value any) {
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, key, value, nil))
+	})
 	p.activity = NewScreenDiffExtractor(profile, emitter)
 	p.activityLog = activityLog
 	p.activityState = emitter.State()
@@ -328,7 +330,7 @@ func (p *PTYProvider) runActivityUpdates(updates <-chan terminal.Update) {
 				continue
 			}
 			if err := p.activity.HandleUpdate(update); err != nil {
-				p.events.EmitMetadata("extractor_warning", map[string]any{"error": err.Error()})
+				p.events.Emit(domain.NewMetadataEvent(p.sessionID, "extractor_warning", map[string]any{"error": err.Error()}, nil))
 			}
 			if p.activityState != nil {
 				_ = SaveExtractorState(p.sessionID, p.activityState)
@@ -372,7 +374,7 @@ func (p *PTYProvider) Stop(ctx context.Context) error {
 	}
 
 	p.state.SetState(session.StateStopped)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateIdle, "pty provider stopped")
+	p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateRunning, domain.SessionStateIdle, "pty provider stopped", nil))
 	p.events.Close()
 
 	return nil
@@ -402,7 +404,7 @@ func (p *PTYProvider) Kill() error {
 	}
 
 	p.state.SetState(session.StateStopped)
-	p.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateIdle, "pty provider killed")
+	p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateRunning, domain.SessionStateIdle, "pty provider killed", nil))
 	p.events.Close()
 	return nil
 }
@@ -470,12 +472,12 @@ func (p *PTYProvider) emitTerminalUpdate(event terminal.Event) {
 func (p *PTYProvider) handleFailure(err error) {
 	if p.circuitBreaker.RecordFailure() {
 		remaining := p.circuitBreaker.CooldownRemaining()
-		p.events.EmitMetadata("circuit_breaker_cooldown", map[string]any{
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "circuit_breaker_cooldown", map[string]any{
 			"cooldown_duration": remaining.String(),
-		})
+		}, nil))
 	}
 	p.state.SetError(err)
-	p.events.EmitError(err.Error(), "PTY_FAILURE")
+	p.events.Emit(domain.NewErrorEvent(p.sessionID, err.Error(), "PTY_FAILURE", nil))
 }
 
 // Suspend captures the PTY session state for persistence (minimal stub).

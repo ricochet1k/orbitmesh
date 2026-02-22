@@ -2150,6 +2150,11 @@ tbody tr:hover {
   background: rgba(15, 118, 110, 0.08);
 }
 
+.transcript-item.user {
+  border-color: rgba(37, 99, 235, 0.2);
+  background: rgba(37, 99, 235, 0.08);
+}
+
 .transcript-item.system {
   border-color: rgba(37, 99, 235, 0.2);
   background: rgba(37, 99, 235, 0.08);
@@ -2204,6 +2209,28 @@ tbody tr:hover {
 .transcript-type-user    { background: rgba(37,99,235,0.15);  color: #2563eb; }
 .transcript-type-system  { background: rgba(100,116,139,0.15); color: var(--ink-3); }
 .transcript-type-error   { background: rgba(185,28,28,0.2);   color: #b91c1c; }
+
+.transcript-item.transcript-kind-tool_use,
+.transcript-item.transcript-kind-tool_call {
+  border-color: rgba(6, 95, 70, 0.24);
+  background: rgba(6, 95, 70, 0.08);
+}
+
+.transcript-item.transcript-kind-thought {
+  border-color: rgba(217, 119, 6, 0.24);
+  background: rgba(217, 119, 6, 0.09);
+}
+
+.transcript-item.transcript-kind-plan {
+  border-color: rgba(2, 132, 199, 0.24);
+  background: rgba(2, 132, 199, 0.08);
+}
+
+.transcript-item.transcript-kind-status_change,
+.transcript-item.transcript-kind-metric,
+.transcript-item.transcript-kind-metadata {
+  border-style: dashed;
+}
 
 /* Open/final status badge */
 .transcript-status {

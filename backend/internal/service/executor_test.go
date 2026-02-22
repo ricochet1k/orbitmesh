@@ -1147,7 +1147,7 @@ func TestAgentExecutor_EventHandling(t *testing.T) {
 	executor.SendMessage(context.Background(), "event-test", "test", "", "")
 	time.Sleep(50 * time.Millisecond)
 
-	prov.SendEvent(domain.NewOutputEvent("event-test", "test output"))
+	prov.SendEvent(domain.NewOutputEvent("event-test", "test output", nil))
 
 	timeout := time.After(1 * time.Second)
 	receivedOutput := false
@@ -2094,11 +2094,11 @@ func TestAgentExecutor_MidRunCrashRecoveryWithCheckpoints(t *testing.T) {
 	}
 
 	// Emit output events that would normally trigger an immediate save via updateSessionFromEvent
-	prov.SendEvent(domain.NewOutputEvent("test-session", "event 1"))
+	prov.SendEvent(domain.NewOutputEvent("test-session", "event 1", nil))
 	time.Sleep(5 * time.Millisecond)
-	prov.SendEvent(domain.NewOutputEvent("test-session", "event 2"))
+	prov.SendEvent(domain.NewOutputEvent("test-session", "event 2", nil))
 	time.Sleep(5 * time.Millisecond)
-	prov.SendEvent(domain.NewOutputEvent("test-session", "event 3"))
+	prov.SendEvent(domain.NewOutputEvent("test-session", "event 3", nil))
 
 	// Wait to allow checkpoints to occur
 	time.Sleep(50 * time.Millisecond)

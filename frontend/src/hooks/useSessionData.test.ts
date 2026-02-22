@@ -586,6 +586,40 @@ describe("useSessionData", () => {
     await vi.waitFor(() => expect(data!.messages().some((m) => m.content === "from realtime event")).toBe(true))
   })
 
+  it("maps persisted activity kinds to the expected transcript types", async () => {
+    ;(apiClient.getActivityEntries as ReturnType<typeof vi.fn>).mockResolvedValue({
+      entries: [
+        makeActivityEntry({ id: "entry-output", kind: "output", data: { content: "assistant output" } }),
+        makeActivityEntry({ id: "entry-user", kind: "user_input", data: { content: "user input" } }),
+        makeActivityEntry({ id: "entry-tool", kind: "tool_use", data: { content: "tool result" } }),
+        makeActivityEntry({ id: "entry-error", kind: "provider_error", data: { content: "boom" } }),
+      ],
+      next_cursor: null,
+    })
+
+    let data: ReturnType<typeof useSessionData> | undefined
+
+    createRoot((d) => {
+      dispose = d
+      const [sessionId] = createSignal("session-1")
+      const [canInspect] = createSignal<boolean | null>(true)
+      data = useSessionData({
+        sessionId,
+        canInspect,
+        eventsUrl: () => `/events/session-1`,
+      })
+    })
+
+    await vi.waitFor(() => expect(data!.messages().length).toBe(4))
+
+    const byId = new Map(data!.messages().map((message) => [message.id, message]))
+    expect(byId.get("activity:entry-output")?.type).toBe("agent")
+    expect(byId.get("activity:entry-output")?.kind).toBe("output")
+    expect(byId.get("activity:entry-user")?.type).toBe("user")
+    expect(byId.get("activity:entry-tool")?.type).toBe("system")
+    expect(byId.get("activity:entry-error")?.type).toBe("error")
+  })
+
   // ── filter & autoScroll ───────────────────────────────────────────────────
 
   it("filteredMessages reflects the filter term", async () => {

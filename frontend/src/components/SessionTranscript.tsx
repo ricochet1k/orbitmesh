@@ -46,14 +46,19 @@ function TranscriptItem(props: { message: TranscriptMessage }) {
   const blocks = createMemo(() => splitIntoBlocks(props.message.content))
   const lineCount = createMemo(() => props.message.content.split("\n").length)
   const isLong = createMemo(() => lineCount() > COLLAPSE_LINE_THRESHOLD)
+  const normalizedKind = createMemo(() => normalizeKind(props.message.kind))
+  const displayLabel = createMemo(() => formatMessageLabel(props.message.type, normalizedKind()))
 
-  // Derive a display label: prefer kind (e.g. "tool_use") else type
-  const kindLabel = createMemo(() => props.message.kind ?? props.message.type)
+  const kindClass = createMemo(() => {
+    const kind = normalizedKind()
+    if (!kind) return ""
+    return `transcript-kind-${kind.replace(/[^a-z0-9_-]/g, "")}`
+  })
 
   return (
-    <article class={`transcript-item ${props.message.type}`} data-kind={props.message.kind}>
+    <article class={`transcript-item ${props.message.type} ${kindClass()}`} data-kind={normalizedKind() || undefined}>
       <header class="transcript-item-header">
-        <span class={`transcript-type transcript-type-${props.message.type}`}>{kindLabel()}</span>
+        <span class={`transcript-type transcript-type-${props.message.type}`}>{displayLabel()}</span>
         <Show when={props.message.open !== undefined}>
           <span class={`transcript-status ${props.message.open ? "open" : "final"}`}>
             {props.message.open ? "streaming" : "done"}
@@ -110,4 +115,45 @@ export function splitIntoBlocks(content: string) {
   }
 
   return blocks
+}
+
+function normalizeKind(kind: string | undefined) {
+  return (kind ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_")
+}
+
+function formatMessageLabel(type: TranscriptMessage["type"], kind: string) {
+  if (!kind) return titleCase(type)
+
+  switch (kind) {
+    case "output":
+    case "assistant":
+      return "Assistant"
+    case "tool_use":
+    case "tool_call":
+      return "Tool"
+    case "status_change":
+      return "Status"
+    case "thought":
+      return "Thought"
+    case "plan":
+      return "Plan"
+    case "metric":
+      return "Metric"
+    case "metadata":
+      return "Metadata"
+    case "user_input":
+      return "User"
+    default:
+      return titleCase(kind)
+  }
+}
+
+function titleCase(value: string) {
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
 }

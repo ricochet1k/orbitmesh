@@ -128,7 +128,7 @@ func (s *Session) start(config session.Config) error {
 	}
 
 	s.state.SetState(session.StateStarting)
-	s.events.EmitStatusChange(domain.SessionStateIdle, domain.SessionStateRunning, "starting acp provider")
+	s.events.Emit(domain.NewStatusChangeEvent(s.sessionID, domain.SessionStateIdle, domain.SessionStateRunning, "starting acp provider", nil))
 
 	// Determine command and args
 	command := s.providerConfig.Command
@@ -210,9 +210,9 @@ func (s *Session) start(config session.Config) error {
 	if s.snapshotManager != nil && config.Custom != nil {
 		if enablePersistence, ok := config.Custom["enable_persistence"].(bool); ok && enablePersistence {
 			s.snapshotManager.StartAutoSnapshot(s.ctx, s, s.sessionID)
-			s.events.EmitMetadata("snapshot_enabled", map[string]any{
+			s.events.Emit(domain.NewMetadataEvent(s.sessionID, "snapshot_enabled", map[string]any{
 				"interval": s.snapshotManager,
-			})
+			}, nil))
 		}
 	}
 
@@ -274,11 +274,11 @@ func (s *Session) createACPSession() error {
 	// should be configured via session.Config.MCPServers
 	var mcpServers []acpsdk.McpServer
 	if len(s.sessionConfig.MCPServers) > 0 {
-		s.events.EmitMetadata("mcp_config", map[string]any{
+		s.events.Emit(domain.NewMetadataEvent(s.sessionID, "mcp_config", map[string]any{
 			"count":   len(s.sessionConfig.MCPServers),
 			"servers": s.sessionConfig.MCPServers,
 			"note":    "MCP configuration format TBD based on ACP SDK version",
-		})
+		}, nil))
 	}
 
 	// McpServers must be a non-nil slice (ACP SDK validation requires it).
@@ -297,9 +297,9 @@ func (s *Session) createACPSession() error {
 
 	sessionID := string(resp.SessionId)
 	s.acpSessionID = &sessionID
-	s.events.EmitMetadata("acp_session_id", map[string]any{
+	s.events.Emit(domain.NewMetadataEvent(s.sessionID, "acp_session_id", map[string]any{
 		"session_id": sessionID,
-	})
+	}, nil))
 
 	return nil
 }
@@ -315,7 +315,7 @@ func (s *Session) Stop(ctx context.Context) error {
 	}
 
 	s.state.SetState(session.StateStopping)
-	s.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateIdle, "stopping acp provider")
+	s.events.Emit(domain.NewStatusChangeEvent(s.sessionID, domain.SessionStateRunning, domain.SessionStateIdle, "stopping acp provider", nil))
 
 	// Cancel context to signal goroutines to stop
 	if s.cancel != nil {
@@ -364,7 +364,7 @@ func (s *Session) Kill() error {
 	}
 
 	s.state.SetState(session.StateStopped)
-	s.events.EmitStatusChange(domain.SessionStateRunning, domain.SessionStateIdle, "acp provider killed")
+	s.events.Emit(domain.NewStatusChangeEvent(s.sessionID, domain.SessionStateRunning, domain.SessionStateIdle, "acp provider killed", nil))
 	s.events.Close()
 
 	return nil
@@ -397,9 +397,9 @@ func (s *Session) processStderr() {
 		}
 
 		// Emit stderr output as metadata
-		s.events.EmitMetadata("stderr", map[string]any{
+		s.events.Emit(domain.NewMetadataEvent(s.sessionID, "stderr", map[string]any{
 			"line": line,
-		})
+		}, nil))
 	}
 }
 
@@ -413,7 +413,7 @@ func (s *Session) processInput() {
 			return
 		case input := <-s.inputBuffer.Receive():
 			if err := s.sendPrompt(input); err != nil {
-				s.events.EmitError(err.Error(), "ACP_PROMPT_ERROR")
+				s.events.Emit(domain.NewErrorEvent(s.sessionID, err.Error(), "ACP_PROMPT_ERROR", nil))
 			}
 		}
 	}
@@ -475,31 +475,29 @@ func (s *Session) handlePromptResponse(resp acpsdk.PromptResponse) {
 	// Note: Token usage is tracked via agent-specific means (e.g., session updates)
 	// The base ACP PromptResponse doesn't include usage stats
 
-	// Marshal the full response as raw for all events derived from it.
-	e := s.events.MarshalRaw(resp)
+	raw, _ := json.Marshal(resp)
 
 	// StopReason is a string, not a pointer
-	e.EmitMetadata("stop_reason", map[string]any{
+	s.events.Emit(domain.NewMetadataEvent(s.sessionID, "stop_reason", map[string]any{
 		"reason": resp.StopReason,
-	})
+	}, raw))
 }
 
 // handleContentBlock processes an ACP content block.
 func (s *Session) handleContentBlock(block acpsdk.ContentBlock) {
-	// Marshal the content block as raw for all events derived from it.
-	e := s.events.MarshalRaw(block)
+	raw, _ := json.Marshal(block)
 
 	switch {
 	case block.Text != nil:
 		// Text output
 		s.state.SetOutput(block.Text.Text)
-		e.EmitOutput(block.Text.Text)
+		s.events.Emit(domain.NewOutputEvent(s.sessionID, block.Text.Text, raw))
 
 	case block.Image != nil:
 		// Image output (emit as metadata)
-		e.EmitMetadata("image", map[string]any{
+		s.events.Emit(domain.NewMetadataEvent(s.sessionID, "image", map[string]any{
 			"source": block.Image,
-		})
+		}, raw))
 	}
 }
 
@@ -507,12 +505,12 @@ func (s *Session) handleContentBlock(block acpsdk.ContentBlock) {
 func (s *Session) handleFailure(err error) {
 	if s.circuitBreaker.RecordFailure() {
 		remaining := s.circuitBreaker.CooldownRemaining()
-		s.events.EmitMetadata("circuit_breaker_cooldown", map[string]any{
+		s.events.Emit(domain.NewMetadataEvent(s.sessionID, "circuit_breaker_cooldown", map[string]any{
 			"cooldown_duration": remaining.String(),
-		})
+		}, nil))
 	}
 	s.state.SetError(err)
-	s.events.EmitError(err.Error(), "ACP_FAILURE")
+	s.events.Emit(domain.NewErrorEvent(s.sessionID, err.Error(), "ACP_FAILURE", nil))
 }
 
 // TerminalProvider interface implementation

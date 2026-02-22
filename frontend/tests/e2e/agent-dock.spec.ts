@@ -215,9 +215,18 @@ test.describe("AgentDock with acp-echo provider", () => {
         // by this point, so browser fetch would queue indefinitely.
         await sendMessage(request, sessionId, csrfToken, prompt);
 
-        // Both consumers should receive the same streamed output.
-        await expect(page.locator(".agent-dock .transcript").getByText(prompt)).toBeVisible({ timeout: 20_000 });
-        await expect(viewerPage.locator(".session-viewer .transcript").getByText(prompt)).toBeVisible({ timeout: 20_000 });
+        // Verify both consumers update while the session is still running.
+        await expect
+          .poll(
+            async () => {
+              const stateText = (await viewerPage.getByTestId("session-state-badge").textContent()) ?? "";
+              const dockCount = await page.locator(".agent-dock .transcript").getByText(prompt).count();
+              const viewerCount = await viewerPage.locator(".session-viewer .transcript").getByText(prompt).count();
+              return stateText.includes("running") && dockCount > 0 && viewerCount > 0;
+            },
+            { timeout: 20_000 },
+          )
+          .toBeTruthy();
       } finally {
         if (viewerPage) await viewerPage.close();
         if (sessionId) await stopSession(request, sessionId, csrfToken);

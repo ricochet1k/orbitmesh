@@ -68,7 +68,7 @@ func TestRealtimeWebSocket_SubscribeGetsSnapshotThenEvent(t *testing.T) {
 		t.Fatalf("snapshot missing created sessions")
 	}
 
-	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionA, domain.SessionStateIdle, domain.SessionStateRunning, "started"))
+	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionA, domain.SessionStateIdle, domain.SessionStateRunning, "started", nil))
 
 	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	var eventMsg realtimeTypes.ServerEnvelope
@@ -132,7 +132,7 @@ func TestRealtimeWebSocket_UnsubscribeStopsTopicEvents(t *testing.T) {
 		t.Fatalf("expected pong, got %q", pong.Type)
 	}
 
-	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionID, domain.SessionStateIdle, domain.SessionStateRunning, "started"))
+	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionID, domain.SessionStateIdle, domain.SessionStateRunning, "started", nil))
 
 	conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 	var msg realtimeTypes.ServerEnvelope
@@ -185,7 +185,7 @@ func TestRealtimeWebSocket_SessionsActivitySnapshotAndEvent(t *testing.T) {
 		t.Fatalf("snapshot session_id = %q, want %q", snapshot.SessionID, sessionID)
 	}
 
-	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionID, "hello from activity stream"))
+	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionID, "hello from activity stream", nil))
 
 	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	var eventMsg realtimeTypes.ServerEnvelope

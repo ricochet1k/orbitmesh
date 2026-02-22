@@ -168,7 +168,14 @@ export function useSessionData({
             if (lastAgentIdx === -1) {
               return [
                 ...prev,
-                { id: stableId("output"), type: "agent", timestamp: payload.timestamp, content, open: true },
+                {
+                  id: stableId("output"),
+                  type: "agent",
+                  kind: "output",
+                  timestamp: payload.timestamp,
+                  content,
+                  open: true,
+                },
               ]
             }
             const realIdx = prev.length - 1 - lastAgentIdx
@@ -177,7 +184,14 @@ export function useSessionData({
           })
         } else {
           mergeMessages(
-            [{ id: stableId("output"), type: "agent", timestamp: payload.timestamp, content, open: false }],
+            [{
+              id: stableId("output"),
+              type: "agent",
+              kind: "output",
+              timestamp: payload.timestamp,
+              content,
+              open: false,
+            }],
             { sort: false },
           )
         }
@@ -190,6 +204,7 @@ export function useSessionData({
         pushMessage({
           id: stableId("status"),
           type: "system",
+          kind: "status_change",
           timestamp: payload.timestamp,
           content: `State changed: ${old_state} -> ${new_state}`,
         })
@@ -200,6 +215,7 @@ export function useSessionData({
         pushMessage({
           id: stableId("metric"),
           type: "system",
+          kind: "metric",
           timestamp: payload.timestamp,
           content: `Metrics updated - in ${tokens_in} - out ${tokens_out} - requests ${request_count}`,
         })
@@ -209,6 +225,7 @@ export function useSessionData({
         pushMessage({
           id: stableId("error"),
           type: "error",
+          kind: "error",
           timestamp: payload.timestamp,
           content: payload.data.message ?? "Unknown error",
         })
@@ -219,6 +236,7 @@ export function useSessionData({
         pushMessage({
           id: stableId("metadata"),
           type: "system",
+          kind: "metadata",
           timestamp: payload.timestamp,
           content: `Metadata - ${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`,
         })
@@ -570,31 +588,54 @@ export function useSessionData({
 // ── Activity entry helpers ────────────────────────────────────────────────────
 
 function toTranscriptFromSessionMessage(message: SessionActivitySnapshot["messages"][number]): TranscriptMessage {
+  const kind = normalizeMessageKind(message.kind)
   return {
     id: `message:${message.id || message.timestamp}`,
-    type: mapActivityKindToType(message.kind),
+    type: mapActivityKindToType(kind),
+    kind,
     timestamp: message.timestamp,
     content: message.contents,
   }
 }
 
 function toActivityMessage(entry: ActivityEntry): TranscriptMessage {
+  const kind = normalizeMessageKind(entry.kind)
   return {
     id: `activity:${entry.id}`,
     entryId: entry.id,
     revision: entry.rev,
     open: entry.open,
-    kind: entry.kind,
-    type: mapActivityKindToType(entry.kind),
+    kind,
+    type: mapActivityKindToType(kind),
     timestamp: entry.ts,
     content: formatActivityContent(entry),
   }
 }
 
 function mapActivityKindToType(kind: string): TranscriptMessage["type"] {
-  const normalized = kind.toLowerCase()
-  if (normalized.includes("error")) return "error"
-  if (normalized.includes("user")) return "user"
-  if (normalized.includes("agent") || normalized.includes("assistant")) return "agent"
+  const normalized = normalizeMessageKind(kind)
+
+  switch (normalized) {
+    case "error":
+    case "tool_error":
+    case "provider_error":
+      return "error"
+    case "user":
+    case "user_input":
+      return "user"
+    case "assistant":
+    case "agent":
+    case "output":
+      return "agent"
+  }
+
+  if (normalized.endsWith("_error")) return "error"
   return "system"
+}
+
+function normalizeMessageKind(kind: string | null | undefined): string {
+  return String(kind ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_")
 }

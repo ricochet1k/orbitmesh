@@ -349,8 +349,8 @@ func TestConcurrentEventEmission(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			for j := 0; j < eventsPerGoroutine; j++ {
-				p.events.EmitOutput("output from goroutine")
-				p.events.EmitMetric(1, 1, 1)
+				p.events.Emit(domain.NewOutputEvent(p.sessionID, "output from goroutine", nil))
+				p.events.Emit(domain.NewMetricEvent(p.sessionID, 1, 1, 1, nil))
 			}
 		}(i)
 	}
@@ -426,11 +426,11 @@ func TestFullEventFlow(t *testing.T) {
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.runCtx, p.runCancel = context.WithCancel(p.ctx)
 
-	p.events.EmitStatusChange(domain.SessionStateIdle, domain.SessionStateRunning, "test started")
-	p.events.EmitOutput("Hello")
-	p.events.EmitMetric(100, 50, 1)
-	p.events.EmitMetadata("model", "gemini-2.5-flash")
-	p.events.EmitError("test error", "TEST_ERR")
+	p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateIdle, domain.SessionStateRunning, "test started", nil))
+	p.events.Emit(domain.NewOutputEvent(p.sessionID, "Hello", nil))
+	p.events.Emit(domain.NewMetricEvent(p.sessionID, 100, 50, 1, nil))
+	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "model", "gemini-2.5-flash", nil))
+	p.events.Emit(domain.NewErrorEvent(p.sessionID, "test error", "TEST_ERR", nil))
 
 	eventTypes := make(map[domain.EventType]int)
 	timeout := time.After(500 * time.Millisecond)
@@ -486,8 +486,8 @@ func TestLoadTest_ConcurrentAgents(t *testing.T) {
 
 			for j := 0; j < 10; j++ {
 				p.state.AddTokens(100, 50)
-				p.events.EmitOutput("output")
-				p.events.EmitMetric(100, 50, 1)
+				p.events.Emit(domain.NewOutputEvent(p.sessionID, "output", nil))
+				p.events.Emit(domain.NewMetricEvent(p.sessionID, 100, 50, 1, nil))
 			}
 
 			if err := p.Stop(context.Background()); err != nil {

@@ -166,7 +166,7 @@ func TestSSE_OutputEvent(t *testing.T) {
 
 	events := readSSEEvents(resp)
 
-	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionID, "hello world"))
+	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionID, "hello world", nil))
 
 	select {
 	case ev := <-events:
@@ -200,9 +200,9 @@ func TestSSE_MultipleEvents(t *testing.T) {
 
 	events := readSSEEvents(resp)
 
-	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionID, "first"))
-	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionID, "second"))
-	env.broadcaster.Broadcast(domain.NewErrorEvent(sessionID, "oops", "ERR_TEST"))
+	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionID, "first", nil))
+	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionID, "second", nil))
+	env.broadcaster.Broadcast(domain.NewErrorEvent(sessionID, "oops", "ERR_TEST", nil))
 
 	var collected []apiTypes.Event
 	timeout := time.After(2 * time.Second)
@@ -242,7 +242,7 @@ func TestSSE_StatusChangeEvent(t *testing.T) {
 
 	events := readSSEEvents(resp)
 
-	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionID, domain.SessionStateIdle, domain.SessionStateRunning, "started"))
+	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionID, domain.SessionStateIdle, domain.SessionStateRunning, "started", nil))
 
 	select {
 	case ev := <-events:
@@ -273,7 +273,7 @@ func TestSSE_MetricEvent(t *testing.T) {
 
 	events := readSSEEvents(resp)
 
-	env.broadcaster.Broadcast(domain.NewMetricEvent(sessionID, 100, 50, 3))
+	env.broadcaster.Broadcast(domain.NewMetricEvent(sessionID, 100, 50, 3, nil))
 
 	select {
 	case ev := <-events:
@@ -304,7 +304,7 @@ func TestSSE_MetadataEvent(t *testing.T) {
 
 	events := readSSEEvents(resp)
 
-	env.broadcaster.Broadcast(domain.NewMetadataEvent(sessionID, "current_task", "do-thing"))
+	env.broadcaster.Broadcast(domain.NewMetadataEvent(sessionID, "current_task", "do-thing", nil))
 
 	select {
 	case ev := <-events:
@@ -377,10 +377,10 @@ func TestSSE_SessionIsolation(t *testing.T) {
 	events := readSSEEvents(resp)
 
 	// Broadcast to session B only
-	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionB, "for B only"))
+	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionB, "for B only", nil))
 
 	// Broadcast to session A
-	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionA, "for A"))
+	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionA, "for A", nil))
 
 	// We should only see the event for A
 	select {
@@ -411,7 +411,7 @@ func TestSSE_ReplayWithLastEventID(t *testing.T) {
 
 	frames := readSSEMessages(resp)
 
-	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionID, "first"))
+	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionID, "first", nil))
 
 	var firstFrame sseMessage
 	select {
@@ -427,7 +427,7 @@ func TestSSE_ReplayWithLastEventID(t *testing.T) {
 
 	resp.Body.Close()
 
-	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionID, "second"))
+	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionID, "second", nil))
 
 	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/sessions/"+sessionID+"/events", nil)
 	req.Header.Set("Last-Event-ID", firstFrame.ID)
@@ -493,9 +493,9 @@ func TestSSE_GlobalSessionEvents_MultipleSessions(t *testing.T) {
 
 	frames := readSSEMessages(resp)
 
-	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionA, "ignore-non-status"))
-	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionA, domain.SessionStateIdle, domain.SessionStateRunning, "start-a"))
-	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionB, domain.SessionStateIdle, domain.SessionStateRunning, "start-b"))
+	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionA, "ignore-non-status", nil))
+	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionA, domain.SessionStateIdle, domain.SessionStateRunning, "start-a", nil))
+	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionB, domain.SessionStateIdle, domain.SessionStateRunning, "start-b", nil))
 
 	collected := make([]apiTypes.SessionStateEvent, 0, 2)
 	timeout := time.After(2 * time.Second)
@@ -541,7 +541,7 @@ func TestSSE_GlobalSessionEvents_ReplayWithLastEventID(t *testing.T) {
 
 	frames := readSSEMessages(resp)
 
-	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionA, domain.SessionStateIdle, domain.SessionStateRunning, "first"))
+	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionA, domain.SessionStateIdle, domain.SessionStateRunning, "first", nil))
 
 	var firstFrame sseMessage
 	select {
@@ -557,7 +557,7 @@ func TestSSE_GlobalSessionEvents_ReplayWithLastEventID(t *testing.T) {
 
 	resp.Body.Close()
 
-	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionB, domain.SessionStateIdle, domain.SessionStateRunning, "second"))
+	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionB, domain.SessionStateIdle, domain.SessionStateRunning, "second", nil))
 
 	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/sessions/events?last_event_id="+firstFrame.ID, nil)
 	respReplay, err := http.DefaultClient.Do(req)
@@ -599,27 +599,27 @@ func TestConvertEventData_AllTypes(t *testing.T) {
 	}{
 		{
 			name:  "status_change",
-			event: domain.NewStatusChangeEvent("s1", domain.SessionStateIdle, domain.SessionStateRunning, "go"),
+			event: domain.NewStatusChangeEvent("s1", domain.SessionStateIdle, domain.SessionStateRunning, "go", nil),
 			want:  apiTypes.EventTypeStatusChange,
 		},
 		{
 			name:  "output",
-			event: domain.NewOutputEvent("s1", "hello"),
+			event: domain.NewOutputEvent("s1", "hello", nil),
 			want:  apiTypes.EventTypeOutput,
 		},
 		{
 			name:  "metric",
-			event: domain.NewMetricEvent("s1", 1, 2, 3),
+			event: domain.NewMetricEvent("s1", 1, 2, 3, nil),
 			want:  apiTypes.EventTypeMetric,
 		},
 		{
 			name:  "error",
-			event: domain.NewErrorEvent("s1", "bad", "CODE"),
+			event: domain.NewErrorEvent("s1", "bad", "CODE", nil),
 			want:  apiTypes.EventTypeError,
 		},
 		{
 			name:  "metadata",
-			event: domain.NewMetadataEvent("s1", "k", "v"),
+			event: domain.NewMetadataEvent("s1", "k", "v", nil),
 			want:  apiTypes.EventTypeMetadata,
 		},
 	}

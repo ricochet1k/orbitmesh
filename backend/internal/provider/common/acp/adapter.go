@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
+	"github.com/ricochet1k/orbitmesh/internal/domain"
 )
 
 // acpClientAdapter implements acpsdk.Client for OrbitMesh.
@@ -67,7 +69,7 @@ func (a *acpClientAdapter) ReadTextFile(ctx context.Context, req acpsdk.ReadText
 	}
 
 	// Emit event for file read
-	a.session.events.EmitMetadata("file_read", map[string]any{
+	a.emitMetadata("file_read", map[string]any{
 		"path": req.Path,
 	})
 
@@ -103,7 +105,7 @@ func (a *acpClientAdapter) WriteTextFile(ctx context.Context, req acpsdk.WriteTe
 	}
 
 	// Emit event for file write
-	a.session.events.EmitMetadata("file_write", map[string]any{
+	a.emitMetadata("file_write", map[string]any{
 		"path": req.Path,
 		"size": len(req.Content),
 	})
@@ -119,7 +121,7 @@ func (a *acpClientAdapter) RequestPermission(ctx context.Context, req acpsdk.Req
 	}
 
 	// Emit permission request as metadata so it can be handled by the orchestration layer
-	a.session.events.EmitMetadata("permission_request", map[string]any{
+	a.emitMetadata("permission_request", map[string]any{
 		"tool_call": req.ToolCall,
 		"title":     title,
 		"options":   req.Options,
@@ -155,7 +157,7 @@ func (a *acpClientAdapter) SessionUpdate(ctx context.Context, notif acpsdk.Sessi
 	case update.UserMessageChunk != nil:
 		// User message echo - useful for confirmation
 		a.handleContentBlock(update.UserMessageChunk.Content)
-		a.session.events.EmitMetadata("user_message_chunk", map[string]any{
+		a.emitMetadata("user_message_chunk", map[string]any{
 			"content": update.UserMessageChunk.Content,
 		})
 
@@ -166,39 +168,42 @@ func (a *acpClientAdapter) SessionUpdate(ctx context.Context, notif acpsdk.Sessi
 	case update.AgentThoughtChunk != nil:
 		// Internal reasoning/thinking process
 		a.handleContentBlock(update.AgentThoughtChunk.Content)
-		a.session.events.EmitMetadata("agent_thought", map[string]any{
-			"content": update.AgentThoughtChunk.Content,
-		})
+		raw, _ := json.Marshal(update.AgentThoughtChunk)
+		if update.AgentThoughtChunk.Content.Text != nil {
+			a.session.events.Emit(domain.NewThoughtEvent(a.session.sessionID, update.AgentThoughtChunk.Content.Text.Text, raw))
+		}
 
 	case update.ToolCall != nil:
 		// Tool call notification
-		a.session.events.EmitMetadata("tool_call", map[string]any{
-			"title":  update.ToolCall.Title,
-			"status": update.ToolCall.Status,
-		})
+		raw, _ := json.Marshal(update.ToolCall)
+		a.session.events.Emit(domain.NewToolCallEvent(a.session.sessionID, domain.ToolCallData{
+			Status: fmt.Sprint(update.ToolCall.Status),
+			Title:  update.ToolCall.Title,
+		}, raw))
 
 	case update.ToolCallUpdate != nil:
 		// Tool call status update
-		a.session.events.EmitMetadata("tool_call_update", map[string]any{
-			"tool_call_id": update.ToolCallUpdate.ToolCallId,
-			"status":       update.ToolCallUpdate.Status,
-		})
+		raw, _ := json.Marshal(update.ToolCallUpdate)
+		a.session.events.Emit(domain.NewToolCallEvent(a.session.sessionID, domain.ToolCallData{
+			ID:     string(update.ToolCallUpdate.ToolCallId),
+			Status: fmt.Sprint(update.ToolCallUpdate.Status),
+			Title:  "tool call update",
+		}, raw))
 
 	case update.Plan != nil:
 		// Agent's execution plan for complex tasks
-		a.session.events.EmitMetadata("plan", map[string]any{
-			"plan": update.Plan,
-		})
+		raw, _ := json.Marshal(update.Plan)
+		a.session.events.Emit(domain.NewPlanEvent(a.session.sessionID, domain.PlanData{Description: fmt.Sprint(update.Plan)}, raw))
 
 	case update.AvailableCommandsUpdate != nil:
 		// Dynamic command discovery
-		a.session.events.EmitMetadata("available_commands", map[string]any{
+		a.emitMetadata("available_commands", map[string]any{
 			"commands": update.AvailableCommandsUpdate,
 		})
 
 	case update.CurrentModeUpdate != nil:
 		// Session mode changes
-		a.session.events.EmitMetadata("mode_change", map[string]any{
+		a.emitMetadata("mode_change", map[string]any{
 			"mode": update.CurrentModeUpdate,
 		})
 	}
@@ -230,7 +235,7 @@ func (a *acpClientAdapter) CreateTerminal(ctx context.Context, req acpsdk.Create
 	}
 
 	// Emit event
-	a.session.events.EmitMetadata("terminal_created", map[string]any{
+	a.emitMetadata("terminal_created", map[string]any{
 		"terminal_id": termID,
 		"command":     req.Command,
 		"args":        req.Args,
@@ -307,7 +312,7 @@ func (a *acpClientAdapter) handleContentBlock(block acpsdk.ContentBlock) {
 	case block.Text != nil:
 		// Text output
 		a.session.state.SetOutput(block.Text.Text)
-		a.session.events.EmitOutput(block.Text.Text)
+		a.session.events.Emit(domain.NewOutputEvent(a.session.sessionID, block.Text.Text, nil))
 
 		// Track assistant message for snapshots
 		a.session.mu.Lock()
@@ -320,8 +325,12 @@ func (a *acpClientAdapter) handleContentBlock(block acpsdk.ContentBlock) {
 
 	case block.Image != nil:
 		// Image output (emit as metadata)
-		a.session.events.EmitMetadata("image", map[string]any{
+		a.emitMetadata("image", map[string]any{
 			"source": block.Image,
 		})
 	}
+}
+
+func (a *acpClientAdapter) emitMetadata(key string, value any) {
+	a.session.events.Emit(domain.NewMetadataEvent(a.session.sessionID, key, value, nil))
 }

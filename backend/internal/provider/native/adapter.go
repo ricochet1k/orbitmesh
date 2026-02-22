@@ -1,7 +1,6 @@
 package native
 
 import (
-	"encoding/json"
 	"sync"
 	"time"
 
@@ -14,6 +13,7 @@ type EventAdapter struct {
 	events    chan domain.Event
 	done      chan struct{}
 	mu        sync.Mutex
+	closed    bool
 	closeOnce sync.Once
 }
 
@@ -32,96 +32,33 @@ func (a *EventAdapter) Events() <-chan domain.Event {
 	return a.events
 }
 
-func (a *EventAdapter) EmitStatusChange(oldState, newState domain.SessionState, reason string) {
-	a.emit(domain.NewStatusChangeEvent(a.sessionID, oldState, newState, reason))
-}
-
-func (a *EventAdapter) EmitOutput(content string) {
-	a.emit(domain.NewOutputEvent(a.sessionID, content))
-}
-
-func (a *EventAdapter) EmitMetric(tokensIn, tokensOut, requestCount int64) {
-	a.emit(domain.NewMetricEvent(a.sessionID, tokensIn, tokensOut, requestCount))
-}
-
-func (a *EventAdapter) EmitError(message, code string) {
-	a.emit(domain.NewErrorEvent(a.sessionID, message, code))
-}
-
-func (a *EventAdapter) EmitMetadata(key string, value any) {
-	a.emit(domain.NewMetadataEvent(a.sessionID, key, value))
+func (a *EventAdapter) Emit(event domain.Event) {
+	a.emit(event)
 }
 
 func (a *EventAdapter) emit(event domain.Event) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	select {
-	case <-a.done:
+	if a.closed {
 		return
-	default:
 	}
 
 	select {
 	case a.events <- event:
 	default:
+		return
 	}
-}
-
-// WithRaw returns a ScopedEmitter that attaches raw provider bytes to every
-// event it emits. Use it at the point where the raw bytes are available:
-//
-//	a.WithRaw(rawBytes).EmitMetadata("key", value)
-func (a *EventAdapter) WithRaw(raw []byte) *ScopedEmitter {
-	return &ScopedEmitter{adapter: a, raw: raw}
-}
-
-// MarshalRaw JSON-encodes v and returns a ScopedEmitter with those bytes.
-// Useful for Go SDK structs that have no wire representation.
-func (a *EventAdapter) MarshalRaw(v any) *ScopedEmitter {
-	b, _ := json.Marshal(v)
-	return &ScopedEmitter{adapter: a, raw: b}
-}
-
-// ScopedEmitter wraps EventAdapter and tags every emitted event with raw bytes.
-type ScopedEmitter struct {
-	adapter *EventAdapter
-	raw     []byte
-}
-
-func (s *ScopedEmitter) emit(event domain.Event) {
-	event.Raw = s.raw
-	s.adapter.emit(event)
-}
-
-func (s *ScopedEmitter) EmitStatusChange(oldState, newState domain.SessionState, reason string) {
-	s.emit(domain.NewStatusChangeEvent(s.adapter.sessionID, oldState, newState, reason))
-}
-
-func (s *ScopedEmitter) EmitOutput(content string) {
-	s.emit(domain.NewOutputEvent(s.adapter.sessionID, content))
-}
-
-func (s *ScopedEmitter) EmitMetric(tokensIn, tokensOut, requestCount int64) {
-	s.emit(domain.NewMetricEvent(s.adapter.sessionID, tokensIn, tokensOut, requestCount))
-}
-
-func (s *ScopedEmitter) EmitError(message, code string) {
-	s.emit(domain.NewErrorEvent(s.adapter.sessionID, message, code))
-}
-
-func (s *ScopedEmitter) EmitMetadata(key string, value any) {
-	s.emit(domain.NewMetadataEvent(s.adapter.sessionID, key, value))
 }
 
 func (a *EventAdapter) Close() {
 	a.closeOnce.Do(func() {
 		a.mu.Lock()
 		defer a.mu.Unlock()
+
+		a.closed = true
 		close(a.done)
 		// Close the events channel so readers see EOF.
-		// The mutex ensures no concurrent emit() is between its done-check and
-		// the channel send when we close here.
 		close(a.events)
 	})
 }

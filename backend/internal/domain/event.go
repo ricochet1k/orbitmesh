@@ -97,11 +97,12 @@ func (e Event) Plan() (PlanData, bool) {
 	return d, ok
 }
 
-func NewStatusChangeEvent(sessionID string, oldState, newState SessionState, reason string) Event {
+func NewStatusChangeEvent(sessionID string, oldState, newState SessionState, reason string, raw json.RawMessage) Event {
 	return Event{
 		Type:      EventTypeStatusChange,
 		Timestamp: time.Now(),
 		SessionID: sessionID,
+		Raw:       raw,
 		Data: StatusChangeData{
 			OldState: oldState,
 			NewState: newState,
@@ -155,30 +156,33 @@ type PlanStep struct {
 	Status      string
 }
 
-func NewOutputEvent(sessionID, content string) Event {
+func NewOutputEvent(sessionID, content string, raw json.RawMessage) Event {
 	return Event{
 		Type:      EventTypeOutput,
 		Timestamp: time.Now(),
 		SessionID: sessionID,
+		Raw:       raw,
 		Data:      OutputData{Content: content, IsDelta: false},
 	}
 }
 
 // NewDeltaOutputEvent creates an output event marked as a delta (should be merged in storage).
-func NewDeltaOutputEvent(sessionID, content string) Event {
+func NewDeltaOutputEvent(sessionID, content string, raw json.RawMessage) Event {
 	return Event{
 		Type:      EventTypeOutput,
 		Timestamp: time.Now(),
 		SessionID: sessionID,
+		Raw:       raw,
 		Data:      OutputData{Content: content, IsDelta: true},
 	}
 }
 
-func NewMetricEvent(sessionID string, tokensIn, tokensOut, requestCount int64) Event {
+func NewMetricEvent(sessionID string, tokensIn, tokensOut, requestCount int64, raw json.RawMessage) Event {
 	return Event{
 		Type:      EventTypeMetric,
 		Timestamp: time.Now(),
 		SessionID: sessionID,
+		Raw:       raw,
 		Data: MetricData{
 			TokensIn:     tokensIn,
 			TokensOut:    tokensOut,
@@ -187,11 +191,12 @@ func NewMetricEvent(sessionID string, tokensIn, tokensOut, requestCount int64) E
 	}
 }
 
-func NewErrorEvent(sessionID, message, code string) Event {
+func NewErrorEvent(sessionID, message, code string, raw json.RawMessage) Event {
 	return Event{
 		Type:      EventTypeError,
 		Timestamp: time.Now(),
 		SessionID: sessionID,
+		Raw:       raw,
 		Data: ErrorData{
 			Message: message,
 			Code:    code,
@@ -199,11 +204,12 @@ func NewErrorEvent(sessionID, message, code string) Event {
 	}
 }
 
-func NewMetadataEvent(sessionID, key string, value any) Event {
+func NewMetadataEvent(sessionID, key string, value any, raw json.RawMessage) Event {
 	return Event{
 		Type:      EventTypeMetadata,
 		Timestamp: time.Now(),
 		SessionID: sessionID,
+		Raw:       raw,
 		Data: MetadataData{
 			Key:   key,
 			Value: value,
@@ -211,29 +217,32 @@ func NewMetadataEvent(sessionID, key string, value any) Event {
 	}
 }
 
-func NewToolCallEvent(sessionID string, data ToolCallData) Event {
+func NewToolCallEvent(sessionID string, data ToolCallData, raw json.RawMessage) Event {
 	return Event{
 		Type:      EventTypeToolCall,
 		Timestamp: time.Now(),
 		SessionID: sessionID,
+		Raw:       raw,
 		Data:      data,
 	}
 }
 
-func NewThoughtEvent(sessionID, content string) Event {
+func NewThoughtEvent(sessionID, content string, raw json.RawMessage) Event {
 	return Event{
 		Type:      EventTypeThought,
 		Timestamp: time.Now(),
 		SessionID: sessionID,
+		Raw:       raw,
 		Data:      ThoughtData{Content: content},
 	}
 }
 
-func NewPlanEvent(sessionID string, data PlanData) Event {
+func NewPlanEvent(sessionID string, data PlanData, raw json.RawMessage) Event {
 	return Event{
 		Type:      EventTypePlan,
 		Timestamp: time.Now(),
 		SessionID: sessionID,
+		Raw:       raw,
 		Data:      data,
 	}
 }

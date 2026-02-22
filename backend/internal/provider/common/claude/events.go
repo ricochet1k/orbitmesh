@@ -53,11 +53,7 @@ func TranslateToOrbitMeshEvent(sessionID string, msg Message) (domain.Event, boo
 		event, ok = domain.NewMetadataEvent(sessionID, "unknown_message_type", map[string]any{
 			"type": string(msg.Type),
 			"data": msg.Data,
-		}), true
-	}
-
-	if ok {
-		event.Raw = msg.Raw()
+		}, msg.Raw()), true
 	}
 	return event, ok
 }
@@ -66,13 +62,13 @@ func TranslateToOrbitMeshEvent(sessionID string, msg Message) (domain.Event, boo
 func handleMessageStart(sessionID string, msg Message) (domain.Event, bool) {
 	// Extract usage if available
 	if usage, ok := msg.ExtractUsage(); ok && (usage.InputTokens > 0 || usage.OutputTokens > 0) {
-		return domain.NewMetricEvent(sessionID, usage.InputTokens, usage.OutputTokens, 1), true
+		return domain.NewMetricEvent(sessionID, usage.InputTokens, usage.OutputTokens, 1, msg.Raw()), true
 	}
 
 	// Emit metadata about message start
 	return domain.NewMetadataEvent(sessionID, "message_start", map[string]any{
 		"message": msg.Data["message"],
-	}), true
+	}, msg.Raw()), true
 }
 
 // handleContentBlockStart processes content_block_start events.
@@ -93,7 +89,7 @@ func handleContentBlockStart(sessionID string, msg Message) (domain.Event, bool)
 			"tool_name": block.ToolUseName,
 			"tool_id":   block.ToolUseID,
 			"index":     block.Index,
-		}), true
+		}, msg.Raw()), true
 
 	default:
 		return domain.Event{}, false
@@ -110,7 +106,7 @@ func handleContentBlockDelta(sessionID string, msg Message) (domain.Event, bool)
 
 	if block.Text != "" {
 		// Emit text content as delta output (will be merged in storage)
-		return domain.NewDeltaOutputEvent(sessionID, block.Text), true
+		return domain.NewDeltaOutputEvent(sessionID, block.Text, msg.Raw()), true
 	}
 
 	return domain.Event{}, false
@@ -122,7 +118,7 @@ func handleContentBlockStop(sessionID string, msg Message) (domain.Event, bool) 
 	if index, ok := msg.GetInt("index"); ok {
 		return domain.NewMetadataEvent(sessionID, "content_block_stop", map[string]any{
 			"index": index,
-		}), true
+		}, msg.Raw()), true
 	}
 
 	return domain.Event{}, false
@@ -132,14 +128,14 @@ func handleContentBlockStop(sessionID string, msg Message) (domain.Event, bool) 
 func handleMessageDelta(sessionID string, msg Message) (domain.Event, bool) {
 	// Extract usage updates
 	if usage, ok := msg.ExtractUsage(); ok && (usage.InputTokens > 0 || usage.OutputTokens > 0) {
-		return domain.NewMetricEvent(sessionID, usage.InputTokens, usage.OutputTokens, 0), true
+		return domain.NewMetricEvent(sessionID, usage.InputTokens, usage.OutputTokens, 0, msg.Raw()), true
 	}
 
 	// Check for stop_reason
 	if stopReason, ok := msg.GetString("delta", "stop_reason"); ok {
 		return domain.NewMetadataEvent(sessionID, "stop_reason", map[string]any{
 			"reason": stopReason,
-		}), true
+		}, msg.Raw()), true
 	}
 
 	return domain.Event{}, false
@@ -150,7 +146,7 @@ func handleMessageStop(sessionID string, msg Message) (domain.Event, bool) {
 	// Message completed successfully
 	return domain.NewMetadataEvent(sessionID, "message_complete", map[string]any{
 		"type": "message_stop",
-	}), true
+	}, msg.Raw()), true
 }
 
 // handleError processes error events.
@@ -160,9 +156,9 @@ func handleError(sessionID string, msg Message) (domain.Event, bool) {
 		// Try to extract error info manually
 		if errorMap, ok := msg.GetMap("error"); ok {
 			jsonBytes, _ := json.Marshal(errorMap)
-			return domain.NewErrorEvent(sessionID, string(jsonBytes), "CLAUDE_ERROR"), true
+			return domain.NewErrorEvent(sessionID, string(jsonBytes), "CLAUDE_ERROR", msg.Raw()), true
 		}
-		return domain.NewErrorEvent(sessionID, "Unknown error", "CLAUDE_ERROR"), true
+		return domain.NewErrorEvent(sessionID, "Unknown error", "CLAUDE_ERROR", msg.Raw()), true
 	}
 
 	message := errInfo.Message
@@ -170,7 +166,7 @@ func handleError(sessionID string, msg Message) (domain.Event, bool) {
 		message = fmt.Sprintf("Claude error: %s", errInfo.Type)
 	}
 
-	return domain.NewErrorEvent(sessionID, message, errInfo.Type), true
+	return domain.NewErrorEvent(sessionID, message, errInfo.Type, msg.Raw()), true
 }
 
 // accumulateMetrics accumulates token usage across multiple messages.
@@ -228,7 +224,7 @@ func handleSystemMessage(sessionID string, msg Message) (domain.Event, bool) {
 		metadata["claude_session_id"] = sessionID
 	}
 
-	return domain.NewMetadataEvent(sessionID, "system_init", metadata), true
+	return domain.NewMetadataEvent(sessionID, "system_init", metadata, msg.Raw()), true
 }
 
 // handleUserMessage processes user messages (typically tool results).
@@ -278,7 +274,7 @@ func handleUserMessage(sessionID string, msg Message) (domain.Event, bool) {
 		}
 	}
 
-	return domain.NewMetadataEvent(sessionID, "tool_result", metadata), true
+	return domain.NewMetadataEvent(sessionID, "tool_result", metadata, msg.Raw()), true
 }
 
 // handleAssistantMessage processes assistant snapshot messages.
@@ -350,5 +346,5 @@ func handleAssistantMessage(sessionID string, msg Message) (domain.Event, bool) 
 		metadata["content_summary"] = contentSummary
 	}
 
-	return domain.NewMetadataEvent(sessionID, "assistant_snapshot", metadata), true
+	return domain.NewMetadataEvent(sessionID, "assistant_snapshot", metadata, msg.Raw()), true
 }
