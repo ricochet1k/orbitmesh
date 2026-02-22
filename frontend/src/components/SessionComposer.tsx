@@ -22,6 +22,8 @@ export interface SessionComposerProps {
   providers?: Accessor<ProviderConfigResponse[]>
   /** Default provider ID (from session preference) */
   defaultProviderId?: string
+  /** Renders a compact floating submit/stop action on the textarea */
+  floatingAction?: boolean
 }
 
 export default function SessionComposer(props: SessionComposerProps) {
@@ -79,24 +81,61 @@ export default function SessionComposer(props: SessionComposerProps) {
     inputRef?.focus()
   }
 
+  const handlePrimaryAction = async () => {
+    if (props.isRunning() && props.onInterrupt) {
+      await handleInterrupt()
+      return
+    }
+    await handleSend()
+  }
+
+  const primaryLabel = () => {
+    if (props.isRunning() && props.onInterrupt) {
+      return props.pendingAction() === "interrupt" ? "Stopping…" : "Stop"
+    }
+    return props.pendingAction() === "send" ? "Sending…" : "Submit"
+  }
+
+  const primaryDisabled = () => {
+    if (props.pendingAction() !== null) return true
+    if (props.isRunning() && props.onInterrupt) return false
+    return !value().trim() || !props.canSend()
+  }
+
   return (
     <div class="session-composer">
       <Show when={props.error?.()}>
         <div class="session-composer-error">{props.error!()}</div>
       </Show>
       <div class="session-composer-row">
-        <textarea
-          ref={inputRef}
-          class="session-composer-input"
-          data-testid="session-composer-input"
-          placeholder={placeholder()}
-          value={value()}
-          onInput={(e) => setValue(e.currentTarget.value)}
-          onKeyDown={handleKeyDown}
-          disabled={props.pendingAction() !== null}
-          rows={2}
-        />
-        <div class="session-composer-actions">
+        <div class="session-composer-input-wrap" classList={{ floating: !!props.floatingAction }}>
+          <textarea
+            ref={inputRef}
+            class="session-composer-input"
+            data-testid="session-composer-input"
+            placeholder={placeholder()}
+            value={value()}
+            onInput={(e) => setValue(e.currentTarget.value)}
+            onKeyDown={handleKeyDown}
+            disabled={props.pendingAction() !== null}
+            rows={2}
+          />
+          <Show when={props.floatingAction}>
+            <button
+              type="button"
+              class="session-composer-float-btn"
+              classList={{ stop: props.isRunning() && !!props.onInterrupt }}
+              data-testid="session-composer-primary"
+              onClick={handlePrimaryAction}
+              disabled={primaryDisabled()}
+              title={props.isRunning() ? "Send interrupt signal (Ctrl+C)" : "Submit message"}
+            >
+              {primaryLabel()}
+            </button>
+          </Show>
+        </div>
+        <Show when={!props.floatingAction}>
+          <div class="session-composer-actions">
           <Show when={props.providers && props.providers().length > 0}>
             <select
               class="session-composer-provider-selector"
@@ -134,7 +173,8 @@ export default function SessionComposer(props: SessionComposerProps) {
           >
             {props.pendingAction() === "send" ? "Sending…" : "Send"}
           </button>
-        </div>
+          </div>
+        </Show>
       </div>
     </div>
   )

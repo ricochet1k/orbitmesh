@@ -84,6 +84,7 @@ describe("SessionViewer", () => {
     vi.stubGlobal("EventSource", MockEventSource as never)
     vi.stubGlobal("atob", (value: string) => value)
     vi.stubGlobal("btoa", (value: string) => value)
+    vi.stubGlobal("WebSocket", undefined as never)
     vi.stubGlobal("crypto", {
       randomUUID: () => "123e4567-e89b-12d3-a456-426614174000",
     })
@@ -200,10 +201,16 @@ describe("SessionViewer", () => {
 
     // Wait for session to load and cancel button to be enabled
     await waitFor(() => {
-      const btn = screen.getByText("Cancel") as HTMLButtonElement
+      screen.getByTestId("session-viewer-menu")
+    })
+
+    fireEvent.click(screen.getByTestId("session-viewer-menu"))
+
+    await waitFor(() => {
+      const btn = screen.getByText("Cancel session") as HTMLButtonElement
       expect(btn.disabled).toBe(false)
     })
-    fireEvent.click(screen.getByText("Cancel"))
+    fireEvent.click(screen.getByText("Cancel session"))
     expect(apiClient.cancelSession).toHaveBeenCalledWith("session-1")
   })
 
@@ -214,7 +221,8 @@ describe("SessionViewer", () => {
     render(() => <SessionViewer sessionId="session-1" onClose={onClose} />)
 
     await waitFor(() => expect(screen.getByTestId("session-state-badge").textContent).toContain("running"))
-    fireEvent.click(screen.getByTitle("Close session viewer"))
+    fireEvent.click(screen.getByTestId("session-viewer-menu"))
+    fireEvent.click(screen.getByText("Close viewer"))
     expect(onClose).toHaveBeenCalled()
   })
 
@@ -229,8 +237,8 @@ describe("SessionViewer", () => {
     const stateBadge = screen.getByTestId("session-state-badge")
     expect(stateBadge.textContent).toContain("suspended")
 
-    // Cancel button should be disabled when not running
-    const cancelButton = screen.getByText("Cancel") as HTMLButtonElement
+    fireEvent.click(screen.getByTestId("session-viewer-menu"))
+    const cancelButton = screen.getByText("Cancel session") as HTMLButtonElement
     expect(cancelButton.disabled).toBe(true)
     expect(cancelButton.getAttribute("title")).toBe("Cannot cancel: session is suspended")
   })
@@ -243,12 +251,18 @@ describe("SessionViewer", () => {
 
     // Wait for session to load and cancel button to be enabled
     await waitFor(() => {
-      const btn = screen.getByText("Cancel") as HTMLButtonElement
+      screen.getByTestId("session-viewer-menu")
+    })
+
+    fireEvent.click(screen.getByTestId("session-viewer-menu"))
+
+    await waitFor(() => {
+      const btn = screen.getByText("Cancel session") as HTMLButtonElement
       expect(btn.disabled).toBe(false)
     })
 
     // Click cancel to start action
-    const cancelButton = screen.getByText("Cancel") as HTMLButtonElement
+    const cancelButton = screen.getByText("Cancel session") as HTMLButtonElement
     fireEvent.click(cancelButton)
 
     // Button should show in-progress tooltip
@@ -268,12 +282,15 @@ describe("SessionViewer", () => {
 
     eventSources[0]?.emit("status_change", {
       type: "status_change",
+      event_id: 12,
       timestamp: "2026-02-05T12:02:00Z",
       session_id: "session-1",
       data: { old_state: "running", new_state: "suspended" },
     })
 
-    const updatedBadge = await screen.findByTestId("session-state-badge")
-    expect(updatedBadge.textContent).toContain("suspended")
+    await waitFor(() => {
+      const updatedBadge = screen.getByTestId("session-state-badge")
+      expect(updatedBadge.textContent).toContain("suspended")
+    })
   })
 })

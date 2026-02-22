@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/solid-router'
-import { createResource, createSignal, createEffect, createMemo } from 'solid-js'
+import { createResource, createSignal, createEffect, createMemo, Show, For } from 'solid-js'
 import { apiClient } from '../../api/client'
 import { listProviders } from '../../api/providers'
 import type { SessionState } from '../../types/api'
@@ -8,11 +8,12 @@ import { isTestEnv } from '../../utils/env'
 import { TIMEOUTS } from '../../constants/timeouts'
 import { useSessionActions } from '../../hooks/useSessionActions'
 import { useSessionData } from '../../hooks/useSessionData'
-import SessionToolbar from '../../components/SessionToolbar'
+import OverflowMenu from '../../components/OverflowMenu'
 import SessionMetrics from '../../components/SessionMetrics'
 import SessionTranscript from '../../components/SessionTranscript'
 import SessionComposer from '../../components/SessionComposer'
 import SessionTerminals from '../../components/SessionTerminals'
+import { getStreamStatusLabel, getTerminalStatusLabel } from '../../utils/statusLabels'
 
 export const Route = createFileRoute('/sessions/$sessionId')({
   component: SessionViewer,
@@ -41,6 +42,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   const [actionNotice, setActionNotice] = createSignal<{ tone: "error" | "success"; message: string } | null>(null)
   const [composerError, setComposerError] = createSignal<string | null>(null)
   const [composerPending, setComposerPending] = createSignal<string | null>(null)
+  const [selectedProviderId, setSelectedProviderId] = createSignal<string | null>(null)
   let transcriptRef: HTMLDivElement | undefined
 
   // canInspect: null while permissions are loading, then boolean
@@ -75,7 +77,21 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
 
   const sessionState = () => sessionStateOverride() ?? session()?.state ?? "idle"
   const providerType = () => session()?.provider_type ?? ""
+  const providerList = () => providers()?.providers ?? []
+  const selectedProvider = () => {
+    const providerId = selectedProviderId()
+    if (!providerId) return providerList()[0] ?? null
+    return providerList().find((provider) => provider.id === providerId) ?? providerList()[0] ?? null
+  }
   const canManage = () => permissions()?.can_initiate_bulk_actions ?? false
+
+  const sessionTitle = () => {
+    const title = session()?.title?.trim()
+    if (title) return title
+    const task = session()?.current_task?.trim()
+    if (task) return task
+    return `Session ${sessionId().slice(0, 8)}`
+  }
 
   const isRunning = () => sessionState() === "running"
   const canSendMessage = () => sessionState() === "idle" || sessionState() === "suspended"
@@ -85,11 +101,31 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     transcriptRef.scrollTop = transcriptRef.scrollHeight
   }
 
+  createEffect(() => {
+    sessionId()
+    setSessionStateOverride(null)
+  })
+
   // Session state sync effect
   createEffect(() => {
     const d = session()
     if (!d) return
-    setSessionStateOverride(d.state)
+    if (sessionStateOverride() === null) {
+      setSessionStateOverride(d.state)
+    }
+  })
+
+  createEffect(() => {
+    if (selectedProviderId() !== null) return
+    const preferred = session()?.preferred_provider_id
+    if (preferred) {
+      setSelectedProviderId(preferred)
+      return
+    }
+    const first = providerList()[0]
+    if (first) {
+      setSelectedProviderId(first.id)
+    }
   })
 
   // Auto-scroll effect
@@ -118,11 +154,12 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     void actions.cancel()
   }
 
-  const handleSend = async (text: string, providerId?: string) => {
+  const handleSend = async (text: string) => {
     setComposerError(null)
     setComposerPending("send")
     try {
-      await apiClient.sendMessage(sessionId(), text, { providerId })
+      const providerId = selectedProvider()?.id
+      await apiClient.sendMessage(sessionId(), text, providerId ? { providerId } : undefined)
     } catch (err) {
       setComposerError(err instanceof Error ? err.message : "Failed to send message")
     } finally {
@@ -177,22 +214,124 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
 
   // Map useSessionData streamStatus to the string union used by SessionToolbar
   const streamStatusStr = () => data.streamStatus()
+  const stateLabel = () => sessionState().replace("_", " ")
+  const cancelDisabled = () => !canManage() || sessionState() !== "running" || pendingAction() === "cancel"
+  const cancelTitle = () => {
+    if (!canManage()) return PERM_DENIED
+    if (pendingAction() === "cancel") return "Cancel action is in progress..."
+    if (sessionState() !== "running") return `Cannot cancel: session is ${sessionState()}`
+    return "Cancel the running session"
+  }
 
   return (
     <div class="session-viewer">
-      <SessionToolbar
-        sessionState={sessionState}
-        streamStatus={streamStatusStr}
-        terminalStatus={terminalStatus}
-        providerType={providerType}
-        pendingAction={pendingAction}
-        canManage={canManage}
-        actionNotice={actionNotice}
-        onCancel={handleCancel}
-        onExportJson={() => exportTranscript("json")}
-        onExportMarkdown={() => exportTranscript("markdown")}
-        onClose={handleClose}
-      />
+      <header class="session-compact-header">
+        <div class="session-compact-title-wrap">
+          <p class="session-compact-kicker">Session</p>
+          <h1 data-testid="session-viewer-heading">{sessionTitle()}</h1>
+          <p class="session-compact-subtitle">{sessionId()}</p>
+        </div>
+
+        <div class="session-compact-meta" data-testid="session-compact-meta">
+          <span class={`state-badge ${sessionState()}`} data-testid="session-state-badge">
+            {stateLabel()}
+          </span>
+          <span class={`stream-pill ${streamStatusStr()}`} data-testid="activity-stream-status">
+            Activity {getStreamStatusLabel(streamStatusStr())}
+          </span>
+          <Show when={providerType() === "pty"}>
+            <span class={`stream-pill ${terminalStatus()}`} data-testid="terminal-stream-status">
+              Terminal {getTerminalStatusLabel(terminalStatus())}
+            </span>
+          </Show>
+          <span class="session-intel-chip">Provider {providerType() || "unknown"}</span>
+          <Show when={session()?.current_task}>
+            <span class="session-intel-chip">Task {session()?.current_task}</span>
+          </Show>
+          <span class="session-intel-chip">In {session()?.metrics?.tokens_in ?? "-"}</span>
+          <span class="session-intel-chip">Out {session()?.metrics?.tokens_out ?? "-"}</span>
+          <span class="session-intel-chip">Req {session()?.metrics?.request_count ?? "-"}</span>
+        </div>
+
+        <OverflowMenu
+          wrapperClass="session-viewer-menu-wrap"
+          triggerClass="session-viewer-menu-trigger"
+          panelClass="session-viewer-menu"
+          triggerLabel="Session actions"
+          triggerTestId="session-viewer-menu"
+        >
+          {({ close }) => (
+            <>
+              <Show when={providerList().length > 0}>
+                <div class="session-viewer-menu-section">
+                  <label class="session-viewer-menu-label">Provider</label>
+                  <select
+                    class="session-viewer-menu-select"
+                    value={selectedProvider()?.id ?? ""}
+                    onChange={(e) => setSelectedProviderId(e.currentTarget.value || null)}
+                  >
+                    <For each={providerList()}>
+                      {(provider) => <option value={provider.id}>{provider.name} ({provider.type})</option>}
+                    </For>
+                  </select>
+                </div>
+                <div class="session-viewer-menu-divider" />
+              </Show>
+
+              <button
+                type="button"
+                class="session-viewer-menu-item"
+                onClick={() => {
+                  exportTranscript("json")
+                  close()
+                }}
+              >
+                Export JSON
+              </button>
+              <button
+                type="button"
+                class="session-viewer-menu-item"
+                onClick={() => {
+                  exportTranscript("markdown")
+                  close()
+                }}
+              >
+                Export Markdown
+              </button>
+              <button
+                type="button"
+                class="session-viewer-menu-item session-viewer-menu-item--danger"
+                onClick={() => {
+                  handleCancel()
+                  close()
+                }}
+                disabled={cancelDisabled()}
+                title={cancelTitle()}
+              >
+                Cancel session
+              </button>
+              <button
+                type="button"
+                class="session-viewer-menu-item"
+                onClick={() => {
+                  handleClose()
+                  close()
+                }}
+              >
+                Close viewer
+              </button>
+            </>
+          )}
+        </OverflowMenu>
+      </header>
+
+      <Show when={actionNotice()}>
+        {(notice) => (
+          <p class={`notice-banner ${notice().tone}`} data-testid="session-action-notice">
+            {notice().message}
+          </p>
+        )}
+      </Show>
 
       <main class="session-layout">
         <section class="session-panel">
@@ -252,8 +391,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
             onSend={handleSend}
             onInterrupt={handleInterrupt}
             error={composerError}
-            providers={() => providers()?.providers ?? []}
-            defaultProviderId={session()?.preferred_provider_id}
+            floatingAction
           />
         </section >
 

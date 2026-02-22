@@ -47,11 +47,7 @@ export default function SessionMetrics(props: SessionMetricsProps) {
       </div>
       <Show
         when={props.providerType() === "pty"}
-        fallback={
-          <div class="empty-terminal">
-            <span>Terminal stream not available for this session.</span>
-          </div>
-        }
+        fallback={null}
       >
         <TerminalView
           sessionId={props.sessionId()}

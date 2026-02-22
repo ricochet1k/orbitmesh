@@ -77,6 +77,7 @@ describe("AgentDock", () => {
     vi.stubGlobal("crypto", {
       randomUUID: () => "123e4567-e89b-12d3-a456-426614174000",
     });
+    vi.stubGlobal("WebSocket", undefined as never);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
       status: 200,

@@ -19,6 +19,7 @@ import { useAgentDockSession } from "../hooks/useAgentDockSession"
 import { useAgentDockMcp } from "../hooks/useAgentDockMcp"
 import SessionTranscript from "./SessionTranscript"
 import SessionComposer from "./SessionComposer"
+import OverflowMenu from "./OverflowMenu"
 import "./AgentDock.css"
 
 interface AgentDockProps {
@@ -44,11 +45,9 @@ export default function AgentDock(props: AgentDockProps) {
   const [composerError, setComposerError] = createSignal<string | null>(null)
   const [composerPending, setComposerPending] = createSignal<string | null>(null)
   const [sessionStateOverride, setSessionStateOverride] = createSignal<SessionState | null>(null)
-  const [menuOpen, setMenuOpen] = createSignal(false)
   const [selectedProviderId, setSelectedProviderId] = createSignal<string | null>(null)
 
   let transcriptContainerRef: HTMLDivElement | undefined
-  let menuRef: HTMLDivElement | undefined
 
   const { ensureDockSessionId } = useAgentDockSession({
     sessionId,
@@ -66,19 +65,6 @@ export default function AgentDock(props: AgentDockProps) {
   const isRunning = () => sessionState() === "running"
 
   const toggleExpanded = () => setIsExpanded((prev) => !prev)
-  const toggleMenu = () => setMenuOpen((prev) => !prev)
-  const closeMenu = () => setMenuOpen(false)
-
-  // Close menu when clicking outside
-  createEffect(() => {
-    if (!menuOpen()) return
-    const handler = (e: MouseEvent) => {
-      if (menuRef && !menuRef.contains(e.target as Node)) closeMenu()
-    }
-    document.addEventListener("mousedown", handler)
-    return () => document.removeEventListener("mousedown", handler)
-  })
-
   const formatShort = (value: unknown, limit = 120) => {
     if (value === null || value === undefined) return ""
     const raw = typeof value === "string" ? value : JSON.stringify(value)
@@ -234,7 +220,6 @@ export default function AgentDock(props: AgentDockProps) {
   const handleNewSession = async () => {
     clearDockSessionId()
     setDockError(null)
-    closeMenu()
     const pid = selectedProviderId()
     const newId = await ensureDockSessionId(pid ? { providerId: pid } : {})
     if (!newId) {
@@ -245,7 +230,6 @@ export default function AgentDock(props: AgentDockProps) {
   const handleOpenFullViewer = () => {
     const id = sessionId()
     if (!id) return
-    closeMenu()
     if (props.onNavigate) {
       props.onNavigate(`/sessions/${id}`)
       return
@@ -280,25 +264,15 @@ export default function AgentDock(props: AgentDockProps) {
         </span>
 
         {/* Hamburger menu */}
-        <div class="agent-dock-menu-wrap" ref={menuRef}>
-          <button
-            type="button"
-            class="agent-dock-icon-btn"
-            onClick={toggleMenu}
-            aria-label="Menu"
-            title="Menu"
-            data-testid="agent-dock-menu"
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-              <line x1="1" y1="3.5" x2="13" y2="3.5" />
-              <line x1="1" y1="7" x2="13" y2="7" />
-              <line x1="1" y1="10.5" x2="13" y2="10.5" />
-            </svg>
-          </button>
-
-          <Show when={menuOpen()}>
-            <div class="agent-dock-menu">
-              {/* Provider selector */}
+        <OverflowMenu
+          wrapperClass="agent-dock-menu-wrap"
+          triggerClass="agent-dock-icon-btn"
+          panelClass="agent-dock-menu"
+          triggerLabel="Menu"
+          triggerTestId="agent-dock-menu"
+        >
+          {({ close }) => (
+            <>
               <Show when={providerList().length > 0}>
                 <div class="agent-dock-menu-section">
                   <label class="agent-dock-menu-label">Provider</label>
@@ -315,26 +289,42 @@ export default function AgentDock(props: AgentDockProps) {
                 <div class="agent-dock-menu-divider" />
               </Show>
 
-              {/* Actions */}
-              <button type="button" class="agent-dock-menu-item" onClick={handleNewSession}>
+              <button
+                type="button"
+                class="agent-dock-menu-item"
+                onClick={() => {
+                  void handleNewSession()
+                  close()
+                }}
+              >
                 New session
               </button>
               <Show when={dockLoadState() === "live"}>
-                <button type="button" class="agent-dock-menu-item" onClick={handleOpenFullViewer}>
+                <button
+                  type="button"
+                  class="agent-dock-menu-item"
+                  onClick={() => {
+                    handleOpenFullViewer()
+                    close()
+                  }}
+                >
                   Open full viewer
                 </button>
                 <button
                   type="button"
                   class="agent-dock-menu-item agent-dock-menu-item--danger"
-                  onClick={() => { void actions.cancel(); closeMenu() }}
+                  onClick={() => {
+                    void actions.cancel()
+                    close()
+                  }}
                   disabled={!canManage() || sessionState() !== "running" || actions.pendingAction() !== null}
                 >
                   Cancel session
                 </button>
               </Show>
-            </div>
-          </Show>
-        </div>
+            </>
+          )}
+        </OverflowMenu>
 
         {/* Collapse toggle — chevron icon */}
         <button

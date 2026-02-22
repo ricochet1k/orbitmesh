@@ -1,4 +1,4 @@
-import { render, screen } from "@solidjs/testing-library";
+import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { describe, it, expect, vi } from "vitest";
 import Sidebar from "./Sidebar";
 
@@ -115,5 +115,18 @@ describe("Sidebar Navigation", () => {
     expect(labels).toContain("Terminals");
     expect(labels).toContain("Extractors");
     expect(labels).toContain("Settings");
+  });
+
+  it("toggles mobile menu state from the hamburger button", async () => {
+    const { container } = render(() => <Sidebar />);
+
+    const menu = container.querySelector("#sidebar-menu") as HTMLElement;
+    const toggle = screen.getByRole("button", { name: "Toggle navigation menu" });
+
+    expect(menu.classList.contains("open")).toBe(false);
+    await fireEvent.click(toggle);
+    expect(menu.classList.contains("open")).toBe(true);
+    await fireEvent.click(toggle);
+    expect(menu.classList.contains("open")).toBe(false);
   });
 });
