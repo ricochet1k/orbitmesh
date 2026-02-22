@@ -365,11 +365,25 @@ func (e *AgentExecutor) SendInput(ctx context.Context, id string, input string, 
 	return err
 }
 
+type SendMessageOptions struct {
+	ProviderID   string
+	ProviderType string
+	AgentID      string
+	Custom       map[string]any
+}
+
 // SendMessage sends a message to a session, starting a new run if the session is idle.
 // If the session is idle: resolves the provider and starts a new run with the message as first input.
 // If the session is running: returns a 409 Conflict error.
 // If the session is suspended: queues the message for delivery after suspension resolves.
 func (e *AgentExecutor) SendMessage(ctx context.Context, id string, content string, providerID string, providerType string) (*domain.Session, error) {
+	return e.SendMessageWithOptions(ctx, id, content, SendMessageOptions{
+		ProviderID:   providerID,
+		ProviderType: providerType,
+	})
+}
+
+func (e *AgentExecutor) SendMessageWithOptions(ctx context.Context, id string, content string, options SendMessageOptions) (*domain.Session, error) {
 	e.mu.RLock()
 	sc, exists := e.sessions[id]
 	e.mu.RUnlock()
@@ -393,7 +407,7 @@ func (e *AgentExecutor) SendMessage(ctx context.Context, id string, content stri
 	switch state {
 	case domain.SessionStateIdle:
 		// For idle sessions, start a new run with this message
-		return e.startRunWithMessage(ctx, id, sess, content, providerID, providerType)
+		return e.startRunWithMessage(ctx, id, sess, content, options)
 
 	case domain.SessionStateRunning:
 		// Session is running - reject with conflict error

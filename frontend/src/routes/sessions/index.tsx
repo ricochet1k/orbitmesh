@@ -36,10 +36,24 @@ function NewSessionForm(props: NewSessionFormProps) {
   const [title, setTitle] = createSignal("")
   // Each option is either "id:<providerId>" or "type:<providerType>"
   const [providerChoice, setProviderChoice] = createSignal("type:claude-ws")
+  const [agentChoice, setAgentChoice] = createSignal("")
+  const [modelOverride, setModelOverride] = createSignal("")
   const [error, setError] = createSignal<string | null>(null)
   const [creating, setCreating] = createSignal(false)
 
   const [providers] = createResource(apiClient.listProviders)
+  const [agents] = createResource(apiClient.listAgents)
+
+  const selectedAgent = createMemo(() => {
+    const agentId = agentChoice().trim()
+    if (!agentId) return null
+    return agents()?.agents.find((agent) => agent.id === agentId) ?? null
+  })
+
+  const selectedAgentDefaultModel = createMemo(() => {
+    const value = selectedAgent()?.custom?.["model"]
+    return typeof value === "string" ? value : ""
+  })
 
   const handleCreate = async () => {
     setError(null)
@@ -60,6 +74,17 @@ function NewSessionForm(props: NewSessionFormProps) {
           title: title().trim() || undefined,
         }
       }
+
+      const chosenAgent = agentChoice().trim()
+      if (chosenAgent) {
+        req.agent_id = chosenAgent
+      }
+
+      const model = modelOverride().trim()
+      if (model) {
+        req.custom = { ...(req.custom ?? {}), model }
+      }
+
       const created = await apiClient.createSession(req)
       props.onCreated(created.id)
     } catch (err) {
@@ -109,6 +134,43 @@ function NewSessionForm(props: NewSessionFormProps) {
             </select>
           )}
         </Show>
+      </div>
+      <div class="form-field">
+        <label for="session-agent">Agent (optional)</label>
+        <Show
+          when={!agents.loading && agents()}
+          fallback={
+            <select id="session-agent" value={agentChoice()} disabled>
+              <option value="">No agent defaults</option>
+            </select>
+          }
+        >
+          {(agentList) => (
+            <select
+              id="session-agent"
+              value={agentChoice()}
+              onChange={(e) => setAgentChoice(e.currentTarget.value)}
+              disabled={creating()}
+            >
+              <option value="">No agent defaults</option>
+              <For each={agentList().agents}>
+                {(agent) => <option value={agent.id}>{agent.name}</option>}
+              </For>
+            </select>
+          )}
+        </Show>
+      </div>
+      <div class="form-field">
+        <label for="session-model">Model override (optional)</label>
+        <input
+          id="session-model"
+          type="text"
+          placeholder={selectedAgentDefaultModel() ? `Agent default: ${selectedAgentDefaultModel()}` : "Leave empty to use provider/agent default"}
+          value={modelOverride()}
+          onInput={(e) => setModelOverride(e.currentTarget.value)}
+          disabled={creating()}
+        />
+        <p class="form-hint">Session model overrides the selected agent default model.</p>
       </div>
       <Show when={error()}>
         <p class="form-error" data-testid="new-session-error">{error()}</p>

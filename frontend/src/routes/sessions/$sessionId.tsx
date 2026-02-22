@@ -34,6 +34,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   const [session, { refetch: refetchSession }] = createResource(sessionId, apiClient.getSession)
   const [permissions] = createResource(apiClient.getPermissions)
   const [providers] = createResource(listProviders)
+  const [agents] = createResource(apiClient.listAgents)
   // Only relevant for PTY sessions; toolbar hides the terminal pill for non-PTY
   const [terminalStatus, setTerminalStatus] = createSignal<
     "connecting" | "live" | "closed" | "error" | "resyncing"
@@ -43,6 +44,8 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   const [composerError, setComposerError] = createSignal<string | null>(null)
   const [composerPending, setComposerPending] = createSignal<string | null>(null)
   const [selectedProviderId, setSelectedProviderId] = createSignal<string | null>(null)
+  const [selectedAgentId, setSelectedAgentId] = createSignal<string | null>(null)
+  const [selectedModel, setSelectedModel] = createSignal<string>("")
   let transcriptRef: HTMLDivElement | undefined
 
   // canInspect: null while permissions are loading, then boolean
@@ -78,11 +81,38 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   const sessionState = () => sessionStateOverride() ?? session()?.state ?? "idle"
   const providerType = () => session()?.provider_type ?? ""
   const providerList = () => providers()?.providers ?? []
+  const agentList = () => agents()?.agents ?? []
   const selectedProvider = () => {
     const providerId = selectedProviderId()
     if (!providerId) return providerList()[0] ?? null
     return providerList().find((provider) => provider.id === providerId) ?? providerList()[0] ?? null
   }
+  const selectedAgent = () => {
+    const agentId = selectedAgentId()
+    if (!agentId) return null
+    return agentList().find((agent) => agent.id === agentId) ?? null
+  }
+  const selectedAgentDefaultModel = createMemo(() => {
+    const value = selectedAgent()?.custom?.["model"]
+    return typeof value === "string" ? value : ""
+  })
+  const selectedProviderDefaultModel = createMemo(() => {
+    const value = selectedProvider()?.custom?.["model"]
+    return typeof value === "string" ? value : ""
+  })
+  const modelOptions = createMemo(() => {
+    const set = new Set<string>()
+    const fromAgent = selectedAgentDefaultModel().trim()
+    if (fromAgent) set.add(fromAgent)
+    const fromProvider = selectedProviderDefaultModel().trim()
+    if (fromProvider) set.add(fromProvider)
+    providerList().forEach((provider) => {
+      const value = provider.custom?.["model"]
+      if (typeof value === "string" && value.trim()) set.add(value.trim())
+    })
+    if (selectedModel().trim()) set.add(selectedModel().trim())
+    return Array.from(set)
+  })
   const canManage = () => permissions()?.can_initiate_bulk_actions ?? false
 
   const sessionTitle = () => {
@@ -128,6 +158,25 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     }
   })
 
+  createEffect(() => {
+    if (selectedAgentId() !== null) return
+    const sessionAgentId = session()?.agent_id
+    if (sessionAgentId) setSelectedAgentId(sessionAgentId)
+  })
+
+  createEffect(() => {
+    if (selectedModel().trim()) return
+    const fromAgent = selectedAgentDefaultModel().trim()
+    if (fromAgent) {
+      setSelectedModel(fromAgent)
+      return
+    }
+    const fromProvider = selectedProviderDefaultModel().trim()
+    if (fromProvider) {
+      setSelectedModel(fromProvider)
+    }
+  })
+
   // Auto-scroll effect
   createEffect(() => {
     data.messages()
@@ -159,7 +208,13 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     setComposerPending("send")
     try {
       const providerId = selectedProvider()?.id
-      await apiClient.sendMessage(sessionId(), text, providerId ? { providerId } : undefined)
+      const agentId = selectedAgentId() ?? undefined
+      const model = selectedModel().trim() || undefined
+      const sendOptions =
+        providerId || agentId || model
+          ? { providerId, agentId, model }
+          : undefined
+      await apiClient.sendMessage(sessionId(), text, sendOptions)
     } catch (err) {
       setComposerError(err instanceof Error ? err.message : "Failed to send message")
     } finally {
@@ -272,6 +327,40 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
                   >
                     <For each={providerList()}>
                       {(provider) => <option value={provider.id}>{provider.name} ({provider.type})</option>}
+                    </For>
+                  </select>
+                </div>
+                <div class="session-viewer-menu-divider" />
+              </Show>
+
+              <Show when={agentList().length > 0}>
+                <div class="session-viewer-menu-section">
+                  <label class="session-viewer-menu-label">Agent</label>
+                  <select
+                    class="session-viewer-menu-select"
+                    value={selectedAgentId() ?? ""}
+                    onChange={(e) => setSelectedAgentId(e.currentTarget.value || null)}
+                  >
+                    <option value="">Session default</option>
+                    <For each={agentList()}>
+                      {(agent) => <option value={agent.id}>{agent.name}</option>}
+                    </For>
+                  </select>
+                </div>
+                <div class="session-viewer-menu-divider" />
+              </Show>
+
+              <Show when={modelOptions().length > 0}>
+                <div class="session-viewer-menu-section">
+                  <label class="session-viewer-menu-label">Model</label>
+                  <select
+                    class="session-viewer-menu-select"
+                    value={selectedModel()}
+                    onChange={(e) => setSelectedModel(e.currentTarget.value)}
+                  >
+                    <option value="">Session/provider default</option>
+                    <For each={modelOptions()}>
+                      {(model) => <option value={model}>{model}</option>}
                     </For>
                   </select>
                 </div>

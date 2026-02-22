@@ -57,6 +57,7 @@ vi.mock("../api/client", () => ({
     getActivityEntries: vi.fn(),
     getEventsUrl: vi.fn(),
     getPermissions: vi.fn(),
+    listAgents: vi.fn(),
     sendSessionInput: vi.fn(),
     listTerminals: vi.fn(),
   },
@@ -91,6 +92,7 @@ describe("SessionViewer", () => {
        ; (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1")
        ; (apiClient.getActivityEntries as any).mockResolvedValue({ entries: [], next_cursor: null })
        ; (apiClient.getPermissions as any).mockResolvedValue(defaultPermissions)
+       ; (apiClient.listAgents as any).mockResolvedValue({ agents: [] })
        ; (apiClient.listTerminals as any).mockResolvedValue({ terminals: [] })
        ; (apiClient.sendSessionInput as any).mockResolvedValue(undefined)
        ; (listProviders as any).mockResolvedValue({ providers: [] })

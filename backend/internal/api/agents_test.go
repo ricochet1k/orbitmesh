@@ -291,3 +291,71 @@ func TestCreateSession_WithAgentID_NotFound(t *testing.T) {
 		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestSendMessage_WithAgentAndModelOverrides(t *testing.T) {
+	env, agentStorage := newTestEnvWithAgents(t)
+	r := env.router()
+
+	_ = agentStorage.Save(storage.AgentConfig{
+		ID:   "agent_001",
+		Name: "Model Agent",
+		Custom: map[string]any{
+			"model":           "agent-default-model",
+			"permission_mode": "acceptEdits",
+		},
+	})
+
+	createBody, _ := json.Marshal(apiTypes.SessionRequest{
+		ProviderType: "mock",
+		WorkingDir:   t.TempDir(),
+	})
+	createReq := httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createW := httptest.NewRecorder()
+	r.ServeHTTP(createW, createReq)
+
+	if createW.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", createW.Code, createW.Body.String())
+	}
+
+	var createResp apiTypes.SessionResponse
+	if err := json.Unmarshal(createW.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("unmarshal create response: %v", err)
+	}
+
+	msgBody, _ := json.Marshal(apiTypes.SendMessageRequest{
+		Content: "hello",
+		AgentID: "agent_001",
+		Model:   "session-override-model",
+	})
+	msgReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+createResp.ID+"/messages", bytes.NewReader(msgBody))
+	msgReq.Header.Set("Content-Type", "application/json")
+	msgW := httptest.NewRecorder()
+	r.ServeHTTP(msgW, msgReq)
+
+	if msgW.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", msgW.Code, msgW.Body.String())
+	}
+
+	var msgResp apiTypes.SessionResponse
+	if err := json.Unmarshal(msgW.Body.Bytes(), &msgResp); err != nil {
+		t.Fatalf("unmarshal message response: %v", err)
+	}
+	if msgResp.AgentID != "agent_001" {
+		t.Fatalf("agent_id = %q, want %q", msgResp.AgentID, "agent_001")
+	}
+
+	sess, err := env.executor.GetSession(createResp.ID)
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+	if sess.AgentID != "agent_001" {
+		t.Fatalf("session.AgentID = %q, want %q", sess.AgentID, "agent_001")
+	}
+	if got := sess.ProviderCustom["model"]; got != "session-override-model" {
+		t.Fatalf("session.ProviderCustom[model] = %v, want %q", got, "session-override-model")
+	}
+	if got := sess.ProviderCustom["permission_mode"]; got != "acceptEdits" {
+		t.Fatalf("session.ProviderCustom[permission_mode] = %v, want %q", got, "acceptEdits")
+	}
+}

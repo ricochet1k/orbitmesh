@@ -53,6 +53,7 @@ vi.mock("../api/client", () => ({
     getSession: vi.fn(),
     getPermissions: vi.fn(),
     listProviders: vi.fn(),
+    listAgents: vi.fn(),
     listSessions: vi.fn(),
     createDockSession: vi.fn(),
     pollDockMcp: vi.fn(),
@@ -85,6 +86,7 @@ describe("AgentDock", () => {
     }));
     (apiClient.listSessions as any).mockResolvedValue({ sessions: [] });
     (apiClient.listProviders as any).mockResolvedValue({ providers: [] });
+    (apiClient.listAgents as any).mockResolvedValue({ agents: [] });
     (apiClient.createDockSession as any).mockResolvedValue({
       id: "dock-session-1",
       provider_type: "adk",

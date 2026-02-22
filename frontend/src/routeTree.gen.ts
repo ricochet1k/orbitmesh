@@ -22,6 +22,7 @@ import { Route as SettingsProvidersRouteImport } from './routes/settings/provide
 import { Route as SettingsProfileRouteImport } from './routes/settings/profile'
 import { Route as SettingsPreferencesRouteImport } from './routes/settings/preferences'
 import { Route as SettingsIntegrationsRouteImport } from './routes/settings/integrations'
+import { Route as SettingsAgentsRouteImport } from './routes/settings/agents'
 import { Route as SessionsSessionIdRouteImport } from './routes/sessions/$sessionId'
 import { Route as HistoryCommitsRouteImport } from './routes/history/commits'
 
@@ -90,6 +91,11 @@ const SettingsIntegrationsRoute = SettingsIntegrationsRouteImport.update({
   path: '/integrations',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsAgentsRoute = SettingsAgentsRouteImport.update({
+  id: '/agents',
+  path: '/agents',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SessionsSessionIdRoute = SessionsSessionIdRouteImport.update({
   id: '/sessions/$sessionId',
   path: '/sessions/$sessionId',
@@ -109,6 +115,7 @@ export interface FileRoutesByFullPath {
   '/tasks': typeof TasksRoute
   '/history/commits': typeof HistoryCommitsRoute
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
+  '/settings/agents': typeof SettingsAgentsRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/preferences': typeof SettingsPreferencesRoute
   '/settings/profile': typeof SettingsProfileRoute
@@ -125,6 +132,7 @@ export interface FileRoutesByTo {
   '/tasks': typeof TasksRoute
   '/history/commits': typeof HistoryCommitsRoute
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
+  '/settings/agents': typeof SettingsAgentsRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/preferences': typeof SettingsPreferencesRoute
   '/settings/profile': typeof SettingsProfileRoute
@@ -143,6 +151,7 @@ export interface FileRoutesById {
   '/tasks': typeof TasksRoute
   '/history/commits': typeof HistoryCommitsRoute
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
+  '/settings/agents': typeof SettingsAgentsRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/preferences': typeof SettingsPreferencesRoute
   '/settings/profile': typeof SettingsProfileRoute
@@ -162,6 +171,7 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/history/commits'
     | '/sessions/$sessionId'
+    | '/settings/agents'
     | '/settings/integrations'
     | '/settings/preferences'
     | '/settings/profile'
@@ -178,6 +188,7 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/history/commits'
     | '/sessions/$sessionId'
+    | '/settings/agents'
     | '/settings/integrations'
     | '/settings/preferences'
     | '/settings/profile'
@@ -195,6 +206,7 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/history/commits'
     | '/sessions/$sessionId'
+    | '/settings/agents'
     | '/settings/integrations'
     | '/settings/preferences'
     | '/settings/profile'
@@ -311,6 +323,13 @@ declare module '@tanstack/solid-router' {
       preLoaderRoute: typeof SettingsIntegrationsRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/agents': {
+      id: '/settings/agents'
+      path: '/agents'
+      fullPath: '/settings/agents'
+      preLoaderRoute: typeof SettingsAgentsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/sessions/$sessionId': {
       id: '/sessions/$sessionId'
       path: '/sessions/$sessionId'
@@ -329,6 +348,7 @@ declare module '@tanstack/solid-router' {
 }
 
 interface SettingsRouteChildren {
+  SettingsAgentsRoute: typeof SettingsAgentsRoute
   SettingsIntegrationsRoute: typeof SettingsIntegrationsRoute
   SettingsPreferencesRoute: typeof SettingsPreferencesRoute
   SettingsProfileRoute: typeof SettingsProfileRoute
@@ -337,6 +357,7 @@ interface SettingsRouteChildren {
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
+  SettingsAgentsRoute: SettingsAgentsRoute,
   SettingsIntegrationsRoute: SettingsIntegrationsRoute,
   SettingsPreferencesRoute: SettingsPreferencesRoute,
   SettingsProfileRoute: SettingsProfileRoute,

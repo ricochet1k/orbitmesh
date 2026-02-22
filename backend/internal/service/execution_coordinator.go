@@ -322,7 +322,7 @@ func (e *AgentExecutor) ensureSessionContext(id string) (*sessionContext, error)
 	return sc, nil
 }
 
-func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess *domain.Session, content string, providerID string, providerType string) (*domain.Session, error) {
+func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess *domain.Session, content string, options SendMessageOptions) (*domain.Session, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -331,26 +331,47 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 	}
 
 	pType := sess.ProviderType
-	if providerType != "" {
-		pType = providerType
+	if options.ProviderType != "" {
+		pType = options.ProviderType
 	}
 
-	if providerID != "" {
-		sess.SetPreferredProviderID(providerID)
-		if e.storage != nil {
-			if err := e.storage.Save(sess); err != nil {
-				return sess, fmt.Errorf("failed to save session with provider preference: %w", err)
-			}
+	persistSessionChanges := false
+	if options.ProviderID != "" {
+		sess.SetPreferredProviderID(options.ProviderID)
+		persistSessionChanges = true
+	}
+
+	if options.AgentID != "" {
+		sess.AgentID = options.AgentID
+		persistSessionChanges = true
+	}
+
+	custom := make(map[string]any, len(sess.ProviderCustom)+len(options.Custom))
+	for k, v := range sess.ProviderCustom {
+		custom[k] = v
+	}
+	if len(options.Custom) > 0 {
+		for k, v := range options.Custom {
+			custom[k] = v
+		}
+		sess.ProviderCustom = custom
+		persistSessionChanges = true
+	}
+
+	if persistSessionChanges && e.storage != nil {
+		if err := e.storage.Save(sess); err != nil {
+			return sess, fmt.Errorf("failed to save session message preferences: %w", err)
 		}
 	}
 
 	config := session.Config{
 		ProviderType: pType,
+		AgentID:      sess.AgentID,
 		WorkingDir:   sess.WorkingDir,
 		ProjectID:    sess.ProjectID,
 		SessionKind:  sess.Kind,
 		Title:        sess.Title,
-		Custom:       sess.ProviderCustom,
+		Custom:       custom,
 	}
 
 	prov, err := e.sessionFactory(pType, id, config)
@@ -362,7 +383,7 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 		e.sessions[id] = &sessionContext{session: sess, run: nil}
 	}
 	sc := e.sessions[id]
-	e.startRunAttempt(sc, pType, providerID)
+	e.startRunAttempt(sc, pType, options.ProviderID)
 
 	run := session.NewProviderRun(prov, e.ctx)
 	sc.setRun(run)

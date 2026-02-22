@@ -307,7 +307,41 @@ func (h *Handler) sendSessionMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, err := h.executor.SendMessage(r.Context(), id, req.Content, req.ProviderID, req.ProviderType)
+	agentID := strings.TrimSpace(req.AgentID)
+	model := strings.TrimSpace(req.Model)
+
+	var custom map[string]any
+	if agentID != "" {
+		if h.agentStorage == nil {
+			writeError(w, http.StatusNotFound, "agent not found", "agent storage is not configured")
+			return
+		}
+		cfg, err := h.agentStorage.Get(agentID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "agent not found", err.Error())
+			return
+		}
+		if len(cfg.Custom) > 0 {
+			custom = make(map[string]any, len(cfg.Custom)+1)
+			for k, v := range cfg.Custom {
+				custom[k] = v
+			}
+		}
+	}
+
+	if model != "" {
+		if custom == nil {
+			custom = make(map[string]any, 1)
+		}
+		custom["model"] = model
+	}
+
+	sess, err := h.executor.SendMessageWithOptions(r.Context(), id, req.Content, service.SendMessageOptions{
+		ProviderID:   req.ProviderID,
+		ProviderType: req.ProviderType,
+		AgentID:      agentID,
+		Custom:       custom,
+	})
 	if err != nil {
 		if errors.Is(err, service.ErrSessionNotFound) {
 			writeError(w, http.StatusNotFound, "session not found", err.Error())

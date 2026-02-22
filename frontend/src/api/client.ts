@@ -4,6 +4,7 @@ export { readSessionCache, writeSessionCache, mergeSessionLists, withCSRFHeaders
 import * as sessionApi from "./sessions";
 import * as terminalApi from "./terminals";
 import * as providerApi from "./providers";
+import * as agentApi from "./agents";
 import * as taskApi from "./tasks";
 import * as projectApi from "./projects";
 
@@ -46,6 +47,13 @@ export const apiClient = {
   createProvider: providerApi.createProvider,
   updateProvider: providerApi.updateProvider,
   deleteProvider: providerApi.deleteProvider,
+
+  // Agents
+  listAgents: agentApi.listAgents,
+  getAgent: agentApi.getAgent,
+  createAgent: agentApi.createAgent,
+  updateAgent: agentApi.updateAgent,
+  deleteAgent: agentApi.deleteAgent,
 
   // Projects
   listProjects: projectApi.listProjects,

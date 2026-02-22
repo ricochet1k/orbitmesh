@@ -39,6 +39,8 @@ type SendMessageRequest struct {
 	Content      string `json:"content"`
 	ProviderID   string `json:"provider_id,omitempty"`
 	ProviderType string `json:"provider_type,omitempty"`
+	AgentID      string `json:"agent_id,omitempty"`
+	Model        string `json:"model,omitempty"`
 }
 
 type ResumeSessionRequest struct {

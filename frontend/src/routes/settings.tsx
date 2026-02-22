@@ -6,6 +6,7 @@ export const Route = createFileRoute('/settings')({
 
 const SETTINGS_NAV = [
   { to: '/settings/providers',    label: 'Providers'     },
+  { to: '/settings/agents',       label: 'Agents'        },
   { to: '/settings/profile',      label: 'User Profile'  },
   { to: '/settings/integrations', label: 'Integrations'  },
   { to: '/settings/preferences',  label: 'Preferences'   },
@@ -21,7 +22,7 @@ function SettingsLayout() {
           <p class="eyebrow">Workspace settings</p>
           <h1>Settings</h1>
           <p class="dashboard-subtitle">
-            Configure providers, integrations, and operational defaults.
+            Configure providers, agents, integrations, and operational defaults.
           </p>
         </div>
       </header>
