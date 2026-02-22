@@ -1,6 +1,9 @@
 package api
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type SessionState string
 
@@ -124,11 +127,12 @@ type Event struct {
 	// EventID is the monotonic SSE event sequence number. Clients should send
 	// this back as Last-Event-ID on reconnect to resume from where they left
 	// off. Zero means the event has no persistent ID (e.g. heartbeats).
-	EventID   int64     `json:"event_id,omitempty"`
-	Type      EventType `json:"type"`
-	Timestamp time.Time `json:"timestamp"`
-	SessionID string    `json:"session_id"`
-	Data      any       `json:"data"`
+	EventID   int64           `json:"event_id,omitempty"`
+	Type      EventType       `json:"type"`
+	Timestamp time.Time       `json:"timestamp"`
+	SessionID string          `json:"session_id"`
+	Data      any             `json:"data"`
+	Raw       json.RawMessage `json:"raw,omitempty"`
 }
 
 type SessionStateEvent struct {

@@ -46,11 +46,25 @@ func (h *Hub) Publish(topic string, msg realtimeTypes.ServerEnvelope) {
 		if !client.IsSubscribed(topic) {
 			continue
 		}
-		if client.Queue(msg) {
+		queued := msg
+		if !client.IncludeRaw() {
+			queued = stripRawFromEnvelope(msg)
+		}
+		if client.Queue(queued) {
 			continue
 		}
 		h.Unregister(client.ID())
 	}
+}
+
+func stripRawFromEnvelope(msg realtimeTypes.ServerEnvelope) realtimeTypes.ServerEnvelope {
+	event, ok := msg.Payload.(realtimeTypes.SessionActivityEvent)
+	if !ok {
+		return msg
+	}
+	event.Raw = nil
+	msg.Payload = event
+	return msg
 }
 
 func (h *Hub) Subscribe(clientID string, topics []string) bool {

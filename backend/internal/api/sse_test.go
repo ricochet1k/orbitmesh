@@ -626,7 +626,7 @@ func TestConvertEventData_AllTypes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			apiEvt := domainEventToAPIEvent(tt.event)
+			apiEvt := domainEventToAPIEvent(tt.event, false)
 			if apiEvt.Type != tt.want {
 				t.Errorf("Type = %q, want %q", apiEvt.Type, tt.want)
 			}
@@ -646,7 +646,7 @@ func TestConvertEventData_UnknownType(t *testing.T) {
 		SessionID: "s1",
 		Data:      "raw string payload",
 	}
-	apiEvt := domainEventToAPIEvent(ev)
+	apiEvt := domainEventToAPIEvent(ev, false)
 	if apiEvt.Type != "unknown" {
 		t.Errorf("Type = %q, want 'unknown'", apiEvt.Type)
 	}

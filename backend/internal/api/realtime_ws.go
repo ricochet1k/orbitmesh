@@ -20,7 +20,7 @@ func (h *Handler) realtimeWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := realtime.NewClient(generateID(), conn)
+	client := realtime.NewClient(generateID(), conn, includeRawRequested(r))
 	h.realtimeHub.Register(client)
 	defer h.realtimeHub.Unregister(client.ID())
 
@@ -74,6 +74,7 @@ func (h *Handler) handleRealtimeSubscribe(client *realtime.Client, topics []stri
 			h.sendRealtimeError(client, "failed to build snapshot")
 			continue
 		}
+		snapshot = sanitizeRealtimeSnapshot(snapshot, client.IncludeRaw())
 		if !client.Queue(realtimeTypes.ServerEnvelope{
 			Type:    realtimeTypes.ServerMessageTypeSnapshot,
 			Topic:   topic,
@@ -83,6 +84,23 @@ func (h *Handler) handleRealtimeSubscribe(client *realtime.Client, topics []stri
 			return
 		}
 	}
+}
+
+func sanitizeRealtimeSnapshot(snapshot any, includeRaw bool) any {
+	if includeRaw {
+		return snapshot
+	}
+	activity, ok := snapshot.(realtimeTypes.SessionActivitySnapshot)
+	if !ok {
+		return snapshot
+	}
+	messages := make([]realtimeTypes.SessionMessage, len(activity.Messages))
+	copy(messages, activity.Messages)
+	for i := range messages {
+		messages[i].Raw = nil
+	}
+	activity.Messages = messages
+	return activity
 }
 
 func (h *Handler) handleRealtimeUnsubscribe(client *realtime.Client, topics []string) {

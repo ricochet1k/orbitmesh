@@ -146,14 +146,14 @@ export interface SessionStateStreamEvent {
 
 // Discriminated union — exhaustive switch on `.type` is now type-safe.
 export type SSEEvent =
-  | { event_id: number; type: "status_change"; timestamp: string; session_id: string; data: StatusChangeData }
-  | { event_id: number; type: "output";        timestamp: string; session_id: string; data: OutputData }
-  | { event_id: number; type: "metric";        timestamp: string; session_id: string; data: MetricData }
-  | { event_id: number; type: "error";         timestamp: string; session_id: string; data: ErrorData }
-  | { event_id: number; type: "metadata";      timestamp: string; session_id: string; data: MetadataData }
-  | { event_id: number; type: "tool_call";     timestamp: string; session_id: string; data: ToolCallData }
-  | { event_id: number; type: "thought";       timestamp: string; session_id: string; data: ThoughtData }
-  | { event_id: number; type: "plan";          timestamp: string; session_id: string; data: PlanData }
+  | { event_id: number; type: "status_change"; timestamp: string; session_id: string; data: StatusChangeData; raw?: unknown }
+  | { event_id: number; type: "output";        timestamp: string; session_id: string; data: OutputData; raw?: unknown }
+  | { event_id: number; type: "metric";        timestamp: string; session_id: string; data: MetricData; raw?: unknown }
+  | { event_id: number; type: "error";         timestamp: string; session_id: string; data: ErrorData; raw?: unknown }
+  | { event_id: number; type: "metadata";      timestamp: string; session_id: string; data: MetadataData; raw?: unknown }
+  | { event_id: number; type: "tool_call";     timestamp: string; session_id: string; data: ToolCallData; raw?: unknown }
+  | { event_id: number; type: "thought";       timestamp: string; session_id: string; data: ThoughtData; raw?: unknown }
+  | { event_id: number; type: "plan";          timestamp: string; session_id: string; data: PlanData; raw?: unknown }
 
 export type SSEEventType = SSEEvent["type"]
 
@@ -177,6 +177,7 @@ export function parseSSEEvent(sseType: string, event: MessageEvent): SSEEvent | 
     timestamp: typeof obj["timestamp"] === "string" ? obj["timestamp"] : new Date().toISOString(),
     session_id: typeof obj["session_id"] === "string" ? obj["session_id"] : "",
     data: (obj["data"] ?? {}) as SSEEvent["data"],
+    raw: obj["raw"],
   } as SSEEvent
 }
 
@@ -462,6 +463,7 @@ export interface TranscriptMessage {
   type: TranscriptMessageType;
   timestamp: string;
   content: string;
+  raw?: unknown;
   /** Activity entry identifier (used in SessionViewer for merge dedup) */
   entryId?: string;
   /** Revision number for merge ordering */

@@ -155,13 +155,14 @@ func (h *Handler) toRealtimeSessionStateEvent(event domain.Event) realtimeTypes.
 }
 
 func (h *Handler) toRealtimeSessionActivityEvent(event domain.Event) realtimeTypes.SessionActivityEvent {
-	apiEvent := domainEventToAPIEvent(event)
+	apiEvent := domainEventToAPIEvent(event, true)
 	return realtimeTypes.SessionActivityEvent{
 		EventID:   apiEvent.EventID,
 		Timestamp: apiEvent.Timestamp,
 		SessionID: apiEvent.SessionID,
 		Type:      string(apiEvent.Type),
 		Data:      apiEvent.Data,
+		Raw:       apiEvent.Raw,
 	}
 }
 

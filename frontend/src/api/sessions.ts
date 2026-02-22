@@ -205,7 +205,8 @@ export async function sendMessage(
 }
 
 export function getEventsUrl(id: string): string {
-  return `${BASE_URL}/sessions/${id}/events`;
+  const suffix = import.meta.env?.DEV ? "?include_raw=1" : "";
+  return `${BASE_URL}/sessions/${id}/events${suffix}`;
 }
 
 export function getGlobalSessionEventsUrl(lastEventId?: number): string {

@@ -10,25 +10,31 @@ import (
 const outboundBufferSize = 64
 
 type Client struct {
-	id     string
-	conn   *websocket.Conn
-	send   chan realtimeTypes.ServerEnvelope
-	mu     sync.RWMutex
-	topics map[string]struct{}
-	close  sync.Once
+	id         string
+	conn       *websocket.Conn
+	send       chan realtimeTypes.ServerEnvelope
+	includeRaw bool
+	mu         sync.RWMutex
+	topics     map[string]struct{}
+	close      sync.Once
 }
 
-func NewClient(id string, conn *websocket.Conn) *Client {
+func NewClient(id string, conn *websocket.Conn, includeRaw bool) *Client {
 	return &Client{
-		id:     id,
-		conn:   conn,
-		send:   make(chan realtimeTypes.ServerEnvelope, outboundBufferSize),
-		topics: make(map[string]struct{}),
+		id:         id,
+		conn:       conn,
+		send:       make(chan realtimeTypes.ServerEnvelope, outboundBufferSize),
+		includeRaw: includeRaw,
+		topics:     make(map[string]struct{}),
 	}
 }
 
 func (c *Client) ID() string {
 	return c.id
+}
+
+func (c *Client) IncludeRaw() bool {
+	return c.includeRaw
 }
 
 func (c *Client) Queue(msg realtimeTypes.ServerEnvelope) bool {

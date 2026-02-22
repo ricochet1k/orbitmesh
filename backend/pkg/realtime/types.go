@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"encoding/json"
 	"time"
 
 	apiTypes "github.com/ricochet1k/orbitmesh/pkg/api"
@@ -67,18 +68,20 @@ type SessionActivityEntry struct {
 }
 
 type SessionMessage struct {
-	ID        string    `json:"id"`
-	Kind      string    `json:"kind"`
-	Contents  string    `json:"contents"`
-	Timestamp time.Time `json:"timestamp"`
+	ID        string          `json:"id"`
+	Kind      string          `json:"kind"`
+	Contents  string          `json:"contents"`
+	Timestamp time.Time       `json:"timestamp"`
+	Raw       json.RawMessage `json:"raw,omitempty"`
 }
 
 type SessionActivityEvent struct {
-	EventID   int64     `json:"event_id"`
-	Timestamp time.Time `json:"timestamp"`
-	SessionID string    `json:"session_id"`
-	Type      string    `json:"type"`
-	Data      any       `json:"data"`
+	EventID   int64           `json:"event_id"`
+	Timestamp time.Time       `json:"timestamp"`
+	SessionID string          `json:"session_id"`
+	Type      string          `json:"type"`
+	Data      any             `json:"data"`
+	Raw       json.RawMessage `json:"raw,omitempty"`
 }
 
 type TerminalsStateSnapshot struct {

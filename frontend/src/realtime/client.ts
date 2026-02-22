@@ -70,7 +70,8 @@ class RealtimeClient {
       return
     }
 
-    const socket = new WebSocket(`${wsBase}/api/realtime`)
+    const suffix = import.meta.env?.DEV ? "?include_raw=1" : ""
+    const socket = new WebSocket(`${wsBase}/api/realtime${suffix}`)
     this.socket = socket
 
     socket.onopen = () => {

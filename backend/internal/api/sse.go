@@ -22,6 +22,7 @@ const sseHeartbeatInterval = 15 * time.Second
 // events are lost between the client seeing the 200 and the first broadcast.
 func (h *Handler) sseEvents(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "id")
+	includeRaw := includeRawRequested(r)
 
 	if _, err := h.executor.GetSession(sessionID); err != nil {
 		if errors.Is(err, service.ErrSessionNotFound) {
@@ -59,7 +60,7 @@ func (h *Handler) sseEvents(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	for _, event := range replay {
-		if err := writeSSEEvent(w, event); err != nil {
+		if err := writeSSEEvent(w, event, includeRaw); err != nil {
 			return
 		}
 		flusher.Flush()
@@ -76,7 +77,7 @@ func (h *Handler) sseEvents(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			if err := writeSSEEvent(w, event); err != nil {
+			if err := writeSSEEvent(w, event, includeRaw); err != nil {
 				return
 			}
 			flusher.Flush()
@@ -157,8 +158,8 @@ func (h *Handler) sseSessionEvents(w http.ResponseWriter, r *http.Request) {
 //	event: <type>\n
 //	data: <json>\n
 //	\n
-func writeSSEEvent(w http.ResponseWriter, event domain.Event) error {
-	apiEvent := domainEventToAPIEvent(event)
+func writeSSEEvent(w http.ResponseWriter, event domain.Event, includeRaw bool) error {
+	apiEvent := domainEventToAPIEvent(event, includeRaw)
 	data, err := json.Marshal(apiEvent)
 	if err != nil {
 		return err
@@ -212,14 +213,23 @@ func (h *Handler) toSessionStateEvent(event domain.Event) apiTypes.SessionStateE
 	return stateEvent
 }
 
-func domainEventToAPIEvent(e domain.Event) apiTypes.Event {
-	return apiTypes.Event{
+func domainEventToAPIEvent(e domain.Event, includeRaw bool) apiTypes.Event {
+	apiEvent := apiTypes.Event{
 		EventID:   e.ID,
 		Type:      apiTypes.EventType(e.Type.String()),
 		Timestamp: e.Timestamp,
 		SessionID: e.SessionID,
 		Data:      convertEventData(e),
 	}
+	if includeRaw {
+		apiEvent.Raw = e.Raw
+	}
+	return apiEvent
+}
+
+func includeRawRequested(r *http.Request) bool {
+	q := r.URL.Query()
+	return q.Get("include_raw") == "1" || q.Get("include_raw") == "true"
 }
 
 func convertEventData(e domain.Event) any {

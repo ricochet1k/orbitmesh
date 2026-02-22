@@ -147,6 +147,7 @@ export function useSessionData({
         type: "error",
         timestamp: new Date().toISOString(),
         content: "Failed to parse stream event payload.",
+        raw: typeof event.data === "string" ? event.data : undefined,
       })
       return
     }
@@ -175,6 +176,7 @@ export function useSessionData({
                   timestamp: payload.timestamp,
                   content,
                   open: true,
+                  raw: payload.raw,
                 },
               ]
             }
@@ -191,6 +193,7 @@ export function useSessionData({
               timestamp: payload.timestamp,
               content,
               open: false,
+              raw: payload.raw,
             }],
             { sort: false },
           )
@@ -207,6 +210,7 @@ export function useSessionData({
           kind: "status_change",
           timestamp: payload.timestamp,
           content: `State changed: ${old_state} -> ${new_state}`,
+          raw: payload.raw,
         })
         break
       }
@@ -218,6 +222,7 @@ export function useSessionData({
           kind: "metric",
           timestamp: payload.timestamp,
           content: `Metrics updated - in ${tokens_in} - out ${tokens_out} - requests ${request_count}`,
+          raw: payload.raw,
         })
         break
       }
@@ -228,6 +233,7 @@ export function useSessionData({
           kind: "error",
           timestamp: payload.timestamp,
           content: payload.data.message ?? "Unknown error",
+          raw: payload.raw,
         })
         break
       }
@@ -239,6 +245,7 @@ export function useSessionData({
           kind: "metadata",
           timestamp: payload.timestamp,
           content: `Metadata - ${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`,
+          raw: payload.raw,
         })
         break
       }
@@ -250,6 +257,7 @@ export function useSessionData({
             kind: "thought",
             timestamp: payload.timestamp,
             content: payload.data.content,
+            raw: payload.raw,
           }],
           { sort: false },
         )
@@ -273,6 +281,7 @@ export function useSessionData({
             timestamp: payload.timestamp,
             content: detail,
             open: status === "running",
+            raw: payload.raw,
           }],
           { sort: false },
         )
@@ -291,6 +300,7 @@ export function useSessionData({
             kind: "plan",
             timestamp: payload.timestamp,
             content: lines.join("\n"),
+            raw: payload.raw,
           }],
           { sort: false },
         )
@@ -595,6 +605,7 @@ function toTranscriptFromSessionMessage(message: SessionActivitySnapshot["messag
     kind,
     timestamp: message.timestamp,
     content: message.contents,
+    raw: (message as { raw?: unknown }).raw,
   }
 }
 
@@ -609,6 +620,7 @@ function toActivityMessage(entry: ActivityEntry): TranscriptMessage {
     type: mapActivityKindToType(kind),
     timestamp: entry.ts,
     content: formatActivityContent(entry),
+    raw: entry.data?.raw,
   }
 }
 
