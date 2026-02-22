@@ -1,19 +1,16 @@
 package acp
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"sync"
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/ricochet1k/orbitmesh/internal/domain"
-	"github.com/ricochet1k/orbitmesh/internal/provider/buffer"
 	"github.com/ricochet1k/orbitmesh/internal/provider/circuit"
 	"github.com/ricochet1k/orbitmesh/internal/provider/native"
 	"github.com/ricochet1k/orbitmesh/internal/provider/process"
@@ -40,18 +37,9 @@ type Session struct {
 	providerConfig Config
 	sessionConfig  session.Config
 
-	processMgr *process.Manager
+	runtime *sharedRuntime
 
-	conn   *acpsdk.ClientSideConnection
-	client *acpClientAdapter
-
-	acpSessionID *string // The ACP session ID returned by NewSession
-
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-
-	inputBuffer    *buffer.InputBuffer
+	acpSessionID   *string // The ACP session ID returned by NewSession
 	circuitBreaker *circuit.Breaker
 
 	terminalManager *TerminalManager
@@ -60,8 +48,8 @@ type Session struct {
 	// Message history for snapshot persistence
 	messageHistory []SnapshotMessage
 
-	// started is true once the ACP process has been launched successfully.
-	started bool
+	started    bool
+	closedOnce sync.Once
 }
 
 // SnapshotMessage represents a message in the conversation history.
@@ -83,14 +71,12 @@ func NewSession(sessionID string, providerConfig Config, sessionConfig session.C
 		events:         native.NewEventAdapter(sessionID, 100),
 		providerConfig: providerConfig,
 		sessionConfig:  sessionConfig,
-		inputBuffer:    buffer.NewInputBuffer(10),
 		circuitBreaker: circuit.NewBreaker(3, 30*time.Second),
 	}, nil
 }
 
 // SendInput implements session.Session.  On the first call it starts the ACP
-// process, establishes the connection, and sends the initial prompt.  On
-// subsequent calls it queues input to the running agent.
+// process/runtime, establishes the ACP session, and sends the prompt.
 func (s *Session) SendInput(ctx context.Context, config session.Config, input string) (<-chan domain.Event, error) {
 	s.mu.Lock()
 	if !s.started {
@@ -99,15 +85,19 @@ func (s *Session) SendInput(ctx context.Context, config session.Config, input st
 			return nil, err
 		}
 	}
+	if s.acpSessionID == nil {
+		s.mu.Unlock()
+		return nil, ErrNoActiveSession
+	}
+	acpSessionID := *s.acpSessionID
+	runtime := s.runtime
 	s.mu.Unlock()
 
-	if err := s.inputBuffer.Send(ctx, input); err != nil {
-		return nil, err
-	}
+	go s.runPrompt(runtime, acpSessionID, input)
 	return s.events.Events(), nil
 }
 
-// start initializes the ACP agent process and establishes the connection.
+// start initializes/borrows a shared ACP process runtime and creates an ACP session.
 // Caller must hold s.mu (write lock).
 func (s *Session) start(config session.Config) error {
 	if s.started {
@@ -118,8 +108,6 @@ func (s *Session) start(config session.Config) error {
 	if config.ProviderType != "" {
 		s.sessionConfig = config
 	}
-
-	s.ctx, s.cancel = context.WithCancel(context.Background())
 
 	// Circuit breaker check
 	if s.circuitBreaker.IsInCooldown() {
@@ -154,15 +142,9 @@ func (s *Session) start(config session.Config) error {
 		workingDir = s.providerConfig.WorkingDir
 	}
 
-	// Merge environment variables
-	environment := maps.Clone(s.providerConfig.Environment)
-	maps.Copy(environment, config.Environment)
+	environment := mergeEnvironment(s.providerConfig.Environment, config.Environment)
 
-	// Initialize terminal manager
-	s.terminalManager = NewTerminalManager(s.sessionID, workingDir, s.ctx)
-
-	// Start the process using ProcessManager
-	processMgr, err := process.Start(s.ctx, process.Config{
+	runtime, err := sharedRuntimePool.acquire(process.Config{
 		Command:     command,
 		Args:        args,
 		WorkingDir:  workingDir,
@@ -170,36 +152,17 @@ func (s *Session) start(config session.Config) error {
 	})
 	if err != nil {
 		s.handleFailure(err)
-		return fmt.Errorf("failed to start acp agent process: %w", err)
+		return err
 	}
+	s.runtime = runtime
 
-	s.processMgr = processMgr
-
-	// Create ACP client adapter
-	s.client = newACPClientAdapter(s)
-
-	// Create client-side connection
-	// Note: peerInput is where we write TO the agent (agent's stdin)
-	//       peerOutput is where we read FROM the agent (agent's stdout)
-	s.conn = acpsdk.NewClientSideConnection(s.client, processMgr.Stdin(), processMgr.Stdout())
-
-	// Start I/O goroutines
-	s.wg.Add(2)
-	go s.processStderr()
-	go s.processInput()
-
-	// Initialize the ACP connection
-	if err := s.initializeConnection(); err != nil {
-		_ = processMgr.Kill()
-		s.handleFailure(err)
-		return fmt.Errorf("failed to initialize acp connection: %w", err)
-	}
+	// Initialize terminal manager
+	s.terminalManager = NewTerminalManager(s.sessionID, workingDir, runtime.ctx)
 
 	// Create an ACP session
 	if err := s.createACPSession(); err != nil {
-		_ = processMgr.Kill()
 		s.handleFailure(err)
-		return fmt.Errorf("failed to create acp session: %w", err)
+		return err
 	}
 
 	// Transition to running state
@@ -209,7 +172,7 @@ func (s *Session) start(config session.Config) error {
 	// Start auto-snapshot if enabled and snapshot manager is set
 	if s.snapshotManager != nil && config.Custom != nil {
 		if enablePersistence, ok := config.Custom["enable_persistence"].(bool); ok && enablePersistence {
-			s.snapshotManager.StartAutoSnapshot(s.ctx, s, s.sessionID)
+			s.snapshotManager.StartAutoSnapshot(runtime.ctx, s, s.sessionID)
 			s.events.Emit(domain.NewMetadataEvent(s.sessionID, "snapshot_enabled", map[string]any{
 				"interval": s.snapshotManager,
 			}, nil))
@@ -217,41 +180,6 @@ func (s *Session) start(config session.Config) error {
 	}
 
 	s.started = true
-
-	// Close the events channel when the process exits so handleEvents sees EOF.
-	s.wg.Add(1)
-	go s.waitForExit()
-
-	return nil
-}
-
-// waitForExit waits for the ACP process to terminate and then closes the event
-// channel so the executor's handleEvents goroutine exits cleanly.
-func (s *Session) waitForExit() {
-	defer s.wg.Done()
-	if s.processMgr != nil {
-		_ = s.processMgr.Wait()
-	}
-	s.events.Close()
-}
-
-// initializeConnection sends the Initialize request to the ACP agent.
-func (s *Session) initializeConnection() error {
-	initReq := acpsdk.InitializeRequest{
-		ProtocolVersion: acpsdk.ProtocolVersionNumber,
-		ClientCapabilities: acpsdk.ClientCapabilities{
-			Fs: acpsdk.FileSystemCapability{
-				ReadTextFile:  true,
-				WriteTextFile: true,
-			},
-			Terminal: true, // Terminal support now implemented
-		},
-	}
-
-	_, err := s.conn.Initialize(s.ctx, initReq)
-	if err != nil {
-		return fmt.Errorf("initialize failed: %w", err)
-	}
 
 	return nil
 }
@@ -285,17 +213,10 @@ func (s *Session) createACPSession() error {
 	if mcpServers == nil {
 		mcpServers = []acpsdk.McpServer{}
 	}
-	newSessionReq := acpsdk.NewSessionRequest{
-		Cwd:        cwd,
-		McpServers: mcpServers,
-	}
-
-	resp, err := s.conn.NewSession(s.ctx, newSessionReq)
+	sessionID, err := s.runtime.createSession(s, sessionRuntimeConfig{cwd: cwd, mcpServers: mcpServers})
 	if err != nil {
-		return fmt.Errorf("new session failed: %w", err)
+		return err
 	}
-
-	sessionID := string(resp.SessionId)
 	s.acpSessionID = &sessionID
 	s.events.Emit(domain.NewMetadataEvent(s.sessionID, "acp_session_id", map[string]any{
 		"session_id": sessionID,
@@ -304,69 +225,81 @@ func (s *Session) createACPSession() error {
 	return nil
 }
 
+func (s *Session) runPrompt(runtime *sharedRuntime, acpSessionID string, input string) {
+	if runtime == nil {
+		s.events.Emit(domain.NewErrorEvent(s.sessionID, ErrNotStarted.Error(), "ACP_PROMPT_ERROR", nil))
+		s.completePrompt("acp runtime unavailable")
+		return
+	}
+
+	if err := s.sendPrompt(runtime, acpSessionID, input); err != nil {
+		s.events.Emit(domain.NewErrorEvent(s.sessionID, err.Error(), "ACP_PROMPT_ERROR", nil))
+	}
+
+	s.completePrompt("prompt completed")
+}
+
+func (s *Session) completePrompt(reason string) {
+	s.mu.Lock()
+	acpSessionID := ""
+	if s.acpSessionID != nil {
+		acpSessionID = *s.acpSessionID
+	}
+	runtime := s.runtime
+	s.acpSessionID = nil
+	s.runtime = nil
+	s.started = false
+	s.mu.Unlock()
+
+	if runtime != nil {
+		runtime.removeSession(acpSessionID)
+	}
+
+	s.closedOnce.Do(func() {
+		s.state.SetState(session.StateStopped)
+		s.events.Emit(domain.NewStatusChangeEvent(s.sessionID, domain.SessionStateRunning, domain.SessionStateIdle, reason, nil))
+		if s.snapshotManager != nil {
+			_ = s.snapshotManager.Snapshot(s)
+			s.snapshotManager.StopAutoSnapshot(s.sessionID)
+		}
+		if s.terminalManager != nil {
+			s.terminalManager.CloseAll()
+		}
+		s.events.Close()
+	})
+}
+
 // Stop gracefully terminates the ACP session.
 func (s *Session) Stop(ctx context.Context) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	providerState := s.state.GetState()
-	if providerState == session.StateStopped {
-		return nil
+	s.mu.RLock()
+	acpSessionID := ""
+	if s.acpSessionID != nil {
+		acpSessionID = *s.acpSessionID
 	}
+	runtime := s.runtime
+	s.mu.RUnlock()
 
-	s.state.SetState(session.StateStopping)
-	s.events.Emit(domain.NewStatusChangeEvent(s.sessionID, domain.SessionStateRunning, domain.SessionStateIdle, "stopping acp provider", nil))
-
-	// Cancel context to signal goroutines to stop
-	if s.cancel != nil {
-		s.cancel()
+	if runtime != nil {
+		runtime.cancelPrompt(acpSessionID)
 	}
-
-	// Take final snapshot if enabled
-	if s.snapshotManager != nil {
-		_ = s.snapshotManager.Snapshot(s)
-		s.snapshotManager.StopAutoSnapshot(s.sessionID)
-	}
-
-	// Clean up all terminals
-	if s.terminalManager != nil {
-		s.terminalManager.CloseAll()
-	}
-
-	// Stop the process gracefully with ProcessManager
-	if s.processMgr != nil {
-		_ = s.processMgr.Stop(5 * time.Second)
-		s.processMgr = nil
-	}
-
-	// Wait for goroutines to complete
-	s.wg.Wait()
-
-	s.state.SetState(session.StateStopped)
-	// Already emitted running->idle at stopping
-	s.events.Close()
-
+	s.completePrompt("stopping acp provider")
 	return nil
 }
 
 // Kill immediately terminates the ACP session.
 func (s *Session) Kill() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.cancel != nil {
-		s.cancel()
+	s.mu.RLock()
+	acpSessionID := ""
+	if s.acpSessionID != nil {
+		acpSessionID = *s.acpSessionID
 	}
+	runtime := s.runtime
+	s.mu.RUnlock()
 
-	if s.processMgr != nil {
-		_ = s.processMgr.Kill()
-		s.processMgr = nil
+	if runtime != nil {
+		runtime.cancelPrompt(acpSessionID)
 	}
-
-	s.state.SetState(session.StateStopped)
-	s.events.Emit(domain.NewStatusChangeEvent(s.sessionID, domain.SessionStateRunning, domain.SessionStateIdle, "acp provider killed", nil))
-	s.events.Close()
-
+	s.completePrompt("acp provider killed")
 	return nil
 }
 
@@ -376,61 +309,15 @@ func (s *Session) Status() session.Status {
 }
 
 // processStderr reads error output from the agent's stderr.
-func (s *Session) processStderr() {
-	defer s.wg.Done()
-
-	if s.processMgr == nil || s.processMgr.Stderr() == nil {
-		return
-	}
-
-	scanner := bufio.NewScanner(s.processMgr.Stderr())
-	for scanner.Scan() {
-		select {
-		case <-s.ctx.Done():
-			return
-		default:
-		}
-
-		line := scanner.Text()
-		if len(line) == 0 {
-			continue
-		}
-
-		// Emit stderr output as metadata
-		s.events.Emit(domain.NewMetadataEvent(s.sessionID, "stderr", map[string]any{
-			"line": line,
-		}, nil))
-	}
-}
-
-// processInput handles sending queued input to the ACP agent.
-func (s *Session) processInput() {
-	defer s.wg.Done()
-
-	for {
-		select {
-		case <-s.ctx.Done():
-			return
-		case input := <-s.inputBuffer.Receive():
-			if err := s.sendPrompt(input); err != nil {
-				s.events.Emit(domain.NewErrorEvent(s.sessionID, err.Error(), "ACP_PROMPT_ERROR", nil))
-			}
-		}
-	}
-}
-
 // sendPrompt sends a prompt via the ACP protocol.
-func (s *Session) sendPrompt(input string) error {
+func (s *Session) sendPrompt(runtime *sharedRuntime, acpSessionID string, input string) error {
 	s.mu.RLock()
-	conn := s.conn
-	acpSessionID := s.acpSessionID
 	s.mu.RUnlock()
 
-	if conn == nil {
+	if runtime == nil {
 		return ErrNotStarted
 	}
-
-	if acpSessionID == nil {
+	if acpSessionID == "" {
 		return ErrNoActiveSession
 	}
 
@@ -445,14 +332,14 @@ func (s *Session) sendPrompt(input string) error {
 
 	// Create a prompt request with text content
 	req := acpsdk.PromptRequest{
-		SessionId: acpsdk.SessionId(*acpSessionID),
+		SessionId: acpsdk.SessionId(acpSessionID),
 		Prompt: []acpsdk.ContentBlock{
 			acpsdk.TextBlock(input),
 		},
 	}
 
 	// Send the prompt request
-	resp, err := conn.Prompt(s.ctx, req)
+	resp, err := runtime.conn.Prompt(runtime.ctx, req)
 	if err != nil {
 		return fmt.Errorf("failed to send prompt: %w", err)
 	}
@@ -511,6 +398,11 @@ func (s *Session) handleFailure(err error) {
 	}
 	s.state.SetError(err)
 	s.events.Emit(domain.NewErrorEvent(s.sessionID, err.Error(), "ACP_FAILURE", nil))
+}
+
+func (s *Session) handleRuntimeStopped() {
+	s.events.Emit(domain.NewErrorEvent(s.sessionID, "acp runtime stopped", "ACP_RUNTIME_STOPPED", nil))
+	s.completePrompt("acp runtime stopped")
 }
 
 // TerminalProvider interface implementation

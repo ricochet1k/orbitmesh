@@ -16,26 +16,39 @@ import (
 // acpClientAdapter implements acpsdk.Client for OrbitMesh.
 // It receives requests and notifications from the ACP agent.
 type acpClientAdapter struct {
-	session *Session
+	runtime *sharedRuntime
 }
 
 var _ acpsdk.Client = (*acpClientAdapter)(nil)
 
-// newACPClientAdapter creates a new adapter for the given session.
-func newACPClientAdapter(session *Session) *acpClientAdapter {
+// newACPClientAdapter creates a new adapter for the shared runtime.
+func newACPClientAdapter(runtime *sharedRuntime) *acpClientAdapter {
 	return &acpClientAdapter{
-		session: session,
+		runtime: runtime,
 	}
+}
+
+func (a *acpClientAdapter) sessionForID(sessionID acpsdk.SessionId) (*Session, error) {
+	sess := a.runtime.sessionForID(string(sessionID))
+	if sess == nil {
+		return nil, fmt.Errorf("acp session not found: %s", string(sessionID))
+	}
+	return sess, nil
 }
 
 // ReadTextFile handles file read requests from the agent.
 func (a *acpClientAdapter) ReadTextFile(ctx context.Context, req acpsdk.ReadTextFileRequest) (acpsdk.ReadTextFileResponse, error) {
+	sess, err := a.sessionForID(req.SessionId)
+	if err != nil {
+		return acpsdk.ReadTextFileResponse{}, err
+	}
+
 	// Ensure path is absolute
 	path := req.Path
 	if !filepath.IsAbs(path) {
 		// Make relative to working directory
-		if a.session.sessionConfig.WorkingDir != "" {
-			path = filepath.Join(a.session.sessionConfig.WorkingDir, path)
+		if sess.sessionConfig.WorkingDir != "" {
+			path = filepath.Join(sess.sessionConfig.WorkingDir, path)
 		} else {
 			return acpsdk.ReadTextFileResponse{}, fmt.Errorf("path must be absolute: %s", req.Path)
 		}
@@ -69,7 +82,7 @@ func (a *acpClientAdapter) ReadTextFile(ctx context.Context, req acpsdk.ReadText
 	}
 
 	// Emit event for file read
-	a.emitMetadata("file_read", map[string]any{
+	a.emitMetadata(sess, "file_read", map[string]any{
 		"path": req.Path,
 	})
 
@@ -80,12 +93,17 @@ func (a *acpClientAdapter) ReadTextFile(ctx context.Context, req acpsdk.ReadText
 
 // WriteTextFile handles file write requests from the agent.
 func (a *acpClientAdapter) WriteTextFile(ctx context.Context, req acpsdk.WriteTextFileRequest) (acpsdk.WriteTextFileResponse, error) {
+	sess, err := a.sessionForID(req.SessionId)
+	if err != nil {
+		return acpsdk.WriteTextFileResponse{}, err
+	}
+
 	// Ensure path is absolute
 	path := req.Path
 	if !filepath.IsAbs(path) {
 		// Make relative to working directory
-		if a.session.sessionConfig.WorkingDir != "" {
-			path = filepath.Join(a.session.sessionConfig.WorkingDir, path)
+		if sess.sessionConfig.WorkingDir != "" {
+			path = filepath.Join(sess.sessionConfig.WorkingDir, path)
 		} else {
 			return acpsdk.WriteTextFileResponse{}, fmt.Errorf("path must be absolute: %s", req.Path)
 		}
@@ -105,7 +123,7 @@ func (a *acpClientAdapter) WriteTextFile(ctx context.Context, req acpsdk.WriteTe
 	}
 
 	// Emit event for file write
-	a.emitMetadata("file_write", map[string]any{
+	a.emitMetadata(sess, "file_write", map[string]any{
 		"path": req.Path,
 		"size": len(req.Content),
 	})
@@ -115,13 +133,18 @@ func (a *acpClientAdapter) WriteTextFile(ctx context.Context, req acpsdk.WriteTe
 
 // RequestPermission handles permission requests from the agent.
 func (a *acpClientAdapter) RequestPermission(ctx context.Context, req acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
+	sess, err := a.sessionForID(req.SessionId)
+	if err != nil {
+		return acpsdk.RequestPermissionResponse{}, err
+	}
+
 	title := ""
 	if req.ToolCall.Title != nil {
 		title = *req.ToolCall.Title
 	}
 
 	// Emit permission request as metadata so it can be handled by the orchestration layer
-	a.emitMetadata("permission_request", map[string]any{
+	a.emitMetadata(sess, "permission_request", map[string]any{
 		"tool_call": req.ToolCall,
 		"title":     title,
 		"options":   req.Options,
@@ -148,6 +171,11 @@ func (a *acpClientAdapter) RequestPermission(ctx context.Context, req acpsdk.Req
 
 // SessionUpdate handles session update notifications from the agent.
 func (a *acpClientAdapter) SessionUpdate(ctx context.Context, notif acpsdk.SessionNotification) error {
+	sess := a.runtime.sessionForID(string(notif.SessionId))
+	if sess == nil {
+		return nil
+	}
+
 	update := notif.Update
 
 	// Note: Usage tracking happens on PromptResponse, not SessionUpdate
@@ -156,27 +184,27 @@ func (a *acpClientAdapter) SessionUpdate(ctx context.Context, notif acpsdk.Sessi
 	switch {
 	case update.UserMessageChunk != nil:
 		// User message echo - useful for confirmation
-		a.handleContentBlock(update.UserMessageChunk.Content)
-		a.emitMetadata("user_message_chunk", map[string]any{
+		a.handleContentBlock(sess, update.UserMessageChunk.Content)
+		a.emitMetadata(sess, "user_message_chunk", map[string]any{
 			"content": update.UserMessageChunk.Content,
 		})
 
 	case update.AgentMessageChunk != nil:
 		// Streaming agent message chunk
-		a.handleContentBlock(update.AgentMessageChunk.Content)
+		a.handleContentBlock(sess, update.AgentMessageChunk.Content)
 
 	case update.AgentThoughtChunk != nil:
 		// Internal reasoning/thinking process
-		a.handleContentBlock(update.AgentThoughtChunk.Content)
+		a.handleContentBlock(sess, update.AgentThoughtChunk.Content)
 		raw, _ := json.Marshal(update.AgentThoughtChunk)
 		if update.AgentThoughtChunk.Content.Text != nil {
-			a.session.events.Emit(domain.NewThoughtEvent(a.session.sessionID, update.AgentThoughtChunk.Content.Text.Text, raw))
+			sess.events.Emit(domain.NewThoughtEvent(sess.sessionID, update.AgentThoughtChunk.Content.Text.Text, raw))
 		}
 
 	case update.ToolCall != nil:
 		// Tool call notification
 		raw, _ := json.Marshal(update.ToolCall)
-		a.session.events.Emit(domain.NewToolCallEvent(a.session.sessionID, domain.ToolCallData{
+		sess.events.Emit(domain.NewToolCallEvent(sess.sessionID, domain.ToolCallData{
 			Status: fmt.Sprint(update.ToolCall.Status),
 			Title:  update.ToolCall.Title,
 		}, raw))
@@ -184,7 +212,7 @@ func (a *acpClientAdapter) SessionUpdate(ctx context.Context, notif acpsdk.Sessi
 	case update.ToolCallUpdate != nil:
 		// Tool call status update
 		raw, _ := json.Marshal(update.ToolCallUpdate)
-		a.session.events.Emit(domain.NewToolCallEvent(a.session.sessionID, domain.ToolCallData{
+		sess.events.Emit(domain.NewToolCallEvent(sess.sessionID, domain.ToolCallData{
 			ID:     string(update.ToolCallUpdate.ToolCallId),
 			Status: fmt.Sprint(update.ToolCallUpdate.Status),
 			Title:  "tool call update",
@@ -193,17 +221,17 @@ func (a *acpClientAdapter) SessionUpdate(ctx context.Context, notif acpsdk.Sessi
 	case update.Plan != nil:
 		// Agent's execution plan for complex tasks
 		raw, _ := json.Marshal(update.Plan)
-		a.session.events.Emit(domain.NewPlanEvent(a.session.sessionID, domain.PlanData{Description: fmt.Sprint(update.Plan)}, raw))
+		sess.events.Emit(domain.NewPlanEvent(sess.sessionID, domain.PlanData{Description: fmt.Sprint(update.Plan)}, raw))
 
 	case update.AvailableCommandsUpdate != nil:
 		// Dynamic command discovery
-		a.emitMetadata("available_commands", map[string]any{
+		a.emitMetadata(sess, "available_commands", map[string]any{
 			"commands": update.AvailableCommandsUpdate,
 		})
 
 	case update.CurrentModeUpdate != nil:
 		// Session mode changes
-		a.emitMetadata("mode_change", map[string]any{
+		a.emitMetadata(sess, "mode_change", map[string]any{
 			"mode": update.CurrentModeUpdate,
 		})
 	}
@@ -213,8 +241,13 @@ func (a *acpClientAdapter) SessionUpdate(ctx context.Context, notif acpsdk.Sessi
 
 // CreateTerminal handles terminal creation requests from the agent.
 func (a *acpClientAdapter) CreateTerminal(ctx context.Context, req acpsdk.CreateTerminalRequest) (acpsdk.CreateTerminalResponse, error) {
+	sess, err := a.sessionForID(req.SessionId)
+	if err != nil {
+		return acpsdk.CreateTerminalResponse{}, err
+	}
+
 	// Generate unique terminal ID
-	termID := fmt.Sprintf("term-%s-%d", a.session.sessionID[:8], time.Now().UnixNano())
+	termID := fmt.Sprintf("term-%s-%d", sess.sessionID[:8], time.Now().UnixNano())
 
 	// Convert ACP env to map
 	env := make(map[string]string)
@@ -223,7 +256,7 @@ func (a *acpClientAdapter) CreateTerminal(ctx context.Context, req acpsdk.Create
 	}
 
 	// Create terminal using manager
-	_, err := a.session.terminalManager.Create(
+	_, err = sess.terminalManager.Create(
 		termID,
 		req.Command,
 		req.Args,
@@ -235,7 +268,7 @@ func (a *acpClientAdapter) CreateTerminal(ctx context.Context, req acpsdk.Create
 	}
 
 	// Emit event
-	a.emitMetadata("terminal_created", map[string]any{
+	a.emitMetadata(sess, "terminal_created", map[string]any{
 		"terminal_id": termID,
 		"command":     req.Command,
 		"args":        req.Args,
@@ -246,7 +279,12 @@ func (a *acpClientAdapter) CreateTerminal(ctx context.Context, req acpsdk.Create
 
 // TerminalOutput handles terminal output requests.
 func (a *acpClientAdapter) TerminalOutput(ctx context.Context, req acpsdk.TerminalOutputRequest) (acpsdk.TerminalOutputResponse, error) {
-	term, err := a.session.terminalManager.Get(req.TerminalId)
+	sess, err := a.sessionForID(req.SessionId)
+	if err != nil {
+		return acpsdk.TerminalOutputResponse{}, err
+	}
+
+	term, err := sess.terminalManager.Get(req.TerminalId)
 	if err != nil {
 		return acpsdk.TerminalOutputResponse{}, err
 	}
@@ -274,7 +312,12 @@ func (a *acpClientAdapter) TerminalOutput(ctx context.Context, req acpsdk.Termin
 
 // WaitForTerminalExit handles waiting for terminal exit.
 func (a *acpClientAdapter) WaitForTerminalExit(ctx context.Context, req acpsdk.WaitForTerminalExitRequest) (acpsdk.WaitForTerminalExitResponse, error) {
-	term, err := a.session.terminalManager.Get(req.TerminalId)
+	sess, err := a.sessionForID(req.SessionId)
+	if err != nil {
+		return acpsdk.WaitForTerminalExitResponse{}, err
+	}
+
+	term, err := sess.terminalManager.Get(req.TerminalId)
 	if err != nil {
 		return acpsdk.WaitForTerminalExitResponse{}, err
 	}
@@ -298,39 +341,47 @@ func (a *acpClientAdapter) WaitForTerminalExit(ctx context.Context, req acpsdk.W
 
 // KillTerminalCommand handles terminal kill requests.
 func (a *acpClientAdapter) KillTerminalCommand(ctx context.Context, req acpsdk.KillTerminalCommandRequest) (acpsdk.KillTerminalCommandResponse, error) {
-	return acpsdk.KillTerminalCommandResponse{}, a.session.terminalManager.Kill(req.TerminalId)
+	sess, err := a.sessionForID(req.SessionId)
+	if err != nil {
+		return acpsdk.KillTerminalCommandResponse{}, err
+	}
+	return acpsdk.KillTerminalCommandResponse{}, sess.terminalManager.Kill(req.TerminalId)
 }
 
 // ReleaseTerminal handles terminal release requests.
 func (a *acpClientAdapter) ReleaseTerminal(ctx context.Context, req acpsdk.ReleaseTerminalRequest) (acpsdk.ReleaseTerminalResponse, error) {
-	return acpsdk.ReleaseTerminalResponse{}, a.session.terminalManager.Release(req.TerminalId)
+	sess, err := a.sessionForID(req.SessionId)
+	if err != nil {
+		return acpsdk.ReleaseTerminalResponse{}, err
+	}
+	return acpsdk.ReleaseTerminalResponse{}, sess.terminalManager.Release(req.TerminalId)
 }
 
 // handleContentBlock processes an ACP content block from session updates.
-func (a *acpClientAdapter) handleContentBlock(block acpsdk.ContentBlock) {
+func (a *acpClientAdapter) handleContentBlock(sess *Session, block acpsdk.ContentBlock) {
 	switch {
 	case block.Text != nil:
 		// Text output
-		a.session.state.SetOutput(block.Text.Text)
-		a.session.events.Emit(domain.NewOutputEvent(a.session.sessionID, block.Text.Text, nil))
+		sess.state.SetOutput(block.Text.Text)
+		sess.events.Emit(domain.NewOutputEvent(sess.sessionID, block.Text.Text, nil))
 
 		// Track assistant message for snapshots
-		a.session.mu.Lock()
-		a.session.messageHistory = append(a.session.messageHistory, SnapshotMessage{
+		sess.mu.Lock()
+		sess.messageHistory = append(sess.messageHistory, SnapshotMessage{
 			Role:      "assistant",
 			Content:   block.Text.Text,
 			Timestamp: time.Now(),
 		})
-		a.session.mu.Unlock()
+		sess.mu.Unlock()
 
 	case block.Image != nil:
 		// Image output (emit as metadata)
-		a.emitMetadata("image", map[string]any{
+		a.emitMetadata(sess, "image", map[string]any{
 			"source": block.Image,
 		})
 	}
 }
 
-func (a *acpClientAdapter) emitMetadata(key string, value any) {
-	a.session.events.Emit(domain.NewMetadataEvent(a.session.sessionID, key, value, nil))
+func (a *acpClientAdapter) emitMetadata(sess *Session, key string, value any) {
+	sess.events.Emit(domain.NewMetadataEvent(sess.sessionID, key, value, nil))
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/ricochet1k/orbitmesh/internal/provider/common/acp"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
 	apiTypes "github.com/ricochet1k/orbitmesh/pkg/api"
 )
@@ -29,6 +30,13 @@ func (h *Handler) listProviders(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(apiTypes.ProviderConfigListResponse{
 		Providers: responses,
 	})
+}
+
+func (h *Handler) getACPRuntimeStats(w http.ResponseWriter, r *http.Request) {
+	stats := acp.SharedRuntimeStats()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(stats)
 }
 
 func (h *Handler) getProvider(w http.ResponseWriter, r *http.Request) {

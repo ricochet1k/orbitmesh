@@ -87,6 +87,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/v1/sessions/{id}/terminal/snapshot", h.getTerminalSnapshot)
 	r.Post("/api/v1/sessions/{id}/extractor/replay", h.replayExtractor)
 	r.Get("/api/v1/providers", h.listProviders)
+	r.Get("/api/v1/providers/acp/runtime", h.getACPRuntimeStats)
 	r.Post("/api/v1/providers", h.createProvider)
 	r.Get("/api/v1/providers/{id}", h.getProvider)
 	r.Put("/api/v1/providers/{id}", h.updateProvider)
