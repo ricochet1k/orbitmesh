@@ -2480,6 +2480,28 @@ tbody tr:hover {
 }
 .transcript-expand-toggle:hover { color: var(--ink-1); }
 
+.transcript-debug-tools {
+  display: flex;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.transcript-raw-json {
+  margin: 0;
+  max-height: 18rem;
+  overflow: auto;
+  border-radius: var(--radius-2);
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: rgba(15, 23, 42, 0.95);
+  color: #dbeafe;
+  padding: 0.65rem;
+  font-size: 0.72rem;
+}
+
+.transcript-raw-json code {
+  white-space: pre;
+}
+
 /* Wrap for the full transcript section (header + scrollable list) */
 .session-transcript-wrap {
   display: flex;

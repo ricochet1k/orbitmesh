@@ -2,6 +2,8 @@ import { createMemo, createSignal, For, Show } from "solid-js"
 import type { Accessor } from "solid-js"
 import type { TranscriptMessage } from "../types/api"
 
+const isDevMode = Boolean(import.meta.env?.DEV)
+
 // Max lines before a message is collapsed with an expand toggle
 export const COLLAPSE_LINE_THRESHOLD = 20
 
@@ -42,12 +44,14 @@ export default function SessionTranscript(props: SessionTranscriptProps) {
 
 function TranscriptItem(props: { message: TranscriptMessage }) {
   const [expanded, setExpanded] = createSignal(false)
+  const [showRawJson, setShowRawJson] = createSignal(false)
 
   const blocks = createMemo(() => splitIntoBlocks(props.message.content))
   const lineCount = createMemo(() => props.message.content.split("\n").length)
   const isLong = createMemo(() => lineCount() > COLLAPSE_LINE_THRESHOLD)
   const normalizedKind = createMemo(() => normalizeKind(props.message.kind))
   const displayLabel = createMemo(() => formatMessageLabel(props.message.type, normalizedKind()))
+  const rawJson = createMemo(() => JSON.stringify(props.message, null, 2))
 
   const kindClass = createMemo(() => {
     const kind = normalizedKind()
@@ -89,6 +93,32 @@ function TranscriptItem(props: { message: TranscriptMessage }) {
         >
           {expanded() ? "Collapse" : `Expand (${lineCount()} lines)`}
         </button>
+      </Show>
+
+      <Show when={isDevMode}>
+        <div class="transcript-debug-tools">
+          <button
+            type="button"
+            class="transcript-expand-toggle"
+            onClick={() => setShowRawJson((v) => !v)}
+          >
+            {showRawJson() ? "Hide raw JSON" : "Show raw JSON"}
+          </button>
+          <Show when={showRawJson()}>
+            <button
+              type="button"
+              class="transcript-expand-toggle"
+              onClick={() => navigator.clipboard?.writeText(rawJson())}
+            >
+              Copy JSON
+            </button>
+          </Show>
+        </div>
+        <Show when={showRawJson()}>
+          <pre class="transcript-raw-json" data-testid="transcript-raw-json">
+            <code>{rawJson()}</code>
+          </pre>
+        </Show>
       </Show>
     </article>
   )
