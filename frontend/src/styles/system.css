@@ -1,0 +1,180 @@
+.ds-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.ds-page-header,
+.view-header.ds-page-header {
+  padding: var(--space-6) var(--space-7) var(--space-5);
+  background: var(--color-surface-0);
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-6);
+  flex-wrap: wrap;
+}
+
+.ds-page-kicker {
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  margin-bottom: var(--space-2);
+}
+
+.ds-page-subtitle,
+.dashboard-subtitle.ds-page-subtitle {
+  margin-top: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  max-width: 48rem;
+}
+
+.ds-metrics,
+.header-meta.ds-metrics,
+.stats-bubbles.ds-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.ds-metric,
+.meta-card.ds-metric,
+.stat-bubble.ds-metric {
+  background: var(--color-surface-0);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  padding: var(--space-3) var(--space-4);
+  display: grid;
+  gap: var(--space-1);
+  box-shadow: var(--shadow-1);
+}
+
+.ds-metric p {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.ds-metric strong {
+  font-size: var(--font-size-lg);
+  color: var(--color-text-primary);
+}
+
+.ds-layout,
+.dashboard-layout.ds-layout,
+.task-tree-layout.ds-layout,
+.commit-layout.ds-layout,
+.session-layout.ds-layout,
+.sessions-layout.ds-layout,
+.terminals-layout.ds-layout,
+.extractor-layout.ds-layout {
+  flex: 1;
+  padding: var(--space-6) var(--space-7) var(--space-8);
+  display: grid;
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.ds-panel,
+.content-block.ds-panel,
+.dashboard-panel.ds-panel,
+.placeholder-panel.ds-panel,
+.session-panel.ds-panel,
+.terminal-detail-panel.ds-panel {
+  border-radius: var(--radius-2xl);
+  padding: var(--space-5);
+  background: var(--color-surface-0);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-2);
+  animation: rise var(--duration-slow) var(--easing-standard);
+}
+
+.ds-panel-header,
+.panel-header.ds-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.ds-kicker,
+.panel-kicker.ds-kicker,
+.eyebrow.ds-page-kicker {
+  text-transform: uppercase;
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.16em;
+  color: var(--color-text-tertiary);
+}
+
+.ds-pill,
+.panel-pill.ds-pill {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
+  font-size: var(--font-size-xs);
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  color: var(--color-primary-dark);
+}
+
+.ds-pill.ds-pill-neutral,
+.panel-pill.ds-pill.ds-pill-neutral {
+  border-color: color-mix(in srgb, var(--color-text-tertiary) 35%, transparent);
+  color: var(--color-text-secondary);
+  background: color-mix(in srgb, var(--color-text-tertiary) 10%, transparent);
+}
+
+.ds-stack {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.ds-muted {
+  color: var(--color-text-tertiary);
+}
+
+.ds-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(220px, 260px) 1fr;
+}
+
+.ds-top-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.ds-error-view {
+  margin: var(--space-7);
+  border: 1px solid color-mix(in srgb, var(--color-error) 35%, transparent);
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--color-error) 8%, var(--color-surface-0));
+  padding: var(--space-6);
+  display: grid;
+  gap: var(--space-4);
+}
+
+.ds-error-title {
+  color: var(--color-error);
+  font-size: var(--font-size-xl);
+}
+
+@media (max-width: 1024px) {
+  .ds-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .ds-page-header,
+  .ds-layout {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+  }
+}

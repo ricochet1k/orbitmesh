@@ -238,22 +238,22 @@ function SessionsView(props: SessionsViewProps) {
   }
 
   return (
-    <div class="sessions-view" data-testid="sessions-view">
-      <header class="view-header">
-        <div class="header-meta stats-bubbles">
-          <div class="meta-card stat-bubble" data-testid="sessions-meta-total">
+    <div class="sessions-view ds-page" data-testid="sessions-view">
+      <header class="view-header ds-page-header">
+        <div class="header-meta stats-bubbles ds-metrics">
+          <div class="meta-card stat-bubble ds-metric" data-testid="sessions-meta-total">
             <p>Total sessions</p>
             <Show when={hasLoaded()} fallback={<span>Loading...</span>}>
               <strong>{sessionList().length}</strong>
             </Show>
           </div>
-          <div class="meta-card stat-bubble" data-testid="sessions-meta-running">
+          <div class="meta-card stat-bubble ds-metric" data-testid="sessions-meta-running">
             <p>Running</p>
             <Show when={hasLoaded()} fallback={<span>Loading...</span>}>
               <strong>{stateCounts().get("running") ?? 0}</strong>
             </Show>
           </div>
-          <div class="meta-card stat-bubble" data-testid="sessions-meta-needs-attention">
+          <div class="meta-card stat-bubble ds-metric" data-testid="sessions-meta-needs-attention">
             <p>Needs attention</p>
             <Show when={hasLoaded()} fallback={<span>Loading...</span>}>
               <strong>{stateCounts().get("error") ?? 0}</strong>
@@ -279,14 +279,14 @@ function SessionsView(props: SessionsViewProps) {
         </div>
       </Show>
 
-      <main class="sessions-layout">
-        <section class="session-list-panel">
-          <div class="panel-header">
+      <main class="sessions-layout ds-layout">
+        <section class="session-list-panel content-block ds-panel">
+          <div class="panel-header ds-panel-header">
             <div>
-              <p class="panel-kicker">Session roster</p>
+              <p class="panel-kicker ds-kicker">Session roster</p>
               <h2>Session List</h2>
             </div>
-            <span class="panel-pill">Live</span>
+            <span class="panel-pill ds-pill">Live</span>
           </div>
 
           <Show 
@@ -360,13 +360,13 @@ function SessionsView(props: SessionsViewProps) {
           </Show>
         </section>
 
-        <section class="session-detail-panel" data-testid="session-detail-panel">
-          <div class="panel-header">
+        <section class="session-detail-panel content-block ds-panel" data-testid="session-detail-panel">
+          <div class="panel-header ds-panel-header">
             <div>
-              <p class="panel-kicker">Session focus</p>
+              <p class="panel-kicker ds-kicker">Session focus</p>
               <h2>Session Details</h2>
             </div>
-            <span class="panel-pill neutral">Preview</span>
+            <span class="panel-pill neutral ds-pill ds-pill-neutral">Preview</span>
           </div>
           <Show when={selectedSession()} fallback={<p class="empty-state">Select a session to preview.</p>}>
             {(session) => (

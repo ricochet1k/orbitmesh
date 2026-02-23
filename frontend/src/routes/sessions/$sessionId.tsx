@@ -295,7 +295,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   }
 
   return (
-    <div class="session-viewer">
+    <div class="session-viewer ds-page">
       <header class="session-compact-header">
         <div class="session-compact-title-wrap">
           <p class="session-compact-kicker">Session</p>
@@ -428,11 +428,11 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
         )}
       </Show>
 
-      <main class="session-layout">
-        <section class="session-panel">
+      <main class="session-layout ds-layout">
+        <section class="session-panel ds-panel">
 
             <div class="session-transcript-wrap">
-              <div class="panel-header">
+              <div class="panel-header ds-panel-header">
                 <div class="panel-tools">
                   <button
                     type="button"
@@ -487,7 +487,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
           />
         </section >
 
-        <div class="session-side-panels">
+        <div class="session-side-panels ds-stack">
           <SessionMetrics
             sessionId={sessionId}
             session={session}

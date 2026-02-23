@@ -16,12 +16,12 @@ function SettingsLayout() {
   const location = useLocation()
 
   return (
-    <div class="settings-view">
-      <header class="view-header">
+    <div class="settings-view ds-page">
+      <header class="view-header ds-page-header">
         <div>
-          <p class="eyebrow">Workspace settings</p>
+          <p class="eyebrow ds-page-kicker">Workspace settings</p>
           <h1>Settings</h1>
-          <p class="dashboard-subtitle">
+          <p class="dashboard-subtitle ds-page-subtitle">
             Configure providers, agents, integrations, and operational defaults.
           </p>
         </div>

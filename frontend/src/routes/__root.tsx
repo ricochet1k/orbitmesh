@@ -4,7 +4,7 @@ import Sidebar from '../components/Sidebar'
 import AgentDock from '../components/AgentDock'
 
 const RootLayout = () => (
-  <div class="app-shell">
+  <div class="app-shell ds-shell">
     <Sidebar />
     <Outlet />
     <TanStackRouterDevtools />

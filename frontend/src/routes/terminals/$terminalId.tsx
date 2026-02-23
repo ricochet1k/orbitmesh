@@ -49,12 +49,12 @@ export function TerminalDetailView(props: TerminalDetailViewProps = {}) {
   };
 
   return (
-    <div class="terminals-view" data-testid="terminal-detail-view">
-      <header class="view-header">
+    <div class="terminals-view ds-page" data-testid="terminal-detail-view">
+      <header class="view-header ds-page-header">
         <div>
-          <p class="eyebrow">Terminal viewer</p>
+          <p class="eyebrow ds-page-kicker">Terminal viewer</p>
           <h1 data-testid="terminal-detail-heading">Terminal {terminalId()}</h1>
-          <p class="dashboard-subtitle">
+          <p class="dashboard-subtitle ds-page-subtitle">
             Inspect live PTY streams or review the most recent snapshot from closed terminals.
           </p>
         </div>
@@ -77,14 +77,14 @@ export function TerminalDetailView(props: TerminalDetailViewProps = {}) {
         </div>
       </header>
 
-      <main class="terminals-layout">
-        <section class="terminal-detail-panel" data-testid="terminal-stream-panel">
-          <div class="panel-header">
+      <main class="terminals-layout ds-layout">
+        <section class="terminal-detail-panel ds-panel" data-testid="terminal-stream-panel">
+          <div class="panel-header ds-panel-header">
             <div>
-              <p class="panel-kicker">Terminal output</p>
+              <p class="panel-kicker ds-kicker">Terminal output</p>
               <h2>Terminal Stream</h2>
             </div>
-            <span class={`panel-pill ${isLive() ? "" : "neutral"}`}>{isLive() ? "Live" : "Snapshot"}</span>
+            <span class={`panel-pill ds-pill ${isLive() ? "" : "neutral ds-pill-neutral"}`}>{isLive() ? "Live" : "Snapshot"}</span>
           </div>
           <Show when={terminal.error}>
             {(error) => <div class="notice-banner error">{error().message ?? "Failed to load terminal."}</div>}
@@ -124,10 +124,10 @@ export function TerminalDetailView(props: TerminalDetailViewProps = {}) {
           </Show>
         </section>
 
-        <section class="terminal-detail-panel" data-testid="terminal-meta-panel">
-          <div class="panel-header">
+        <section class="terminal-detail-panel ds-panel" data-testid="terminal-meta-panel">
+          <div class="panel-header ds-panel-header">
             <div>
-              <p class="panel-kicker">Terminal intel</p>
+              <p class="panel-kicker ds-kicker">Terminal intel</p>
               <h2>Terminal Details</h2>
             </div>
           </div>

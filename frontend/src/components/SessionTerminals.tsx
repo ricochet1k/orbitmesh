@@ -20,10 +20,10 @@ export default function SessionTerminals(props: SessionTerminalsProps) {
 
   return (
     <Show when={(terminals() ?? []).length > 0}>
-      <section class="session-panel session-terminals">
-        <div class="panel-header">
+      <section class="session-panel session-terminals ds-panel">
+        <div class="panel-header ds-panel-header">
           <div>
-            <p class="panel-kicker">Terminal sessions</p>
+            <p class="panel-kicker ds-kicker">Terminal sessions</p>
             <h2>Terminals</h2>
           </div>
         </div>

@@ -12,10 +12,10 @@ interface SessionMetricsProps {
 
 export default function SessionMetrics(props: SessionMetricsProps) {
   return (
-    <section class="session-panel">
-      <div class="panel-header">
+    <section class="session-panel ds-panel">
+      <div class="panel-header ds-panel-header">
         <div>
-          <p class="panel-kicker">Operational details</p>
+          <p class="panel-kicker ds-kicker">Operational details</p>
           <h2>Session Intel</h2>
         </div>
       </div>

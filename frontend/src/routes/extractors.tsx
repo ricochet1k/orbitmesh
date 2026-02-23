@@ -259,25 +259,18 @@ function ExtractorRulesView() {
   });
 
   return (
-    <div class="extractor-view">
-      <header class="view-header">
-        <div>
-          <p class="eyebrow">Extraction engine</p>
-          <h1>Extractor Rules</h1>
-          <p class="dashboard-subtitle">
-            Tune terminal extraction profiles, preview regions, and replay PTY logs without redeploys.
-          </p>
-        </div>
-        <div class="header-meta">
-          <div class="meta-card">
+    <div class="extractor-view ds-page">
+      <header class="view-header ds-page-header">
+        <div class="header-meta stats-bubbles ds-metrics">
+          <div class="meta-card stat-bubble ds-metric">
             <p>Profiles</p>
             <strong>{draft()?.profiles.length ?? 0}</strong>
           </div>
-          <div class="meta-card">
+          <div class="meta-card stat-bubble ds-metric">
             <p>Selected</p>
             <strong>{currentProfile()?.id || "None"}</strong>
           </div>
-          <div class="meta-card">
+          <div class="meta-card stat-bubble ds-metric">
             <p>Replay records</p>
             <strong>{replayResult()?.records.length ?? 0}</strong>
           </div>
@@ -288,11 +281,11 @@ function ExtractorRulesView() {
         {(current) => <p class={`extractor-banner ${current().tone}`}>{current().message}</p>}
       </Show>
 
-      <main class="extractor-layout">
-        <section class="extractor-panel">
-          <div class="panel-header">
+      <main class="extractor-layout ds-layout">
+        <section class="extractor-panel content-block ds-panel">
+          <div class="panel-header ds-panel-header">
             <div>
-              <p class="panel-kicker">Profiles</p>
+              <p class="panel-kicker ds-kicker">Profiles</p>
               <h2>Profile Library</h2>
             </div>
             <div class="panel-tools">
@@ -324,10 +317,10 @@ function ExtractorRulesView() {
           </div>
         </section>
 
-        <section class="extractor-panel">
-          <div class="panel-header">
+        <section class="extractor-panel content-block ds-panel">
+          <div class="panel-header ds-panel-header">
             <div>
-              <p class="panel-kicker">Rules</p>
+              <p class="panel-kicker ds-kicker">Rules</p>
               <h2>Rule Set</h2>
             </div>
             <div class="panel-tools">
@@ -367,10 +360,10 @@ function ExtractorRulesView() {
           </div>
         </section>
 
-        <section class="extractor-panel wide">
-          <div class="panel-header">
+        <section class="extractor-panel wide content-block ds-panel">
+          <div class="panel-header ds-panel-header">
             <div>
-              <p class="panel-kicker">Editor</p>
+              <p class="panel-kicker ds-kicker">Editor</p>
               <h2>Profile & Rule Editor</h2>
             </div>
             <div class="panel-tools">
@@ -591,10 +584,10 @@ function ExtractorRulesView() {
           </Show>
         </section>
 
-        <section class="extractor-panel">
-          <div class="panel-header">
+        <section class="extractor-panel content-block ds-panel">
+          <div class="panel-header ds-panel-header">
             <div>
-              <p class="panel-kicker">Snapshots</p>
+              <p class="panel-kicker ds-kicker">Snapshots</p>
               <h2>Region Preview</h2>
             </div>
             <div class="panel-tools">
@@ -647,10 +640,10 @@ function ExtractorRulesView() {
           </div>
         </section>
 
-        <section class="extractor-panel">
-          <div class="panel-header">
+        <section class="extractor-panel content-block ds-panel">
+          <div class="panel-header ds-panel-header">
             <div>
-              <p class="panel-kicker">Replay</p>
+              <p class="panel-kicker ds-kicker">Replay</p>
               <h2>Extractor Replay</h2>
             </div>
             <div class="panel-tools">

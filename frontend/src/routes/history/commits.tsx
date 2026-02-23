@@ -41,39 +41,39 @@ export default function CommitHistoryView() {
   const diffRows = createMemo(() => parseDiff(commitDetail()?.commit))
 
   return (
-    <div class="commit-history-view">
-      <header class="view-header">
+    <div class="commit-history-view ds-page">
+      <header class="view-header ds-page-header">
         <div>
-          <p class="eyebrow">Source history</p>
+          <p class="eyebrow ds-page-kicker">Source history</p>
           <h1>Git Commit Viewer</h1>
-          <p class="dashboard-subtitle">
+          <p class="dashboard-subtitle ds-page-subtitle">
             Track recent commits, inspect author context, and review diffs side-by-side.
           </p>
         </div>
-        <div class="header-meta">
-          <div class="meta-card">
+        <div class="header-meta ds-metrics">
+          <div class="meta-card ds-metric">
             <p>Commits loaded</p>
             <strong>{commits().length}</strong>
           </div>
-          <div class="meta-card">
+          <div class="meta-card ds-metric">
             <p>Latest author</p>
             <strong>{commits()[0]?.author ?? "-"}</strong>
           </div>
-          <div class="meta-card">
+          <div class="meta-card ds-metric">
             <p>Latest commit</p>
             <strong>{commits()[0]?.sha?.slice(0, 7) ?? "-"}</strong>
           </div>
         </div>
       </header>
 
-      <main class="commit-layout">
-        <section class="commit-list-panel">
-          <div class="panel-header">
+      <main class="commit-layout ds-layout">
+        <section class="commit-list-panel ds-panel">
+          <div class="panel-header ds-panel-header">
             <div>
-              <p class="panel-kicker">History</p>
+              <p class="panel-kicker ds-kicker">History</p>
               <h2>Commit List</h2>
             </div>
-            <span class="panel-pill">Live</span>
+            <span class="panel-pill ds-pill">Live</span>
           </div>
           <Show when={!commitList.loading} fallback={<p class="muted">Loading commits...</p>}>
             <div class="commit-list">
@@ -99,13 +99,13 @@ export default function CommitHistoryView() {
           </Show>
         </section>
 
-        <section class="commit-detail-panel">
-          <div class="panel-header">
+        <section class="commit-detail-panel ds-panel">
+          <div class="panel-header ds-panel-header">
             <div>
-              <p class="panel-kicker">Diff viewer</p>
+              <p class="panel-kicker ds-kicker">Diff viewer</p>
               <h2>Commit Detail</h2>
             </div>
-            <span class="panel-pill neutral">Side-by-side</span>
+            <span class="panel-pill neutral ds-pill ds-pill-neutral">Side-by-side</span>
           </div>
           <Show when={commitDetail.loading}>
             <p class="muted">Loading diff...</p>
@@ -147,13 +147,13 @@ export default function CommitHistoryView() {
           </Show>
         </section>
 
-        <section class="graph-view compact">
-          <div class="panel-header">
+        <section class="graph-view compact ds-panel">
+          <div class="panel-header ds-panel-header">
             <div>
-              <p class="panel-kicker">Commit topology</p>
+              <p class="panel-kicker ds-kicker">Commit topology</p>
               <h2>Graph Sync</h2>
             </div>
-            <span class="panel-pill neutral">Linked</span>
+            <span class="panel-pill neutral ds-pill ds-pill-neutral">Linked</span>
           </div>
           <div id="graph-container">
             <AgentGraph

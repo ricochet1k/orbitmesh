@@ -237,39 +237,39 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
   }
 
   return (
-    <div class="task-tree-view" data-testid="tasks-view">
-      <header class="view-header">
+    <div class="task-tree-view ds-page" data-testid="tasks-view">
+      <header class="view-header ds-page-header">
         <div>
-          <p class="eyebrow">Task operations</p>
+          <p class="eyebrow ds-page-kicker">Task operations</p>
           <h1 data-testid="tasks-heading">Task Tree</h1>
-          <p class="dashboard-subtitle">
+          <p class="dashboard-subtitle ds-page-subtitle">
             Explore hierarchical task progress, filter by role or status, and sync selections with the system graph.
           </p>
         </div>
-        <div class="header-meta stats-bubbles">
-          <div class="meta-card stat-bubble" data-testid="tasks-meta-tracked">
+        <div class="header-meta stats-bubbles ds-metrics">
+          <div class="meta-card stat-bubble ds-metric" data-testid="tasks-meta-tracked">
             <p>Tasks tracked</p>
             <strong>{countTasks(treeData())}</strong>
           </div>
-          <div class="meta-card stat-bubble" data-testid="tasks-meta-in-progress">
+          <div class="meta-card stat-bubble ds-metric" data-testid="tasks-meta-in-progress">
             <p>In progress</p>
             <strong>{countTasks(treeData(), "in_progress")}</strong>
           </div>
-          <div class="meta-card stat-bubble" data-testid="tasks-meta-completed">
+          <div class="meta-card stat-bubble ds-metric" data-testid="tasks-meta-completed">
             <p>Completed</p>
             <strong>{countTasks(treeData(), "completed")}</strong>
           </div>
         </div>
       </header>
 
-      <main class="task-tree-layout">
-        <section class="dashboard-panel task-tree-panel">
-          <div class="panel-header">
+      <main class="task-tree-layout ds-layout">
+        <section class="dashboard-panel task-tree-panel content-block ds-panel">
+          <div class="panel-header ds-panel-header">
             <div>
-              <p class="panel-kicker">Hierarchy</p>
+              <p class="panel-kicker ds-kicker">Hierarchy</p>
               <h2>Task Tree Viewer</h2>
             </div>
-            <span class="panel-pill">Live</span>
+            <span class="panel-pill ds-pill">Live</span>
           </div>
 
           <div class="task-tree-controls">
@@ -354,13 +354,13 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
           </Show>
         </section>
 
-        <section class="dashboard-panel task-detail-panel" data-testid="task-detail-panel">
-          <div class="panel-header">
+        <section class="dashboard-panel task-detail-panel content-block ds-panel" data-testid="task-detail-panel">
+          <div class="panel-header ds-panel-header">
             <div>
-              <p class="panel-kicker">Task control</p>
+              <p class="panel-kicker ds-kicker">Task control</p>
               <h2>Agent Launchpad</h2>
             </div>
-            <span class="panel-pill neutral">Ready</span>
+            <span class="panel-pill neutral ds-pill ds-pill-neutral">Ready</span>
           </div>
           <Show when={!treeResponse.loading && !treeResponse.error} fallback={<p class="muted">Loading task focus...</p>}>
             <Show when={selectedTask()} fallback={<p class="empty-state">Select a task to start an agent session.</p>}>
@@ -442,13 +442,13 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
           </Show>
         </section>
 
-        <section class="dashboard-panel graph-view compact">
-          <div class="panel-header">
+        <section class="dashboard-panel graph-view compact content-block ds-panel">
+          <div class="panel-header ds-panel-header">
             <div>
-              <p class="panel-kicker">Task topology</p>
+              <p class="panel-kicker ds-kicker">Task topology</p>
               <h2>Graph Sync</h2>
             </div>
-            <span class="panel-pill neutral">Linked</span>
+            <span class="panel-pill neutral ds-pill ds-pill-neutral">Linked</span>
           </div>
           <div id="graph-container">
             <AgentGraph

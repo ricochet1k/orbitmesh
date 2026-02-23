@@ -39,7 +39,7 @@ function FilesPage() {
     <Show
       when={projectId()}
       fallback={
-        <div class="files-page">
+        <div class="files-page ds-page">
           <EmptyState
             title="No project selected"
             description="Select a project in the sidebar to browse files"
@@ -48,10 +48,10 @@ function FilesPage() {
       }
     >
       {(pid) => (
-        <div class="files-page">
-          <header class="view-header">
+        <div class="files-page ds-page">
+          <header class="view-header ds-page-header">
             <div>
-              <p class="eyebrow">File browser</p>
+              <p class="eyebrow ds-page-kicker">File browser</p>
               <h1>{activeProject()?.name ?? "Files"}</h1>
             </div>
           </header>

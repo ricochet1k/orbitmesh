@@ -104,22 +104,22 @@ export function TerminalsView(props: TerminalsViewProps) {
   }
 
   return (
-    <div class="terminals-view" data-testid="terminals-view">
-      <header class="view-header">
-        <div class="header-meta stats-bubbles">
-          <div class="meta-card stat-bubble" data-testid="terminals-meta-total">
+    <div class="terminals-view ds-page" data-testid="terminals-view">
+      <header class="view-header ds-page-header">
+        <div class="header-meta stats-bubbles ds-metrics">
+          <div class="meta-card stat-bubble ds-metric" data-testid="terminals-meta-total">
             <p>Total terminals</p>
             <Show when={hasLoaded()} fallback={<span>Loading...</span>}>
               <strong>{terminalList().length}</strong>
             </Show>
           </div>
-          <div class="meta-card stat-bubble" data-testid="terminals-meta-attached">
+          <div class="meta-card stat-bubble ds-metric" data-testid="terminals-meta-attached">
             <p>Attached</p>
             <Show when={hasLoaded()} fallback={<span>Loading...</span>}>
               <strong>{attachedCount()}</strong>
             </Show>
           </div>
-          <div class="meta-card stat-bubble" data-testid="terminals-meta-detached">
+          <div class="meta-card stat-bubble ds-metric" data-testid="terminals-meta-detached">
             <p>Detached</p>
             <Show when={hasLoaded()} fallback={<span>Loading...</span>}>
               <strong>{detachedCount()}</strong>
@@ -128,14 +128,14 @@ export function TerminalsView(props: TerminalsViewProps) {
         </div>
       </header>
 
-      <main class="terminals-layout">
-        <section class="terminal-list-panel">
-          <div class="panel-header">
+      <main class="terminals-layout ds-layout">
+        <section class="terminal-list-panel content-block ds-panel">
+          <div class="panel-header ds-panel-header">
             <div>
-              <p class="panel-kicker">Terminal roster</p>
+              <p class="panel-kicker ds-kicker">Terminal roster</p>
               <h2>Terminal List</h2>
             </div>
-            <span class="panel-pill">Live</span>
+            <span class="panel-pill ds-pill">Live</span>
           </div>
 
           <Show when={error()}>
@@ -241,13 +241,13 @@ export function TerminalsView(props: TerminalsViewProps) {
           </Show>
         </section>
 
-        <section class="terminal-detail-panel" data-testid="terminal-detail-panel">
-          <div class="panel-header">
+        <section class="terminal-detail-panel content-block ds-panel" data-testid="terminal-detail-panel">
+          <div class="panel-header ds-panel-header">
             <div>
-              <p class="panel-kicker">Terminal focus</p>
+              <p class="panel-kicker ds-kicker">Terminal focus</p>
               <h2>Terminal Details</h2>
             </div>
-            <span class="panel-pill neutral">Preview</span>
+            <span class="panel-pill neutral ds-pill ds-pill-neutral">Preview</span>
           </div>
           <Show
             when={selectedTerminal()}

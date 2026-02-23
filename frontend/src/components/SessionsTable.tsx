@@ -24,13 +24,13 @@ export default function SessionsTable(props: SessionsTableProps) {
   }
 
   return (
-    <section class="sessions-list">
-      <div class="panel-header">
+    <section class="sessions-list content-block ds-panel">
+      <div class="panel-header ds-panel-header">
         <div>
-          <p class="panel-kicker">Session operations</p>
+          <p class="panel-kicker ds-kicker">Session operations</p>
           <h2>Active Sessions</h2>
         </div>
-        <span class="panel-pill neutral">Operators ready</span>
+        <span class="panel-pill neutral ds-pill ds-pill-neutral">Operators ready</span>
       </div>
       <Show
         when={props.hasLoaded()}

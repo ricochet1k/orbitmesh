@@ -24,11 +24,11 @@ const stateLabel = (state: SessionState) => state.replace("_", " ")
 export default function SessionToolbar(props: SessionToolbarProps) {
   return (
     <>
-      <header class="view-header">
+      <header class="view-header ds-page-header">
         <div>
-          <p class="eyebrow">Session Viewer</p>
+          <p class="eyebrow ds-page-kicker">Session Viewer</p>
           <h1 data-testid="session-viewer-heading">Live Session Control</h1>
-          <p class="dashboard-subtitle">Track the real-time transcript, monitor PTY output, and intervene fast.</p>
+          <p class="dashboard-subtitle ds-page-subtitle">Track the real-time transcript, monitor PTY output, and intervene fast.</p>
         </div>
         <div class="session-meta">
           <div class="stream-pill-group">

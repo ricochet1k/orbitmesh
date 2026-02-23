@@ -83,16 +83,16 @@ export default function Dashboard(props: DashboardProps = {}) {
   }
 
   return (
-    <div class="dashboard" data-testid="dashboard-view">
-      <header class="view-header">
-        <div class="header-meta stats-bubbles">
-          <div class="meta-card stat-bubble" data-testid="dashboard-meta-role">
+    <div class="dashboard ds-page" data-testid="dashboard-view">
+      <header class="view-header ds-page-header">
+        <div class="header-meta stats-bubbles ds-metrics">
+          <div class="meta-card stat-bubble ds-metric" data-testid="dashboard-meta-role">
             <p>Active role</p>
             <Show when={!permissions.loading} fallback={<span>Loading...</span>}>
               <strong>{permissions()?.role}</strong>
             </Show>
           </div>
-          <div class="meta-card stat-bubble" data-testid="dashboard-meta-active-sessions">
+          <div class="meta-card stat-bubble ds-metric" data-testid="dashboard-meta-active-sessions">
             <p>Active sessions</p>
             <Show when={hasLoaded()} fallback={<span>Loading...</span>}>
               <strong>{activeCount()}</strong>
@@ -101,14 +101,14 @@ export default function Dashboard(props: DashboardProps = {}) {
         </div>
       </header>
 
-      <main class="dashboard-layout">
-        <section class="overview-panel">
-          <div class="panel-header">
+      <main class="dashboard-layout ds-layout">
+        <section class="overview-panel content-block ds-panel">
+          <div class="panel-header ds-panel-header">
             <div>
-              <p class="panel-kicker">Operational overview</p>
+              <p class="panel-kicker ds-kicker">Operational overview</p>
               <h2>System pulse</h2>
             </div>
-            <span class="panel-pill">Live</span>
+            <span class="panel-pill ds-pill">Live</span>
           </div>
           <div class="overview-grid">
             <div class="overview-card" data-testid="dashboard-overview-sessions">
@@ -146,13 +146,13 @@ export default function Dashboard(props: DashboardProps = {}) {
           onNavigateToTasks={() => navigateTo("/tasks")}
         />
 
-        <section class="graph-view">
-          <div class="panel-header">
+        <section class="graph-view content-block ds-panel">
+          <div class="panel-header ds-panel-header">
             <div>
-              <p class="panel-kicker">System topology</p>
+              <p class="panel-kicker ds-kicker">System topology</p>
               <h2>System Graph</h2>
             </div>
-            <span class="panel-pill neutral">Monitoring</span>
+            <span class="panel-pill neutral ds-pill ds-pill-neutral">Monitoring</span>
           </div>
           <div id="graph-container">
             <AgentGraph

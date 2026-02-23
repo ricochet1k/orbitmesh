@@ -361,6 +361,11 @@
   --motion-slow: var(--duration-slow);
   --font-sans: var(--font-family-sans);
   --font-mono: var(--font-family-mono);
+  --radius-1: 6px;
+  --radius-2: 8px;
+  --radius-3: 12px;
+  --radius-4: 16px;
+  --radius-5: 20px;
 
   /* Graph tokens */
   --graph-agent: var(--color-success);

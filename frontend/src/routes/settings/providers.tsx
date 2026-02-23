@@ -24,10 +24,10 @@ function ProvidersPage() {
   const closeForm = () => setFormMode(null)
 
   return (
-    <section class="placeholder-panel">
-      <div class="panel-header">
+    <section class="placeholder-panel ds-panel">
+      <div class="panel-header ds-panel-header">
         <div>
-          <p class="panel-kicker">Configuration</p>
+          <p class="panel-kicker ds-kicker">Configuration</p>
           <h2>Providers</h2>
         </div>
         <Show

@@ -15,11 +15,11 @@ declare module '@tanstack/solid-router' {
 }
 
 function ErrorComponent(props: ErrorComponentProps) {
-  return <div style={{ background: "white", border: "1px solid red", "border-radius": "10px", margin: "20px", padding: "20px" }}>
-    <h2 style={{ "color": "red" }}>Error</h2>
+  return <div class="ds-error-view">
+    <h2 class="ds-error-title">Error</h2>
     <pre>{'' + props.error}</pre>
     <Show when={props.info}><pre>{'' + props.info}</pre></Show>
-    <button onClick={() => props.reset()}>Reset</button>
+    <button class="btn btn-secondary" onClick={() => props.reset()}>Reset</button>
   </ div>
 }
 
