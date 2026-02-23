@@ -3,6 +3,8 @@ import type { FileReadResponse } from "../api/files";
 
 interface ImageViewerProps {
   file: FileReadResponse;
+  isTreeOpen?: boolean;
+  onToggleTree?: () => void;
 }
 
 function formatBytes(bytes: number): string {
@@ -32,6 +34,15 @@ export default function ImageViewer(props: ImageViewerProps) {
   return (
     <div class="image-viewer-wrap">
       <div class="editor-toolbar">
+        <button
+          type="button"
+          class="editor-tree-toggle"
+          aria-label={props.isTreeOpen ? "Hide files" : "Browse files"}
+          aria-expanded={props.isTreeOpen ?? false}
+          onClick={() => props.onToggleTree?.()}
+        >
+          <span aria-hidden="true">☰</span>
+        </button>
         <span class="image-viewer-path">{props.file.path}</span>
         <span class="image-viewer-meta">
           {filename()} &middot; {formatBytes(approxBytes())} &middot; {props.file.mime_type}

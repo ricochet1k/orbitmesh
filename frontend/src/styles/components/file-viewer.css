@@ -21,6 +21,11 @@
   flex-direction: row;
   flex: 1;
   min-height: 0; /* critical for overflow to work inside a flex parent */
+  position: relative;
+}
+
+.file-tree-mobile-backdrop {
+  display: none;
 }
 
 .file-tree-panel {
@@ -32,7 +37,7 @@
 
 .file-editor-panel {
   flex: 1;
-  overflow: hidden;
+  overflow: auto;
   display: flex;
   flex-direction: column;
 }
@@ -102,6 +107,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 10;
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border);
   background: var(--surface-2);
@@ -128,6 +136,23 @@
   flex-shrink: 0;
 }
 
+.editor-tree-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  background: var(--surface-1);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.editor-tree-toggle:hover {
+  background: var(--surface-3);
+}
+
 .btn-save {
   padding: var(--space-1) var(--space-3);
   border-radius: var(--radius-2);
@@ -149,6 +174,14 @@
 .btn-save:disabled {
   opacity: 0.55;
   cursor: default;
+}
+
+.editor-save-error {
+  border-bottom: 1px solid rgba(220, 38, 38, 0.3);
+  background: rgba(220, 38, 38, 0.08);
+  color: var(--danger);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--font-size-sm, 0.875rem);
 }
 
 .mode-toggle {
@@ -273,5 +306,64 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  overflow: hidden;
+  overflow: visible;
+}
+
+@media (max-width: 900px) {
+  .editor-toolbar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    min-height: auto;
+  }
+
+  .editor-breadcrumb {
+    order: 2;
+    flex: 1 1 calc(100% - 2.75rem);
+  }
+
+  .editor-toolbar-actions {
+    order: 1;
+    margin-left: auto;
+    flex: 0 0 auto;
+  }
+
+  .editor-tree-toggle {
+    display: inline-flex;
+  }
+
+  .file-tree-panel {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: min(24rem, 86vw);
+    max-width: 100%;
+    border-right: 1px solid var(--border);
+    background: var(--surface-1);
+    z-index: 2;
+    transform: translateX(-100%);
+    transition: transform var(--motion-fast) var(--easing-standard);
+  }
+
+  .file-tree-panel.open {
+    transform: translateX(0);
+  }
+
+  .file-tree-mobile-backdrop {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    cursor: default;
+  }
+
+  .file-viewer-shell.tree-open .file-tree-mobile-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: rgba(15, 23, 42, 0.35);
+  }
+
+  .file-editor-panel {
+    min-width: 0;
+    width: 100%;
+  }
 }

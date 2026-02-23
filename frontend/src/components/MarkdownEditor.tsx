@@ -28,6 +28,9 @@ import type { FileReadResponse } from "../api/files"
 interface MarkdownEditorProps {
   file: FileReadResponse
   onSave: (content: string) => Promise<void>
+  onDirtyChange?: (dirty: boolean) => void
+  isTreeOpen?: boolean
+  onToggleTree?: () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -42,8 +45,16 @@ export default function MarkdownEditor(props: MarkdownEditorProps) {
 
   const [mode, setMode] = createSignal<"rich" | "source">("rich")
   const [dirty, setDirty] = createSignal(false)
+  const [baseContent, setBaseContent] = createSignal(props.file.content)
   const [saveLabel, setSaveLabel] = createSignal<"Save" | "Saving..." | "Saved">("Save")
+  const [saveError, setSaveError] = createSignal<string | null>(null)
   const [markdownContent, setMarkdownContent] = createSignal(props.file.content)
+
+  const updateDirty = (nextContent: string) => {
+    const nextDirty = nextContent !== baseContent()
+    setDirty(nextDirty)
+    props.onDirtyChange?.(nextDirty)
+  }
 
   // -------------------------------------------------------------------------
   // Save
@@ -61,10 +72,14 @@ export default function MarkdownEditor(props: MarkdownEditorProps) {
     setSaveLabel("Saving...")
     try {
       await props.onSave(content)
+      setBaseContent(content)
       setDirty(false)
+      props.onDirtyChange?.(false)
+      setSaveError(null)
       setSaveLabel("Saved")
       setTimeout(() => setSaveLabel("Save"), 2000)
-    } catch {
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Save failed")
       setSaveLabel("Save")
     }
   }
@@ -96,7 +111,9 @@ export default function MarkdownEditor(props: MarkdownEditorProps) {
       dispatchTransaction(tr) {
         const newState = pmView!.state.apply(tr)
         pmView!.updateState(newState)
-        if (tr.docChanged) setDirty(true)
+        if (!tr.docChanged) return
+        updateDirty(markdownSerializer.serialize(newState.doc))
+        setSaveError(null)
       },
     })
   }
@@ -112,7 +129,9 @@ export default function MarkdownEditor(props: MarkdownEditorProps) {
         oneDark,
         markdown(),
         CMEditorView.updateListener.of((update) => {
-          if (update.docChanged) setDirty(true)
+          if (!update.docChanged) return
+          updateDirty(update.state.doc.toString())
+          setSaveError(null)
         }),
         cmKeymap.of([
           {
@@ -136,6 +155,7 @@ export default function MarkdownEditor(props: MarkdownEditorProps) {
       // Serialize PM → markdown, store, destroy PM
       const md = markdownSerializer.serialize(pmView.state.doc)
       setMarkdownContent(md)
+      updateDirty(md)
       pmView.destroy()
       pmView = undefined
       // Create CM with that content
@@ -144,6 +164,7 @@ export default function MarkdownEditor(props: MarkdownEditorProps) {
       // Get CM doc text, store, destroy CM
       const md = cmView.state.doc.toString()
       setMarkdownContent(md)
+      updateDirty(md)
       cmView.destroy()
       cmView = undefined
       // Create PM parsing that markdown
@@ -162,7 +183,10 @@ export default function MarkdownEditor(props: MarkdownEditorProps) {
     // Track path as reactive dep; reset when it changes
     void path
     setMarkdownContent(content)
+    setBaseContent(content)
     setDirty(false)
+    props.onDirtyChange?.(false)
+    setSaveError(null)
     setSaveLabel("Save")
 
     if (mode() === "rich") {
@@ -187,6 +211,7 @@ export default function MarkdownEditor(props: MarkdownEditorProps) {
   // -------------------------------------------------------------------------
   onMount(() => {
     pmView = createPMView(pmContainer, markdownContent())
+    props.onDirtyChange?.(false)
   })
 
   onCleanup(() => {
@@ -202,6 +227,15 @@ export default function MarkdownEditor(props: MarkdownEditorProps) {
   return (
     <div class="markdown-editor-wrap">
       <div class="editor-toolbar">
+        <button
+          type="button"
+          class="editor-tree-toggle"
+          aria-label={props.isTreeOpen ? "Hide files" : "Browse files"}
+          aria-expanded={props.isTreeOpen ?? false}
+          onClick={() => props.onToggleTree?.()}
+        >
+          <span aria-hidden="true">☰</span>
+        </button>
         <span class="editor-breadcrumb">{props.file.path}</span>
         <div class="editor-toolbar-actions">
           <button
@@ -227,6 +261,9 @@ export default function MarkdownEditor(props: MarkdownEditorProps) {
           </Show>
         </div>
       </div>
+      <Show when={saveError()}>
+        {(error) => <div class="editor-save-error">{error()}</div>}
+      </Show>
       <div
         ref={pmContainer}
         class="pm-editor-container"
