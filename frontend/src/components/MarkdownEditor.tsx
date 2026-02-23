@@ -9,27 +9,18 @@ import { markdown } from "@codemirror/lang-markdown"
 // ProseMirror
 import { EditorState as PMEditorState } from "prosemirror-state"
 import { EditorView as PMEditorView } from "prosemirror-view"
-import { schema } from "prosemirror-schema-basic"
-import { addListNodes } from "prosemirror-schema-list"
-import { Schema } from "prosemirror-model"
-import {
-  defaultMarkdownParser,
-  defaultMarkdownSerializer,
-} from "prosemirror-markdown"
 import { history, undo, redo } from "prosemirror-history"
 import { keymap as pmKeymap } from "prosemirror-keymap"
 import { baseKeymap } from "prosemirror-commands"
 import { inputRules, smartQuotes, emDash, ellipsis } from "prosemirror-inputrules"
+import { goToNextCell, tableEditing } from "prosemirror-tables"
+
+import {
+  markdownParser,
+  markdownSerializer,
+} from "./markdown/prosemirrorMarkdown"
 
 import type { FileReadResponse } from "../api/files"
-
-// ---------------------------------------------------------------------------
-// ProseMirror schema extended with list nodes
-// ---------------------------------------------------------------------------
-const mySchema = new Schema({
-  nodes: addListNodes(schema.spec.nodes, "paragraph block*", "block"),
-  marks: schema.spec.marks,
-})
 
 // ---------------------------------------------------------------------------
 // Props
@@ -61,7 +52,7 @@ export default function MarkdownEditor(props: MarkdownEditorProps) {
     if (saveLabel() === "Saving...") return
     let content: string
     if (mode() === "rich" && pmView) {
-      content = defaultMarkdownSerializer.serialize(pmView.state.doc)
+      content = markdownSerializer.serialize(pmView.state.doc)
     } else if (mode() === "source" && cmView) {
       content = cmView.state.doc.toString()
     } else {
@@ -83,10 +74,13 @@ export default function MarkdownEditor(props: MarkdownEditorProps) {
   // -------------------------------------------------------------------------
   function createPMView(container: HTMLDivElement, content: string): PMEditorView {
     const state = PMEditorState.create({
-      doc: defaultMarkdownParser.parse(content)!,
+      doc: markdownParser.parse(content)!,
       plugins: [
         history(),
+        tableEditing(),
         pmKeymap({
+          Tab: goToNextCell(1),
+          "Shift-Tab": goToNextCell(-1),
           "Mod-z": undo,
           "Mod-y": redo,
           "Mod-Shift-z": redo,
@@ -140,7 +134,7 @@ export default function MarkdownEditor(props: MarkdownEditorProps) {
 
     if (current === "rich" && pmView) {
       // Serialize PM → markdown, store, destroy PM
-      const md = defaultMarkdownSerializer.serialize(pmView.state.doc)
+      const md = markdownSerializer.serialize(pmView.state.doc)
       setMarkdownContent(md)
       pmView.destroy()
       pmView = undefined
@@ -174,7 +168,7 @@ export default function MarkdownEditor(props: MarkdownEditorProps) {
     if (mode() === "rich") {
       if (pmView) {
         const newState = PMEditorState.create({
-          doc: defaultMarkdownParser.parse(content)!,
+          doc: markdownParser.parse(content)!,
           plugins: pmView.state.plugins,
         })
         pmView.updateState(newState)
