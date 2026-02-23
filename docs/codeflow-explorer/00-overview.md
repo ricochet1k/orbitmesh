@@ -29,6 +29,8 @@ Three principles guide every design decision:
 
 **3. Structural anomalies surface automatically.** Users should not have to know what they are looking for. The system identifies deviations from structural norms — unusual lock acquisition orders, data that crosses trust boundaries without transformation, goroutines that never terminate — and surfaces them as first-class findings.
 
+**4. Project semantics are extensible.** Core analysis stays language-agnostic, but projects can declare framework- and library-specific semantics (for spawn/join APIs, message wrappers, boundary bridges, and endpoint-to-type mappings) without changing engine code.
+
 ---
 
 ## The Two Primary Lenses
@@ -128,6 +130,19 @@ The two interfaces share selection state. Selecting a row in the flat view highl
 **4. Pattern Engine** — Evaluates a library of structural anti-patterns against the semantic model. Patterns are composable queries over the graph; new patterns can be added without modifying the core engine. Ships with detectors for lock ordering violations, unguarded concurrent map access, unbounded goroutine growth, and trust boundary bypasses.
 
 **5. Semantic Model DB** — A persistent, incrementally-updated graph database storing all derived facts from the four analysis subsystems. Serves the API layer with sub-second query response. Invalidated and rebuilt on file change in watch mode.
+
+---
+
+## Project Semantic Extensions
+
+Projects can add semantic mappings in `codeflow.semantic.yaml` to teach the analyzer how local abstractions map to core graph primitives.
+
+- **Spawn/join mappings** — map APIs like worker pools or wrapper helpers to `SPAWNS` and `JOINS` edges
+- **Message wrapper mappings** — map custom queue/channel wrappers to `MessageChannel`, `SENDS_ON`, and `RECEIVES_FROM`
+- **Boundary bridge mappings** — map client request sites to server handlers via `REQUESTS` edges
+- **Endpoint type mappings** — map simple CRUD endpoints to domain types via `OPERATES_ON` edges
+
+All project-defined edges carry confidence metadata (`certain`, `probable`, `possible`) and are visible in the UI confidence filter.
 
 ---
 

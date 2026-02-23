@@ -216,15 +216,15 @@ func (h *Handler) readProjectFile(w http.ResponseWriter, r *http.Request) {
 
 	ext := filepath.Ext(absPath)
 	mimeType := mime.TypeByExtension(ext)
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
-
 	bareType := strings.SplitN(mimeType, ";", 2)[0]
 	bareType = strings.TrimSpace(bareType)
 
 	isImage := strings.HasPrefix(bareType, "image/")
 	isText := isTextMime(bareType, ext)
+
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
 
 	if !isText && !isImage {
 		w.Header().Set("Content-Type", "application/json")
