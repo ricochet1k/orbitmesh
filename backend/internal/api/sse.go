@@ -247,7 +247,7 @@ func convertEventData(e domain.Event) any {
 			Reason:   d.Reason,
 		}
 	case domain.OutputData:
-		return apiTypes.OutputData{Content: d.Content, IsDelta: d.IsDelta}
+		return apiTypes.OutputData{Content: d.Content, IsDelta: d.IsDelta, MessageID: d.MessageID}
 	case domain.MetricData:
 		return apiTypes.MetricData{TokensIn: d.TokensIn, TokensOut: d.TokensOut, RequestCount: d.RequestCount}
 	case domain.ErrorData:

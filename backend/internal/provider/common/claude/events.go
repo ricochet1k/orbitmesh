@@ -84,11 +84,11 @@ func handleContentBlockStart(sessionID string, msg Message) (domain.Event, bool)
 		return domain.Event{}, false
 
 	case ContentBlockTypeToolUse:
-		// Tool use started - emit metadata
-		return domain.NewMetadataEvent(sessionID, "tool_use_start", map[string]any{
-			"tool_name": block.ToolUseName,
-			"tool_id":   block.ToolUseID,
-			"index":     block.Index,
+		// Tool use started - emit structured ToolCallEvent
+		return domain.NewToolCallEvent(sessionID, domain.ToolCallData{
+			ID:     block.ToolUseID,
+			Name:   block.ToolUseName,
+			Status: "started",
 		}, msg.Raw()), true
 
 	default:
@@ -257,20 +257,15 @@ func handleUserMessage(sessionID string, msg Message) (domain.Event, bool) {
 		}
 
 		if itemType, ok := itemMap["type"].(string); ok && itemType == "tool_result" {
-			toolResult := make(map[string]any)
+			toolUseID, _ := itemMap["tool_use_id"].(string)
+			resultContent, _ := itemMap["content"].(string)
 
-			if toolUseID, ok := itemMap["tool_use_id"].(string); ok {
-				toolResult["tool_use_id"] = toolUseID
-			}
-			if resultContent, ok := itemMap["content"].(string); ok {
-				toolResult["content"] = resultContent
-			}
-			if isError, ok := itemMap["is_error"].(bool); ok {
-				toolResult["is_error"] = isError
-			}
-
-			metadata["tool_result"] = toolResult
-			break
+			return domain.NewToolCallEvent(sessionID, domain.ToolCallData{
+				ID:     toolUseID,
+				Name:   "",
+				Status: "completed",
+				Output: resultContent,
+			}, msg.Raw()), true
 		}
 	}
 

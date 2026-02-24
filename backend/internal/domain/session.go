@@ -113,10 +113,18 @@ const (
 	MessageKindOutput  MessageKind = "output"
 	MessageKindThought MessageKind = "thought"
 	MessageKindToolUse MessageKind = "tool_use"
-	MessageKindError   MessageKind = "error"
-	MessageKindSystem  MessageKind = "system"
-	MessageKindPlan    MessageKind = "plan"
-	MessageKindMetric  MessageKind = "metric"
+	// MessageKindToolCall persists a tool invocation (id, name, arguments JSON).
+	// The JSON payload matches the format expected by openai/session.go newSession:
+	//   {"id":"...","name":"...","arguments":"..."}
+	MessageKindToolCall MessageKind = "tool_call"
+	// MessageKindToolResponse persists the result of a tool invocation.
+	// The JSON payload matches the format expected by openai/session.go newSession:
+	//   {"tool_call_id":"...","content":"..."}
+	MessageKindToolResponse MessageKind = "tool_response"
+	MessageKindError        MessageKind = "error"
+	MessageKindSystem       MessageKind = "system"
+	MessageKindPlan         MessageKind = "plan"
+	MessageKindMetric       MessageKind = "metric"
 )
 
 // Message is a single entry in a session's conversation history.
@@ -248,8 +256,36 @@ func (s *Session) AppendMessageRaw(kind MessageKind, contents string, raw json.R
 // exists, or creates a new output message. This accumulates delta chunks into a
 // single coherent message rather than producing one entry per chunk.
 func (s *Session) AppendOutputDelta(delta string) {
+	s.AppendOutputDeltaToMessage("", delta)
+}
+
+// AppendOutputDeltaToMessage appends streaming text to a specific output message
+// when messageID is provided; otherwise it appends to the latest output message.
+func (s *Session) AppendOutputDeltaToMessage(messageID, delta string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if messageID != "" {
+		for i := len(s.Messages) - 1; i >= 0; i-- {
+			if s.Messages[i].ID == messageID {
+				if s.Messages[i].Kind == MessageKindOutput {
+					s.Messages[i].Contents += delta
+					s.UpdatedAt = time.Now()
+					return
+				}
+				break
+			}
+		}
+		s.Messages = append(s.Messages, Message{
+			ID:        messageID,
+			Kind:      MessageKindOutput,
+			Contents:  delta,
+			Timestamp: time.Now(),
+		})
+		s.UpdatedAt = time.Now()
+		return
+	}
+
 	if n := len(s.Messages); n > 0 && s.Messages[n-1].Kind == MessageKindOutput {
 		s.Messages[n-1].Contents += delta
 	} else {

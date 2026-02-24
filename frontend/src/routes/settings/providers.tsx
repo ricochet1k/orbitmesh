@@ -33,12 +33,12 @@ function ProvidersPage() {
         <Show
           when={formMode() === 'add'}
           fallback={
-            <button class="btn-primary" onClick={openAdd}>
+            <button class="btn btn-primary" onClick={openAdd}>
               Add Provider
             </button>
           }
         >
-          <button class="btn-secondary" onClick={closeForm}>
+          <button class="btn btn-secondary" onClick={closeForm}>
             Cancel
           </button>
         </Show>
@@ -113,7 +113,7 @@ function ProvidersPage() {
                 </div>
                 <div class="provider-actions">
                   <button
-                    class="btn-secondary"
+                    class="btn btn-secondary"
                     onClick={() =>
                       formMode() === provider.id ? closeForm() : openEdit(provider.id)
                     }
@@ -121,7 +121,7 @@ function ProvidersPage() {
                     {formMode() === provider.id ? 'Cancel' : 'Edit'}
                   </button>
                   <button
-                    class="btn-danger"
+                    class="btn btn-danger"
                     onClick={async () => {
                       if (confirm(`Delete provider "${provider.name}"?`)) {
                         await apiClient.deleteProvider(provider.id)

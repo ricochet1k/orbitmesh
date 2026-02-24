@@ -532,3 +532,8 @@ func (s *ADKSession) Resume(ctx context.Context, suspensionContext *session.Susp
 	// ADK provider has minimal state to restore
 	return nil
 }
+
+// ResumeWithToolResults is not yet implemented for the ADK provider.
+func (s *ADKSession) ResumeWithToolResults(ctx context.Context, sc *session.SuspensionContext, results []session.ToolResult) (<-chan domain.Event, error) {
+	return nil, fmt.Errorf("ResumeWithToolResults not implemented")
+}

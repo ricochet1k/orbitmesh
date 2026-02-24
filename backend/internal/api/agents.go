@@ -76,11 +76,13 @@ func (h *Handler) createAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg := storage.AgentConfig{
-		ID:           id,
-		Name:         req.Name,
-		SystemPrompt: req.SystemPrompt,
-		MCPServers:   mcpServersFromAPI(req.MCPServers),
-		Custom:       req.Custom,
+		ID:              id,
+		Name:            req.Name,
+		SystemPrompt:    req.SystemPrompt,
+		MCPServers:      mcpServersFromAPI(req.MCPServers),
+		Custom:          req.Custom,
+		AllowedTools:    req.AllowedTools,
+		DisallowedTools: req.DisallowedTools,
 	}
 
 	if err := h.agentStorage.Save(cfg); err != nil {
@@ -112,11 +114,13 @@ func (h *Handler) updateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg := storage.AgentConfig{
-		ID:           id,
-		Name:         req.Name,
-		SystemPrompt: req.SystemPrompt,
-		MCPServers:   mcpServersFromAPI(req.MCPServers),
-		Custom:       req.Custom,
+		ID:              id,
+		Name:            req.Name,
+		SystemPrompt:    req.SystemPrompt,
+		MCPServers:      mcpServersFromAPI(req.MCPServers),
+		Custom:          req.Custom,
+		AllowedTools:    req.AllowedTools,
+		DisallowedTools: req.DisallowedTools,
 	}
 
 	if err := h.agentStorage.Save(cfg); err != nil {
@@ -161,11 +165,13 @@ func agentConfigToResponse(cfg storage.AgentConfig) apiTypes.AgentConfigResponse
 		}
 	}
 	return apiTypes.AgentConfigResponse{
-		ID:           cfg.ID,
-		Name:         cfg.Name,
-		SystemPrompt: cfg.SystemPrompt,
-		MCPServers:   servers,
-		Custom:       cfg.Custom,
+		ID:              cfg.ID,
+		Name:            cfg.Name,
+		SystemPrompt:    cfg.SystemPrompt,
+		MCPServers:      servers,
+		Custom:          cfg.Custom,
+		AllowedTools:    cfg.AllowedTools,
+		DisallowedTools: cfg.DisallowedTools,
 	}
 }
 

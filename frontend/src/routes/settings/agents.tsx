@@ -98,10 +98,10 @@ function AgentForm(props: AgentFormProps) {
       </Show>
 
       <div class="form-actions">
-        <button type="button" class="btn-secondary" onClick={props.onCancel}>
+        <button type="button" class="btn btn-secondary" onClick={props.onCancel}>
           Cancel
         </button>
-        <button type="submit" class="btn-primary" disabled={saving()}>
+        <button type="submit" class="btn btn-primary" disabled={saving()}>
           {saving() ? 'Saving…' : props.agent ? 'Update' : 'Create'}
         </button>
       </div>
@@ -133,12 +133,12 @@ function AgentsPage() {
         <Show
           when={formMode() === 'add'}
           fallback={
-            <button class="btn-primary" onClick={openAdd}>
+            <button class="btn btn-primary" onClick={openAdd}>
               Add Agent
             </button>
           }
         >
-          <button class="btn-secondary" onClick={closeForm}>
+          <button class="btn btn-secondary" onClick={closeForm}>
             Cancel
           </button>
         </Show>
@@ -191,13 +191,13 @@ function AgentsPage() {
                 </div>
                 <div class="provider-actions">
                   <button
-                    class="btn-secondary"
+                    class="btn btn-secondary"
                     onClick={() => (formMode() === agent.id ? closeForm() : openEdit(agent.id))}
                   >
                     {formMode() === agent.id ? 'Cancel' : 'Edit'}
                   </button>
                   <button
-                    class="btn-danger"
+                    class="btn btn-danger"
                     onClick={async () => {
                       if (confirm(`Delete agent "${agent.name}"?`)) {
                         await apiClient.deleteAgent(agent.id)

@@ -74,6 +74,21 @@ func TestNewOutputEvent(t *testing.T) {
 	}
 }
 
+func TestNewDeltaOutputEventForMessage(t *testing.T) {
+	e := NewDeltaOutputEventForMessage("session-123", "msg-42", "delta", nil)
+
+	data, ok := e.Data.(OutputData)
+	if !ok {
+		t.Fatalf("expected OutputData, got %T", e.Data)
+	}
+	if !data.IsDelta {
+		t.Fatal("expected IsDelta=true")
+	}
+	if data.MessageID != "msg-42" {
+		t.Fatalf("expected MessageID 'msg-42', got %q", data.MessageID)
+	}
+}
+
 func TestNewMetricEvent(t *testing.T) {
 	e := NewMetricEvent("session-123", 100, 200, 5, nil)
 

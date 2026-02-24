@@ -4,6 +4,7 @@ import SessionViewer from "./SessionViewer"
 import { apiClient } from "../api/client"
 import { listProviders } from "../api/providers"
 import { baseSession, defaultPermissions, makeSession } from "../test/fixtures"
+import type { ServerEnvelope } from "../types/generated/realtime"
 
 const mockNavigate = vi.fn()
 
@@ -15,6 +16,24 @@ vi.mock("@tanstack/solid-router", () => ({
       {props.children}
     </a>
   ),
+}))
+
+// ── Realtime client mock ───────────────────────────────────────────────────────
+
+let realtimeHandlers: Map<string, (message: ServerEnvelope) => void> = new Map()
+let realtimeStatusHandler: ((status: "connecting" | "open" | "closed") => void) | undefined
+
+vi.mock("../realtime/client", () => ({
+  realtimeClient: {
+    subscribe: vi.fn((topic: string, handler: (message: ServerEnvelope) => void) => {
+      realtimeHandlers.set(topic, handler)
+      return () => realtimeHandlers.delete(topic)
+    }),
+    onStatus: vi.fn((handler: (status: "connecting" | "open" | "closed") => void) => {
+      realtimeStatusHandler = handler
+      return () => { realtimeStatusHandler = undefined }
+    }),
+  },
 }))
 
 type EventListener = (event: MessageEvent) => void
@@ -82,6 +101,8 @@ describe("SessionViewer", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     eventSources.splice(0, eventSources.length)
+    realtimeHandlers.clear()
+    realtimeStatusHandler = undefined
     vi.stubGlobal("EventSource", MockEventSource as never)
     vi.stubGlobal("atob", (value: string) => value)
     vi.stubGlobal("btoa", (value: string) => value)
@@ -270,27 +291,32 @@ describe("SessionViewer", () => {
     expect(cancelButton.getAttribute("title")).toBe("Cancel action is in progress...")
   })
 
-  it("updates state badge when status_change event arrives", async () => {
+  it("updates state badge when sessions.state WebSocket event arrives", async () => {
     ; (apiClient.getSession as any).mockResolvedValue(baseSession)
+
+    // Enable WebSocket path so the realtime client is used
+    vi.stubGlobal("WebSocket", class MockWebSocket {} as never)
 
     render(() => <SessionViewer sessionId="session-1" />)
 
-    await waitFor(() => expect(eventSources.length).toBeGreaterThan(0))
+    // With WebSocket mode there's no EventSource; wait for realtime subscription
+    await waitFor(() => expect(realtimeHandlers.size).toBeGreaterThan(0))
+    // Initial state comes from the session resource
     await waitFor(() => expect(screen.getByTestId("session-state-badge").textContent).toContain("running"))
-    const stateBadge = screen.getByTestId("session-state-badge")
-    expect(stateBadge.textContent).toContain("running")
 
-    eventSources[0]?.emit("status_change", {
-      type: "status_change",
-      event_id: 12,
-      timestamp: "2026-02-05T12:02:00Z",
-      session_id: "session-1",
-      data: { old_state: "running", new_state: "suspended" },
+    // State changes arrive via the WebSocket sessions.state topic
+    realtimeHandlers.get("sessions.state")?.({
+      type: "event",
+      topic: "sessions.state",
+      payload: {
+        session_id: "session-1",
+        derived_state: "suspended",
+        timestamp: "2026-02-05T12:02:00Z",
+      },
     })
 
     await waitFor(() => {
-      const updatedBadge = screen.getByTestId("session-state-badge")
-      expect(updatedBadge.textContent).toContain("suspended")
+      expect(screen.getByTestId("session-state-badge").textContent).toContain("suspended")
     })
   })
 })

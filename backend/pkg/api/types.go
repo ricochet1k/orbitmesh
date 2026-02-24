@@ -19,17 +19,19 @@ type SessionRequest struct {
 	// AgentID references a saved AgentConfig whose system_prompt, mcp_servers
 	// and custom fields are merged into the session at creation time.  Values
 	// supplied directly in the request take precedence over the agent defaults.
-	AgentID      string            `json:"agent_id,omitempty"`
-	WorkingDir   string            `json:"working_dir,omitempty"`
-	ProjectID    string            `json:"project_id,omitempty"`
-	Environment  map[string]string `json:"environment,omitempty"`
-	SystemPrompt string            `json:"system_prompt,omitempty"`
-	MCPServers   []MCPServerConfig `json:"mcp_servers,omitempty"`
-	Custom       map[string]any    `json:"custom,omitempty"`
-	TaskID       string            `json:"task_id,omitempty"`
-	TaskTitle    string            `json:"task_title,omitempty"`
-	SessionKind  string            `json:"session_kind,omitempty"`
-	Title        string            `json:"title,omitempty"`
+	AgentID         string            `json:"agent_id,omitempty"`
+	WorkingDir      string            `json:"working_dir,omitempty"`
+	ProjectID       string            `json:"project_id,omitempty"`
+	Environment     map[string]string `json:"environment,omitempty"`
+	SystemPrompt    string            `json:"system_prompt,omitempty"`
+	MCPServers      []MCPServerConfig `json:"mcp_servers,omitempty"`
+	Custom          map[string]any    `json:"custom,omitempty"`
+	TaskID          string            `json:"task_id,omitempty"`
+	TaskTitle       string            `json:"task_title,omitempty"`
+	SessionKind     string            `json:"session_kind,omitempty"`
+	Title           string            `json:"title,omitempty"`
+	AllowedTools    []string          `json:"allowed_tools,omitempty"`
+	DisallowedTools []string          `json:"disallowed_tools,omitempty"`
 }
 
 type SessionInputRequest struct {
@@ -159,6 +161,8 @@ type OutputData struct {
 	// IsDelta indicates this is a streaming chunk to be appended to the
 	// previous output message rather than starting a new one.
 	IsDelta bool `json:"is_delta,omitempty"`
+	// MessageID optionally identifies which output message this delta belongs to.
+	MessageID string `json:"message_id,omitempty"`
 }
 
 type MetricData struct {
@@ -508,20 +512,24 @@ type MessageListResponse struct {
 // AgentConfigRequest is the request body for create/update agent endpoints.
 type AgentConfigRequest struct {
 	// ID is optional on create; a random ID is generated when omitted.
-	ID           string            `json:"id,omitempty"`
-	Name         string            `json:"name"`
-	SystemPrompt string            `json:"system_prompt,omitempty"`
-	MCPServers   []MCPServerConfig `json:"mcp_servers,omitempty"`
-	Custom       map[string]any    `json:"custom,omitempty"`
+	ID              string            `json:"id,omitempty"`
+	Name            string            `json:"name"`
+	SystemPrompt    string            `json:"system_prompt,omitempty"`
+	MCPServers      []MCPServerConfig `json:"mcp_servers,omitempty"`
+	Custom          map[string]any    `json:"custom,omitempty"`
+	AllowedTools    []string          `json:"allowed_tools,omitempty"`
+	DisallowedTools []string          `json:"disallowed_tools,omitempty"`
 }
 
 // AgentConfigResponse is returned by agent endpoints.
 type AgentConfigResponse struct {
-	ID           string            `json:"id"`
-	Name         string            `json:"name"`
-	SystemPrompt string            `json:"system_prompt,omitempty"`
-	MCPServers   []MCPServerConfig `json:"mcp_servers,omitempty"`
-	Custom       map[string]any    `json:"custom,omitempty"`
+	ID              string            `json:"id"`
+	Name            string            `json:"name"`
+	SystemPrompt    string            `json:"system_prompt,omitempty"`
+	MCPServers      []MCPServerConfig `json:"mcp_servers,omitempty"`
+	Custom          map[string]any    `json:"custom,omitempty"`
+	AllowedTools    []string          `json:"allowed_tools,omitempty"`
+	DisallowedTools []string          `json:"disallowed_tools,omitempty"`
 }
 
 // AgentConfigListResponse wraps a list of agent configs.

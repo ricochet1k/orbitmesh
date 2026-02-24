@@ -18,16 +18,16 @@ func TestJSONFileStorage_MessageLogAppendOrderAndReadback(t *testing.T) {
 	}
 
 	ts := time.Now().UTC()
-	if err := s.AppendMessageLog("session-log-order", MessageProjectionAppend, domain.MessageKindUser, "hello", nil, ts); err != nil {
+	if err := s.AppendMessageLog("session-log-order", MessageProjectionAppend, domain.MessageKindUser, "hello", nil, ts, ""); err != nil {
 		t.Fatalf("AppendMessageLog #1 failed: %v", err)
 	}
-	if err := s.AppendMessageLog("session-log-order", MessageProjectionAppendRaw, domain.MessageKindOutput, "a", json.RawMessage(`{"chunk":1}`), ts.Add(time.Second)); err != nil {
+	if err := s.AppendMessageLog("session-log-order", MessageProjectionAppendRaw, domain.MessageKindOutput, "a", json.RawMessage(`{"chunk":1}`), ts.Add(time.Second), ""); err != nil {
 		t.Fatalf("AppendMessageLog #2 failed: %v", err)
 	}
-	if err := s.AppendMessageLog("session-log-order", MessageProjectionOutputDelta, domain.MessageKindOutput, "b", nil, ts.Add(2*time.Second)); err != nil {
+	if err := s.AppendMessageLog("session-log-order", MessageProjectionOutputDelta, domain.MessageKindOutput, "b", nil, ts.Add(2*time.Second), ""); err != nil {
 		t.Fatalf("AppendMessageLog #3 failed: %v", err)
 	}
-	if err := s.AppendMessageLog("session-log-order", MessageProjectionAppend, domain.MessageKindError, "boom", nil, ts.Add(3*time.Second)); err != nil {
+	if err := s.AppendMessageLog("session-log-order", MessageProjectionAppend, domain.MessageKindError, "boom", nil, ts.Add(3*time.Second), ""); err != nil {
 		t.Fatalf("AppendMessageLog #4 failed: %v", err)
 	}
 
@@ -85,7 +85,7 @@ func TestJSONFileStorage_GetMessages_PrefersJSONL(t *testing.T) {
 		t.Fatalf("Save failed: %v", err)
 	}
 
-	if err := s.AppendMessageLog("session-jsonl-preferred", MessageProjectionAppend, domain.MessageKindUser, "from-log", nil, time.Now()); err != nil {
+	if err := s.AppendMessageLog("session-jsonl-preferred", MessageProjectionAppend, domain.MessageKindUser, "from-log", nil, time.Now(), ""); err != nil {
 		t.Fatalf("AppendMessageLog failed: %v", err)
 	}
 
@@ -109,7 +109,7 @@ func TestJSONFileStorage_MessageLogCorruptionHandling(t *testing.T) {
 		t.Fatalf("NewJSONFileStorage failed: %v", err)
 	}
 
-	if err := s.AppendMessageLog("session-log-corrupt", MessageProjectionAppend, domain.MessageKindUser, "first", nil, time.Now()); err != nil {
+	if err := s.AppendMessageLog("session-log-corrupt", MessageProjectionAppend, domain.MessageKindUser, "first", nil, time.Now(), ""); err != nil {
 		t.Fatalf("AppendMessageLog #1 failed: %v", err)
 	}
 	path := s.messageLogPath("session-log-corrupt")
@@ -121,7 +121,7 @@ func TestJSONFileStorage_MessageLogCorruptionHandling(t *testing.T) {
 		t.Fatalf("WriteString failed: %v", err)
 	}
 	_ = f.Close()
-	if err := s.AppendMessageLog("session-log-corrupt", MessageProjectionAppend, domain.MessageKindOutput, "second", nil, time.Now()); err != nil {
+	if err := s.AppendMessageLog("session-log-corrupt", MessageProjectionAppend, domain.MessageKindOutput, "second", nil, time.Now(), ""); err != nil {
 		t.Fatalf("AppendMessageLog #2 failed: %v", err)
 	}
 
@@ -140,6 +140,39 @@ func TestJSONFileStorage_MessageLogCorruptionHandling(t *testing.T) {
 	}
 	if len(messages) != 2 {
 		t.Fatalf("expected 2 messages from tolerant read, got %d", len(messages))
+	}
+}
+
+func TestJSONFileStorage_MessageLogTargetedOutputDelta(t *testing.T) {
+	tmpDir := t.TempDir()
+	s, err := NewJSONFileStorage(tmpDir)
+	if err != nil {
+		t.Fatalf("NewJSONFileStorage failed: %v", err)
+	}
+
+	ts := time.Now().UTC()
+	if err := s.AppendMessageLog("session-log-target", MessageProjectionAppendRaw, domain.MessageKindOutput, "first", nil, ts, ""); err != nil {
+		t.Fatalf("AppendMessageLog base output failed: %v", err)
+	}
+	if err := s.AppendMessageLog("session-log-target", MessageProjectionAppendRaw, domain.MessageKindOutput, "second", nil, ts.Add(time.Second), ""); err != nil {
+		t.Fatalf("AppendMessageLog second output failed: %v", err)
+	}
+	if err := s.AppendMessageLog("session-log-target", MessageProjectionOutputDelta, domain.MessageKindOutput, "+", nil, ts.Add(2*time.Second), "log_1"); err != nil {
+		t.Fatalf("AppendMessageLog targeted delta failed: %v", err)
+	}
+
+	messages, err := s.ReadMessagesFromJSONL("session-log-target")
+	if err != nil {
+		t.Fatalf("ReadMessagesFromJSONL failed: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(messages))
+	}
+	if messages[0].Contents != "first+" {
+		t.Fatalf("expected first message to receive targeted delta, got %q", messages[0].Contents)
+	}
+	if messages[1].Contents != "second" {
+		t.Fatalf("expected second message unchanged, got %q", messages[1].Contents)
 	}
 }
 

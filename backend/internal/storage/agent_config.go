@@ -14,11 +14,13 @@ import (
 // An agent is decoupled from the provider (LLM backend) so they can be
 // freely mixed and matched when creating sessions.
 type AgentConfig struct {
-	ID           string                    `json:"id"`
-	Name         string                    `json:"name"`
-	SystemPrompt string                    `json:"system_prompt,omitempty"`
-	MCPServers   []session.MCPServerConfig `json:"mcp_servers,omitempty"`
-	Custom       map[string]any            `json:"custom,omitempty"`
+	ID              string                    `json:"id"`
+	Name            string                    `json:"name"`
+	SystemPrompt    string                    `json:"system_prompt,omitempty"`
+	MCPServers      []session.MCPServerConfig `json:"mcp_servers,omitempty"`
+	Custom          map[string]any            `json:"custom,omitempty"`
+	AllowedTools    []string                  `json:"allowed_tools,omitempty"`
+	DisallowedTools []string                  `json:"disallowed_tools,omitempty"`
 }
 
 // AgentConfigStorage manages agent configurations on disk.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -25,6 +26,7 @@ import (
 	"github.com/ricochet1k/orbitmesh/internal/service"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
+	"github.com/ricochet1k/orbitmesh/internal/tools"
 )
 
 const (
@@ -40,10 +42,53 @@ func listenAddr() string {
 }
 
 func main() {
+	// Register built-in tool definitions so providers can filter and advertise them.
+	if err := tools.Global().Register(tools.ToolDef{
+		Name:        "read_file",
+		Description: "Read the contents of a file at the given path",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute or relative file path"}},"required":["path"]}`),
+		Handler: func(ctx context.Context, input json.RawMessage) (string, error) {
+			log.Printf("TOOL read_file handler %v", string(input))
+			var args struct {
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal(input, &args); err != nil {
+				return "", fmt.Errorf("read_file: invalid arguments: %w", err)
+			}
+			data, err := os.ReadFile(args.Path)
+			if err != nil {
+				return "", fmt.Errorf("read_file: %w", err)
+			}
+			return string(data), nil
+		},
+	}); err != nil {
+		log.Fatalf("tools register read_file: %v", err)
+	}
+	if err := tools.Global().Register(tools.ToolDef{
+		Name:        "write_file",
+		Description: "Write content to a file at the given path",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}`),
+		Handler: func(ctx context.Context, input json.RawMessage) (string, error) {
+			var args struct {
+				Path    string `json:"path"`
+				Content string `json:"content"`
+			}
+			if err := json.Unmarshal(input, &args); err != nil {
+				return "", fmt.Errorf("write_file: invalid arguments: %w", err)
+			}
+			if err := os.WriteFile(args.Path, []byte(args.Content), 0o644); err != nil {
+				return "", fmt.Errorf("write_file: %w", err)
+			}
+			return fmt.Sprintf("wrote %d bytes to %s", len(args.Content), args.Path), nil
+		},
+	}); err != nil {
+		log.Fatalf("tools register write_file: %v", err)
+	}
+
 	baseDir := storage.DefaultBaseDir()
 	store, err := storage.NewJSONFileStorage(baseDir)
 	if err != nil {
-		log.Fatalf("storage init: %v", err)
+		log.Fatalf("storage init : %v", err)
 	}
 
 	providerStorage := storage.NewProviderConfigStorage(baseDir)
@@ -64,6 +109,7 @@ func main() {
 		Storage:         store,
 		TerminalStorage: store,
 		Broadcaster:     broadcaster,
+		EvalStorage:     store,
 		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
 			return factory.CreateSession(providerType, sessionID, config)
 		},
@@ -90,6 +136,14 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	resp, err := http.Get("http://192.168.1.31:1234/v1/models")
+	if err != nil {
+		log.Printf("http get error: %v", err)
+	} else {
+		log.Printf("http get ok: %v", resp)
+		resp.Body.Close()
+	}
 
 	go func() {
 		fmt.Printf("OrbitMesh listening on %s\n", addr)

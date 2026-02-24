@@ -48,18 +48,20 @@ type MCPServerConfig struct {
 type Config struct {
 	ProviderType string
 	// AgentID is the ID of the AgentConfig applied to this session (if any).
-	AgentID        string
-	WorkingDir     string
-	ProjectID      string
-	Environment    map[string]string
-	SystemPrompt   string
-	MCPServers     []MCPServerConfig
-	Custom         map[string]any
-	TaskID         string
-	TaskTitle      string
-	SessionKind    string
-	Title          string
-	ResumeMessages []Message // Message history to resume from (for session resumption)
+	AgentID         string
+	WorkingDir      string
+	ProjectID       string
+	Environment     map[string]string
+	SystemPrompt    string
+	MCPServers      []MCPServerConfig
+	Custom          map[string]any
+	TaskID          string
+	TaskTitle       string
+	SessionKind     string
+	Title           string
+	ResumeMessages  []Message // Message history to resume from (for session resumption)
+	AllowedTools    []string
+	DisallowedTools []string
 }
 
 type Metrics struct {

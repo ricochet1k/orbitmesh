@@ -22,16 +22,17 @@ const (
 )
 
 type MessageLogAppender interface {
-	AppendMessageLog(sessionID string, projection MessageProjection, kind domain.MessageKind, contents string, raw json.RawMessage, timestamp time.Time) error
+	AppendMessageLog(sessionID string, projection MessageProjection, kind domain.MessageKind, contents string, raw json.RawMessage, timestamp time.Time, targetMessageID string) error
 }
 
 type messageLogRecord struct {
-	Sequence   int64              `json:"seq"`
-	Timestamp  time.Time          `json:"timestamp"`
-	Projection MessageProjection  `json:"projection"`
-	Kind       domain.MessageKind `json:"kind"`
-	Contents   string             `json:"contents"`
-	Raw        json.RawMessage    `json:"raw,omitempty"`
+	Sequence        int64              `json:"seq"`
+	Timestamp       time.Time          `json:"timestamp"`
+	Projection      MessageProjection  `json:"projection"`
+	Kind            domain.MessageKind `json:"kind"`
+	Contents        string             `json:"contents"`
+	Raw             json.RawMessage    `json:"raw,omitempty"`
+	TargetMessageID string             `json:"target_message_id,omitempty"`
 }
 
 type MessageLogCorruptionError struct {
@@ -47,7 +48,7 @@ func (s *JSONFileStorage) messageLogPath(id string) string {
 	return filepath.Join(s.baseDir, "sessions", id+".messages.jsonl")
 }
 
-func (s *JSONFileStorage) AppendMessageLog(sessionID string, projection MessageProjection, kind domain.MessageKind, contents string, raw json.RawMessage, timestamp time.Time) error {
+func (s *JSONFileStorage) AppendMessageLog(sessionID string, projection MessageProjection, kind domain.MessageKind, contents string, raw json.RawMessage, timestamp time.Time, targetMessageID string) error {
 	if err := validateSessionID(sessionID); err != nil {
 		return err
 	}
@@ -64,12 +65,13 @@ func (s *JSONFileStorage) AppendMessageLog(sessionID string, projection MessageP
 	}
 
 	record := messageLogRecord{
-		Sequence:   seq,
-		Timestamp:  timestamp,
-		Projection: projection,
-		Kind:       kind,
-		Contents:   contents,
-		Raw:        raw,
+		Sequence:        seq,
+		Timestamp:       timestamp,
+		Projection:      projection,
+		Kind:            kind,
+		Contents:        contents,
+		Raw:             raw,
+		TargetMessageID: targetMessageID,
 	}
 
 	line, err := json.Marshal(record)
@@ -155,6 +157,30 @@ func rebuildMessagesFromLogRecords(records []messageLogRecord) []domain.Message 
 	messages := make([]domain.Message, 0, len(records))
 	for _, rec := range records {
 		if rec.Projection == MessageProjectionOutputDelta {
+			if rec.TargetMessageID != "" {
+				merged := false
+				for i := len(messages) - 1; i >= 0; i-- {
+					if messages[i].ID == rec.TargetMessageID {
+						if messages[i].Kind == domain.MessageKindOutput {
+							messages[i].Contents += rec.Contents
+							merged = true
+						}
+						break
+					}
+				}
+				if merged {
+					continue
+				}
+				messages = append(messages, domain.Message{
+					ID:        rec.TargetMessageID,
+					Kind:      domain.MessageKindOutput,
+					Contents:  rec.Contents,
+					Timestamp: rec.Timestamp,
+					Raw:       rec.Raw,
+				})
+				continue
+			}
+
 			n := len(messages)
 			if n > 0 && messages[n-1].Kind == domain.MessageKindOutput {
 				messages[n-1].Contents += rec.Contents

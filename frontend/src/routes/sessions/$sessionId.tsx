@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/solid-router'
-import { createResource, createSignal, createEffect, createMemo, Show, For } from 'solid-js'
+import { createResource, createSignal, createEffect, createMemo, on, Show, For } from 'solid-js'
 import { apiClient } from '../../api/client'
 import { listProviders } from '../../api/providers'
 import type { SessionState } from '../../types/api'
@@ -38,7 +38,11 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   const [terminalStatus, setTerminalStatus] = createSignal<
     "connecting" | "live" | "closed" | "error" | "resyncing"
   >("closed")
-  const [sessionStateOverride, setSessionStateOverride] = createSignal<SessionState | null>(null)
+
+  // Optimistic state from WebSocket events — overrides the HTTP session state
+  // until the next refetch settles. null means "use session.state".
+  const [streamState, setStreamState] = createSignal<SessionState | null>(null)
+
   const [actionNotice, setActionNotice] = createSignal<{ tone: "error" | "success"; message: string } | null>(null)
   const [composerError, setComposerError] = createSignal<string | null>(null)
   const [composerPending, setComposerPending] = createSignal<string | null>(null)
@@ -62,7 +66,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
       preflight: !isTestEnv(),
       trackHeartbeat: true,
     },
-    onStatusChange: (state) => setSessionStateOverride(state),
+    onStatusChange: (state) => setStreamState(state),
     onSessionRefetchNeeded: () => void refetchSession(),
   })
 
@@ -77,20 +81,36 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   })
   const pendingAction = actions.pendingAction
 
-  const sessionState = () => sessionStateOverride() ?? session()?.state ?? "idle"
+  // sessionState: prefer the realtime-pushed state, fall back to the last HTTP value.
+  // streamState is reset to null when the session refetch settles so the authoritative
+  // server state takes over again.
+  const sessionState = createMemo<SessionState>(() =>
+    streamState() ?? session()?.state ?? "idle"
+  )
+
+  // Once the session HTTP refetch resolves, clear the optimistic override so we
+  // track the authoritative state. Use on() with defer so this only runs when
+  // session() actually changes, not on initial render.
+  createEffect(on(session, () => {
+    setStreamState(null)
+  }, { defer: true }))
+
   const providerType = () => session()?.provider_type ?? ""
   const providerList = () => providers()?.providers ?? []
   const agentList = () => agents()?.agents ?? []
-  const selectedProvider = () => {
+
+  const selectedProvider = createMemo(() => {
     const providerId = selectedProviderId()
     if (!providerId) return providerList()[0] ?? null
     return providerList().find((provider) => provider.id === providerId) ?? providerList()[0] ?? null
-  }
-  const selectedAgent = () => {
+  })
+
+  const selectedAgent = createMemo(() => {
     const agentId = selectedAgentId()
     if (!agentId) return null
     return agentList().find((agent) => agent.id === agentId) ?? null
-  }
+  })
+
   const selectedAgentDefaultModel = createMemo(() => {
     const value = selectedAgent()?.custom?.["model"]
     return typeof value === "string" ? value : ""
@@ -112,15 +132,16 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     if (selectedModel().trim()) set.add(selectedModel().trim())
     return Array.from(set)
   })
+
   const canManage = () => permissions()?.can_initiate_bulk_actions ?? false
 
-  const sessionTitle = () => {
+  const sessionTitle = createMemo(() => {
     const title = session()?.title?.trim()
     if (title) return title
     const task = session()?.current_task?.trim()
     if (task) return task
     return `Session ${sessionId().slice(0, 8)}`
-  }
+  })
 
   const isRunning = () => sessionState() === "running"
   const canSendMessage = () => sessionState() === "idle" || sessionState() === "suspended"
@@ -130,53 +151,37 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     transcriptRef.scrollTop = transcriptRef.scrollHeight
   }
 
-  createEffect(() => {
-    sessionId()
-    setSessionStateOverride(null)
-  })
+  // Initialise selectedProviderId from session/provider list.
+  // Runs only once when session or providerList first provides a value;
+  // guarded so user overrides are not clobbered.
+  createEffect(on(
+    () => ({ preferred: session()?.preferred_provider_id, first: providerList()[0]?.id }),
+    ({ preferred, first }) => {
+      if (selectedProviderId() !== null) return
+      if (preferred) { setSelectedProviderId(preferred); return }
+      if (first) setSelectedProviderId(first)
+    },
+  ))
 
-  // Session state sync effect
-  createEffect(() => {
-    const d = session()
-    if (!d) return
-    if (sessionStateOverride() === null) {
-      setSessionStateOverride(d.state)
-    }
-  })
+  // Initialise selectedAgentId from session.agent_id.
+  createEffect(on(
+    () => session()?.agent_id,
+    (agentId) => {
+      if (selectedAgentId() !== null) return
+      if (agentId) setSelectedAgentId(agentId)
+    },
+  ))
 
-  createEffect(() => {
-    if (selectedProviderId() !== null) return
-    const preferred = session()?.preferred_provider_id
-    if (preferred) {
-      setSelectedProviderId(preferred)
-      return
-    }
-    const first = providerList()[0]
-    if (first) {
-      setSelectedProviderId(first.id)
-    }
-  })
+  // Initialise selectedModel from agent/provider defaults.
+  createEffect(on(
+    () => selectedAgentDefaultModel() || selectedProviderDefaultModel(),
+    (defaultModel) => {
+      if (selectedModel().trim()) return
+      if (defaultModel) setSelectedModel(defaultModel)
+    },
+  ))
 
-  createEffect(() => {
-    if (selectedAgentId() !== null) return
-    const sessionAgentId = session()?.agent_id
-    if (sessionAgentId) setSelectedAgentId(sessionAgentId)
-  })
-
-  createEffect(() => {
-    if (selectedModel().trim()) return
-    const fromAgent = selectedAgentDefaultModel().trim()
-    if (fromAgent) {
-      setSelectedModel(fromAgent)
-      return
-    }
-    const fromProvider = selectedProviderDefaultModel().trim()
-    if (fromProvider) {
-      setSelectedModel(fromProvider)
-    }
-  })
-
-  // Auto-scroll effect
+  // Auto-scroll when messages update.
   createEffect(() => {
     data.messages()
     if (!data.autoScroll()) return
@@ -245,14 +250,14 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     downloadFile(`${sessionId()}-transcript.md`, markdown)
   }
 
-  createEffect(() => {
-    const id = sessionId()
+  // Sync the dock's active session to this viewer's sessionId.
+  // Only sets dockSessionId if it isn't already pointing here, to avoid
+  // triggering a dock reset when this viewer remounts.
+  createEffect(on(sessionId, (id) => {
     if (!id) return
-    if (!dockSessionId()) {
-      setDockSessionId(id)
-    }
-    if (props.onDockSession) props.onDockSession(id)
-  })
+    if (dockSessionId() !== id) setDockSessionId(id)
+    props.onDockSession?.(id)
+  }))
 
   const handleClose = () => {
     if (props.onClose) {
@@ -266,25 +271,28 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     navigate({ to: "/sessions" })
   }
 
-  // Map useSessionData streamStatus to the string union used by SessionToolbar
-  const streamStatusStr = () => data.streamStatus()
-  const connectionIndicator = (): "connecting" | "reconnecting" | "disconnected" | "error" | null => {
-    const stream = streamStatusStr()
-    let streamState: "connecting" | "reconnecting" | "disconnected" | "error" | null = null
-    if (stream === "connecting") streamState = "connecting"
-    if (stream === "reconnecting") streamState = "reconnecting"
-    if (stream === "disconnected") streamState = "disconnected"
-    if (stream === "error") streamState = "error"
+  const connectionIndicator = createMemo((): "connecting" | "reconnecting" | "disconnected" | "error" | null => {
+    const streamState = data.streamStatus()
+    const streamIndicator = ((): "connecting" | "reconnecting" | "disconnected" | "error" | null => {
+      switch (streamState) {
+        case "connecting": return "connecting"
+        case "reconnecting": return "reconnecting"
+        case "disconnected": return "disconnected"
+        case "error": return "error"
+        default: return null
+      }
+    })()
 
-    if (providerType() !== "pty") return streamState
+    if (providerType() !== "pty") return streamIndicator
 
     const terminal = terminalStatus()
     if (terminal === "error") return "error"
     if (terminal === "resyncing") return "reconnecting"
-    if (terminal === "connecting") return streamState === "error" ? "error" : "connecting"
-    if (terminal === "closed") return streamState === "error" ? "error" : "disconnected"
-    return streamState
-  }
+    if (terminal === "connecting") return streamIndicator === "error" ? "error" : "connecting"
+    if (terminal === "closed") return streamIndicator === "error" ? "error" : "disconnected"
+    return streamIndicator
+  })
+
   const stateLabel = () => sessionState().replace("_", " ")
   const cancelDisabled = () => !canManage() || sessionState() !== "running" || pendingAction() === "cancel"
   const cancelTitle = () => {

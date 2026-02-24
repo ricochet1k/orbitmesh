@@ -373,6 +373,9 @@ func (h *Handler) sendSessionMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var allowedTools []string
+	var disallowedTools []string
+
 	if agentID != "" {
 		if h.agentStorage == nil {
 			writeError(w, http.StatusNotFound, "agent not found", "agent storage is not configured")
@@ -390,6 +393,8 @@ func (h *Handler) sendSessionMessage(w http.ResponseWriter, r *http.Request) {
 			}
 			custom[k] = v
 		}
+		allowedTools = cfg.AllowedTools
+		disallowedTools = cfg.DisallowedTools
 	}
 
 	// Explicit per-request model wins over everything.
@@ -401,11 +406,13 @@ func (h *Handler) sendSessionMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess, err := h.executor.SendMessageWithOptions(r.Context(), id, req.Content, service.SendMessageOptions{
-		ProviderID:   req.ProviderID,
-		ProviderType: req.ProviderType,
-		AgentID:      agentID,
-		Custom:       custom,
-		Environment:  environment,
+		ProviderID:      req.ProviderID,
+		ProviderType:    req.ProviderType,
+		AgentID:         agentID,
+		Custom:          custom,
+		Environment:     environment,
+		AllowedTools:    allowedTools,
+		DisallowedTools: disallowedTools,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrSessionNotFound) {
@@ -488,17 +495,19 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	id := generateID()
 
 	config := session.Config{
-		ProviderType: req.ProviderType,
-		AgentID:      req.AgentID,
-		WorkingDir:   workingDir,
-		ProjectID:    projectID,
-		Environment:  req.Environment,
-		SystemPrompt: req.SystemPrompt,
-		Custom:       req.Custom,
-		TaskID:       req.TaskID,
-		TaskTitle:    req.TaskTitle,
-		SessionKind:  sessionKind,
-		Title:        req.Title,
+		ProviderType:    req.ProviderType,
+		AgentID:         req.AgentID,
+		WorkingDir:      workingDir,
+		ProjectID:       projectID,
+		Environment:     req.Environment,
+		SystemPrompt:    req.SystemPrompt,
+		Custom:          req.Custom,
+		TaskID:          req.TaskID,
+		TaskTitle:       req.TaskTitle,
+		SessionKind:     sessionKind,
+		Title:           req.Title,
+		AllowedTools:    req.AllowedTools,
+		DisallowedTools: req.DisallowedTools,
 	}
 
 	// Apply agent config defaults (agent values only fill gaps left by the request).
@@ -520,6 +529,12 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		// and the session is not a dock session (dock servers are always overridden below).
 		if len(req.MCPServers) == 0 && sessionKind != domain.SessionKindDock && len(agentConfig.MCPServers) > 0 {
 			config.MCPServers = agentConfig.MCPServers
+		}
+		if len(config.AllowedTools) == 0 && len(agentConfig.AllowedTools) > 0 {
+			config.AllowedTools = agentConfig.AllowedTools
+		}
+		if len(config.DisallowedTools) == 0 && len(agentConfig.DisallowedTools) > 0 {
+			config.DisallowedTools = agentConfig.DisallowedTools
 		}
 	}
 

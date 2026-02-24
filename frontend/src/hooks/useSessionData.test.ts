@@ -37,6 +37,7 @@ class MockEventSource {
 }
 
 const mockEventSources: MockEventSource[] = []
+let realtimeHandlers: Map<string, (message: ServerEnvelope) => void> = new Map()
 let realtimeHandler: ((message: ServerEnvelope) => void) | undefined
 let realtimeStatusHandler: ((status: "connecting" | "open" | "closed") => void) | undefined
 
@@ -51,10 +52,17 @@ vi.mock("../api/client", () => ({
 
 vi.mock("../realtime/client", () => ({
   realtimeClient: {
-    subscribe: vi.fn((_topic: string, handler: (message: ServerEnvelope) => void) => {
-      realtimeHandler = handler
+    subscribe: vi.fn((topic: string, handler: (message: ServerEnvelope) => void) => {
+      realtimeHandlers.set(topic, handler)
+      // Expose the activity-topic handler as the legacy realtimeHandler for backward compat
+      if (topic !== "sessions.state") {
+        realtimeHandler = handler
+      }
       return () => {
-        realtimeHandler = undefined
+        realtimeHandlers.delete(topic)
+        if (topic !== "sessions.state") {
+          realtimeHandler = undefined
+        }
       }
     }),
     onStatus: vi.fn((handler: (status: "connecting" | "open" | "closed") => void) => {
@@ -105,6 +113,7 @@ describe("useSessionData", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockEventSources.splice(0, mockEventSources.length)
+    realtimeHandlers.clear()
     realtimeHandler = undefined
     realtimeStatusHandler = undefined
     vi.stubGlobal("EventSource", MockEventSource as never)
@@ -252,6 +261,47 @@ describe("useSessionData", () => {
 
     await vi.waitFor(() => expect(data!.messages().length).toBeGreaterThan(0))
     expect(data!.messages()[0].content).toBe("live output")
+  })
+
+  // ── canInspect resolving does not wipe existing messages ─────────────────
+
+  it("does not wipe messages when canInspect resolves from null to true for the same session", async () => {
+    let data: ReturnType<typeof useSessionData> | undefined
+    let setCanInspect!: (v: boolean | null) => void
+
+    ;(apiClient.getActivityEntries as ReturnType<typeof vi.fn>).mockResolvedValue({
+      entries: [makeActivityEntry({ id: "entry-1" })],
+      next_cursor: null,
+    })
+
+    createRoot((d) => {
+      dispose = d
+      const [sessionId] = createSignal("session-1")
+      const [canInspect, setCI] = createSignal<boolean | null>(true)
+      setCanInspect = setCI
+      data = useSessionData({
+        sessionId,
+        canInspect,
+        eventsUrl: () => `/events/session-1`,
+        streamOptions: noPreflightOpts,
+      })
+    })
+
+    // Wait for messages to load
+    await vi.waitFor(() => expect(data!.messages().length).toBeGreaterThan(0))
+    expect(data!.messages().some((m) => m.id === "activity:entry-1")).toBe(true)
+
+    // Simulate canInspect cycling null → true (as happens when permissions refetch)
+    const countBefore = data!.messages().length
+    setCanInspect(null)
+    setCanInspect(true)
+
+    // Allow a tick for any effects to run
+    await new Promise((r) => setTimeout(r, 5))
+
+    // Messages must NOT have been wiped
+    expect(data!.messages().length).toBe(countBefore)
+    expect(data!.messages().some((m) => m.id === "activity:entry-1")).toBe(true)
   })
 
   // ── sessionId change ───────────────────────────────────────────────────────

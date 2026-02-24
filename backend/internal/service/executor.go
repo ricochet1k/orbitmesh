@@ -10,6 +10,7 @@ import (
 	"github.com/ricochet1k/orbitmesh/internal/domain"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
+	"github.com/ricochet1k/orbitmesh/internal/tools"
 )
 
 var (
@@ -25,7 +26,7 @@ var (
 )
 
 const (
-	DefaultOperationTimeout   = 30 * time.Second
+	DefaultOperationTimeout   = 10 * time.Minute
 	DefaultCheckpointInterval = 30 * time.Second
 )
 
@@ -75,6 +76,8 @@ type AgentExecutor struct {
 	bootID             string
 	resumeTokenTTL     time.Duration
 
+	evalManager *EvalManager
+
 	recovery *recoveryManager
 
 	ctx    context.Context
@@ -92,6 +95,8 @@ type ExecutorConfig struct {
 	RunAttemptStorage  storage.RunAttemptStorage
 	ResumeTokenStorage storage.ResumeTokenStorage
 	ResumeTokenTTL     time.Duration
+	EvalStorage        storage.EvalStorage
+	ToolRegistry       tools.Registry
 }
 
 func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
@@ -139,6 +144,19 @@ func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
 
 	if exec.resumeTokenTTL <= 0 {
 		exec.resumeTokenTTL = 24 * time.Hour
+	}
+
+	// Wire up EvalManager if eval storage is provided.
+	if cfg.EvalStorage != nil {
+		toolReg := cfg.ToolRegistry
+		if toolReg == nil {
+			toolReg = tools.Global()
+		}
+		em := NewEvalManager(toolReg, cfg.EvalStorage)
+		em.OnSessionWake = func(sessionID string, results []session.ToolResult) {
+			exec.resumeSessionWithToolResults(sessionID, results)
+		}
+		exec.evalManager = em
 	}
 
 	exec.recovery = newRecoveryManager(exec)
@@ -370,6 +388,11 @@ type SendMessageOptions struct {
 	ProviderType string
 	AgentID      string
 	Custom       map[string]any
+	// Environment holds additional environment variables to pass to the
+	// provider's CreateSession call (e.g. API keys from stored provider config).
+	Environment     map[string]string
+	AllowedTools    []string
+	DisallowedTools []string
 }
 
 // SendMessage sends a message to a session, starting a new run if the session is idle.

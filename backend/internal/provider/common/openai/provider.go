@@ -85,13 +85,16 @@ func (p *Provider) TestConfig(ctx context.Context, config session.Config) error 
 	if apiKey == "" {
 		apiKey = os.Getenv("OPENAI_API_KEY")
 	}
-	if apiKey == "" {
-		return fmt.Errorf("OPENAI_API_KEY is not set")
-	}
-
 	baseURL := p.cfg.BaseURL
 	if u, ok := config.Custom["base_url"].(string); ok && u != "" {
 		baseURL = u
+	}
+
+	// Only require an API key when talking to the real OpenAI API.  When a
+	// custom base_url is set (e.g. Ollama, vLLM, LM Studio) the key is
+	// optional and many servers will reject a non-empty placeholder anyway.
+	if apiKey == "" && baseURL == "" {
+		return fmt.Errorf("OPENAI_API_KEY is not set")
 	}
 
 	opts := []option.RequestOption{option.WithAPIKey(apiKey)}

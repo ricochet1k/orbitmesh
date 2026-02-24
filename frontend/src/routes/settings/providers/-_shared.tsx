@@ -12,6 +12,7 @@ import type { ProviderConfigResponse } from '../../../types/api'
 export const PROVIDER_TYPES = [
   { value: 'claude-ws', label: 'Claude (WebSocket SDK)' },
   { value: 'claude',    label: 'Claude (stream-json)' },
+  { value: 'openai',    label: 'OpenAI' },
   { value: 'acp',       label: 'ACP (generic agent)' },
   { value: 'adk',       label: 'ADK (Gemini / Google)' },
   { value: 'pty',       label: 'PTY (terminal)' },
@@ -60,6 +61,7 @@ export function initialProviderEdit(base?: ProviderConfigResponse): ProviderEdit
     if (k in custom) scratch[k] = (custom[k] as string[]).join(', ')
   }
 
+  liftString('base_url')
   liftString('model')
   liftString('permission_mode')
   liftNum('max_budget_usd')
@@ -104,6 +106,8 @@ export function envKeyName(type: ProviderType | string): string | null {
       return 'ANTHROPIC_API_KEY'
     case 'adk':
       return 'GOOGLE_API_KEY'
+    case 'openai':
+      return 'OPENAI_API_KEY'
     default:
       return null
   }

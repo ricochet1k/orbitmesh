@@ -120,6 +120,10 @@ func NewStatusChangeEvent(sessionID string, oldState, newState SessionState, rea
 type OutputData struct {
 	Content string
 	IsDelta bool // If true, this content should be appended to the previous message in storage
+	// MessageID optionally targets a specific output message for delta appends.
+	// Providers that can identify per-message streams (for example OpenAI)
+	// should set this; providers without IDs can leave it empty.
+	MessageID string
 }
 
 type MetricData struct {
@@ -174,12 +178,18 @@ func NewOutputEvent(sessionID, content string, raw json.RawMessage) Event {
 
 // NewDeltaOutputEvent creates an output event marked as a delta (should be merged in storage).
 func NewDeltaOutputEvent(sessionID, content string, raw json.RawMessage) Event {
+	return NewDeltaOutputEventForMessage(sessionID, "", content, raw)
+}
+
+// NewDeltaOutputEventForMessage creates an output delta that can optionally
+// target a specific output message ID.
+func NewDeltaOutputEventForMessage(sessionID, messageID, content string, raw json.RawMessage) Event {
 	return Event{
 		Type:      EventTypeOutput,
 		Timestamp: time.Now(),
 		SessionID: sessionID,
 		Raw:       raw,
-		Data:      OutputData{Content: content, IsDelta: true},
+		Data:      OutputData{Content: content, IsDelta: true, MessageID: messageID},
 	}
 }
 

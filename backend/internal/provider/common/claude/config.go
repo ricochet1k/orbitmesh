@@ -18,7 +18,17 @@ func buildCommandArgs(config session.Config) ([]string, error) {
 		"--include-partial-messages",
 	}
 
+	// First-class field: AllowedTools / DisallowedTools (applied even when Custom is nil).
+	// These are handled below after the Custom-map section.
+
 	if config.Custom == nil {
+		// Still apply first-class tool restrictions before returning.
+		for _, tool := range config.AllowedTools {
+			args = append(args, "--allowed-tools", tool)
+		}
+		for _, tool := range config.DisallowedTools {
+			args = append(args, "--disallowed-tools", tool)
+		}
 		return args, nil
 	}
 
@@ -57,17 +67,21 @@ func buildCommandArgs(config session.Config) ([]string, error) {
 		args = append(args, "--max-budget-usd", strconv.FormatFloat(maxBudget, 'f', -1, 64))
 	}
 
-	// Tool restrictions
-	if allowedTools, ok := parseStringSlice(config.Custom["allowed_tools"]); ok {
-		for _, tool := range allowedTools {
-			args = append(args, "--allowed-tools", tool)
-		}
+	// Tool restrictions — first-class fields take precedence; fall back to Custom map.
+	allowedTools := config.AllowedTools
+	if len(allowedTools) == 0 {
+		allowedTools, _ = parseStringSlice(config.Custom["allowed_tools"])
+	}
+	for _, tool := range allowedTools {
+		args = append(args, "--allowed-tools", tool)
 	}
 
-	if disallowedTools, ok := parseStringSlice(config.Custom["disallowed_tools"]); ok {
-		for _, tool := range disallowedTools {
-			args = append(args, "--disallowed-tools", tool)
-		}
+	disallowedTools := config.DisallowedTools
+	if len(disallowedTools) == 0 {
+		disallowedTools, _ = parseStringSlice(config.Custom["disallowed_tools"])
+	}
+	for _, tool := range disallowedTools {
+		args = append(args, "--disallowed-tools", tool)
 	}
 
 	// Permission mode

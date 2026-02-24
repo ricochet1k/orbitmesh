@@ -501,3 +501,8 @@ func (p *PTYProvider) Resume(ctx context.Context, suspensionContext *session.Sus
 	// PTY provider has minimal state to restore
 	return nil
 }
+
+// ResumeWithToolResults is not yet implemented for the PTY provider.
+func (p *PTYProvider) ResumeWithToolResults(ctx context.Context, sc *session.SuspensionContext, results []session.ToolResult) (<-chan domain.Event, error) {
+	return nil, fmt.Errorf("ResumeWithToolResults not implemented")
+}

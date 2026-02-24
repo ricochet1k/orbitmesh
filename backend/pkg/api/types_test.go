@@ -262,7 +262,7 @@ func TestStatusChangeData_JSONMarshal(t *testing.T) {
 }
 
 func TestOutputData_JSONMarshal(t *testing.T) {
-	data := OutputData{Content: "Hello, world!"}
+	data := OutputData{Content: "Hello, world!", IsDelta: true, MessageID: "msg-1"}
 
 	jsonData, err := json.Marshal(data)
 	if err != nil {
@@ -276,6 +276,12 @@ func TestOutputData_JSONMarshal(t *testing.T) {
 
 	if decoded.Content != "Hello, world!" {
 		t.Errorf("expected content 'Hello, world!', got %s", decoded.Content)
+	}
+	if !decoded.IsDelta {
+		t.Error("expected is_delta true")
+	}
+	if decoded.MessageID != "msg-1" {
+		t.Errorf("expected message_id 'msg-1', got %s", decoded.MessageID)
 	}
 }
 

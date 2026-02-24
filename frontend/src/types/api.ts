@@ -91,6 +91,8 @@ export interface OutputData {
   content: string;
   /** True when this chunk should be appended to the previous output message. */
   is_delta?: boolean;
+  /** Optional provider-scoped message id for targeted delta appends. */
+  message_id?: string;
 }
 
 export interface MetricData {

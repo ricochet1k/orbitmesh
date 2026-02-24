@@ -20,6 +20,7 @@ import (
 	"github.com/ricochet1k/orbitmesh/internal/provider/native"
 	"github.com/ricochet1k/orbitmesh/internal/provider/process"
 	"github.com/ricochet1k/orbitmesh/internal/session"
+	"github.com/ricochet1k/orbitmesh/internal/tools"
 )
 
 var (
@@ -28,11 +29,6 @@ var (
 	ErrNotPaused      = errors.New("claudews provider not paused")
 	ErrAlreadyPaused  = errors.New("claudews provider already paused")
 )
-
-// PermissionHandler is an optional callback invoked when Claude requests
-// permission to run a tool.  It returns (allow bool, updatedInput, reason).
-// If nil, all tools are auto-allowed.
-type PermissionHandler func(ctx context.Context, req CanUseToolRequest) (allow bool, updatedInput map[string]any, reason string)
 
 // ClaudeWSProvider implements session.Session using the Claude Code CLI's
 // hidden --sdk-url WebSocket protocol.  The provider:
@@ -57,7 +53,7 @@ type ClaudeWSProvider struct {
 	wsServer *wsServer
 	wsConn   *wsConn // set when CLI connects
 
-	permHandler PermissionHandler
+	permHandler tools.PermissionHandler
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -73,7 +69,7 @@ type ClaudeWSProvider struct {
 
 // NewClaudeWSProvider creates a new WebSocket-mode Claude provider.
 // permHandler may be nil (auto-allow all tools).
-func NewClaudeWSProvider(sessionID string, permHandler PermissionHandler) *ClaudeWSProvider {
+func NewClaudeWSProvider(sessionID string, permHandler tools.PermissionHandler) *ClaudeWSProvider {
 	p := &ClaudeWSProvider{
 		sessionID:      sessionID,
 		state:          native.NewProviderState(),
@@ -646,30 +642,26 @@ func (p *ClaudeWSProvider) handleCanUseTool(req ControlRequest, raw []byte) {
 		Input:  toolReq.Input,
 	}, raw))
 
-	var (
-		allow        = true
-		updatedInput = toolReq.Input
-		reason       = ""
-	)
-
-	if p.permHandler != nil {
-		allow, updatedInput, reason = p.permHandler(p.ctx, toolReq)
+	handler := p.permHandler
+	if handler == nil {
+		handler = tools.AutoApprovePermissionHandler{}
 	}
 
-	if allow {
-		if updatedInput == nil {
-			updatedInput = toolReq.Input
-		}
-		_ = p.wsConn.Send(AllowResponse(req.RequestID, updatedInput))
-		p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
-			ID:     req.RequestID,
-			Name:   toolReq.ToolName,
-			Status: "permission_granted",
-			Title:  "tool permission granted",
-		}, raw))
-	} else {
+	decision, err := handler.RequestPermission(p.ctx, tools.PermissionRequest{
+		ToolCallID:  toolReq.ToolUseID,
+		ToolName:    toolReq.ToolName,
+		Input:       toolReq.Input,
+		Description: toolReq.Description,
+	})
+
+	if err != nil || !decision.Granted {
+		reason := decision.Reason
 		if reason == "" {
-			reason = "denied by policy"
+			if err != nil {
+				reason = err.Error()
+			} else {
+				reason = "denied by policy"
+			}
 		}
 		_ = p.wsConn.Send(DenyResponse(req.RequestID, reason))
 		p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
@@ -677,6 +669,15 @@ func (p *ClaudeWSProvider) handleCanUseTool(req ControlRequest, raw []byte) {
 			Name:   toolReq.ToolName,
 			Status: "permission_denied",
 			Title:  reason,
+		}, raw))
+	} else {
+		updatedInput := toolReq.Input
+		_ = p.wsConn.Send(AllowResponse(req.RequestID, updatedInput))
+		p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+			ID:     req.RequestID,
+			Name:   toolReq.ToolName,
+			Status: "permission_granted",
+			Title:  "tool permission granted",
 		}, raw))
 	}
 }
@@ -854,4 +855,9 @@ func (p *ClaudeWSProvider) Resume(ctx context.Context, suspensionContext *sessio
 	}
 	// ClaudeWS provider has minimal state to restore
 	return nil
+}
+
+// ResumeWithToolResults is not yet implemented for the ClaudeWS provider.
+func (p *ClaudeWSProvider) ResumeWithToolResults(ctx context.Context, sc *session.SuspensionContext, results []session.ToolResult) (<-chan domain.Event, error) {
+	return nil, fmt.Errorf("ResumeWithToolResults not implemented")
 }

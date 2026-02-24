@@ -1,4 +1,5 @@
 import { createFileRoute, Outlet, Link, useLocation } from '@tanstack/solid-router'
+import { createSignal } from 'solid-js'
 
 export const Route = createFileRoute('/settings')({
   component: SettingsLayout,
@@ -14,6 +15,7 @@ const SETTINGS_NAV = [
 
 function SettingsLayout() {
   const location = useLocation()
+  const [mobileNavOpen, setMobileNavOpen] = createSignal(false)
 
   return (
     <div class="settings-view ds-page">
@@ -28,11 +30,24 @@ function SettingsLayout() {
       </header>
 
       <div class="settings-shell">
-        <nav class="settings-subnav">
+        <button
+          class="btn btn-secondary settings-subnav-toggle"
+          type="button"
+          aria-label="Toggle settings navigation"
+          aria-expanded={mobileNavOpen()}
+          aria-controls="settings-subnav"
+          onClick={() => setMobileNavOpen((open) => !open)}
+        >
+          <span class="sidebar-toggle-icon" aria-hidden="true" />
+          <span>{mobileNavOpen() ? 'Close menu' : 'Settings menu'}</span>
+        </button>
+
+        <nav id="settings-subnav" class={`settings-subnav${mobileNavOpen() ? ' open' : ''}`}>
           {SETTINGS_NAV.map((item) => (
             <Link
               to={item.to}
               class={`settings-subnav-item${location().pathname === item.to ? ' active' : ''}`}
+              onClick={() => setMobileNavOpen(false)}
             >
               {item.label}
             </Link>

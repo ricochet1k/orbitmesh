@@ -17,6 +17,7 @@ import (
 	"github.com/ricochet1k/orbitmesh/internal/service"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/terminal"
+	"github.com/ricochet1k/orbitmesh/internal/tools"
 )
 
 var (
@@ -48,15 +49,27 @@ type Session struct {
 	// Message history for snapshot persistence
 	messageHistory []SnapshotMessage
 
+	permHandler tools.PermissionHandler
+
 	started    bool
 	closedOnce sync.Once
 }
 
 // SnapshotMessage represents a message in the conversation history.
+// The Kind field distinguishes regular chat turns from tool call records:
+//   - "" / "user" / "assistant": normal turn messages
+//   - "tool_call":     JSON payload {"id","name","arguments"} — invocation record
+//   - "tool_response": JSON payload {"tool_call_id","content"} — result record
+//
+// NOTE: The ACP SDK's PromptRequest does not have a history or turns field, so
+// tool_call/tool_response messages stored here are for observability only.
+// They cannot be replayed to resume ACP conversation context on a fresh session.
+// TODO: revisit when ACP SDK adds conversation-history support in PromptRequest.
 type SnapshotMessage struct {
-	Role      string    `json:"role"`      // "user" or "assistant"
-	Content   string    `json:"content"`   // Message content
-	Timestamp time.Time `json:"timestamp"` // When message was sent/received
+	Role      string    `json:"role"`           // "user" or "assistant"
+	Content   string    `json:"content"`        // Message content
+	Timestamp time.Time `json:"timestamp"`      // When message was sent/received
+	Kind      string    `json:"kind,omitempty"` // "" for chat turns; "tool_call" or "tool_response"
 }
 
 var _ session.Session = (*Session)(nil)
@@ -72,6 +85,7 @@ func NewSession(sessionID string, providerConfig Config, sessionConfig session.C
 		providerConfig: providerConfig,
 		sessionConfig:  sessionConfig,
 		circuitBreaker: circuit.NewBreaker(3, 30*time.Second),
+		permHandler:    tools.AutoApprovePermissionHandler{},
 	}, nil
 }
 
@@ -533,6 +547,9 @@ func (s *Session) RestoreFromSnapshot(snapshot *session.SessionSnapshot) error {
 								sm.Timestamp = t
 							}
 						}
+						if kind, ok := msgMap["kind"].(string); ok {
+							sm.Kind = kind
+						}
 						s.messageHistory = append(s.messageHistory, sm)
 					}
 				}
@@ -665,6 +682,9 @@ func (s *Session) Resume(ctx context.Context, suspensionContext *session.Suspens
 							sm.Timestamp = t
 						}
 					}
+					if kind, ok := msgMap["kind"].(string); ok {
+						sm.Kind = kind
+					}
 					s.messageHistory = append(s.messageHistory, sm)
 				}
 			}
@@ -680,4 +700,9 @@ func (s *Session) Resume(ctx context.Context, suspensionContext *session.Suspens
 	// For now we skip this to avoid double-counting
 
 	return nil
+}
+
+// ResumeWithToolResults is not yet implemented for the ACP provider.
+func (s *Session) ResumeWithToolResults(ctx context.Context, sc *session.SuspensionContext, results []session.ToolResult) (<-chan domain.Event, error) {
+	return nil, fmt.Errorf("ResumeWithToolResults not implemented")
 }

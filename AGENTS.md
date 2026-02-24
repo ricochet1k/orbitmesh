@@ -84,7 +84,7 @@ This project uses `roam` for codebase comprehension. Always prefer roam over Glo
 
 Before modifying any code:
 1. First time in the repo: `roam understand` then `roam tour`
-2. Find a symbol: `roam search <pattern>`
+2. Find a symbol: `roam search <substring>`
 3. Before changing a symbol: `roam preflight <name>` (blast radius + tests + fitness)
 4. Need files to read: `roam context <name>` (files + line ranges, prioritized)
 5. Debugging a failure: `roam diagnose <name>` (root cause ranking)

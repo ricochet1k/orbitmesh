@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js"
+import { createEffect, createMemo, createResource, createSignal, on, onCleanup, untrack } from "solid-js"
 import type { Accessor } from "solid-js"
 import type {
   ActivityEntry,
@@ -341,9 +341,8 @@ export function useSessionData({
   // undefined = not yet ready to fetch; null = fetch latest page; string = fetch that page
   const [paginationCursor, setPaginationCursor] = createSignal<string | null | undefined>(undefined)
 
-  const activitySource = createMemo((): { id: string; cursor: string | null } | undefined => {
+  const activitySource = createMemo(() => {
     const id = sessionId()
-    if (!id) return undefined
     const cursor = paginationCursor()
     if (cursor === undefined) return undefined
     return { id, cursor }
@@ -367,19 +366,51 @@ export function useSessionData({
 
   const [streamStatus, setStreamStatus] = createSignal<StreamStatus>("idle")
 
-  createEffect(() => {
-    const id = sessionId()
-    const inspect = canInspect()
+  // Reset message state and restart the stream whenever sessionId changes.
+  // canInspect is read with untrack so that permissions resolving (null → bool)
+  // for the same session does not re-trigger a reset and wipe the transcript.
+  createEffect(on(sessionId, (id) => {
+    if (!id) return
 
-    // Wait until sessionId is set and permissions have resolved (null = still loading)
-    if (!id || inspect === null) return
+    // Read canInspect without tracking it — changes to permissions must not
+    // cause a transcript wipe after the stream is already open.
+    const inspect = untrack(canInspect)
 
-    // Reset message state and pagination for the new session
+    // If permissions haven't resolved yet, defer: a separate effect below
+    // will re-run once canInspect becomes non-null.
+    if (inspect === null) return
+
     setMessages([])
     setPaginationCursor(undefined)
     setStreamStatus("connecting")
     setLastEvent(null)
 
+    openStream(id, inspect)
+  }))
+
+  // When canInspect resolves from null → boolean for the current session,
+  // open the stream if it hasn't been opened yet (streamStatus still "idle"
+  // means the sessionId effect above deferred because inspect was null).
+  // streamStatus is read with untrack to avoid re-running this effect when
+  // the stream transitions connecting → live, which would close and reopen it.
+  createEffect(() => {
+    const inspect = canInspect()
+    if (inspect === null) return
+
+    const id = untrack(sessionId)
+    if (!id) return
+
+    if (untrack(streamStatus) !== "idle") return
+
+    setMessages([])
+    setPaginationCursor(undefined)
+    setStreamStatus("connecting")
+    setLastEvent(null)
+
+    openStream(id, inspect)
+  })
+
+  function openStream(id: string, inspect: boolean) {
     // ── Per-run coordination variables ─────────────────────────────────────
     let historySettled = false
     let buffer: Array<{ type: string; event: MessageEvent }> = []
@@ -527,57 +558,62 @@ export function useSessionData({
     }
 
     // ── Watch for history page resolution ─────────────────────────────────
-    // Use a nested createEffect so we only track activityPage inside it.
-    createEffect(() => {
-      // Skip while loading: activityPage() returns the PREVIOUS cached value
-      // during loading state (stale-while-revalidate), which would apply old
-      // session data after a session change. Only process settled pages.
-      if (activityPage.loading) return
-      const page = activityPage()
-      if (!page) return
-      if (historySettled) {
-        // Pagination load (loadEarlier): merge new older entries
+    // Nested createEffect is replaced with a top-level effect using on() with
+    // defer:true so it only tracks activityPage and does not re-run on outer
+    // signal changes. The outer effect's onCleanup will dispose this when
+    // sessionId changes, preventing stale-session page application.
+    createEffect(on(
+      () => ({ loading: activityPage.loading, page: activityPage() }),
+      ({ loading, page }) => {
+        // Skip while loading: activityPage() returns the PREVIOUS cached value
+        // during loading state (stale-while-revalidate), which would apply old
+        // session data after a session change. Only process settled pages.
+        if (loading) return
+        if (!page) return
+        if (historySettled) {
+          // Pagination load (loadEarlier): merge new older entries
+          const entries = page.entries ?? []
+          if (entries.length > 0) {
+            mergeMessages(entries.map(toActivityMessage), { sort: true })
+          }
+          return
+        }
+
+        // First history page settled: compute watermark and drain buffer
         const entries = page.entries ?? []
+        let watermark = 0
+        for (const entry of entries) {
+          if ((entry.event_id ?? 0) > watermark) {
+            watermark = entry.event_id!
+          }
+        }
+
         if (entries.length > 0) {
           mergeMessages(entries.map(toActivityMessage), { sort: true })
         }
-        return
-      }
 
-      // First history page settled: compute watermark and drain buffer
-      const entries = page.entries ?? []
-      let watermark = 0
-      for (const entry of entries) {
-        if ((entry.event_id ?? 0) > watermark) {
-          watermark = entry.event_id!
+        if (pendingRealtimeSnapshot) {
+          applyRealtimeSnapshot(pendingRealtimeSnapshot)
+          pendingRealtimeSnapshot = null
         }
-      }
 
-      if (entries.length > 0) {
-        mergeMessages(entries.map(toActivityMessage), { sort: true })
-      }
+        historySettled = true
 
-      if (pendingRealtimeSnapshot) {
-        applyRealtimeSnapshot(pendingRealtimeSnapshot)
-        pendingRealtimeSnapshot = null
-      }
-
-      historySettled = true
-
-      // Drain buffer: replay events whose event_id > watermark
-      const buffered = buffer
-      buffer = []
-      for (const { type, event } of buffered) {
-        // Parse event_id from the buffered event to compare against watermark
-        const parsed = parseSSEEvent(type, event)
-        if (parsed && watermark > 0 && parsed.event_id > 0 && parsed.event_id <= watermark) {
-          // Already represented in history; skip
-          continue
+        // Drain buffer: replay events whose event_id > watermark
+        const buffered = buffer
+        buffer = []
+        for (const { type, event } of buffered) {
+          // Parse event_id from the buffered event to compare against watermark
+          const parsed = parseSSEEvent(type, event)
+          if (parsed && watermark > 0 && parsed.event_id > 0 && parsed.event_id <= watermark) {
+            // Already represented in history; skip
+            continue
+          }
+          applyStreamEvent(type, event)
         }
-        applyStreamEvent(type, event)
-      }
-    })
-  })
+      },
+    ))
+  }
 
   // ── loadEarlier ───────────────────────────────────────────────────────────
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/ricochet1k/orbitmesh/internal/provider/process"
 	"github.com/ricochet1k/orbitmesh/internal/session"
+	"github.com/ricochet1k/orbitmesh/internal/tools"
 )
 
 // ClaudeWSProviderFactory is the factory for claude-ws sessions.  It implements
@@ -21,7 +22,7 @@ func NewClaudeWSProviderFactory() *ClaudeWSProviderFactory { return &ClaudeWSPro
 
 // CreateSession implements provider.Provider.
 func (f *ClaudeWSProviderFactory) CreateSession(sessionID string, config session.Config) (session.Session, error) {
-	return NewClaudeWSProvider(sessionID, nil), nil
+	return NewClaudeWSProvider(sessionID, tools.AutoApprovePermissionHandler{}), nil
 }
 
 // TestConfig implements provider.Provider.  It starts a WebSocket server on a

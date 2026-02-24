@@ -11,6 +11,7 @@ import (
 
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/ricochet1k/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/tools"
 )
 
 // acpClientAdapter implements acpsdk.Client for OrbitMesh.
@@ -150,8 +151,27 @@ func (a *acpClientAdapter) RequestPermission(ctx context.Context, req acpsdk.Req
 		"options":   req.Options,
 	})
 
-	// For now, auto-approve the first option if available
-	// TODO: Integrate with OrbitMesh permission system
+	// Delegate to the session's permission handler.
+	handler := sess.permHandler
+	if handler == nil {
+		handler = tools.AutoApprovePermissionHandler{}
+	}
+
+	decision, err := handler.RequestPermission(ctx, tools.PermissionRequest{
+		ToolCallID:  string(req.ToolCall.ToolCallId),
+		Input:       req.ToolCall.RawInput,
+		Description: title,
+	})
+	if err != nil || !decision.Granted {
+		// Deny: cancel the permission request.
+		return acpsdk.RequestPermissionResponse{
+			Outcome: acpsdk.RequestPermissionOutcome{
+				Cancelled: &acpsdk.RequestPermissionOutcomeCancelled{},
+			},
+		}, nil
+	}
+
+	// Granted: select the first available option (allow_once or similar).
 	if len(req.Options) == 0 {
 		return acpsdk.RequestPermissionResponse{
 			Outcome: acpsdk.RequestPermissionOutcome{
@@ -205,6 +225,7 @@ func (a *acpClientAdapter) SessionUpdate(ctx context.Context, notif acpsdk.Sessi
 		// Tool call notification
 		raw, _ := json.Marshal(update.ToolCall)
 		sess.events.Emit(domain.NewToolCallEvent(sess.sessionID, domain.ToolCallData{
+			ID:     string(update.ToolCall.ToolCallId),
 			Status: fmt.Sprint(update.ToolCall.Status),
 			Title:  update.ToolCall.Title,
 		}, raw))
@@ -212,10 +233,14 @@ func (a *acpClientAdapter) SessionUpdate(ctx context.Context, notif acpsdk.Sessi
 	case update.ToolCallUpdate != nil:
 		// Tool call status update
 		raw, _ := json.Marshal(update.ToolCallUpdate)
+		title := ""
+		if update.ToolCallUpdate.Title != nil {
+			title = *update.ToolCallUpdate.Title
+		}
 		sess.events.Emit(domain.NewToolCallEvent(sess.sessionID, domain.ToolCallData{
 			ID:     string(update.ToolCallUpdate.ToolCallId),
 			Status: fmt.Sprint(update.ToolCallUpdate.Status),
-			Title:  "tool call update",
+			Title:  title,
 		}, raw))
 
 	case update.Plan != nil:

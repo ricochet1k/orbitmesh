@@ -20,6 +20,13 @@ func buildWSCommandArgs(sdkURL string, config session.Config) ([]string, error) 
 	}
 
 	if config.Custom == nil {
+		// Still apply first-class tool restrictions before returning.
+		for _, tool := range config.AllowedTools {
+			args = append(args, "--allowedTools", tool)
+		}
+		for _, tool := range config.DisallowedTools {
+			args = append(args, "--disallowedTools", tool)
+		}
 		return args, nil
 	}
 
@@ -33,17 +40,21 @@ func buildWSCommandArgs(sdkURL string, config session.Config) ([]string, error) 
 		args = append(args, "--permission-mode", permMode)
 	}
 
-	// Tool allow/deny lists (pre-set; can also be changed at runtime via control)
-	if allowedTools, ok := parseStringSlice(config.Custom["allowed_tools"]); ok {
-		for _, tool := range allowedTools {
-			args = append(args, "--allowedTools", tool)
-		}
+	// Tool allow/deny lists — first-class fields take precedence; fall back to Custom map.
+	allowedTools := config.AllowedTools
+	if len(allowedTools) == 0 {
+		allowedTools, _ = parseStringSlice(config.Custom["allowed_tools"])
+	}
+	for _, tool := range allowedTools {
+		args = append(args, "--allowedTools", tool)
 	}
 
-	if disallowedTools, ok := parseStringSlice(config.Custom["disallowed_tools"]); ok {
-		for _, tool := range disallowedTools {
-			args = append(args, "--disallowedTools", tool)
-		}
+	disallowedTools := config.DisallowedTools
+	if len(disallowedTools) == 0 {
+		disallowedTools, _ = parseStringSlice(config.Custom["disallowed_tools"])
+	}
+	for _, tool := range disallowedTools {
+		args = append(args, "--disallowedTools", tool)
 	}
 
 	// Budget cap

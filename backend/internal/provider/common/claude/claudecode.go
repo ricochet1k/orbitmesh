@@ -372,3 +372,8 @@ func (p *ClaudeCodeProvider) Resume(ctx context.Context, suspensionContext *sess
 	// Claude provider has minimal state to restore
 	return nil
 }
+
+// ResumeWithToolResults is not yet implemented for the ClaudeCode provider.
+func (p *ClaudeCodeProvider) ResumeWithToolResults(ctx context.Context, sc *session.SuspensionContext, results []session.ToolResult) (<-chan domain.Event, error) {
+	return nil, fmt.Errorf("ResumeWithToolResults not implemented")
+}

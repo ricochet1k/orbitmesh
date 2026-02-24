@@ -18,27 +18,32 @@ func (e *AgentExecutor) emitSynthesized(sess *domain.Session, event domain.Event
 	switch data := event.Data.(type) {
 	case domain.UserMessageData:
 		sess.AppendMessage(domain.MessageKindUser, data.Content)
-		e.appendToMessageLog(sess.ID, storage.MessageProjectionAppend, domain.MessageKindUser, data.Content, event.Raw, event.Timestamp)
+		e.appendToMessageLog(sess.ID, storage.MessageProjectionAppend, domain.MessageKindUser, data.Content, event.Raw, event.Timestamp, "")
 	case domain.SystemMessageData:
 		sess.AppendMessage(domain.MessageKindSystem, data.Content)
-		e.appendToMessageLog(sess.ID, storage.MessageProjectionAppend, domain.MessageKindSystem, data.Content, event.Raw, event.Timestamp)
+		e.appendToMessageLog(sess.ID, storage.MessageProjectionAppend, domain.MessageKindSystem, data.Content, event.Raw, event.Timestamp, "")
 	case domain.ErrorData:
 		sess.AppendMessage(domain.MessageKindError, data.Message)
-		e.appendToMessageLog(sess.ID, storage.MessageProjectionAppend, domain.MessageKindError, data.Message, event.Raw, event.Timestamp)
+		e.appendToMessageLog(sess.ID, storage.MessageProjectionAppend, domain.MessageKindError, data.Message, event.Raw, event.Timestamp, "")
 	}
 }
 
 func (e *AgentExecutor) appendSessionMessageRaw(session *domain.Session, kind domain.MessageKind, contents string, raw json.RawMessage, at time.Time) {
 	session.AppendMessageRaw(kind, contents, raw)
-	e.appendToMessageLog(session.ID, storage.MessageProjectionAppendRaw, kind, contents, raw, at)
+	e.appendToMessageLog(session.ID, storage.MessageProjectionAppendRaw, kind, contents, raw, at, "")
 }
 
 func (e *AgentExecutor) appendOutputDelta(session *domain.Session, delta string, raw json.RawMessage, at time.Time) {
 	session.AppendOutputDelta(delta)
-	e.appendToMessageLog(session.ID, storage.MessageProjectionOutputDelta, domain.MessageKindOutput, delta, raw, at)
+	e.appendToMessageLog(session.ID, storage.MessageProjectionOutputDelta, domain.MessageKindOutput, delta, raw, at, "")
 }
 
-func (e *AgentExecutor) appendToMessageLog(sessionID string, projection storage.MessageProjection, kind domain.MessageKind, contents string, raw json.RawMessage, at time.Time) {
+func (e *AgentExecutor) appendOutputDeltaToMessage(session *domain.Session, messageID string, delta string, raw json.RawMessage, at time.Time) {
+	session.AppendOutputDeltaToMessage(messageID, delta)
+	e.appendToMessageLog(session.ID, storage.MessageProjectionOutputDelta, domain.MessageKindOutput, delta, raw, at, messageID)
+}
+
+func (e *AgentExecutor) appendToMessageLog(sessionID string, projection storage.MessageProjection, kind domain.MessageKind, contents string, raw json.RawMessage, at time.Time, messageID string) {
 	if e.storage == nil {
 		return
 	}
@@ -49,5 +54,5 @@ func (e *AgentExecutor) appendToMessageLog(sessionID string, projection storage.
 	if at.IsZero() {
 		at = time.Now()
 	}
-	_ = appender.AppendMessageLog(sessionID, projection, kind, contents, raw, at)
+	_ = appender.AppendMessageLog(sessionID, projection, kind, contents, raw, at, messageID)
 }

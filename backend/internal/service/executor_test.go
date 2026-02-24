@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -14,6 +15,8 @@ import (
 	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
 	"github.com/ricochet1k/orbitmesh/internal/terminal"
+	"github.com/ricochet1k/orbitmesh/internal/toolcall"
+	"github.com/ricochet1k/orbitmesh/internal/tools"
 )
 
 type mockProvider struct {
@@ -105,6 +108,10 @@ func (m *mockProvider) Resume(ctx context.Context, suspensionContext *session.Su
 	return nil
 }
 
+func (m *mockProvider) ResumeWithToolResults(ctx context.Context, sc *session.SuspensionContext, results []session.ToolResult) (<-chan domain.Event, error) {
+	return nil, fmt.Errorf("ResumeWithToolResults not implemented")
+}
+
 type mockStorage struct {
 	mu       sync.Mutex
 	sessions map[string]*domain.Session
@@ -121,6 +128,7 @@ type messageLogAppendCall struct {
 	contents   string
 	raw        json.RawMessage
 	timestamp  time.Time
+	targetID   string
 }
 
 func newMockStorage() *mockStorage {
@@ -178,7 +186,7 @@ func (s *mockStorage) GetMessages(id string) ([]domain.Message, error) {
 	return nil, storage.ErrSessionNotFound
 }
 
-func (s *mockStorage) AppendMessageLog(sessionID string, projection storage.MessageProjection, kind domain.MessageKind, contents string, raw json.RawMessage, timestamp time.Time) error {
+func (s *mockStorage) AppendMessageLog(sessionID string, projection storage.MessageProjection, kind domain.MessageKind, contents string, raw json.RawMessage, timestamp time.Time, targetMessageID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.log = append(s.log, messageLogAppendCall{
@@ -188,6 +196,7 @@ func (s *mockStorage) AppendMessageLog(sessionID string, projection storage.Mess
 		contents:   contents,
 		raw:        raw,
 		timestamp:  timestamp,
+		targetID:   targetMessageID,
 	})
 	return nil
 }
@@ -1793,7 +1802,7 @@ func TestAgentExecutor_SuspendAndResume(t *testing.T) {
 	}
 
 	// Call suspend on the session
-	executor.suspendSession(sc, "tool-call-123")
+	executor.suspendSession(sc, "tool-call-123", nil)
 
 	// Verify the session is now suspended
 	if sc.session.GetState() != domain.SessionStateSuspended {
@@ -1847,7 +1856,7 @@ func TestAgentExecutor_ResumeTokenMintAndConsume(t *testing.T) {
 	if sc == nil {
 		t.Fatal("missing session context")
 	}
-	executor.suspendSession(sc, "tool-123")
+	executor.suspendSession(sc, "tool-123", nil)
 
 	attempt := waitForRunAttemptWithToken(t, store, "resume-token-session")
 	if attempt.ResumeTokenID == "" {
@@ -2132,6 +2141,302 @@ func TestAgentExecutor_MidRunCrashRecoveryWithCheckpoints(t *testing.T) {
 
 	t.Logf("Successfully recovered session from checkpoint: %d messages", len(recoveredSess.Messages))
 	t.Log("Checkpoint mechanism working: periodic snapshots prevent data loss on crash")
+}
+
+// ---------------------------------------------------------------------------
+// Tool call end-to-end path
+// ---------------------------------------------------------------------------
+
+// mockEvalStorage is an in-memory EvalStorage implementation for testing.
+type mockEvalStorage struct {
+	mu    sync.Mutex
+	evals map[string]*toolcall.Eval
+}
+
+func newMockEvalStorage() *mockEvalStorage {
+	return &mockEvalStorage{evals: make(map[string]*toolcall.Eval)}
+}
+
+func (s *mockEvalStorage) SaveEval(e *toolcall.Eval) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	copy := *e
+	s.evals[e.ID] = &copy
+	return nil
+}
+
+func (s *mockEvalStorage) LoadEval(evalID string) (*toolcall.Eval, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.evals[evalID]
+	if !ok {
+		return nil, storage.ErrEvalNotFound
+	}
+	copy := *e
+	return &copy, nil
+}
+
+func (s *mockEvalStorage) ListEvalsForSession(sessionID string) ([]*toolcall.Eval, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*toolcall.Eval
+	for _, e := range s.evals {
+		if e.SessionID == sessionID {
+			copy := *e
+			out = append(out, &copy)
+		}
+	}
+	return out, nil
+}
+
+func (s *mockEvalStorage) DeleteEval(evalID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.evals, evalID)
+	return nil
+}
+
+// toolCallMockProvider is a mock provider that fully implements Suspendable
+// including ResumeWithToolResults. It records the tool results it receives
+// so tests can assert on them.
+type toolCallMockProvider struct {
+	mockProvider
+
+	resumeCh      chan []session.ToolResult // receives results from ResumeWithToolResults
+	resumeEventCh chan domain.Event         // events emitted after resumption
+}
+
+func newToolCallMockProvider() *toolCallMockProvider {
+	return &toolCallMockProvider{
+		mockProvider: mockProvider{
+			state:  session.StateCreated,
+			events: make(chan domain.Event, 10),
+		},
+		resumeCh:      make(chan []session.ToolResult, 1),
+		resumeEventCh: make(chan domain.Event, 10),
+	}
+}
+
+func (p *toolCallMockProvider) ResumeWithToolResults(ctx context.Context, sc *session.SuspensionContext, results []session.ToolResult) (<-chan domain.Event, error) {
+	p.resumeCh <- results
+	return p.resumeEventCh, nil
+}
+
+// TestAgentExecutor_ToolCallEndToEnd exercises the complete tool call lifecycle:
+//  1. Session starts and provider emits a tool_call event (status="running")
+//  2. The event stream closes, triggering flushPendingToolCalls
+//  3. The EvalManager dispatches the eval to the registered tool handler
+//  4. suspendSession transitions the session to Suspended
+//  5. The tool handler completes the eval (after the test observes Suspended state)
+//  6. OnSessionWake fires → resumeSessionWithToolResults is called
+//  7. The provider's ResumeWithToolResults receives the tool result
+//  8. The second event stream closes and the session transitions back to Idle
+func TestAgentExecutor_ToolCallEndToEnd(t *testing.T) {
+	const sessionID = "toolcall-e2e-session"
+	const toolName = "echo_tool"
+	const providerCallID = "call_abc123"
+	const toolInput = `{"text":"hello"}`
+	const toolResult = "hello"
+
+	// toolGate blocks the tool handler until the test unblocks it, so we can
+	// observe the Suspended state before the session resumes.
+	toolGate := make(chan struct{})
+
+	// Build a tool registry with a blocking echo tool.
+	reg := tools.NewRegistry()
+	if err := reg.Register(tools.ToolDef{
+		Name:        toolName,
+		Description: "echoes the input text, blocked by toolGate",
+		Handler: func(ctx context.Context, input json.RawMessage) (string, error) {
+			// Wait until the test signals us to proceed.
+			select {
+			case <-toolGate:
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+			var args struct {
+				Text string `json:"text"`
+			}
+			if err := json.Unmarshal(input, &args); err != nil {
+				return "", err
+			}
+			return args.Text, nil
+		},
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Set up provider, eval storage, and executor.
+	prov := newToolCallMockProvider()
+	evalStorage := newMockEvalStorage()
+	store := newMockStorage()
+	broadcaster := NewEventBroadcaster(100)
+
+	factory := func(providerType, sessionID string, config session.Config) (session.Session, error) {
+		return prov, nil
+	}
+
+	cfg := ExecutorConfig{
+		Storage:          store,
+		Broadcaster:      broadcaster,
+		ProviderFactory:  factory,
+		OperationTimeout: 5 * time.Second,
+		EvalStorage:      evalStorage,
+		ToolRegistry:     reg,
+	}
+	executor := NewAgentExecutor(cfg)
+	defer executor.Shutdown(context.Background())
+
+	// ── Phase 1: create session and send first message ──────────────────────
+	_, err := executor.StartSession(context.Background(), sessionID, session.Config{
+		ProviderType: "test",
+		WorkingDir:   "/tmp",
+	})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	_, err = executor.SendMessage(context.Background(), sessionID, "use the echo tool", "", "")
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+
+	// Wait for the session to enter running state.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if s, _ := executor.GetSession(sessionID); s != nil && s.GetState() == domain.SessionStateRunning {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if s, _ := executor.GetSession(sessionID); s == nil || s.GetState() != domain.SessionStateRunning {
+		t.Fatalf("session never entered running state")
+	}
+
+	// ── Phase 2: provider emits a tool_call event and closes the stream ──────
+	// Sending status="running" means the tool input is complete; this is what
+	// triggers accumulation into pendingToolCalls in updateSessionFromEvent.
+	prov.SendEvent(domain.NewToolCallEvent(sessionID, domain.ToolCallData{
+		ID:     providerCallID,
+		Name:   toolName,
+		Status: "running",
+		Input:  toolInput,
+	}, nil))
+
+	// Close the first event stream to trigger flushPendingToolCalls.
+	close(prov.events)
+
+	// ── Phase 3: wait for the session to become suspended ───────────────────
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if s, _ := executor.GetSession(sessionID); s != nil && s.GetState() == domain.SessionStateSuspended {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	sess, _ := executor.GetSession(sessionID)
+	if sess == nil {
+		t.Fatal("session not found after tool call")
+	}
+	if sess.GetState() != domain.SessionStateSuspended {
+		t.Fatalf("expected Suspended after tool call, got %v", sess.GetState())
+	}
+
+	// Verify a suspension context was stored.
+	if sess.GetSuspensionContext() == nil {
+		t.Error("expected a suspension context to be set on the session")
+	}
+
+	// Verify the eval was created in storage.
+	evalsForSession, err := evalStorage.ListEvalsForSession(sessionID)
+	if err != nil {
+		t.Fatalf("ListEvalsForSession: %v", err)
+	}
+	if len(evalsForSession) == 0 {
+		t.Fatal("expected at least one eval in storage after tool call event")
+	}
+
+	// ── Phase 4: unblock the tool handler, wait for ResumeWithToolResults ───
+	// Release the tool handler gate so it can complete the eval. OnSessionWake
+	// fires when the eval reaches a terminal state, which calls
+	// resumeSessionWithToolResults → prov.ResumeWithToolResults → prov.resumeCh.
+	close(toolGate)
+
+	var receivedResults []session.ToolResult
+	select {
+	case receivedResults = <-prov.resumeCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for ResumeWithToolResults to be called")
+	}
+
+	if len(receivedResults) == 0 {
+		t.Fatal("expected tool results to be passed to ResumeWithToolResults")
+	}
+
+	gotResult := receivedResults[0]
+	if gotResult.ToolCallID != providerCallID {
+		t.Errorf("tool call ID: got %q, want %q", gotResult.ToolCallID, providerCallID)
+	}
+	if gotResult.Result != toolResult {
+		t.Errorf("tool result content: got %q, want %q", gotResult.Result, toolResult)
+	}
+	if gotResult.IsError {
+		t.Errorf("expected IsError=false, got true")
+	}
+
+	// ── Phase 5: the session should now be running again ────────────────────
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if s, _ := executor.GetSession(sessionID); s != nil && s.GetState() == domain.SessionStateRunning {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if s, _ := executor.GetSession(sessionID); s == nil || s.GetState() != domain.SessionStateRunning {
+		t.Fatalf("session never returned to running state after tool result delivery")
+	}
+
+	// Verify the suspension context was cleared.
+	if s, _ := executor.GetSession(sessionID); s.GetSuspensionContext() != nil {
+		t.Error("suspension context should be cleared after resumption")
+	}
+
+	// ── Phase 6: close the second event stream → session returns to idle ────
+	close(prov.resumeEventCh)
+
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if s, _ := executor.GetSession(sessionID); s != nil && s.GetState() == domain.SessionStateIdle {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if s, _ := executor.GetSession(sessionID); s == nil || s.GetState() != domain.SessionStateIdle {
+		t.Fatalf("session never returned to idle state after second stream closed")
+	}
+
+	// Verify the eval reached the done state. We already received results via
+	// resumeCh which proves the eval completed; double-check storage reflects it.
+	deadline = time.Now().Add(2 * time.Second)
+	var terminalEval *toolcall.Eval
+	for time.Now().Before(deadline) {
+		latestEvals, _ := evalStorage.ListEvalsForSession(sessionID)
+		for _, e := range latestEvals {
+			if e.State == toolcall.EvalStateDone || e.State == toolcall.EvalStateError {
+				terminalEval = e
+				break
+			}
+		}
+		if terminalEval != nil {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if terminalEval == nil {
+		t.Error("expected eval to reach a terminal state (done or error) in storage")
+	} else if terminalEval.State != toolcall.EvalStateDone {
+		t.Errorf("expected eval state done, got %v (error: %s)", terminalEval.State, terminalEval.Error)
+	}
 }
 
 // ---------------------------------------------------------------------------

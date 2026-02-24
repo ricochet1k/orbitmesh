@@ -8,7 +8,7 @@ import { useProjectStore } from "../state/project"
 type FilesSearch = { path?: string }
 
 export default function FilesPage() {
-  const { activeProjectId, projects } = useProjectStore()
+  const { activeProjectId } = useProjectStore()
   const search = useSearch({ from: '/files' })
   const navigate = useNavigate()
 
@@ -30,12 +30,6 @@ export default function FilesPage() {
 
   const projectId = () => activeProjectId()
 
-  const activeProject = () => {
-    const id = projectId()
-    if (!id) return null
-    return projects().find((p) => p.id === id) ?? null
-  }
-
   return (
     <Show
       when={projectId()}
@@ -50,12 +44,6 @@ export default function FilesPage() {
     >
       {(pid) => (
         <div class="files-page ds-page">
-          <header class="view-header ds-page-header">
-            <div>
-              <p class="eyebrow ds-page-kicker">File browser</p>
-              <h1>{activeProject()?.name ?? "Files"}</h1>
-            </div>
-          </header>
           <div class={`file-viewer-shell${isTreeOpen() ? " tree-open" : ""}`}>
             <aside id="files-tree-panel" class={`file-tree-panel${isTreeOpen() ? " open" : ""}`}>
               <FileTree
@@ -71,6 +59,19 @@ export default function FilesPage() {
               onClick={() => setIsTreeOpen(false)}
             />
             <main class="file-editor-panel">
+              <Show when={selectedPath() === null}>
+                <div class="editor-toolbar files-page-toolbar">
+                  <button
+                    type="button"
+                    class="editor-tree-toggle"
+                    aria-label={isTreeOpen() ? "Hide files" : "Browse files"}
+                    aria-expanded={isTreeOpen()}
+                    onClick={() => setIsTreeOpen((open) => !open)}
+                  >
+                    <span aria-hidden="true">☰</span>
+                  </button>
+                </div>
+              </Show>
               <FileEditor
                 projectId={pid()}
                 path={selectedPath()}

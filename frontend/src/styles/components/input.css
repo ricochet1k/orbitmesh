@@ -72,7 +72,7 @@ input[type="tel"]:not(:disabled):hover,
 textarea:not(:disabled):hover,
 select:not(:disabled):hover {
   border-color: var(--color-primary);
-  background-color: white;
+  background-color: var(--color-surface-0);
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.05);
 }
 
@@ -95,7 +95,7 @@ textarea:focus,
 select:focus {
   outline: none;
   border-color: var(--color-primary);
-  background-color: white;
+  background-color: var(--color-surface-0);
   box-shadow: var(--focus-shadow);
 }
 
@@ -488,7 +488,7 @@ select:focus {
 }
 
 .input-filled:focus {
-  background-color: white;
+  background-color: var(--color-surface-0);
   border-color: var(--color-primary);
 }
 
