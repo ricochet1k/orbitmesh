@@ -19,8 +19,9 @@ import (
 	"github.com/ricochet1k/orbitmesh/internal/provider/common/acp"
 	"github.com/ricochet1k/orbitmesh/internal/provider/common/claude"
 	"github.com/ricochet1k/orbitmesh/internal/provider/common/claudews"
+	openaiProvider "github.com/ricochet1k/orbitmesh/internal/provider/common/openai"
 	"github.com/ricochet1k/orbitmesh/internal/provider/native"
-	"github.com/ricochet1k/orbitmesh/internal/provider/pty"
+	ptyProvider "github.com/ricochet1k/orbitmesh/internal/provider/pty"
 	"github.com/ricochet1k/orbitmesh/internal/service"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
@@ -50,23 +51,12 @@ func main() {
 	projectStorage := storage.NewProjectStorage(baseDir)
 
 	factory := provider.NewDefaultFactory()
-	factory.Register("adk", func(sessionID string, config session.Config) (session.Session, error) {
-		return native.NewADKSession(sessionID, adkConfigFromProvider(config)), nil
-	})
-	factory.Register("pty", func(sessionID string, config session.Config) (session.Session, error) {
-		return pty.NewPTYProvider(sessionID), nil
-	})
-	factory.Register("claude", func(sessionID string, config session.Config) (session.Session, error) {
-		return claude.NewClaudeCodeProvider(sessionID), nil
-	})
-	factory.Register("claude-ws", func(sessionID string, config session.Config) (session.Session, error) {
-		// permHandler is nil → auto-allow all tools.
-		// Callers can wire a custom handler by constructing the provider directly.
-		return claudews.NewClaudeWSProvider(sessionID, nil), nil
-	})
-	factory.Register("acp", func(sessionID string, config session.Config) (session.Session, error) {
-		return acp.NewSession(sessionID, acpConfigFromProvider(config), config)
-	})
+	factory.Register("adk", native.NewADKProvider())
+	factory.Register("pty", ptyProvider.NewPTYProviderFactory())
+	factory.Register("claude", claude.NewClaudeProvider())
+	factory.Register("claude-ws", claudews.NewClaudeWSProviderFactory())
+	factory.Register("acp", acp.NewProvider(acp.Config{}))
+	factory.Register("openai", openaiProvider.NewProvider(openaiProvider.Config{}))
 
 	broadcaster := service.NewEventBroadcaster(100)
 
@@ -89,6 +79,7 @@ func main() {
 	r.Use(api.CSRFMiddleware)
 
 	handler := api.NewHandler(executor, broadcaster, store, providerStorage, agentStorage, projectStorage)
+	handler.SetProviderTester(factory)
 	handler.Mount(r)
 	addr := listenAddr()
 
@@ -121,42 +112,4 @@ func main() {
 	}
 
 	fmt.Println("OrbitMesh shut down cleanly")
-}
-
-func acpConfigFromProvider(config session.Config) acp.Config {
-	cfg := acp.Config{}
-	if config.Custom == nil {
-		return cfg
-	}
-	if command, ok := config.Custom["acp_command"].(string); ok && command != "" {
-		cfg.Command = command
-	}
-	if args, ok := config.Custom["acp_args"].([]any); ok {
-		for _, a := range args {
-			if s, ok := a.(string); ok {
-				cfg.Args = append(cfg.Args, s)
-			}
-		}
-	}
-	return cfg
-}
-
-func adkConfigFromProvider(config session.Config) native.ADKConfig {
-	adkCfg := native.ADKConfig{}
-	if config.Custom == nil {
-		return adkCfg
-	}
-	if model, ok := config.Custom["model"].(string); ok && model != "" {
-		adkCfg.Model = model
-	}
-	if useVertex, ok := config.Custom["use_vertex_ai"].(bool); ok {
-		adkCfg.UseVertexAI = useVertex
-	}
-	if projectID, ok := config.Custom["vertex_project_id"].(string); ok && projectID != "" {
-		adkCfg.ProjectID = projectID
-	}
-	if location, ok := config.Custom["vertex_location"].(string); ok && location != "" {
-		adkCfg.Location = location
-	}
-	return adkCfg
 }

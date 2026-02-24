@@ -7,7 +7,7 @@
  */
 import { createSignal, For, Show, Switch, Match, untrack } from 'solid-js'
 import { createStore } from 'solid-js/store'
-import type { ProviderConfigRequest, ProviderConfigResponse } from '../../../types/api'
+import type { ProviderConfigRequest, ProviderConfigResponse, ProviderTestRequest } from '../../../types/api'
 import { PROVIDER_TYPES, initialProviderEdit, FormGroup } from './-_shared'
 import type { ProviderType } from './-_shared'
 import { ClaudeFields } from './-_claude'
@@ -15,6 +15,8 @@ import { ClaudeWsFields } from './-_claudews'
 import { AdkFields } from './-_adk'
 import { AcpFields } from './-_acp'
 import { PtyFields } from './-_pty'
+import { OpenAiFields } from './-_openai'
+import { apiClient } from '../../../api/client'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -43,8 +45,10 @@ export function ProviderForm(props: ProviderFormProps) {
     untrack(() => initialProviderEdit(props.provider)),
   )
 
-  const [error, setError]   = createSignal<string | null>(null)
-  const [saving, setSaving] = createSignal(false)
+  const [error, setError]       = createSignal<string | null>(null)
+  const [saving, setSaving]     = createSignal(false)
+  const [testing, setTesting]   = createSignal(false)
+  const [testResult, setTestResult] = createSignal<{ ok: boolean; message: string } | null>(null)
 
   // ---------------------------------------------------------------------------
   // Env-variable editor helpers
@@ -75,6 +79,82 @@ export function ProviderForm(props: ProviderFormProps) {
       delete next[key]
       return next
     })
+
+  // ---------------------------------------------------------------------------
+  // Helpers: assemble request objects from store
+  // ---------------------------------------------------------------------------
+
+  /** Build a ProviderTestRequest from the current store state. */
+  const buildTestRequest = (): ProviderTestRequest => {
+    const t = provider.type as ProviderType
+    const req: ProviderTestRequest = { type: t }
+
+    // Env (filter blank keys)
+    const env: Record<string, string> = {}
+    for (const [k, v] of Object.entries(provider.env ?? {})) {
+      if (k.trim()) env[k.trim()] = v
+    }
+    if (Object.keys(env).length > 0) req.env = env
+
+    req.custom = {}
+
+    // PTY: command
+    if (t === 'pty') {
+      const parts = provider.command.trim().split(/\s+/)
+      if (parts[0]) req.command = parts
+    }
+
+    // ACP
+    if (t === 'acp') {
+      const cmd = String(provider.scratch['acp_command'] ?? '').trim()
+      if (cmd) req.custom['acp_command'] = cmd
+    }
+
+    // Model (claude, claude-ws, adk, openai)
+    if (t === 'claude' || t === 'claude-ws' || t === 'adk' || t === 'openai') {
+      const model = String(provider.scratch['model'] ?? '').trim()
+      if (model) req.custom['model'] = model
+    }
+
+    // OpenAI base URL
+    if (t === 'openai') {
+      const baseURL = String(provider.scratch['base_url'] ?? '').trim()
+      if (baseURL) req.custom['base_url'] = baseURL
+    }
+
+    // ADK Vertex AI
+    if (t === 'adk') {
+      if (provider.scratch['use_vertex_ai']) {
+        req.custom['use_vertex_ai'] = true
+        const proj = String(provider.scratch['vertex_project_id'] ?? '').trim()
+        if (proj) req.custom['vertex_project_id'] = proj
+        const loc = String(provider.scratch['vertex_location'] ?? '').trim()
+        if (loc) req.custom['vertex_location'] = loc
+      }
+    }
+
+    if (Object.keys(req.custom).length === 0) delete req.custom
+    return req
+  }
+
+  // ---------------------------------------------------------------------------
+  // Test handler — validates config without saving
+  // ---------------------------------------------------------------------------
+
+  const handleTest = async (e: Event) => {
+    e.preventDefault()
+    setTestResult(null)
+    setError(null)
+    setTesting(true)
+    try {
+      const result = await apiClient.testProvider(buildTestRequest())
+      setTestResult(result)
+    } catch (err) {
+      setTestResult({ ok: false, message: String(err) })
+    } finally {
+      setTesting(false)
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // Submit handler — assembles ProviderConfigRequest from store
@@ -120,10 +200,16 @@ export function ProviderForm(props: ProviderFormProps) {
         if (rawArgs) config.custom!['acp_args'] = rawArgs.split(/\s+/)
       }
 
-      // --- Model (claude, claude-ws, adk) ---
-      if (t === 'claude' || t === 'claude-ws' || t === 'adk') {
+      // --- Model (claude, claude-ws, adk, openai) ---
+      if (t === 'claude' || t === 'claude-ws' || t === 'adk' || t === 'openai') {
         const model = String(provider.scratch['model'] ?? '').trim()
         if (model) config.custom!['model'] = model
+      }
+
+      // --- OpenAI base URL ---
+      if (t === 'openai') {
+        const baseURL = String(provider.scratch['base_url'] ?? '').trim()
+        if (baseURL) config.custom!['base_url'] = baseURL
       }
 
       // --- Claude shared fields ---
@@ -227,6 +313,9 @@ export function ProviderForm(props: ProviderFormProps) {
         <Match when={provider.type === 'pty'}>
           <PtyFields provider={provider} setProvider={setProvider} />
         </Match>
+        <Match when={provider.type === 'openai'}>
+          <OpenAiFields provider={provider} setProvider={setProvider} />
+        </Match>
       </Switch>
 
       {/* ── Environment variables ── */}
@@ -251,13 +340,13 @@ export function ProviderForm(props: ProviderFormProps) {
                   onInput={(e) => updateEnvVal(key, e.currentTarget.value)}
                   placeholder="Value"
                 />
-                <button type="button" class="btn-secondary" onClick={() => removeEnvEntry(key)}>
+                <button type="button" class="btn btn-secondary" onClick={() => removeEnvEntry(key)}>
                   Remove
                 </button>
               </div>
             )}
           </For>
-          <button type="button" class="btn-secondary" onClick={addEnvEntry}>
+          <button type="button" class="btn btn-secondary" onClick={addEnvEntry}>
             Add variable
           </button>
         </div>
@@ -279,11 +368,25 @@ export function ProviderForm(props: ProviderFormProps) {
         <p class="error-message">{error()}</p>
       </Show>
 
+      <Show when={testResult()}>
+        <p class={testResult()!.ok ? 'test-result test-result--ok' : 'test-result test-result--fail'}>
+          {testResult()!.ok ? '✓' : '✗'} {testResult()!.message}
+        </p>
+      </Show>
+
       <div class="form-actions">
-        <button type="button" class="btn-secondary" onClick={props.onCancel}>
+        <button type="button" class="btn btn-secondary" onClick={props.onCancel}>
           Cancel
         </button>
-        <button type="submit" class="btn-primary" disabled={saving()}>
+        <button
+          type="button"
+          class="btn btn-secondary"
+          onClick={handleTest}
+          disabled={testing() || saving() || !provider.type}
+        >
+          {testing() ? 'Testing…' : 'Test'}
+        </button>
+        <button type="submit" class="btn btn-primary" disabled={saving() || testing()}>
           {saving() ? 'Saving…' : props.provider ? 'Update' : 'Create'}
         </button>
       </div>

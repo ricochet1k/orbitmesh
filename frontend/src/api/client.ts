@@ -48,6 +48,8 @@ export const apiClient = {
   createProvider: providerApi.createProvider,
   updateProvider: providerApi.updateProvider,
   deleteProvider: providerApi.deleteProvider,
+  testProvider: providerApi.testProvider,
+  testSavedProvider: providerApi.testSavedProvider,
 
   // Agents
   listAgents: agentApi.listAgents,

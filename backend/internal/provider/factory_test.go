@@ -9,14 +9,26 @@ import (
 	"github.com/ricochet1k/orbitmesh/internal/session"
 )
 
+// mockProvider is a minimal Provider for testing the factory.
+type mockProvider struct {
+	createErr error
+	testErr   error
+}
+
+func (m *mockProvider) CreateSession(sessionID string, config session.Config) (session.Session, error) {
+	if m.createErr != nil {
+		return nil, m.createErr
+	}
+	return &mockSession{}, nil
+}
+
+func (m *mockProvider) TestConfig(ctx context.Context, config session.Config) error {
+	return m.testErr
+}
+
 func TestDefaultFactory_Register(t *testing.T) {
 	factory := NewDefaultFactory()
-
-	creator := func(sessionID string, config session.Config) (session.Session, error) {
-		return &mockSession{}, nil
-	}
-
-	factory.Register("test-provider", creator)
+	factory.Register("test-provider", &mockProvider{})
 
 	types := factory.SupportedTypes()
 	if len(types) != 1 {
@@ -29,12 +41,7 @@ func TestDefaultFactory_Register(t *testing.T) {
 
 func TestDefaultFactory_CreateSession(t *testing.T) {
 	factory := NewDefaultFactory()
-
-	creator := func(sessionID string, config session.Config) (session.Session, error) {
-		return &mockSession{}, nil
-	}
-
-	factory.Register("test-provider", creator)
+	factory.Register("test-provider", &mockProvider{})
 
 	sess, err := factory.CreateSession("test-provider", "session-1", session.Config{})
 
@@ -60,11 +67,7 @@ func TestDefaultFactory_CreateSessionWithError(t *testing.T) {
 	factory := NewDefaultFactory()
 
 	expectedErr := errors.New("creation failed")
-	creator := func(sessionID string, config session.Config) (session.Session, error) {
-		return nil, expectedErr
-	}
-
-	factory.Register("failing-provider", creator)
+	factory.Register("failing-provider", &mockProvider{createErr: expectedErr})
 
 	_, err := factory.CreateSession("failing-provider", "session-1", session.Config{})
 
@@ -80,13 +83,30 @@ func TestDefaultFactory_SupportedTypes(t *testing.T) {
 		t.Error("expected no types initially")
 	}
 
-	factory.Register("type1", func(string, session.Config) (session.Session, error) { return nil, nil })
-	factory.Register("type2", func(string, session.Config) (session.Session, error) { return nil, nil })
-	factory.Register("type3", func(string, session.Config) (session.Session, error) { return nil, nil })
+	factory.Register("type1", &mockProvider{})
+	factory.Register("type2", &mockProvider{})
+	factory.Register("type3", &mockProvider{})
 
 	types := factory.SupportedTypes()
 	if len(types) != 3 {
 		t.Errorf("expected 3 types, got %d", len(types))
+	}
+}
+
+func TestDefaultFactory_TestConfig(t *testing.T) {
+	factory := NewDefaultFactory()
+
+	factory.Register("good-provider", &mockProvider{})
+	factory.Register("bad-provider", &mockProvider{testErr: errors.New("bad key")})
+
+	if err := factory.TestConfig(context.Background(), "good-provider", session.Config{}); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if err := factory.TestConfig(context.Background(), "bad-provider", session.Config{}); err == nil {
+		t.Error("expected error for bad-provider")
+	}
+	if err := factory.TestConfig(context.Background(), "unknown-provider", session.Config{}); err == nil {
+		t.Error("expected error for unknown provider type")
 	}
 }
 

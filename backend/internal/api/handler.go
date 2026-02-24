@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -23,6 +24,12 @@ import (
 	realtimeTypes "github.com/ricochet1k/orbitmesh/pkg/realtime"
 )
 
+// ProviderTester is satisfied by *provider.DefaultFactory and allows the
+// handler to test provider configs without importing the full factory type.
+type ProviderTester interface {
+	TestConfig(ctx context.Context, providerType string, config session.Config) error
+}
+
 // Handler routes REST API requests to the agent executor service.
 type Handler struct {
 	executor        *service.AgentExecutor
@@ -31,6 +38,7 @@ type Handler struct {
 	providerStorage *storage.ProviderConfigStorage
 	agentStorage    *storage.AgentConfigStorage
 	projectStorage  *storage.ProjectStorage
+	providerTester  ProviderTester
 	gitDir          string
 	dockBridge      *DockBridge
 	realtimeHub     *realtime.Hub
@@ -53,6 +61,12 @@ func NewHandler(executor *service.AgentExecutor, broadcaster *service.EventBroad
 	}
 	h.startRealtimeBridge()
 	return h
+}
+
+// SetProviderTester wires the provider factory so the handler can serve the
+// POST /api/v1/providers/test endpoint.
+func (h *Handler) SetProviderTester(t ProviderTester) {
+	h.providerTester = t
 }
 
 // Mount registers all API routes on the provided router.
@@ -88,10 +102,12 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Post("/api/v1/sessions/{id}/extractor/replay", h.replayExtractor)
 	r.Get("/api/v1/providers", h.listProviders)
 	r.Get("/api/v1/providers/acp/runtime", h.getACPRuntimeStats)
+	r.Post("/api/v1/providers/test", h.testProvider)
 	r.Post("/api/v1/providers", h.createProvider)
 	r.Get("/api/v1/providers/{id}", h.getProvider)
 	r.Put("/api/v1/providers/{id}", h.updateProvider)
 	r.Delete("/api/v1/providers/{id}", h.deleteProvider)
+	r.Post("/api/v1/providers/{id}/test", h.testSavedProvider)
 	r.Get("/api/v1/agents", h.listAgents)
 	r.Post("/api/v1/agents", h.createAgent)
 	r.Get("/api/v1/agents/{id}", h.getAgent)
@@ -118,7 +134,7 @@ func (h *Handler) startRealtimeBridge() {
 	}
 	go func() {
 		for event := range sub.Events {
-			if event.SessionID != "" {
+			if event.SessionID != "" && event.Type != domain.EventTypeStatusChange {
 				h.realtimeHub.Publish(realtime.TopicSessionsActivity(event.SessionID), realtimeTypes.ServerEnvelope{
 					Type:    realtimeTypes.ServerMessageTypeEvent,
 					Topic:   realtime.TopicSessionsActivity(event.SessionID),
@@ -315,6 +331,48 @@ func (h *Handler) sendSessionMessage(w http.ResponseWriter, r *http.Request) {
 	model := strings.TrimSpace(req.Model)
 
 	var custom map[string]any
+	var environment map[string]string
+
+	// Look up stored provider config so its Custom and Env values are applied
+	// to every message send, not just the initial session creation.
+	if req.ProviderID != "" && h.providerStorage != nil {
+		if provCfg, err := h.providerStorage.Get(req.ProviderID); err == nil {
+			if len(provCfg.Custom) > 0 {
+				custom = make(map[string]any, len(provCfg.Custom))
+				for k, v := range provCfg.Custom {
+					custom[k] = v
+				}
+			}
+			// Merge Env from stored config (API key, etc.).
+			if len(provCfg.Env) > 0 {
+				environment = make(map[string]string, len(provCfg.Env))
+				for k, v := range provCfg.Env {
+					environment[k] = v
+				}
+			}
+			// Migrate legacy api_key field into the appropriate env var.
+			if provCfg.APIKey != "" {
+				if environment == nil {
+					environment = make(map[string]string, 1)
+				}
+				envKey := ""
+				switch provCfg.Type {
+				case "adk":
+					envKey = "GOOGLE_API_KEY"
+				case "anthropic", "claude", "claude-ws", "acp":
+					envKey = "ANTHROPIC_API_KEY"
+				case "openai":
+					envKey = "OPENAI_API_KEY"
+				}
+				if envKey != "" {
+					if _, ok := environment[envKey]; !ok {
+						environment[envKey] = provCfg.APIKey
+					}
+				}
+			}
+		}
+	}
+
 	if agentID != "" {
 		if h.agentStorage == nil {
 			writeError(w, http.StatusNotFound, "agent not found", "agent storage is not configured")
@@ -325,14 +383,16 @@ func (h *Handler) sendSessionMessage(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "agent not found", err.Error())
 			return
 		}
-		if len(cfg.Custom) > 0 {
-			custom = make(map[string]any, len(cfg.Custom)+1)
-			for k, v := range cfg.Custom {
-				custom[k] = v
+		// Agent custom values win over stored provider custom values.
+		for k, v := range cfg.Custom {
+			if custom == nil {
+				custom = make(map[string]any)
 			}
+			custom[k] = v
 		}
 	}
 
+	// Explicit per-request model wins over everything.
 	if model != "" {
 		if custom == nil {
 			custom = make(map[string]any, 1)
@@ -345,6 +405,7 @@ func (h *Handler) sendSessionMessage(w http.ResponseWriter, r *http.Request) {
 		ProviderType: req.ProviderType,
 		AgentID:      agentID,
 		Custom:       custom,
+		Environment:  environment,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrSessionNotFound) {

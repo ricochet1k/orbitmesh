@@ -2,6 +2,8 @@ import type {
   ProviderConfigRequest,
   ProviderConfigResponse,
   ProviderConfigListResponse,
+  ProviderTestRequest,
+  ProviderTestResponse,
 } from "../types/api";
 import { BASE_URL, withCSRFHeaders, readErrorMessage } from "./_base";
 
@@ -46,4 +48,25 @@ export async function deleteProvider(id: string): Promise<void> {
     headers: withCSRFHeaders(),
   });
   if (!resp.ok) throw new Error(await readErrorMessage(resp));
+}
+
+/** Test an unsaved provider config without creating a session. */
+export async function testProvider(req: ProviderTestRequest): Promise<ProviderTestResponse> {
+  const resp = await fetch(`${BASE_URL}/v1/providers/test`, {
+    method: "POST",
+    headers: withCSRFHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(req),
+  });
+  if (!resp.ok) throw new Error(await readErrorMessage(resp));
+  return resp.json();
+}
+
+/** Test a saved provider config by its stored ID. */
+export async function testSavedProvider(id: string): Promise<ProviderTestResponse> {
+  const resp = await fetch(`${BASE_URL}/v1/providers/${id}/test`, {
+    method: "POST",
+    headers: withCSRFHeaders(),
+  });
+  if (!resp.ok) throw new Error(await readErrorMessage(resp));
+  return resp.json();
 }
