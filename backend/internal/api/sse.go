@@ -60,6 +60,9 @@ func (h *Handler) sseEvents(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	for _, event := range replay {
+		if event.Type == domain.EventTypeStatusChange {
+			continue
+		}
 		if err := writeSSEEvent(w, event, includeRaw); err != nil {
 			return
 		}
@@ -76,6 +79,9 @@ func (h *Handler) sseEvents(w http.ResponseWriter, r *http.Request) {
 		case event, ok := <-sub.Events:
 			if !ok {
 				return
+			}
+			if event.Type == domain.EventTypeStatusChange {
+				continue
 			}
 			if err := writeSSEEvent(w, event, includeRaw); err != nil {
 				return
@@ -259,6 +265,10 @@ func convertEventData(e domain.Event) any {
 		}
 	case domain.ThoughtData:
 		return apiTypes.ThoughtData{Content: d.Content}
+	case domain.UserMessageData:
+		return apiTypes.UserMessageData{Content: d.Content}
+	case domain.SystemMessageData:
+		return apiTypes.SystemMessageData{Content: d.Content}
 	case domain.PlanData:
 		steps := make([]apiTypes.PlanStep, len(d.Steps))
 		for i, s := range d.Steps {

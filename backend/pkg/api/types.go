@@ -112,15 +112,17 @@ type SessionStatusResponse struct {
 type EventType string
 
 const (
-	EventTypeStatusChange EventType = "status_change"
-	EventTypeSessionState EventType = "session_state"
-	EventTypeOutput       EventType = "output"
-	EventTypeMetric       EventType = "metric"
-	EventTypeError        EventType = "error"
-	EventTypeMetadata     EventType = "metadata"
-	EventTypeToolCall     EventType = "tool_call"
-	EventTypeThought      EventType = "thought"
-	EventTypePlan         EventType = "plan"
+	EventTypeStatusChange  EventType = "status_change"
+	EventTypeSessionState  EventType = "session_state"
+	EventTypeOutput        EventType = "output"
+	EventTypeMetric        EventType = "metric"
+	EventTypeError         EventType = "error"
+	EventTypeMetadata      EventType = "metadata"
+	EventTypeToolCall      EventType = "tool_call"
+	EventTypeThought       EventType = "thought"
+	EventTypePlan          EventType = "plan"
+	EventTypeUserMessage   EventType = "user_message"
+	EventTypeSystemMessage EventType = "system_message"
 )
 
 type Event struct {
@@ -197,6 +199,14 @@ type PlanStep struct {
 type PlanData struct {
 	Description string     `json:"description,omitempty"`
 	Steps       []PlanStep `json:"steps,omitempty"`
+}
+
+type UserMessageData struct {
+	Content string `json:"content"`
+}
+
+type SystemMessageData struct {
+	Content string `json:"content"`
 }
 
 type ActivityEntry struct {
@@ -466,6 +476,22 @@ type ProviderConfigResponse struct {
 
 type ProviderConfigListResponse struct {
 	Providers []ProviderConfigResponse `json:"providers"`
+}
+
+// ProviderTestRequest is the body for POST /api/v1/providers/test.
+// It mirrors ProviderConfigRequest so callers can test an unsaved config.
+type ProviderTestRequest struct {
+	Type    string            `json:"type"`
+	Command []string          `json:"command,omitempty"`
+	APIKey  string            `json:"api_key,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+	Custom  map[string]any    `json:"custom,omitempty"`
+}
+
+// ProviderTestResponse is returned by the test endpoint.
+type ProviderTestResponse struct {
+	OK      bool   `json:"ok"`
+	Message string `json:"message"`
 }
 
 type Message struct {

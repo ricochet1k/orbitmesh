@@ -13,9 +13,11 @@ const (
 	EventTypeMetric
 	EventTypeError
 	EventTypeMetadata
-	EventTypeToolCall // Structured tool call information
-	EventTypeThought  // Agent reasoning/thinking
-	EventTypePlan     // Agent execution plans
+	EventTypeToolCall      // Structured tool call information
+	EventTypeThought       // Agent reasoning/thinking
+	EventTypePlan          // Agent execution plans
+	EventTypeUserMessage   // User-originated message sent to start a run
+	EventTypeSystemMessage // System-generated message (cancel, resume, etc.)
 )
 
 func (t EventType) String() string {
@@ -36,6 +38,10 @@ func (t EventType) String() string {
 		return "thought"
 	case EventTypePlan:
 		return "plan"
+	case EventTypeUserMessage:
+		return "user_message"
+	case EventTypeSystemMessage:
+		return "system_message"
 	default:
 		return "unknown"
 	}
@@ -244,5 +250,41 @@ func NewPlanEvent(sessionID string, data PlanData, raw json.RawMessage) Event {
 		SessionID: sessionID,
 		Raw:       raw,
 		Data:      data,
+	}
+}
+
+type UserMessageData struct {
+	Content string
+}
+
+func (e Event) UserMessage() (UserMessageData, bool) {
+	d, ok := e.Data.(UserMessageData)
+	return d, ok
+}
+
+func NewUserMessageEvent(sessionID, content string) Event {
+	return Event{
+		Type:      EventTypeUserMessage,
+		Timestamp: time.Now(),
+		SessionID: sessionID,
+		Data:      UserMessageData{Content: content},
+	}
+}
+
+type SystemMessageData struct {
+	Content string
+}
+
+func (e Event) SystemMessage() (SystemMessageData, bool) {
+	d, ok := e.Data.(SystemMessageData)
+	return d, ok
+}
+
+func NewSystemMessageEvent(sessionID, content string) Event {
+	return Event{
+		Type:      EventTypeSystemMessage,
+		Timestamp: time.Now(),
+		SessionID: sessionID,
+		Data:      SystemMessageData{Content: content},
 	}
 }

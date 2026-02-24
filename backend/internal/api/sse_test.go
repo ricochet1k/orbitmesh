@@ -242,15 +242,22 @@ func TestSSE_StatusChangeEvent(t *testing.T) {
 
 	events := readSSEEvents(resp)
 
+	// status_change events are filtered from the per-session activity stream;
+	// they are only emitted on the global /api/sessions/events endpoint.
+	// Send a status_change followed by a metric so we have a sentinel to drain to.
 	env.broadcaster.Broadcast(domain.NewStatusChangeEvent(sessionID, domain.SessionStateIdle, domain.SessionStateRunning, "started", nil))
+	env.broadcaster.Broadcast(domain.NewMetricEvent(sessionID, 1, 1, 1, nil))
 
 	select {
 	case ev := <-events:
-		if ev.Type != apiTypes.EventTypeStatusChange {
-			t.Errorf("Type = %q, want status_change", ev.Type)
+		if ev.Type == apiTypes.EventTypeStatusChange {
+			t.Errorf("status_change event should not appear on per-session SSE stream, got type %q", ev.Type)
+		}
+		if ev.Type != apiTypes.EventTypeMetric {
+			t.Errorf("expected metric sentinel, got %q", ev.Type)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for status_change event")
+		t.Fatal("timed out waiting for sentinel metric event")
 	}
 }
 
@@ -622,6 +629,11 @@ func TestConvertEventData_AllTypes(t *testing.T) {
 			event: domain.NewMetadataEvent("s1", "k", "v", nil),
 			want:  apiTypes.EventTypeMetadata,
 		},
+		{
+			name:  "user_message",
+			event: domain.NewUserMessageEvent("s1", "hello"),
+			want:  apiTypes.EventTypeUserMessage,
+		},
 	}
 
 	for _, tt := range tests {
@@ -714,8 +726,8 @@ func TestIntegration_SessionLifecycle(t *testing.T) {
 		t.Errorf("final state = %q, want idle", sess.State)
 	}
 
-	// 7. Drain any buffered SSE events — we should have received state changes
-	// from the executor's internal broadcasts (starting, running, paused, etc.)
+	// 7. Drain any buffered SSE events — status_change events are filtered from
+	// the per-session activity stream and should not appear here.
 	var received []apiTypes.Event
 	drainTimeout := time.After(500 * time.Millisecond)
 drain:
@@ -731,16 +743,10 @@ drain:
 		}
 	}
 
-	// At minimum we expect some status_change events from the executor
-	hasStatusChange := false
 	for _, ev := range received {
 		if ev.Type == apiTypes.EventTypeStatusChange {
-			hasStatusChange = true
-			break
+			t.Errorf("unexpected status_change event on per-session SSE stream")
 		}
-	}
-	if !hasStatusChange {
-		t.Error("expected at least one status_change event on SSE stream")
 	}
 }
 

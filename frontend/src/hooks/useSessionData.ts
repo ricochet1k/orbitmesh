@@ -16,6 +16,7 @@ import type {
   ServerEnvelope,
   SessionActivityEvent,
   SessionActivitySnapshot,
+  SessionStateEvent,
 } from "../types/generated/realtime"
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -67,7 +68,6 @@ export interface SessionData {
 
 const STREAM_EVENT_TYPES = [
   "output",
-  "status_change",
   "metric",
   "error",
   "metadata",
@@ -200,20 +200,6 @@ export function useSessionData({
         }
         break
       }
-      case "status_change": {
-        const { old_state, new_state } = payload.data
-        onStatusChange?.(new_state as SessionState)
-        onSessionRefetchNeeded?.()
-        pushMessage({
-          id: stableId("status"),
-          type: "system",
-          kind: "status_change",
-          timestamp: payload.timestamp,
-          content: `State changed: ${old_state} -> ${new_state}`,
-          raw: payload.raw,
-        })
-        break
-      }
       case "metric": {
         const { tokens_in, tokens_out, request_count } = payload.data
         pushMessage({
@@ -304,6 +290,19 @@ export function useSessionData({
           }],
           { sort: false },
         )
+        break
+      }
+      case "user_message": {
+        const { content } = payload.data
+        if (!content) break
+        pushMessage({
+          id: stableId("user_message"),
+          type: "user",
+          kind: "user",
+          timestamp: payload.timestamp,
+          content,
+          raw: payload.raw,
+        })
         break
       }
     }
@@ -427,8 +426,16 @@ export function useSessionData({
         }
         applyRealtimeEvent(payload)
       })
+      const unsubscribeState = realtimeClient.subscribe("sessions.state", (message: ServerEnvelope) => {
+        if (message.type !== "event") return
+        const stateEvent = message.payload as SessionStateEvent
+        if (stateEvent.session_id !== id) return
+        onStatusChange?.(stateEvent.derived_state as SessionState)
+        onSessionRefetchNeeded?.()
+      })
       closeStream = () => {
         unsubscribeTopic()
+        unsubscribeState()
         unsubscribeStatus()
       }
     } else {

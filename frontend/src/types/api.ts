@@ -133,6 +133,10 @@ export interface PlanData {
   steps?: PlanStep[];
 }
 
+export interface UserMessageData {
+  content: string;
+}
+
 export interface SessionStateStreamEvent {
   event_id: number;
   type: "session_state";
@@ -152,8 +156,9 @@ export type SSEEvent =
   | { event_id: number; type: "error";         timestamp: string; session_id: string; data: ErrorData; raw?: unknown }
   | { event_id: number; type: "metadata";      timestamp: string; session_id: string; data: MetadataData; raw?: unknown }
   | { event_id: number; type: "tool_call";     timestamp: string; session_id: string; data: ToolCallData; raw?: unknown }
-  | { event_id: number; type: "thought";       timestamp: string; session_id: string; data: ThoughtData; raw?: unknown }
-  | { event_id: number; type: "plan";          timestamp: string; session_id: string; data: PlanData; raw?: unknown }
+  | { event_id: number; type: "thought";        timestamp: string; session_id: string; data: ThoughtData; raw?: unknown }
+  | { event_id: number; type: "plan";           timestamp: string; session_id: string; data: PlanData; raw?: unknown }
+  | { event_id: number; type: "user_message";   timestamp: string; session_id: string; data: UserMessageData; raw?: unknown }
 
 export type SSEEventType = SSEEvent["type"]
 
@@ -431,6 +436,19 @@ export interface ProviderConfigResponse {
 
 export interface ProviderConfigListResponse {
   providers: ProviderConfigResponse[];
+}
+
+export interface ProviderTestRequest {
+  type: string;
+  command?: string[];
+  api_key?: string;
+  env?: Record<string, string>;
+  custom?: Record<string, any>;
+}
+
+export interface ProviderTestResponse {
+  ok: boolean;
+  message: string;
 }
 
 // ── Agent configuration (decoupled from Provider) ─────────────────────────

@@ -145,7 +145,7 @@ func (e *AgentExecutor) CancelRun(ctx context.Context, id string) error {
 	}
 
 	e.closeTerminalHub(id)
-	e.appendSessionMessage(sc.session, domain.MessageKindSystem, "Run cancelled by user", time.Now())
+	e.emitSynthesized(sc.session, domain.NewSystemMessageEvent(id, "Run cancelled by user"))
 	e.finalizeRunAttempt(sc, "cancelled", "run cancelled by user")
 	e.transitionWithSave(sc, domain.SessionStateIdle, "run cancelled by user")
 	return nil
@@ -251,7 +251,7 @@ func (e *AgentExecutor) resumeSessionValidated(ctx context.Context, id string, t
 	if sc.session.GetState() == domain.SessionStateSuspended {
 		e.transitionWithSave(sc, domain.SessionStateIdle, "resume token accepted; provider continuation unavailable")
 	}
-	e.appendSessionMessage(sc.session, domain.MessageKindSystem, "[resume] Resume token accepted. Provider continuation is unavailable; send a new message to continue.", time.Now())
+	e.emitSynthesized(sc.session, domain.NewSystemMessageEvent(sc.session.ID, "[resume] Resume token accepted. Provider continuation is unavailable; send a new message to continue."))
 	if e.storage != nil {
 		if err := e.storage.Save(sc.session); err != nil {
 			return nil, fmt.Errorf("failed to save session: %w", err)
@@ -372,6 +372,7 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 		SessionKind:  sess.Kind,
 		Title:        sess.Title,
 		Custom:       custom,
+		Environment:  options.Environment,
 	}
 
 	prov, err := e.sessionFactory(pType, id, config)
@@ -388,7 +389,7 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 	run := session.NewProviderRun(prov, e.ctx)
 	sc.setRun(run)
 
-	e.appendSessionMessage(sess, domain.MessageKindUser, content, time.Now())
+	e.emitSynthesized(sess, domain.NewUserMessageEvent(id, content))
 	if e.storage != nil {
 		_ = e.storage.Save(sess)
 	}
@@ -409,15 +410,13 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 		if err != nil {
 			errMsg := fmt.Sprintf("Provider failed to start: %v", err)
 			log.Printf("SESSION START FAILED: %v", errMsg)
-			e.appendSessionMessage(sc.session, domain.MessageKindError, errMsg, time.Now())
+			e.emitSynthesized(sc.session, domain.NewErrorEvent(id, errMsg, "SESSION_START_FAILED", nil))
 			e.finalizeRunAttempt(sc, "failed", errMsg)
 			run.SetError(err)
 
 			if e.storage != nil {
 				_ = e.storage.Save(sc.session)
 			}
-
-			e.broadcaster.Broadcast(domain.NewErrorEvent(id, errMsg, "SESSION_START_FAILED", nil))
 
 			e.mu.Lock()
 			sc.setRun(nil)
@@ -502,14 +501,11 @@ func (e *AgentExecutor) handlePanic(sc *sessionContext, r any) {
 	errMsg := fmt.Sprintf("Panic recovered: %v", r)
 	log.Printf("PANIC: %v", errMsg)
 
-	e.appendSessionMessage(sc.session, domain.MessageKindError, errMsg, time.Now())
+	e.emitSynthesized(sc.session, domain.NewErrorEvent(sc.session.ID, errMsg, "PANIC", nil))
 	e.finalizeRunAttempt(sc, "failed", errMsg)
 	_ = sc.session.TransitionTo(domain.SessionStateIdle, errMsg)
 
 	if e.storage != nil {
 		_ = e.storage.Save(sc.session)
 	}
-
-	event := domain.NewErrorEvent(sc.session.ID, errMsg, "PANIC", nil)
-	e.broadcaster.Broadcast(event)
 }
