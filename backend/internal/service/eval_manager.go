@@ -362,6 +362,12 @@ func (m *EvalManager) Fail(evalID string, err error) error {
 
 // Suspend transitions the eval to suspended state, persists handler state and
 // deps, and registers a watch with the wakeup registry.
+//
+// The watch is registered while holding m.mu so that a concurrent Complete or
+// Fail that calls Notify cannot slip in between the state mutation and the
+// Watch registration, which would leave the eval permanently un-wakeable.
+// m.mu and wakeup.mu (an internal lock in the registry) are independent, so
+// calling Watch under m.mu is safe and does not introduce a deadlock.
 func (m *EvalManager) Suspend(evalID string, handlerState json.RawMessage, deps []toolcall.Dependency) error {
 	m.mu.Lock()
 	e, ok := m.evals[evalID]
@@ -374,20 +380,26 @@ func (m *EvalManager) Suspend(evalID string, handlerState json.RawMessage, deps 
 	e.HandlerState = handlerState
 	e.DepsWaiting = deps
 	e.UpdatedAt = now
-	m.mu.Unlock()
-
-	if err := m.storage.SaveEval(e); err != nil {
-		return fmt.Errorf("failed to persist suspended eval %s: %w", evalID, err)
-	}
-
-	if err := m.wakeup.Watch("eval", evalID, deps); err != nil {
+	// Take a value snapshot for storage write before releasing the lock.
+	snapshot := *e
+	// Register the watch while still holding m.mu so that any concurrent
+	// Complete/Fail that tries to set a terminal state cannot call Notify
+	// before our watch is registered.
+	watchErr := m.wakeup.Watch("eval", evalID, deps)
+	if watchErr != nil {
 		// Revert to running state so the caller knows the suspend failed.
-		m.mu.Lock()
 		e.State = toolcall.EvalStateRunning
 		e.HandlerState = nil
 		e.DepsWaiting = nil
-		m.mu.Unlock()
-		return fmt.Errorf("wakeup watch failed for eval %s: %w", evalID, err)
+	}
+	m.mu.Unlock()
+
+	if watchErr != nil {
+		return fmt.Errorf("wakeup watch failed for eval %s: %w", evalID, watchErr)
+	}
+
+	if err := m.storage.SaveEval(&snapshot); err != nil {
+		return fmt.Errorf("failed to persist suspended eval %s: %w", evalID, err)
 	}
 
 	return nil
@@ -406,13 +418,18 @@ func (m *EvalManager) Cancel(evalID string) error {
 	e.State = toolcall.EvalStateError
 	e.Error = "cancelled"
 	e.UpdatedAt = now
+	// Take a value snapshot while holding the lock so the storage write uses a
+	// stable snapshot that cannot be modified by a concurrent mutation.
+	snapshot := *e
 	m.mu.Unlock()
 
-	if err := m.storage.SaveEval(e); err != nil {
+	if err := m.storage.SaveEval(&snapshot); err != nil {
 		return fmt.Errorf("failed to persist cancelled eval %s: %w", evalID, err)
 	}
 
 	m.wakeup.Cancel("eval", evalID)
+	// Notify only after the storage write completes so readers see the terminal
+	// state in storage before any wake callback fires.
 	m.wakeup.Notify(toolcall.Dependency{Kind: "eval", ID: evalID})
 	return nil
 }
@@ -430,6 +447,10 @@ func (m *EvalManager) Get(evalID string) (*toolcall.Eval, error) {
 
 // updateState applies mut to the in-memory eval, persists it, and fires a
 // wakeup notification if the new state is terminal.
+//
+// Ordering guarantee: storage write always completes before Notify fires.
+// We take a value snapshot under the lock so that concurrent Complete/Fail
+// calls cannot corrupt what gets written to storage.
 func (m *EvalManager) updateState(evalID string, mut func(*toolcall.Eval)) error {
 	m.mu.Lock()
 	e, ok := m.evals[evalID]
@@ -439,15 +460,21 @@ func (m *EvalManager) updateState(evalID string, mut func(*toolcall.Eval)) error
 	}
 	mut(e)
 	e.UpdatedAt = time.Now().UTC()
+	// Take a value copy while holding the lock so the storage write uses a
+	// stable snapshot that cannot be modified by a concurrent mutation.
+	snapshot := *e
 	m.mu.Unlock()
 
-	log.Printf("EvalManager updateState %v %v", evalID, e)
+	log.Printf("EvalManager updateState %v %v", evalID, snapshot)
 
-	if err := m.storage.SaveEval(e); err != nil {
+	if err := m.storage.SaveEval(&snapshot); err != nil {
 		return fmt.Errorf("failed to persist eval %s: %w", evalID, err)
 	}
 
-	if e.State == toolcall.EvalStateDone || e.State == toolcall.EvalStateError {
+	// Notify only after the storage write that put the eval into a terminal
+	// state has completed, ensuring readers can observe the terminal state
+	// from persistent storage before any wake callback fires.
+	if snapshot.State == toolcall.EvalStateDone || snapshot.State == toolcall.EvalStateError {
 		m.wakeup.Notify(toolcall.Dependency{Kind: "eval", ID: evalID})
 	}
 

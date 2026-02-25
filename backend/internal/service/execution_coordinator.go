@@ -606,17 +606,16 @@ func (e *AgentExecutor) resumeSessionWithToolResults(sessionID string, results [
 	// Re-launch the event loop for the new model turn. The provider has reset
 	// its event channel; we consume it in a new handleEvents call that runs
 	// to completion in the same goroutine as the current run.
-	// The original run.Ctx was cancelled by suspendSession, so create a fresh
-	// context rooted at the executor lifetime for this resumed phase.
-	resumeCtx, resumeCancel := context.WithCancel(e.ctx)
-	run.Ctx = resumeCtx
-	run.Cancel = resumeCancel
-	// Reset EventsDone so handleEvents can close it again for this new turn.
-	run.EventsDone = make(chan struct{})
+	// Create a fresh Run for this resumed turn rather than mutating the
+	// existing *Run (which may still be referenced by other goroutines).
+	// The old run's context was already cancelled by suspendSession.
+	resumeRun := session.NewProviderRun(run.Session, e.ctx)
+	resumeRun.MarkActive()
+	sc.setRun(resumeRun)
 	e.wg.Add(1)
-	e.handleEvents(run.Ctx, sc, run, events)
+	e.handleEvents(resumeRun.Ctx, sc, resumeRun, events)
 
-	if run.Ctx.Err() == nil {
+	if resumeRun.Ctx.Err() == nil {
 		e.finalizeRunAttempt(sc, "completed", "")
 		e.transitionWithSave(sc, domain.SessionStateIdle, "session run completed")
 	}
