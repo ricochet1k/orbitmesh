@@ -232,6 +232,23 @@
   line-height: 1.6;
 }
 
+/* Embedded CodeMirror inside ProseMirror code_block nodes */
+.pm-editor-container .ProseMirror [data-pm-code-block] {
+  border-radius: var(--radius-2, 4px);
+  overflow: hidden;
+  margin: var(--space-3, 0.75rem) 0;
+}
+
+.pm-editor-container .ProseMirror [data-pm-code-block] .cm-editor {
+  border-radius: var(--radius-2, 4px);
+  font-size: 0.85em;
+}
+
+.pm-editor-container .ProseMirror [data-pm-code-block] .cm-editor.cm-focused {
+  outline: 2px solid var(--accent-1, #2563eb);
+  outline-offset: 1px;
+}
+
 .code-editor-wrap {
   display: flex;
   flex-direction: column;

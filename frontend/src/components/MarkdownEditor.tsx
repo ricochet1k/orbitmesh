@@ -19,6 +19,10 @@ import {
   markdownParser,
   markdownSerializer,
 } from "./markdown/prosemirrorMarkdown"
+import {
+  CodeBlockView,
+  codeBlockArrowHandlers,
+} from "./markdown/CodeBlockView"
 
 import type { FileReadResponse } from "../api/files"
 
@@ -93,6 +97,7 @@ export default function MarkdownEditor(props: MarkdownEditorProps) {
       plugins: [
         history(),
         tableEditing(),
+        codeBlockArrowHandlers,
         pmKeymap({
           Tab: goToNextCell(1),
           "Shift-Tab": goToNextCell(-1),
@@ -108,6 +113,11 @@ export default function MarkdownEditor(props: MarkdownEditorProps) {
 
     return new PMEditorView(container, {
       state,
+      nodeViews: {
+        code_block(node, view, getPos) {
+          return new CodeBlockView(node, view, getPos)
+        },
+      },
       dispatchTransaction(tr) {
         const newState = pmView!.state.apply(tr)
         pmView!.updateState(newState)
