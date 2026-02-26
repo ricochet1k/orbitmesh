@@ -180,46 +180,50 @@ func (s *Store[T, S]) List() ([]Handle[T, S], error) {
 	return handles, nil
 }
 
-// ListIDs returns the stable identifiers of every entity known to the store,
-// merging the in-memory cache with the storage index.
+// ListIDs returns metadata (ID + timestamps) for every entity known to the
+// store, merging the in-memory cache with the storage index.
 //
 // Unlike List(), this never reads or parses individual entity files — the
 // storage implementation is expected to satisfy ListIDs() with a directory
 // scan or equivalent O(1)-per-entry operation.  Cold entities are NOT loaded
 // into the cache; callers that need a live handle should follow up with Get().
 //
+// In-memory-only entries (never persisted to disk from the store's perspective)
+// use zero timestamps.
+//
 // Typical use:
 //
-//	ids, err := store.ListIDs()
-//	for _, id := range ids {
-//	    h, err := store.Get(id)   // lazy-loads on demand
+//	metas, err := store.ListIDs()
+//	for _, m := range metas {
+//	    h, err := store.Get(m.ID)   // lazy-loads on demand
 //	    ...
 //	}
-func (s *Store[T, S]) ListIDs() ([]string, error) {
+func (s *Store[T, S]) ListIDs() ([]StoredMeta, error) {
 	// Collect in-memory IDs first (no storage I/O needed).
+	// In-memory entries use zero timestamps since we don't track creation time.
 	s.mapMu.RLock()
 	seen := make(map[string]bool, len(s.entries))
-	ids := make([]string, 0, len(s.entries))
+	metas := make([]StoredMeta, 0, len(s.entries))
 	for id := range s.entries {
 		seen[id] = true
-		ids = append(ids, id)
+		metas = append(metas, StoredMeta{ID: id})
 	}
 	s.mapMu.RUnlock()
 
 	if s.storage == nil {
-		return ids, nil
+		return metas, nil
 	}
 
 	stored, err := s.storage.ListIDs()
 	if err != nil {
 		return nil, fmt.Errorf("entity.Store.ListIDs: %w", err)
 	}
-	for _, id := range stored {
-		if !seen[id] {
-			ids = append(ids, id)
+	for _, m := range stored {
+		if !seen[m.ID] {
+			metas = append(metas, m)
 		}
 	}
-	return ids, nil
+	return metas, nil
 }
 
 // OnRestart iterates all persisted entities and calls hook for each one.

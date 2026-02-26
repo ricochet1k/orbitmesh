@@ -85,14 +85,14 @@ func (m *memStorage[S]) List() ([]S, error) {
 	return out, nil
 }
 
-func (m *memStorage[S]) ListIDs() ([]string, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	ids := make([]string, 0, len(m.data))
+func (m *memStorage[S]) ListIDs() ([]entity.StoredMeta, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	metas := make([]entity.StoredMeta, 0, len(m.data))
 	for id := range m.data {
-		ids = append(ids, id)
+		metas = append(metas, entity.StoredMeta{ID: id})
 	}
-	return ids, nil
+	return metas, nil
 }
 
 // errStorage always returns errors.
@@ -103,9 +103,11 @@ func (e *errStorage[S]) Load(string) (S, error) {
 	var zero S
 	return zero, errors.New("load error")
 }
-func (e *errStorage[S]) Delete(string) error        { return errors.New("delete error") }
-func (e *errStorage[S]) List() ([]S, error)         { return nil, errors.New("list error") }
-func (e *errStorage[S]) ListIDs() ([]string, error) { return nil, errors.New("listids error") }
+func (e *errStorage[S]) Delete(string) error { return errors.New("delete error") }
+func (e *errStorage[S]) List() ([]S, error)  { return nil, errors.New("list error") }
+func (e *errStorage[S]) ListIDs() ([]entity.StoredMeta, error) {
+	return nil, errors.New("listids error")
+}
 
 // captureBus captures published events.
 type captureBus struct {
@@ -429,22 +431,22 @@ func TestStore_ListIDs_MergesStorage(t *testing.T) {
 	// store, so we inject into a fresh store and add a live entry via Create).
 	_, _ = store.Create("hot1", &counter{ID: "hot1"})
 
-	ids, err := store.ListIDs()
+	metas, err := store.ListIDs()
 	if err != nil {
 		t.Fatalf("ListIDs: %v", err)
 	}
 	// Expect cold1, cold2, hot1 — no duplicates.
-	got := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		got[id] = true
+	got := make(map[string]bool, len(metas))
+	for _, m := range metas {
+		got[m.ID] = true
 	}
 	for _, want := range []string{"cold1", "cold2", "hot1"} {
 		if !got[want] {
-			t.Errorf("missing id %q in ListIDs result %v", want, ids)
+			t.Errorf("missing id %q in ListIDs result %v", want, metas)
 		}
 	}
-	if len(ids) != 3 {
-		t.Errorf("want 3 ids, got %d: %v", len(ids), ids)
+	if len(metas) != 3 {
+		t.Errorf("want 3 ids, got %d: %v", len(metas), metas)
 	}
 }
 
@@ -454,13 +456,13 @@ func TestStore_ListIDs_NoDuplicates(t *testing.T) {
 	store := newCounterStore(st, nil)
 	_, _ = store.Create("dup", &counter{ID: "dup"}) // persisted via Create
 
-	ids, err := store.ListIDs()
+	metas, err := store.ListIDs()
 	if err != nil {
 		t.Fatalf("ListIDs: %v", err)
 	}
 	count := 0
-	for _, id := range ids {
-		if id == "dup" {
+	for _, m := range metas {
+		if m.ID == "dup" {
 			count++
 		}
 	}
@@ -479,7 +481,7 @@ func TestStore_ListIDs_DoesNotLoadColdEntities(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListIDs: %v", err)
 	}
-	if len(ids) != 1 || ids[0] != "cold" {
+	if len(ids) != 1 || ids[0].ID != "cold" {
 		t.Fatalf("unexpected ids: %v", ids)
 	}
 

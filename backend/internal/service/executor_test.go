@@ -2192,14 +2192,14 @@ func (s *mockEvalStorage) List() ([]toolcall.EvalSnapshot, error) {
 	return snaps, nil
 }
 
-func (s *mockEvalStorage) ListIDs() ([]string, error) {
+func (s *mockEvalStorage) ListIDs() ([]entity.StoredMeta, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ids := make([]string, 0, len(s.evals))
+	metas := make([]entity.StoredMeta, 0, len(s.evals))
 	for id := range s.evals {
-		ids = append(ids, id)
+		metas = append(metas, entity.StoredMeta{ID: id})
 	}
-	return ids, nil
+	return metas, nil
 }
 
 // toolCallMockProvider is a mock provider that fully implements Suspendable
@@ -2356,12 +2356,12 @@ func TestAgentExecutor_ToolCallEndToEnd(t *testing.T) {
 	// Verify the eval was created in storage.
 	var evalsForSession []toolcall.EvalSnapshot
 	{
-		ids, err := evalStorage.ListIDs()
+		metas, err := evalStorage.ListIDs()
 		if err != nil {
 			t.Fatalf("ListIDs: %v", err)
 		}
-		for _, id := range ids {
-			snap, err := evalStorage.Load(id)
+		for _, m := range metas {
+			snap, err := evalStorage.Load(m.ID)
 			if err != nil {
 				continue
 			}
@@ -2438,9 +2438,9 @@ func TestAgentExecutor_ToolCallEndToEnd(t *testing.T) {
 	deadline = time.Now().Add(2 * time.Second)
 	var terminalEval *toolcall.EvalSnapshot
 	for time.Now().Before(deadline) {
-		ids, _ := evalStorage.ListIDs()
-		for _, id := range ids {
-			snap, err := evalStorage.Load(id)
+		metas, _ := evalStorage.ListIDs()
+		for _, m := range metas {
+			snap, err := evalStorage.Load(m.ID)
 			if err != nil {
 				continue
 			}

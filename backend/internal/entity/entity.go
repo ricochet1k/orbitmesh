@@ -31,6 +31,16 @@ type Snapshotter[S any] interface {
 	Snapshot() S
 }
 
+// StoredMeta is returned by TypedStorage.ListIDs and Store.ListIDs.
+// It carries the stable ID plus filesystem timestamps useful for sorting.
+// CreatedAt is the file birth time where available; it falls back to ModifiedAt
+// on platforms where birth time is not accessible.
+type StoredMeta struct {
+	ID         string
+	CreatedAt  time.Time
+	ModifiedAt time.Time
+}
+
 // TypedStorage handles persistence of snapshot values.  Save and Load operate
 // on the serialisable type S, never on the live T.
 type TypedStorage[S any] interface {
@@ -41,11 +51,10 @@ type TypedStorage[S any] interface {
 	// Used by OnRestart (which needs to reconstruct live T) and by List()
 	// (which warms the cache).  Prefer ListIDs when only the IDs are needed.
 	List() ([]S, error)
-	// ListIDs returns the stable identifiers of every persisted entity without
+	// ListIDs returns metadata (ID + timestamps) for every persisted entity without
 	// reading or parsing any entity file.  Implementations should satisfy this
-	// with a directory scan or equivalent index read — O(1) per entry, no
-	// per-entity I/O.
-	ListIDs() ([]string, error)
+	// with a directory scan — O(1) per entry, no per-entity I/O.
+	ListIDs() ([]StoredMeta, error)
 }
 
 // EventBus receives change notifications after every successful Mutate.

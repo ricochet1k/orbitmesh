@@ -161,14 +161,14 @@ func (c *EvalCoordinator) maybeWakeSession(sessionID string) {
 		return
 	}
 
-	ids, err := c.evals.ListIDs()
+	metas, err := c.evals.ListIDs()
 	if err != nil {
 		return
 	}
 
 	var results []session.ToolResult
-	for _, id := range ids {
-		h, err := c.evals.Get(id)
+	for _, m := range metas {
+		h, err := c.evals.Get(m.ID)
 		if err != nil {
 			continue
 		}
@@ -251,9 +251,9 @@ func (c *EvalCoordinator) DispatchBatch(
 // CancelEvalsForSession marks all non-terminal evals for the given session as
 // cancelled. Uses MutateWhen for idempotency — already-terminal evals are skipped.
 func (c *EvalCoordinator) CancelEvalsForSession(sessionID string) {
-	ids, _ := c.evals.ListIDs()
-	for _, id := range ids {
-		h, err := c.evals.Get(id)
+	metas, _ := c.evals.ListIDs()
+	for _, m := range metas {
+		h, err := c.evals.Get(m.ID)
 		if err != nil {
 			continue
 		}

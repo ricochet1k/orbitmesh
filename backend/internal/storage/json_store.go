@@ -136,22 +136,22 @@ func (js *JSONStore[S]) List() ([]S, error) {
 	return results, nil
 }
 
-// ListIDs scans the directory for .json files and returns the IDs (filenames minus the
-// ".json" suffix). Files with invalid IDs are silently skipped.
+// ListIDs scans the directory for .json files and returns StoredMeta (ID +
+// timestamps) for each valid entry. Files with invalid IDs are silently skipped.
 // If the directory does not exist, an empty slice is returned with no error.
-func (js *JSONStore[S]) ListIDs() ([]string, error) {
+func (js *JSONStore[S]) ListIDs() ([]entity.StoredMeta, error) {
 	js.mu.RLock()
 	defer js.mu.RUnlock()
 
 	entries, err := os.ReadDir(js.dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return []string{}, nil
+			return []entity.StoredMeta{}, nil
 		}
 		return nil, fmt.Errorf("failed to read directory %s: %w", js.dir, err)
 	}
 
-	ids := make([]string, 0, len(entries))
+	metas := make([]entity.StoredMeta, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
@@ -161,7 +161,17 @@ func (js *JSONStore[S]) ListIDs() ([]string, error) {
 			// Skip files with invalid names (e.g. temp files).
 			continue
 		}
-		ids = append(ids, id)
+		info, err := entry.Info()
+		if err != nil {
+			continue // file disappeared between ReadDir and Info
+		}
+		modTime := info.ModTime()
+		birthTime := fileBirthTime(info) // platform-specific helper
+		metas = append(metas, entity.StoredMeta{
+			ID:         id,
+			CreatedAt:  birthTime,
+			ModifiedAt: modTime,
+		})
 	}
-	return ids, nil
+	return metas, nil
 }
