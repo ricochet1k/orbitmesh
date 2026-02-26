@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/entity"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
 	"github.com/ricochet1k/orbitmesh/internal/terminal"
@@ -2147,53 +2148,58 @@ func TestAgentExecutor_MidRunCrashRecoveryWithCheckpoints(t *testing.T) {
 // Tool call end-to-end path
 // ---------------------------------------------------------------------------
 
-// mockEvalStorage is an in-memory EvalStorage implementation for testing.
+// mockEvalStorage is an in-memory entity.TypedStorage[toolcall.EvalSnapshot] implementation for testing.
 type mockEvalStorage struct {
 	mu    sync.Mutex
-	evals map[string]*toolcall.Eval
+	evals map[string]toolcall.EvalSnapshot
 }
 
 func newMockEvalStorage() *mockEvalStorage {
-	return &mockEvalStorage{evals: make(map[string]*toolcall.Eval)}
+	return &mockEvalStorage{evals: make(map[string]toolcall.EvalSnapshot)}
 }
 
-func (s *mockEvalStorage) SaveEval(e *toolcall.Eval) error {
+func (s *mockEvalStorage) Save(snap toolcall.EvalSnapshot) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	copy := *e
-	s.evals[e.ID] = &copy
+	s.evals[snap.ID] = snap
 	return nil
 }
 
-func (s *mockEvalStorage) LoadEval(evalID string) (*toolcall.Eval, error) {
+func (s *mockEvalStorage) Load(id string) (toolcall.EvalSnapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	e, ok := s.evals[evalID]
+	snap, ok := s.evals[id]
 	if !ok {
-		return nil, storage.ErrEvalNotFound
+		return toolcall.EvalSnapshot{}, entity.ErrNotFound
 	}
-	copy := *e
-	return &copy, nil
+	return snap, nil
 }
 
-func (s *mockEvalStorage) ListEvalsForSession(sessionID string) ([]*toolcall.Eval, error) {
+func (s *mockEvalStorage) Delete(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var out []*toolcall.Eval
-	for _, e := range s.evals {
-		if e.SessionID == sessionID {
-			copy := *e
-			out = append(out, &copy)
-		}
-	}
-	return out, nil
-}
-
-func (s *mockEvalStorage) DeleteEval(evalID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.evals, evalID)
+	delete(s.evals, id)
 	return nil
+}
+
+func (s *mockEvalStorage) List() ([]toolcall.EvalSnapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snaps := make([]toolcall.EvalSnapshot, 0, len(s.evals))
+	for _, snap := range s.evals {
+		snaps = append(snaps, snap)
+	}
+	return snaps, nil
+}
+
+func (s *mockEvalStorage) ListIDs() ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ids := make([]string, 0, len(s.evals))
+	for id := range s.evals {
+		ids = append(ids, id)
+	}
+	return ids, nil
 }
 
 // toolCallMockProvider is a mock provider that fully implements Suspendable
@@ -2348,9 +2354,21 @@ func TestAgentExecutor_ToolCallEndToEnd(t *testing.T) {
 	}
 
 	// Verify the eval was created in storage.
-	evalsForSession, err := evalStorage.ListEvalsForSession(sessionID)
-	if err != nil {
-		t.Fatalf("ListEvalsForSession: %v", err)
+	var evalsForSession []toolcall.EvalSnapshot
+	{
+		ids, err := evalStorage.ListIDs()
+		if err != nil {
+			t.Fatalf("ListIDs: %v", err)
+		}
+		for _, id := range ids {
+			snap, err := evalStorage.Load(id)
+			if err != nil {
+				continue
+			}
+			if snap.SessionID == sessionID {
+				evalsForSession = append(evalsForSession, snap)
+			}
+		}
 	}
 	if len(evalsForSession) == 0 {
 		t.Fatal("expected at least one eval in storage after tool call event")
@@ -2418,12 +2436,20 @@ func TestAgentExecutor_ToolCallEndToEnd(t *testing.T) {
 	// Verify the eval reached the done state. We already received results via
 	// resumeCh which proves the eval completed; double-check storage reflects it.
 	deadline = time.Now().Add(2 * time.Second)
-	var terminalEval *toolcall.Eval
+	var terminalEval *toolcall.EvalSnapshot
 	for time.Now().Before(deadline) {
-		latestEvals, _ := evalStorage.ListEvalsForSession(sessionID)
-		for _, e := range latestEvals {
-			if e.State == toolcall.EvalStateDone || e.State == toolcall.EvalStateError {
-				terminalEval = e
+		ids, _ := evalStorage.ListIDs()
+		for _, id := range ids {
+			snap, err := evalStorage.Load(id)
+			if err != nil {
+				continue
+			}
+			if snap.SessionID != sessionID {
+				continue
+			}
+			if snap.State == toolcall.EvalStateDone || snap.State == toolcall.EvalStateError {
+				snapCopy := snap
+				terminalEval = &snapCopy
 				break
 			}
 		}

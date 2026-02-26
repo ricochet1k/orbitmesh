@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/entity"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
+	"github.com/ricochet1k/orbitmesh/internal/toolcall"
 	"github.com/ricochet1k/orbitmesh/internal/tools"
 )
 
@@ -76,7 +78,7 @@ type AgentExecutor struct {
 	bootID             string
 	resumeTokenTTL     time.Duration
 
-	evalManager *EvalManager
+	evalCoordinator *EvalCoordinator
 
 	recovery *recoveryManager
 
@@ -95,7 +97,7 @@ type ExecutorConfig struct {
 	RunAttemptStorage  storage.RunAttemptStorage
 	ResumeTokenStorage storage.ResumeTokenStorage
 	ResumeTokenTTL     time.Duration
-	EvalStorage        storage.EvalStorage
+	EvalStorage        entity.TypedStorage[toolcall.EvalSnapshot]
 	ToolRegistry       tools.Registry
 }
 
@@ -146,17 +148,20 @@ func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
 		exec.resumeTokenTTL = 24 * time.Hour
 	}
 
-	// Wire up EvalManager if eval storage is provided.
+	// Wire up EvalCoordinator if eval storage is provided.
 	if cfg.EvalStorage != nil {
 		toolReg := cfg.ToolRegistry
 		if toolReg == nil {
 			toolReg = tools.Global()
 		}
-		em := NewEvalManager(toolReg, cfg.EvalStorage)
-		em.OnSessionWake = func(sessionID string, results []session.ToolResult) {
-			exec.resumeSessionWithToolResults(sessionID, results)
-		}
-		exec.evalManager = em
+		exec.evalCoordinator = NewEvalCoordinator(
+			ctx,
+			toolReg,
+			cfg.EvalStorage,
+			func(sessionID string, results []session.ToolResult) {
+				exec.resumeSessionWithToolResults(sessionID, results)
+			},
+		)
 	}
 
 	exec.recovery = newRecoveryManager(exec)

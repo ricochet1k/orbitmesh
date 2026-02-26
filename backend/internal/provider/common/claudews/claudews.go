@@ -724,8 +724,6 @@ func (p *ClaudeWSProvider) handleAuthStatus(rm RawMessage) {
 
 // processInput reads from the input buffer and sends user messages over WS.
 func (p *ClaudeWSProvider) processInput() {
-	defer p.wg.Done()
-
 	for {
 		select {
 		case <-p.ctx.Done():
@@ -749,8 +747,6 @@ func (p *ClaudeWSProvider) processInput() {
 
 // drainStderr reads and emits stderr lines from the subprocess.
 func (p *ClaudeWSProvider) drainStderr() {
-	defer p.wg.Done()
-
 	if p.processMgr == nil || p.processMgr.Stderr() == nil {
 		return
 	}

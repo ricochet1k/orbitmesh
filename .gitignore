@@ -46,3 +46,5 @@ node_modules
 tests/.orbitmesh-e2e
 .roam
 backend/acp-echo
+backend/orbitmesh
+tooltest

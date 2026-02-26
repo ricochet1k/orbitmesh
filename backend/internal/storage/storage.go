@@ -323,6 +323,55 @@ func (s *JSONFileStorage) getMessagesUnlocked(id string) ([]domain.Message, erro
 	return snap.Messages, nil
 }
 
+// atomicWriteFileAt creates dir if needed and atomically writes data to destPath.
+// prefix is used to name the temp file.
+func atomicWriteFileAt(dir, destPath, prefix string, data []byte) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", dir, err)
+	}
+
+	f, err := os.CreateTemp(dir, prefix+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrStorageWrite, err)
+	}
+	tmpName := f.Name()
+	_ = os.Chmod(tmpName, 0o600)
+
+	defer func() {
+		if f != nil {
+			f.Close()
+			_ = os.Remove(tmpName)
+		}
+	}()
+
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("%w: %v", ErrStorageWrite, err)
+	}
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("%w: %v", ErrStorageWrite, err)
+	}
+	if err := f.Close(); err != nil {
+		f = nil
+		return fmt.Errorf("%w: %v", ErrStorageWrite, err)
+	}
+	f = nil
+
+	if err := os.Rename(tmpName, destPath); err != nil {
+		return fmt.Errorf("%w: %v", ErrStorageWrite, err)
+	}
+
+	df, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrStorageWrite, err)
+	}
+	defer df.Close()
+	if err := df.Sync(); err != nil {
+		return fmt.Errorf("%w: %v", ErrStorageWrite, err)
+	}
+
+	return nil
+}
+
 func (s *JSONFileStorage) loadUnlocked(id string) (*domain.Session, error) {
 	filePath := s.sessionPath(id)
 

@@ -1,11 +1,14 @@
 package openai
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	oai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
@@ -16,6 +19,30 @@ import (
 	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/tools"
 )
+
+// openDumpWriter opens a buffered writer for JSONL stream dumps.
+// The path may contain a %s verb which is replaced with a timestamp so that
+// each session turn gets its own file.  Returns nil, nil when dumping is
+// disabled (i.e. OPENAI_STREAM_DUMP is not set).
+func openDumpWriter(sessionID string, turn int64) (*bufio.Writer, func(), error) {
+	path := os.Getenv("OPENAI_STREAM_DUMP")
+	if path == "" {
+		return nil, nil, nil
+	}
+	// Allow a %s placeholder that is replaced with "<sessionID>-t<turn>-<ts>".
+	stamp := fmt.Sprintf("%s-t%d-%s", sessionID, turn, time.Now().UTC().Format("20060102T150405Z"))
+	expanded := fmt.Sprintf(path, stamp)
+	f, err := os.OpenFile(expanded, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, nil, fmt.Errorf("openai stream dump: %w", err)
+	}
+	w := bufio.NewWriterSize(f, 64*1024)
+	flush := func() {
+		_ = w.Flush()
+		_ = f.Close()
+	}
+	return w, flush, nil
+}
 
 // Session is a single OpenAI chat conversation.  It maintains message history
 // so that follow-up SendInput calls append to the same thread.
@@ -169,6 +196,16 @@ func (s *Session) handleStream(
 	msgID := fmt.Sprintf("%s-t%d", s.sessionID, turn)
 	var acc oai.ChatCompletionAccumulator
 
+	// Open dump writer if OPENAI_STREAM_DUMP is set.  Errors are non-fatal;
+	// we log them as a warning event and continue without dumping.
+	dumpW, dumpClose, dumpErr := openDumpWriter(s.sessionID, turn)
+	if dumpErr != nil {
+		s.events.Emit(domain.NewErrorEvent(s.sessionID, dumpErr.Error(), "OPENAI_DUMP_OPEN_ERROR", nil))
+	}
+	if dumpClose != nil {
+		defer dumpClose()
+	}
+
 	// Announce a new (empty) assistant message so the live stream has an entry
 	// to append deltas into.
 	s.liveStream.MessageNew(session.Message{
@@ -178,6 +215,14 @@ func (s *Session) handleStream(
 
 	for stream.Next() {
 		chunk := stream.Current()
+
+		// Dump raw chunk as JSONL when enabled.
+		if dumpW != nil {
+			if raw, err := json.Marshal(chunk); err == nil {
+				_, _ = dumpW.Write(raw)
+				_ = dumpW.WriteByte('\n')
+			}
+		}
 
 		// Fix: check AddChunk return value; a false return means the chunk
 		// could not be accumulated (e.g. out-of-order, mismatched ID).

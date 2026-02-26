@@ -165,24 +165,26 @@ export function useSessionData({
         if (!content) break
         if (is_delta) {
           setMessages((prev) => {
-            const lastAgentIdx = [...prev].reverse().findIndex((m) => m.type === "agent" && m.open)
-            if (lastAgentIdx === -1) {
-              return [
-                ...prev,
-                {
-                  id: stableId("output"),
-                  type: "agent",
-                  kind: "output",
-                  timestamp: payload.timestamp,
-                  content,
-                  open: true,
-                  raw: payload.raw,
-                },
-              ]
+            // Only append to the last message if it is already an open output message.
+            // Searching backward for any open agent message causes out-of-order display
+            // when a tool_call or other event has been pushed since the output started.
+            const last = prev[prev.length - 1]
+            if (last && last.type === "agent" && last.open) {
+              const updated = { ...last, content: last.content + content }
+              return [...prev.slice(0, -1), updated]
             }
-            const realIdx = prev.length - 1 - lastAgentIdx
-            const updated = { ...prev[realIdx], content: prev[realIdx].content + content }
-            return [...prev.slice(0, realIdx), updated, ...prev.slice(realIdx + 1)]
+            return [
+              ...prev,
+              {
+                id: stableId("output"),
+                type: "agent",
+                kind: "output",
+                timestamp: payload.timestamp,
+                content,
+                open: true,
+                raw: payload.raw,
+              },
+            ]
           })
         } else {
           mergeMessages(
@@ -253,24 +255,51 @@ export function useSessionData({
         const { id: toolId, name, status, title, input, output } = payload.data
         const msgId = toolId ? `tool:${toolId}` : stableId("tool_call")
         const label = title || name
-        const detail =
-          output != null
-            ? `${label}: ${typeof output === "string" ? output : JSON.stringify(output)}`
-            : input != null
-              ? `${label}(${typeof input === "string" ? input : JSON.stringify(input)})`
-              : label
-        mergeMessages(
-          [{
-            id: msgId,
+
+        if (output != null) {
+          // Tool result: update the running tool_call to closed, then push the
+          // result as a separate message so it appears after any other messages
+          // that arrived while the tool was running.
+          mergeMessages(
+            [{
+              id: msgId,
+              type: "system",
+              kind: "tool_call",
+              timestamp: payload.timestamp,
+              content: input != null
+                ? `${label}(${typeof input === "string" ? input : JSON.stringify(input)})`
+                : label,
+              open: false,
+              raw: payload.raw,
+            }],
+            { sort: false },
+          )
+          pushMessage({
+            id: `${msgId}:result`,
             type: "system",
             kind: "tool_call",
             timestamp: payload.timestamp,
-            content: detail,
-            open: status === "running",
+            content: `${label}: ${typeof output === "string" ? output : JSON.stringify(output)}`,
+            open: false,
             raw: payload.raw,
-          }],
-          { sort: false },
-        )
+          })
+        } else {
+          const detail = input != null
+            ? `${label}(${typeof input === "string" ? input : JSON.stringify(input)})`
+            : label
+          mergeMessages(
+            [{
+              id: msgId,
+              type: "system",
+              kind: "tool_call",
+              timestamp: payload.timestamp,
+              content: detail,
+              open: status === "running",
+              raw: payload.raw,
+            }],
+            { sort: false },
+          )
+        }
         break
       }
       case "plan": {

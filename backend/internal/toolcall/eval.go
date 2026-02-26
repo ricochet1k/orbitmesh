@@ -5,6 +5,8 @@ package toolcall
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/ricochet1k/orbitmesh/internal/entity"
 )
 
 // EvalState represents the lifecycle state of a tool call evaluation.
@@ -77,4 +79,30 @@ type Eval struct {
 
 	// UpdatedAt is the time this eval was last modified.
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// EvalSnapshot is the serialisable projection of Eval.
+// Because Eval contains only value types, the snapshot type is identical.
+type EvalSnapshot = Eval
+
+// Snapshot implements entity.Snapshotter[EvalSnapshot].
+func (e *Eval) Snapshot() EvalSnapshot { return *e }
+
+// EntityID returns the stable identifier for this eval, satisfying entity.IDer.
+func (e *Eval) EntityID() string { return e.ID }
+
+// IsDone reports whether this eval has reached a terminal state,
+// satisfying entity.DepSource.
+func (e *Eval) IsDone() bool {
+	return e.State == EvalStateDone || e.State == EvalStateError
+}
+
+// Deps returns the dependencies this eval is currently waiting on,
+// satisfying entity.DepSource.
+func (e *Eval) Deps() []entity.Dep {
+	deps := make([]entity.Dep, len(e.DepsWaiting))
+	for i, d := range e.DepsWaiting {
+		deps[i] = entity.Dep{Kind: d.Kind, ID: d.ID}
+	}
+	return deps
 }

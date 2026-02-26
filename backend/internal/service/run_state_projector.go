@@ -55,7 +55,7 @@ func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.
 
 			// Accumulate for batch dispatch at stream close. Only "running"
 			// carries a complete input; "started" is a streaming preamble.
-			if data.Status == "running" && e.evalManager != nil {
+			if data.Status == "running" && e.evalCoordinator != nil {
 				var inputJSON json.RawMessage
 				switch v := data.Input.(type) {
 				case string:

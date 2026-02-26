@@ -7,7 +7,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -26,6 +28,7 @@ import (
 	"github.com/ricochet1k/orbitmesh/internal/service"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
+	"github.com/ricochet1k/orbitmesh/internal/toolcall"
 	"github.com/ricochet1k/orbitmesh/internal/tools"
 )
 
@@ -64,6 +67,70 @@ func main() {
 	}); err != nil {
 		log.Fatalf("tools register read_file: %v", err)
 	}
+
+	if err := tools.Global().Register(tools.ToolDef{
+		Name:        "bash",
+		Description: "Execute a bash command and return its output",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"The bash command to execute"}},"required":["command"]}`),
+		Handler: func(ctx context.Context, input json.RawMessage) (string, error) {
+			var args struct {
+				Command string `json:"command"`
+			}
+			if err := json.Unmarshal(input, &args); err != nil {
+				return "", fmt.Errorf("bash: invalid arguments: %w", err)
+			}
+			cmd := exec.CommandContext(ctx, "bash", "-c", args.Command)
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				return "", fmt.Errorf("bash: %w: %s", err, output)
+			}
+			return string(output), nil
+		},
+	}); err != nil {
+		log.Fatalf("tools register bash: %v", err)
+	}
+
+	if err := tools.Global().Register(tools.ToolDef{
+		Name:        "edit",
+		Description: "Make exact string replacements in a file",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"oldString":{"type":"string"},"newString":{"type":"string"},"replaceAll":{"type":"boolean"}},"required":["path","oldString","newString"]}`),
+		Handler: func(ctx context.Context, input json.RawMessage) (string, error) {
+			var args struct {
+				Path       string `json:"path"`
+				OldString  string `json:"oldString"`
+				NewString  string `json:"newString"`
+				ReplaceAll bool   `json:"replaceAll"`
+			}
+			if err := json.Unmarshal(input, &args); err != nil {
+				return "", fmt.Errorf("edit: invalid arguments: %w", err)
+			}
+			content, err := os.ReadFile(args.Path)
+			if err != nil {
+				return "", fmt.Errorf("edit: failed to read file: %w", err)
+			}
+			originalContent := string(content)
+			var newContent string
+			if args.ReplaceAll {
+				newContent = strings.Replace(originalContent, args.OldString, args.NewString, -1)
+			} else {
+				idx := strings.Index(originalContent, args.OldString)
+				if idx == -1 {
+					return "", fmt.Errorf("edit: no matches found for oldString")
+				}
+				newContent = originalContent[:idx] + args.NewString + originalContent[idx+len(args.OldString):]
+			}
+			if originalContent == newContent {
+				return "", fmt.Errorf("edit: no matches found for oldString")
+			}
+			if err := os.WriteFile(args.Path, []byte(newContent), 0o644); err != nil {
+				return "", fmt.Errorf("edit: failed to write file: %w", err)
+			}
+			return "edit completed successfully", nil
+		},
+	}); err != nil {
+		log.Fatalf("tools register edit: %v", err)
+	}
+
 	if err := tools.Global().Register(tools.ToolDef{
 		Name:        "write_file",
 		Description: "Write content to a file at the given path",
@@ -105,11 +172,16 @@ func main() {
 
 	broadcaster := service.NewEventBroadcaster(100)
 
+	evalStore := storage.NewJSONStore[toolcall.EvalSnapshot](
+		filepath.Join(baseDir, "evals"),
+		func(s toolcall.EvalSnapshot) string { return s.ID },
+	)
+
 	executor := service.NewAgentExecutor(service.ExecutorConfig{
 		Storage:         store,
 		TerminalStorage: store,
 		Broadcaster:     broadcaster,
-		EvalStorage:     store,
+		EvalStorage:     evalStore,
 		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
 			return factory.CreateSession(providerType, sessionID, config)
 		},

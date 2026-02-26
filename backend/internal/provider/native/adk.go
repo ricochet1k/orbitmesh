@@ -420,6 +420,7 @@ func (p *ADKSession) Stop(ctx context.Context) error {
 
 	done := make(chan struct{})
 	go func() {
+		// TODO: nothing adds to this waitgroup
 		p.wg.Wait()
 		close(done)
 	}()

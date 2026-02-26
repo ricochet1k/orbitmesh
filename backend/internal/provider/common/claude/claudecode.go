@@ -127,10 +127,9 @@ func (p *ClaudeCodeProvider) start(config session.Config) error {
 	p.lastMessageTime = time.Now()
 
 	// Start I/O goroutines
-	p.wg.Add(3)
-	go p.processStdout()
-	go p.processStderr()
-	go p.processInput()
+	p.wg.Go(p.processStdout)
+	p.wg.Go(p.processStderr)
+	p.wg.Go(p.processInput)
 
 	// Wait a moment for the process to initialize
 	time.Sleep(100 * time.Millisecond)
@@ -205,8 +204,6 @@ func (p *ClaudeCodeProvider) Status() session.Status {
 
 // processStdout reads and parses JSON messages from Claude's stdout.
 func (p *ClaudeCodeProvider) processStdout() {
-	defer p.wg.Done()
-
 	if p.processMgr == nil || p.processMgr.Stdout() == nil {
 		return
 	}
@@ -256,8 +253,6 @@ func (p *ClaudeCodeProvider) processStdout() {
 
 // processStderr reads error output from Claude's stderr.
 func (p *ClaudeCodeProvider) processStderr() {
-	defer p.wg.Done()
-
 	if p.processMgr == nil || p.processMgr.Stderr() == nil {
 		return
 	}
@@ -284,8 +279,6 @@ func (p *ClaudeCodeProvider) processStderr() {
 
 // processInput handles sending queued input to Claude's stdin.
 func (p *ClaudeCodeProvider) processInput() {
-	defer p.wg.Done()
-
 	for {
 		select {
 		case <-p.ctx.Done():

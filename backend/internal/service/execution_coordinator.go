@@ -67,37 +67,22 @@ func (e *AgentExecutor) handleEvents(ctx context.Context, sc *sessionContext, ru
 // turn and suspends the session waiting on all of them. This is called once per
 // stream close, never per-event, so the session is suspended exactly once
 // regardless of how many parallel tools the model requested.
-//
-// The two-phase prepare → suspend → launch ordering guarantees that the session
-// SuspensionContext is stored before any handler goroutine can complete and
-// trigger OnSessionWake, preventing the "no suspension context" race.
 func (e *AgentExecutor) flushPendingToolCalls(ctx context.Context, sc *sessionContext, calls []DispatchOptions) {
-	if e.evalManager == nil || len(calls) == 0 {
+	if e.evalCoordinator == nil || len(calls) == 0 {
 		return
 	}
 
-	sessionID := sc.session.ID
-
-	// Phase 1: create evals and register the session watch. No goroutines yet.
-	// Tool handlers run independently of the provider run, so they use the
-	// executor's own long-lived context rather than the run's context (which is
-	// cancelled by suspendSession below).
-	pending, deps, err := e.evalManager.PrepareDispatches(e.ctx, sessionID, calls)
+	deps, err := e.evalCoordinator.DispatchBatch(sc.session.ID, calls)
 	if err != nil {
-		log.Printf("PrepareDispatches failed for session %s: %v", sessionID, err)
+		log.Printf("DispatchBatch failed for session %s: %v", sc.session.ID, err)
 		return
 	}
 
-	// Phase 2: suspend the session and store the SuspensionContext.
-	// Use the last tool call ID for the suspension label (arbitrary for parallel
-	// calls; the deps slice is what actually matters for wake-up).
 	lastToolCallID := calls[len(calls)-1].ProviderToolCallID
 	e.suspendSession(sc, lastToolCallID, deps)
-
-	// Phase 3: now that the SuspensionContext is set, start the handler
-	// goroutines. Any handler that completes immediately will find the context
-	// already in place when OnSessionWake fires.
-	pending.Launch()
+	// No waiter goroutine needed. When all evals complete, onSessionDone
+	// (set at coordinator construction) calls resumeSessionWithToolResults
+	// directly. No channel, no blocked goroutine.
 }
 
 func (e *AgentExecutor) checkpointSession(sc *sessionContext) {
@@ -444,7 +429,7 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 		_ = e.storage.Save(sess)
 	}
 
-	e.wg.Go(func() {
+	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				e.handlePanic(sc, r)
@@ -478,6 +463,9 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 		e.transitionWithSave(sc, domain.SessionStateRunning, "session started")
 		e.ensureTerminalHubForPTY(sc)
 
+		// e.wg.Add(1) is paired with handleEvents' defer e.wg.Done().
+		// Do not use e.wg.Go here: that would double-decrement because
+		// handleEvents already manages its own Done.
 		e.wg.Add(1)
 		e.handleEvents(run.Ctx, sc, run, events)
 
@@ -496,7 +484,7 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 		e.mu.Lock()
 		sc.setRun(nil)
 		e.mu.Unlock()
-	})
+	}()
 
 	return sess, nil
 }
@@ -565,7 +553,7 @@ func (e *AgentExecutor) suspendSession(sc *sessionContext, toolCallID string, de
 
 // resumeSessionWithToolResults resumes a suspended session by injecting
 // completed tool results into the provider history and re-running the model.
-// It is called from the EvalManager's OnSessionWake callback, which fires
+// It is called from the EvalCoordinator's onSessionDone callback, which fires
 // from a tool handler goroutine.
 func (e *AgentExecutor) resumeSessionWithToolResults(sessionID string, results []session.ToolResult) {
 	sc, err := e.ensureSessionContext(sessionID)

@@ -154,22 +154,19 @@ func (p *PTYProvider) start(config session.Config) error {
 	// Already emitted idle->running at startup
 	p.started = true
 
-	p.wg.Add(1)
-	go p.processTerminalEvents()
+	p.wg.Go(p.processTerminalEvents)
 	if err := p.startActivityExtractor(command, args); err != nil {
 		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "extractor_warning", map[string]any{"error": err.Error()}, nil))
 	}
 
 	// Close the events channel when the process exits.
-	p.wg.Add(1)
-	go p.waitForExit()
+	p.wg.Go(p.waitForExit)
 
 	return nil
 }
 
 // waitForExit waits for the PTY command to terminate and closes the event channel.
 func (p *PTYProvider) waitForExit() {
-	defer p.wg.Done()
 	if p.cmd != nil {
 		_ = p.cmd.Wait()
 	}
@@ -221,7 +218,6 @@ func parsePTYArgs(rawArgs any) ([]string, error) {
 }
 
 func (p *PTYProvider) processTerminalEvents() {
-	defer p.wg.Done()
 	if p.terminalEvents == nil {
 		return
 	}
@@ -307,8 +303,7 @@ func (p *PTYProvider) startActivityExtractor(command string, args []string) erro
 
 	updates, unsubscribe := p.SubscribeTerminalUpdates(128)
 	p.activityUnsubscribe = unsubscribe
-	p.wg.Add(1)
-	go p.runActivityUpdates(updates)
+	p.wg.Go(func() { p.runActivityUpdates(updates) })
 
 	if snapshot, ok := terminal.SnapshotFromTerminal(p.terminal); ok {
 		_ = p.activity.HandleUpdate(terminal.Update{Kind: terminal.UpdateSnapshot, Snapshot: &snapshot})
@@ -317,7 +312,6 @@ func (p *PTYProvider) startActivityExtractor(command string, args []string) erro
 }
 
 func (p *PTYProvider) runActivityUpdates(updates <-chan terminal.Update) {
-	defer p.wg.Done()
 	for {
 		select {
 		case <-p.ctx.Done():
