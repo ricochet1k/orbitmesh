@@ -32,7 +32,7 @@ This document defines the roles and task templates used in the OrbitMesh project
 
 Agents should use the `strand` CLI to interact with tasks. Choose the command based on how the task is specified:
 
-- `strand next`: Get the next task assigned to your role (only when the user asks for ???the next task???).
+- `strand next`: Get the next task assigned to your role (only when the user asks for "the next task").
 - `strand next --claim`: Get and immediately claim the next task assigned to your role (only when explicitly asked to claim the next task).
 - When the user provides a specific task ID, do not call `strand next`. Use `strand show <id>` to load the task, then `strand claim <id>` before starting work unless the user explicitly asks you not to claim it.
 - `strand complete <id> --todo <num> "report"`: Complete a specific todo.
@@ -65,9 +65,19 @@ so you should use it to track work that needs to be done.
 ## Execution Guidelines
 
 1. **Iterative Execution**: Agents must complete ONE significant task at a time. After finishing a task, STOP and return control to the user or orchestrator. Do not chain multiple distinct tasks in a single session unless explicitly instructed.
-2. **Task Handoffs**: When you are asked to handoff to a new session, after wrapping up each task???whether completed or blocked???exit by launching a fresh session via `session` with `mode="new"` and enter the exact prompt `do the next task, you can commit at the end and then start a new session as in Task Handoffs` before returning control.
+2. **Task Handoffs**: When you are asked to handoff to a new session, after wrapping up each task (whether completed or blocked), exit by launching a fresh session via `session` with `mode="new"` and enter the exact prompt `do the next task, you can commit at the end and then start a new session as in Task Handoffs` before returning control.
 3. **Session Titles**: After receiving a new task, update the session title to `<role>: <task_title>` so the agenda stays clear.
 4. **Tests Required**: When code changes are made, run relevant tests before finishing the task and record whether they passed in your report.
+
+## Lifecycle Drain Contract
+
+When touching lifecycle/drain code, treat these as required expectations:
+
+- `BeginDrain` is idempotent and only transitions start policy; it does not cancel in-flight runs.
+- `AwaitDrain` blocks on active work and returns context errors on timeout/cancel.
+- New starts during drain must follow explicit policy (`reject` or `defer`) and deferred starts must be durable/replayable.
+- Deferred replay must stay migration-safe and idempotent across restarts, including legacy envelopes.
+- `DrainStatus` introspection must stay accurate for running waiters, dependency waiters, deferred ops, and replay-pending state.
 
 ## Live Documentation
 

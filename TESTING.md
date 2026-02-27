@@ -51,6 +51,15 @@ It is intentionally forward-looking and describes how tests should be structured
 - Keep tests independent and order-agnostic.
 - Avoid `waitForTimeout` unless there is no better signal; prefer observable state.
 
+## Lifecycle Contract Coverage
+
+Drain/deferred replay behavior is part of the reliability contract and must stay covered.
+
+- `ActiveStore` tests must validate drain mode transitions, idempotent drain calls, start policy behavior (reject/defer), deferred-op enqueue semantics, replay ordering, and replay idempotency.
+- Waiter introspection tests must validate `DrainStatus.WaitOn` reason accuracy (`running body`, `waiting dependency`, `deferred op`, `replay pending`) and transitions when dependencies complete.
+- Executor + eval integration tests must validate drain/await/interrupt interplay (including timeout paths) and verify waiters clear after force-stop/interrupt.
+- Migration/compatibility tests must include legacy deferred envelopes (for example missing idempotency fields) to ensure restart replay remains safe across schema evolution.
+
 ## Running Playwright Tests
 
 - UI-mock suite (mocked APIs): `cd frontend && npm run test:ui-mock`
@@ -77,4 +86,5 @@ It is intentionally forward-looking and describes how tests should be structured
 
 - Keep this document aligned with actual test tooling and layout.
 - Update fixtures and helpers whenever API contracts change.
+- When lifecycle semantics change, update both tests and this contract section in the same PR.
 - Track flaky tests and either stabilize or quarantine them quickly.

@@ -1008,6 +1008,149 @@ func TestAgentExecutor_ForceStop_AfterDrainTimeout(t *testing.T) {
 	}
 }
 
+func TestAgentExecutor_DrainStatus_TracksEvalWaitersAndClearsOnInterrupt(t *testing.T) {
+	const sessionID = "drain-eval-status"
+	const toolName = "slow_eval_tool"
+
+	toolGate := make(chan struct{})
+	reg := tools.NewRegistry()
+	if err := reg.Register(tools.ToolDef{
+		Name: toolName,
+		Handler: func(ctx context.Context, _ json.RawMessage) (string, error) {
+			select {
+			case <-toolGate:
+				return "ok", nil
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		},
+	}); err != nil {
+		t.Fatalf("register tool: %v", err)
+	}
+
+	prov := newToolCallMockProvider()
+	evalStorage := newMockEvalStorage()
+	store := newMockStorage()
+	broadcaster := NewEventBroadcaster(100)
+
+	executor := NewAgentExecutor(ExecutorConfig{
+		Storage:          store,
+		Broadcaster:      broadcaster,
+		ProviderFactory:  func(providerType, sessionID string, config session.Config) (session.Session, error) { return prov, nil },
+		OperationTimeout: 5 * time.Second,
+		EvalStorage:      evalStorage,
+		ToolRegistry:     reg,
+	})
+	toolGateClosed := false
+	closeToolGate := func() {
+		if toolGateClosed {
+			return
+		}
+		close(toolGate)
+		toolGateClosed = true
+	}
+	t.Cleanup(func() {
+		closeToolGate()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = executor.ForceStop(ctx)
+	})
+
+	if _, err := executor.StartSession(context.Background(), sessionID, session.Config{ProviderType: "test", WorkingDir: "/tmp"}); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if _, err := executor.SendMessage(context.Background(), sessionID, "run slow tool", "", ""); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+
+	prov.SendEvent(domain.NewToolCallEvent(sessionID, domain.ToolCallData{
+		ID:     "call-drain-eval",
+		Name:   toolName,
+		Status: "running",
+		Input:  `{}`,
+	}, nil))
+	close(prov.events)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		s, _ := executor.GetSession(sessionID)
+		if s != nil && s.GetState() == domain.SessionStateSuspended {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if s, _ := executor.GetSession(sessionID); s == nil || s.GetState() != domain.SessionStateSuspended {
+		t.Fatalf("session never entered suspended state")
+	}
+
+	executor.BeginDrain(context.Background())
+
+	statusDeadline := time.Now().Add(2 * time.Second)
+	foundEvalWaiter := false
+	for time.Now().Before(statusDeadline) {
+		status := executor.DrainStatus()
+		if status.Evals.Mode != entity.ActiveStoreModeDraining {
+			t.Fatalf("eval drain mode: want %q, got %q", entity.ActiveStoreModeDraining, status.Evals.Mode)
+		}
+		for _, wait := range status.Evals.WaitOn {
+			if wait.Reason == entity.ActiveStoreWaitReasonRunningBody || wait.Reason == entity.ActiveStoreWaitReasonWaitingDependency {
+				foundEvalWaiter = true
+				break
+			}
+		}
+		if foundEvalWaiter {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !foundEvalWaiter {
+		t.Fatalf("expected eval waiters while draining, status=%+v", executor.DrainStatus())
+	}
+
+	awaitCtx, cancelAwait := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancelAwait()
+	if err := executor.AwaitDrain(awaitCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("AwaitDrain: want context deadline exceeded, got %v", err)
+	}
+
+	executor.evalCoordinator.CancelEvalsForSession(sessionID)
+	closeToolGate()
+
+	awaitDoneCtx, cancelDone := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelDone()
+	if err := executor.AwaitDrain(awaitDoneCtx); err != nil {
+		t.Fatalf("AwaitDrain after cancel: %v", err)
+	}
+
+	post := executor.DrainStatus()
+	if len(post.Evals.WaitOn) != 0 {
+		t.Fatalf("expected no eval blockers after interrupt/cancel, got %+v", post.Evals.WaitOn)
+	}
+
+	metas, err := evalStorage.ListIDs()
+	if err != nil {
+		t.Fatalf("evalStorage.ListIDs: %v", err)
+	}
+	if len(metas) == 0 {
+		t.Fatal("expected eval snapshots to exist")
+	}
+
+	var sawTerminal bool
+	for _, m := range metas {
+		snap, err := evalStorage.Load(m.ID)
+		if err != nil || snap.SessionID != sessionID {
+			continue
+		}
+		if snap.State == toolcall.EvalStateDone || snap.State == toolcall.EvalStateError {
+			sawTerminal = true
+			break
+		}
+	}
+	if !sawTerminal {
+		t.Fatalf("expected terminal eval state for session %s", sessionID)
+	}
+}
+
 func TestAgentExecutor_SendMessage_DuringDrain_ReturnsShutdown(t *testing.T) {
 	prov := newMockProvider()
 	executor, _ := createTestExecutor(prov)

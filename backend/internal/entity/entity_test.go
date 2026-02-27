@@ -655,6 +655,7 @@ func newActiveCounterStore() *entity.ActiveStore[*counter, counterSnap] {
 			Kind:           "counter",
 			FromSnapshot:   func(s counterSnap) *counter { return &counter{ID: s.ID, Val: s.Val} },
 			IDFromSnapshot: func(s counterSnap) string { return s.ID },
+			IsDone:         func(s counterSnap) bool { return s.Val < 0 },
 		},
 	)
 }
@@ -723,6 +724,25 @@ func TestActiveStore_BeginDrain_TransitionsMode(t *testing.T) {
 
 	if got := s.LifecycleMode(); got != entity.ActiveStoreModeDraining {
 		t.Fatalf("mode after BeginDrain: want %q, got %q", entity.ActiveStoreModeDraining, got)
+	}
+}
+
+func TestActiveStore_BeginDrain_Idempotent(t *testing.T) {
+	s := newActiveCounterStore()
+
+	s.BeginDrain(context.Background())
+	first := s.DrainStatus().AsOf
+	s.BeginDrain(context.Background())
+
+	status := s.DrainStatus()
+	if status.Mode != entity.ActiveStoreModeDraining {
+		t.Fatalf("mode after repeated BeginDrain: want %q, got %q", entity.ActiveStoreModeDraining, status.Mode)
+	}
+	if status.AsOf.Before(first) {
+		t.Fatalf("status timestamp moved backwards: first=%s second=%s", first, status.AsOf)
+	}
+	if len(status.WaitOn) != 0 {
+		t.Fatalf("unexpected blockers in empty store: %+v", status.WaitOn)
 	}
 }
 
@@ -872,6 +892,7 @@ func TestActiveStore_DrainStatus_DrainingIncludesDependenciesAndDeferredOps(t *t
 			Kind:           "counter",
 			FromSnapshot:   func(s counterSnap) *counter { return &counter{ID: s.ID, Val: s.Val} },
 			IDFromSnapshot: func(s counterSnap) string { return s.ID },
+			IsDone:         func(s counterSnap) bool { return s.Val < 0 },
 		},
 		entity.WithDeferredOpStorage[*counter, counterSnap](deferredStorage),
 		entity.WithDrainStartPolicy[*counter, counterSnap](func(entity.ActiveStoreStartOp, string) entity.DrainStartPolicyDecision {
@@ -916,6 +937,28 @@ func TestActiveStore_DrainStatus_DrainingIncludesDependenciesAndDeferredOps(t *t
 	}
 	if !foundDeferred {
 		t.Fatalf("DrainStatus missing deferred op blocker: %+v", status.WaitOn)
+	}
+
+	_ = dep.Mutate(func(c **counter) { (*c).Val = -1 })
+	dep.MarkDone()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		status = s.DrainStatus()
+		var waiterEntry *entity.DrainWait
+		for i := range status.WaitOn {
+			if status.WaitOn[i].EntityID == "waiter" {
+				waiterEntry = &status.WaitOn[i]
+				break
+			}
+		}
+		if waiterEntry != nil && waiterEntry.Reason == entity.ActiveStoreWaitReasonRunningBody && len(waiterEntry.BlockedDeps) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("waiter dependency introspection did not clear after dep completion: %+v", status.WaitOn)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	dep.Stop()
@@ -1138,6 +1181,89 @@ func TestActiveStore_DeferredQueue_IdempotentReplay_NoDuplicateStarts(t *testing
 	}
 	if len(envelopes) != 0 {
 		t.Fatalf("expected duplicate deferred envelopes to be cleared, got %d", len(envelopes))
+	}
+}
+
+func TestActiveStore_DeferredQueue_LegacyEnvelopeWithoutIdempotency_ReplaysEachEnvelope(t *testing.T) {
+	entityStorage := newMemStorage(func(s counterSnap) string { return s.ID })
+	deferredStorage := newMemStorage(func(s entity.DeferredOpEnvelope) string { return s.EnvelopeID })
+	base := time.Now().UTC()
+
+	firstPayload, err := json.Marshal(map[string]counterSnap{"snapshot": {ID: "legacy-1", Val: 1}})
+	if err != nil {
+		t.Fatalf("marshal first payload: %v", err)
+	}
+	secondPayload, err := json.Marshal(map[string]counterSnap{"snapshot": {ID: "legacy-2", Val: 2}})
+	if err != nil {
+		t.Fatalf("marshal second payload: %v", err)
+	}
+
+	if err := deferredStorage.Save(entity.DeferredOpEnvelope{
+		EnvelopeID: "legacy-1",
+		Kind:       "counter",
+		EntityID:   "legacy-1",
+		Op:         entity.ActiveStoreStartCreate,
+		Payload:    firstPayload,
+		EnqueuedAt: base,
+	}); err != nil {
+		t.Fatalf("save legacy-1 envelope: %v", err)
+	}
+	if err := deferredStorage.Save(entity.DeferredOpEnvelope{
+		EnvelopeID: "legacy-2",
+		Kind:       "counter",
+		EntityID:   "legacy-2",
+		Op:         entity.ActiveStoreStartCreate,
+		Payload:    secondPayload,
+		EnqueuedAt: base.Add(time.Millisecond),
+	}); err != nil {
+		t.Fatalf("save legacy-2 envelope: %v", err)
+	}
+
+	started := make(chan string, 4)
+	s := entity.NewActiveStore[*counter, counterSnap](
+		entityStorage,
+		nil,
+		func(h entity.Handle[*counter, counterSnap]) func(ctx context.Context) {
+			return func(ctx context.Context) {
+				select {
+				case started <- h.ID():
+				default:
+				}
+				<-ctx.Done()
+			}
+		},
+		entity.StoreOptions[*counter, counterSnap]{
+			Kind:           "counter",
+			FromSnapshot:   func(s counterSnap) *counter { return &counter{ID: s.ID, Val: s.Val} },
+			IDFromSnapshot: func(s counterSnap) string { return s.ID },
+		},
+		entity.WithDeferredOpStorage[*counter, counterSnap](deferredStorage),
+	)
+
+	if err := s.OnRestart(context.Background(), func(entity.Handle[*counter, counterSnap]) error { return nil }); err != nil {
+		t.Fatalf("OnRestart: %v", err)
+	}
+
+	seen := map[string]bool{}
+	deadline := time.After(2 * time.Second)
+	for len(seen) < 2 {
+		select {
+		case id := <-started:
+			seen[id] = true
+		case <-deadline:
+			t.Fatalf("expected both legacy deferred envelopes to replay, saw %v", seen)
+		}
+	}
+	if !seen["legacy-1"] || !seen["legacy-2"] {
+		t.Fatalf("missing replayed legacy ids: %v", seen)
+	}
+
+	envelopes, err := deferredStorage.List()
+	if err != nil {
+		t.Fatalf("deferredStorage.List: %v", err)
+	}
+	if len(envelopes) != 0 {
+		t.Fatalf("expected legacy envelopes to be cleared after replay, got %d", len(envelopes))
 	}
 }
 

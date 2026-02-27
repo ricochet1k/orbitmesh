@@ -32,6 +32,14 @@ func deferredIdempotencyKey(kind string, op ActiveStoreStartOp, id string) strin
 	return fmt.Sprintf("%s:%s:%s", kind, op, id)
 }
 
+func deferredReplayKey(env DeferredOpEnvelope) string {
+	if env.IdempotencyKey != "" {
+		return env.IdempotencyKey
+	}
+	// Legacy envelopes may not have idempotency keys; treat each as distinct.
+	return "legacy:" + env.EnvelopeID
+}
+
 type deferredIndex struct {
 	once  sync.Once
 	err   error
@@ -124,7 +132,8 @@ func (s *ActiveStore[T, S]) replayDeferredOps() error {
 
 	processedKeys := make(map[string]struct{}, len(filtered))
 	for _, env := range filtered {
-		if _, seen := processedKeys[env.IdempotencyKey]; seen {
+		replayKey := deferredReplayKey(env)
+		if _, seen := processedKeys[replayKey]; seen {
 			s.clearDeferredEnvelope(env)
 			continue
 		}
@@ -140,7 +149,7 @@ func (s *ActiveStore[T, S]) replayDeferredOps() error {
 			}
 			return err
 		}
-		processedKeys[env.IdempotencyKey] = struct{}{}
+		processedKeys[replayKey] = struct{}{}
 		s.clearDeferredEnvelope(env)
 	}
 
