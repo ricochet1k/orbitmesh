@@ -173,6 +173,14 @@ func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
 }
 
 func (e *AgentExecutor) Startup(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if e != nil && e.evalCoordinator != nil {
+		if err := e.evalCoordinator.OnRestart(ctx); err != nil {
+			return err
+		}
+	}
 	if e == nil || e.recovery == nil {
 		return nil
 	}
@@ -458,6 +466,9 @@ func (e *AgentExecutor) SendMessageWithOptions(ctx context.Context, id string, c
 }
 
 func (e *AgentExecutor) Shutdown(ctx context.Context) error {
+	if e.evalCoordinator != nil {
+		e.evalCoordinator.BeginDrain(ctx)
+	}
 	e.cancel()
 
 	e.mu.RLock()
@@ -479,6 +490,11 @@ func (e *AgentExecutor) Shutdown(ctx context.Context) error {
 
 	select {
 	case <-done:
+		if e.evalCoordinator != nil {
+			if err := e.evalCoordinator.AwaitDrain(ctx); err != nil {
+				return err
+			}
+		}
 		return nil
 	case <-ctx.Done():
 		for _, id := range sessionIDs {

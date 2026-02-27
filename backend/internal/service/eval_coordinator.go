@@ -31,14 +31,11 @@ type DispatchOptions struct {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EvalCoordinator manages the lifecycle of tool call evals using entity.Store.
-// It replaces EvalManager, eliminating the wake-before-suspend race, the
-// context.Background() cancellation gap, and the circular callback dependency.
-//
-// No mu, no evals map, no sessionDeps map, no WakeupRegistry, no ActiveStore,
-// no parked goroutines during suspension.
+// EvalCoordinator manages the lifecycle of tool call evals using
+// entity.ActiveStore so each eval has a run body managed by store lifecycle
+// primitives (create/load/restart/drain).
 type EvalCoordinator struct {
-	evals *entity.Store[*toolcall.Eval, toolcall.EvalSnapshot]
+	evals *entity.ActiveStore[*toolcall.Eval, toolcall.EvalSnapshot]
 	tools tools.Registry
 	ctx   context.Context // executor's long-lived cancellable context
 
@@ -59,9 +56,14 @@ func NewEvalCoordinator(
 		ctx:           ctx,
 		onSessionDone: onSessionDone,
 	}
-	c.evals = entity.NewStore[*toolcall.Eval, toolcall.EvalSnapshot](
+	c.evals = entity.NewActiveStore[*toolcall.Eval, toolcall.EvalSnapshot](
 		evalStorage,
 		nil, // no event bus needed for evals
+		func(h entity.Handle[*toolcall.Eval, toolcall.EvalSnapshot]) func(context.Context) {
+			return func(runCtx context.Context) {
+				c.runEvalLifecycle(runCtx, h)
+			}
+		},
 		entity.StoreOptions[*toolcall.Eval, toolcall.EvalSnapshot]{
 			Kind:           "eval",
 			FromSnapshot:   func(s toolcall.EvalSnapshot) *toolcall.Eval { e := s; return &e },
@@ -75,14 +77,64 @@ func NewEvalCoordinator(
 	return c
 }
 
-// scheduleRun spawns a goroutine for one eval. The goroutine calls Run (first
-// dispatch) or ResumeFunc (after deps fire), then exits regardless of whether
-// the handler calls Complete, Fail, or Suspend.
-//
-// Key difference from the old design: there is no for { select { case <-WakeC() } }
-// loop. The goroutine simply returns. Suspension is encoded entirely in the
-// persisted Eval.State + Eval.DepsWaiting, not in any in-memory channel.
-func (c *EvalCoordinator) scheduleRun(h entity.Handle[*toolcall.Eval, toolcall.EvalSnapshot], isSuspended bool) {
+// runEvalLifecycle executes one eval's lifecycle inside the ActiveStore run body.
+// It runs tool handler code, waits for dependencies while suspended, and resumes
+// the handler when deps complete.
+func (c *EvalCoordinator) runEvalLifecycle(ctx context.Context, h entity.Handle[*toolcall.Eval, toolcall.EvalSnapshot]) {
+	for {
+		state, _, _, deps := c.evalRuntimeState(h)
+		switch state {
+		case toolcall.EvalStateDone, toolcall.EvalStateError:
+			return
+		case toolcall.EvalStateSuspended:
+			if len(deps) > 0 {
+				if err := h.Watch(toEntityDeps(deps)); err != nil {
+					newEvalHandle(h, c).Fail(err)
+					return
+				}
+				if !c.checkDepsDone(h) {
+					select {
+					case <-h.WakeC():
+					case <-ctx.Done():
+						return
+					}
+				}
+			}
+		}
+
+		err := c.invokeToolHandler(ctx, h, state == toolcall.EvalStateSuspended)
+		if err != nil {
+			newEvalHandle(h, c).Fail(err)
+		}
+
+		state, _, _, _ = c.evalRuntimeState(h)
+		if state == toolcall.EvalStateSuspended {
+			continue
+		}
+		if state == toolcall.EvalStateDone || state == toolcall.EvalStateError {
+			return
+		}
+		// Handler returned without resolving or suspending; treat as externally
+		// managed completion and end this run body.
+		return
+	}
+}
+
+func (c *EvalCoordinator) evalRuntimeState(h entity.Handle[*toolcall.Eval, toolcall.EvalSnapshot]) (toolcall.EvalState, string, json.RawMessage, []toolcall.Dependency) {
+	state := toolcall.EvalStatePending
+	toolName := ""
+	var input json.RawMessage
+	var deps []toolcall.Dependency
+	h.Read(func(e **toolcall.Eval) {
+		state = (*e).State
+		toolName = (*e).ToolName
+		input = (*e).Input
+		deps = append(deps[:0], (*e).DepsWaiting...)
+	})
+	return state, toolName, input, deps
+}
+
+func (c *EvalCoordinator) invokeToolHandler(ctx context.Context, h entity.Handle[*toolcall.Eval, toolcall.EvalSnapshot], isSuspended bool) error {
 	var toolName string
 	var input json.RawMessage
 	h.Read(func(e **toolcall.Eval) {
@@ -97,7 +149,7 @@ func (c *EvalCoordinator) scheduleRun(h entity.Handle[*toolcall.Eval, toolcall.E
 			(*e).Error = fmt.Sprintf("tool %q not found", toolName)
 		})
 		h.MarkDone()
-		return
+		return nil
 	}
 	asyncHandler := tools.WrapAtRegistration(def)
 	if asyncHandler == nil {
@@ -106,26 +158,13 @@ func (c *EvalCoordinator) scheduleRun(h entity.Handle[*toolcall.Eval, toolcall.E
 			(*e).Error = fmt.Sprintf("tool %q has no handler configured", toolName)
 		})
 		h.MarkDone()
-		return
+		return nil
 	}
 	handle := newEvalHandle(h, c)
-
-	go func() {
-		var err error
-		if isSuspended && asyncHandler.ResumeFunc != nil {
-			err = asyncHandler.ResumeFunc(c.ctx, handle)
-		} else {
-			err = asyncHandler.Run(c.ctx, input, handle)
-		}
-		// If the handler returned an error without calling Complete/Fail/Suspend,
-		// fail the eval now. If it already called one of those, this is a no-op
-		// because coordEvalHandle.done is already set.
-		if err != nil {
-			handle.Fail(err)
-		}
-		// Goroutine exits here regardless of whether the handler suspended.
-		// If it suspended, onEvalDone will reschedule when deps fire.
-	}()
+	if isSuspended && asyncHandler.ResumeFunc != nil {
+		return asyncHandler.ResumeFunc(ctx, handle)
+	}
+	return asyncHandler.Run(ctx, input, handle)
 }
 
 // onEvalDone is called by Store.OnDone when an eval becomes terminal.
@@ -142,16 +181,11 @@ func (c *EvalCoordinator) onEvalDone(id string) {
 		sessionID = (*e).SessionID
 	})
 
-	// If this eval itself is suspended (waiting on sub-deps), this callback
-	// fires when those sub-deps are done. Re-schedule its resume goroutine.
-	if state == toolcall.EvalStateSuspended {
-		c.scheduleRun(h, true)
-		return
+	if state == toolcall.EvalStateDone || state == toolcall.EvalStateError {
+		// The eval is terminal (done or error). Check whether the owning session
+		// is now fully unblocked.
+		c.maybeWakeSession(sessionID)
 	}
-
-	// The eval is terminal (done or error). Check whether the owning session
-	// is now fully unblocked.
-	c.maybeWakeSession(sessionID)
 }
 
 // maybeWakeSession collects results and fires the session resume callback if
@@ -216,10 +250,9 @@ func (c *EvalCoordinator) DispatchBatch(
 ) ([]toolcall.Dependency, error) {
 
 	now := time.Now().UTC()
-	handles := make([]entity.Handle[*toolcall.Eval, toolcall.EvalSnapshot], len(calls))
 	deps := make([]toolcall.Dependency, len(calls))
 
-	// Create all evals (persisted) before starting any goroutine.
+	// Create all evals. ActiveStore starts each eval run immediately.
 	for i, opts := range calls {
 		id := newEvalID()
 		e := &toolcall.Eval{
@@ -229,20 +262,11 @@ func (c *EvalCoordinator) DispatchBatch(
 			State:              toolcall.EvalStateRunning,
 			CreatedAt:          now, UpdatedAt: now,
 		}
-		h, err := c.evals.Create(id, e)
+		_, err := c.evals.Create(id, e)
 		if err != nil {
 			return nil, err
 		}
-		handles[i] = h
 		deps[i] = toolcall.Dependency{Kind: "eval", ID: id}
-	}
-
-	// Now start goroutines. Even if one completes instantly and calls
-	// onEvalDone → maybeWakeSession, the session is not yet suspended so
-	// onSessionDone will check and find nothing to do (session still running).
-	// suspendSession is called by the caller after this returns.
-	for _, h := range handles {
-		c.scheduleRun(h, false)
 	}
 
 	return deps, nil
@@ -275,6 +299,9 @@ func (c *EvalCoordinator) CancelEvalsForSession(sessionID string) {
 			return true, nil
 		})
 		h.MarkDone()
+		if rh, err := c.evals.Load(m.ID); err == nil {
+			rh.Stop()
+		}
 	}
 }
 
@@ -297,27 +324,18 @@ func (c *EvalCoordinator) OnRestart(ctx context.Context) error {
 				(*e).Error = "interrupted by restart"
 			})
 			h.MarkDone()
-
-		case toolcall.EvalStateSuspended:
-			// Deps are re-registered automatically by Store.Get via DepSource.Deps().
-			// Check now whether all deps are already terminal.
-			var alreadyDone bool
-			h.Read(func(e **toolcall.Eval) {
-				alreadyDone = (*e).IsDone()
-			})
-			if !alreadyDone {
-				depsDone := c.checkDepsDone(h)
-				if depsDone {
-					c.scheduleRun(h, true)
-				}
-			}
-
-		case toolcall.EvalStateDone, toolcall.EvalStateError:
-			// Already terminal — no action needed.
 		}
 
 		return nil
 	})
+}
+
+func (c *EvalCoordinator) BeginDrain(ctx context.Context) {
+	c.evals.BeginDrain(ctx)
+}
+
+func (c *EvalCoordinator) AwaitDrain(ctx context.Context) error {
+	return c.evals.AwaitDrain(ctx)
 }
 
 // checkDepsDone reports whether all DepsWaiting for h are currently terminal.
@@ -408,23 +426,36 @@ func (h *coordEvalHandle) Fail(err error) {
 func (h *coordEvalHandle) Suspend(handlerState json.RawMessage, deps []toolcall.Dependency) error {
 	// Suspension does not consume the done token — the goroutine may be
 	// rescheduled later and will call Complete/Fail when it finishes.
-	return h.h.Mutate(func(e **toolcall.Eval) {
+	if err := h.h.Mutate(func(e **toolcall.Eval) {
 		(*e).State = toolcall.EvalStateSuspended
 		(*e).HandlerState = handlerState
 		(*e).DepsWaiting = deps
 		(*e).UpdatedAt = time.Now().UTC()
-	})
+	}); err != nil {
+		return err
+	}
+	if len(deps) == 0 {
+		return nil
+	}
+	return h.h.Watch(toEntityDeps(deps))
+}
+
+func toEntityDeps(deps []toolcall.Dependency) []entity.Dep {
+	out := make([]entity.Dep, len(deps))
+	for i, dep := range deps {
+		out[i] = entity.Dep{Kind: dep.Kind, ID: dep.ID}
+	}
+	return out
 }
 
 // OnCancel registers a function to be called if the eval is cancelled
 // externally. Only the most recently registered function is kept.
-// NOTE: with the entity.Store model, cancellation is done via CancelEvalsForSession
+// NOTE: with the EvalCoordinator model, cancellation is done via CancelEvalsForSession
 // which mutates state directly. OnCancel is kept for interface compatibility
 // but the callback is not invoked by the coordinator.
 func (h *coordEvalHandle) OnCancel(_ func()) {
 	// No-op in the EvalCoordinator model. Cancellation happens via
-	// CancelEvalsForSession which sets the eval state directly; there is no
-	// in-flight goroutine for suspended evals to notify.
+	// CancelEvalsForSession which sets eval state directly.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
