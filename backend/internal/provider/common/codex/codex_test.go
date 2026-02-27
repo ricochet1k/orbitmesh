@@ -1,9 +1,13 @@
 package codex
 
 import (
+	"context"
 	"encoding/json"
+	"os/exec"
 	"testing"
+	"time"
 
+	"github.com/ricochet1k/orbitmesh/internal/domain"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 )
 
@@ -78,5 +82,82 @@ func TestParseThreadID(t *testing.T) {
 	}
 	if id != "thr_abc" {
 		t.Fatalf("expected thr_abc, got %q", id)
+	}
+}
+
+func TestParsePlanUpdate(t *testing.T) {
+	raw := json.RawMessage(`{
+	  "explanation": "Plan updated",
+	  "plan": [
+	    {"step": "Inspect tests", "status": "pending"},
+	    {"step": "Patch provider", "status": "inProgress"}
+	  ]
+	}`)
+	plan := parsePlanUpdate(raw)
+	if plan == nil {
+		t.Fatalf("expected non-nil plan")
+	}
+	if plan.Description != "Plan updated" {
+		t.Fatalf("unexpected description: %q", plan.Description)
+	}
+	if len(plan.Steps) != 2 {
+		t.Fatalf("expected 2 steps, got %d", len(plan.Steps))
+	}
+	if plan.Steps[1].Status != "inProgress" {
+		t.Fatalf("unexpected step status: %q", plan.Steps[1].Status)
+	}
+}
+
+func TestParseDiffUpdate(t *testing.T) {
+	raw := json.RawMessage(`{"threadId":"thr_1","turnId":"turn_2","diff":"diff --git a/x b/x\n+hi"}`)
+	d := parseDiffUpdate(raw)
+	if d == "" {
+		t.Fatalf("expected non-empty diff")
+	}
+}
+
+func TestHandleItemNotification_CommandExecutionIncludesOutput(t *testing.T) {
+	p := NewCodexProvider("sess_1", Config{})
+	params := json.RawMessage(`{
+	  "item": {
+	    "id": "cmd_1",
+	    "type": "commandExecution",
+	    "command": "go test ./...",
+	    "aggregatedOutput": "ok",
+	    "exitCode": 0,
+	    "durationMs": 210
+	  }
+	}`)
+
+	p.handleItemNotification("item/completed", params, nil)
+
+	e := <-p.events.Events()
+	if e.Type != domain.EventTypeToolCall {
+		t.Fatalf("expected tool_call event, got %v", e.Type)
+	}
+	tc, ok := e.ToolCall()
+	if !ok {
+		t.Fatalf("expected tool call data")
+	}
+	out, ok := tc.Output.(map[string]any)
+	if !ok {
+		t.Fatalf("expected output map, got %T", tc.Output)
+	}
+	if out["exit_code"].(float64) != 0 {
+		t.Fatalf("expected exit_code 0")
+	}
+}
+
+func TestProvider_TestConfig_RealCodexInitialize(t *testing.T) {
+	if _, err := exec.LookPath("codex"); err != nil {
+		t.Skip("codex CLI not found")
+	}
+
+	p := NewProvider(Config{})
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := p.TestConfig(ctx, session.Config{WorkingDir: t.TempDir()}); err != nil {
+		t.Fatalf("expected TestConfig initialize probe to succeed with real codex CLI: %v", err)
 	}
 }

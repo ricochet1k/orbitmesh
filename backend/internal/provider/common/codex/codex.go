@@ -123,6 +123,11 @@ func (p *CodexProvider) start(ctx context.Context, config session.Config) error 
 	if workingDir == "" {
 		workingDir = p.staticCfg.WorkingDir
 	}
+	if !supportsAppServer(p.ctx, cmd, env, workingDir) {
+		err := fmt.Errorf("installed codex CLI does not support app-server; update codex to a version with app-server support")
+		p.handleFailure(err)
+		return err
+	}
 
 	mgr, err := process.Start(p.ctx, process.Config{
 		Command:     cmd,
@@ -387,6 +392,18 @@ func (p *CodexProvider) handleNotification(method string, params json.RawMessage
 	case "item/started", "item/completed":
 		p.handleItemNotification(method, params, raw)
 
+	case "turn/plan/updated":
+		if plan := parsePlanUpdate(params); plan != nil {
+			p.events.Emit(domain.NewPlanEvent(p.sessionID, *plan, raw))
+		}
+
+	case "turn/diff/updated":
+		if diff := parseDiffUpdate(params); diff != "" {
+			p.events.Emit(domain.NewMetadataEvent(p.sessionID, "turn_diff_updated", map[string]any{
+				"diff": diff,
+			}, raw))
+		}
+
 	default:
 		// TODO(codex): handle server-originated tool/requestUserInput and review
 		// flows once OrbitMesh has first-class UI/state for approval prompts.
@@ -468,6 +485,12 @@ func (p *CodexProvider) handleItemNotification(method string, params json.RawMes
 			Name:   "command/exec",
 			Status: status,
 			Title:  name,
+			Input:  item["command"],
+			Output: map[string]any{
+				"aggregated_output": item["aggregatedOutput"],
+				"exit_code":         item["exitCode"],
+				"duration_ms":       item["durationMs"],
+			},
 		}, raw))
 
 	default:
@@ -731,6 +754,50 @@ func extractAgentMessageText(item map[string]any) string {
 	return ""
 }
 
+func parsePlanUpdate(params json.RawMessage) *domain.PlanData {
+	var payload struct {
+		Explanation string `json:"explanation"`
+		Plan        []struct {
+			Step   string `json:"step"`
+			Status string `json:"status"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return nil
+	}
+
+	steps := make([]domain.PlanStep, 0, len(payload.Plan))
+	for i, s := range payload.Plan {
+		desc := strings.TrimSpace(s.Step)
+		if desc == "" {
+			continue
+		}
+		steps = append(steps, domain.PlanStep{
+			ID:          fmt.Sprintf("step-%d", i+1),
+			Description: desc,
+			Status:      strings.TrimSpace(s.Status),
+		})
+	}
+
+	if payload.Explanation == "" && len(steps) == 0 {
+		return nil
+	}
+	return &domain.PlanData{
+		Description: payload.Explanation,
+		Steps:       steps,
+	}
+}
+
+func parseDiffUpdate(params json.RawMessage) string {
+	var payload struct {
+		Diff string `json:"diff"`
+	}
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.Diff)
+}
+
 func asString(v any) string {
 	s, _ := v.(string)
 	return s
@@ -774,16 +841,21 @@ func customStringSlice(custom map[string]any, key string) []string {
 	}
 }
 
-// Suspend captures minimal state for future resume support.
-// TODO(codex): persist app-server thread state and support thread/resume.
+// Suspend captures minimal Codex thread metadata for future resume support.
 func (p *CodexProvider) Suspend(ctx context.Context) (*session.SuspensionContext, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
+	state, _ := json.Marshal(map[string]any{
+		"thread_id":      p.threadID,
+		"active_turn_id": p.activeTurnID,
+	})
+
 	return &session.SuspensionContext{
-		Reason:       "awaiting external response",
-		Timestamp:    time.Now(),
-		PendingInput: []string{},
+		Reason:        "awaiting external response",
+		Timestamp:     time.Now(),
+		PendingInput:  []string{},
+		ProviderState: state,
 	}, nil
 }
 
@@ -791,6 +863,22 @@ func (p *CodexProvider) Resume(ctx context.Context, sc *session.SuspensionContex
 	if sc == nil {
 		return fmt.Errorf("suspension context is nil")
 	}
+	if len(sc.ProviderState) == 0 {
+		return nil
+	}
+	var state struct {
+		ThreadID     string `json:"thread_id"`
+		ActiveTurnID string `json:"active_turn_id"`
+	}
+	if err := json.Unmarshal(sc.ProviderState, &state); err != nil {
+		return fmt.Errorf("invalid codex suspension provider_state: %w", err)
+	}
+	p.mu.Lock()
+	p.threadID = state.ThreadID
+	p.activeTurnID = state.ActiveTurnID
+	p.turnActive = state.ActiveTurnID != ""
+	p.mu.Unlock()
+	// TODO(codex): restore remote thread via thread/resume before next turn.
 	return nil
 }
 

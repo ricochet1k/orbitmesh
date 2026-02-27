@@ -2,6 +2,13 @@
 
 The initial `codex` provider is implemented as a prototype around `codex app-server` over stdio JSON-RPC.
 
+## Completed in prototype
+
+- `turn/plan/updated` notifications are now mapped into OrbitMesh plan events.
+- `turn/diff/updated` notifications are now surfaced as metadata events.
+- `commandExecution` items now include richer tool-call output metadata (`aggregated_output`, `exit_code`, `duration_ms`).
+- Provider config tests now verify real CLI initialization by probing `app-server` when available and falling back to legacy `proto` initialization checks.
+
 ## High-priority follow-ups
 
 - Persist and resume Codex threads (`thread/resume`) across OrbitMesh restarts.
