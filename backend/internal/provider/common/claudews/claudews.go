@@ -147,7 +147,7 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) err
 
 	// ── 4. Spawn the CLI process ─────────────────────────────────────────────
 	mgr, err := process.Start(p.ctx, process.Config{
-		Command:     "claude",
+		Command:     resolveClaudeCommand(config),
 		Args:        args,
 		WorkingDir:  config.WorkingDir,
 		Environment: env,

@@ -113,7 +113,7 @@ func (p *ClaudeCodeProvider) start(config session.Config) error {
 
 	// Start the process using ProcessManager
 	processMgr, err := process.Start(p.ctx, process.Config{
-		Command:     "claude",
+		Command:     resolveClaudeCommand(config),
 		Args:        args,
 		WorkingDir:  config.WorkingDir,
 		Environment: env,

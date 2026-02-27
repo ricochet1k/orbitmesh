@@ -3,10 +3,35 @@ package claudews
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
+	"strings"
 
 	"github.com/ricochet1k/orbitmesh/internal/session"
 )
+
+const defaultClaudeCommand = "claude"
+
+func resolveClaudeCommand(config session.Config) string {
+	if config.Custom != nil {
+		if v, ok := config.Custom["claudews_command"].(string); ok {
+			if cmd := strings.TrimSpace(v); cmd != "" {
+				return cmd
+			}
+		}
+		if v, ok := config.Custom["claude_command"].(string); ok {
+			if cmd := strings.TrimSpace(v); cmd != "" {
+				return cmd
+			}
+		}
+	}
+
+	if cmd := strings.TrimSpace(os.Getenv("CLAUDE_COMMAND")); cmd != "" {
+		return cmd
+	}
+
+	return defaultClaudeCommand
+}
 
 // buildWSCommandArgs constructs CLI arguments for WebSocket SDK mode.
 // The --sdk-url flag makes the claude binary connect back to our server.
@@ -22,10 +47,10 @@ func buildWSCommandArgs(sdkURL string, config session.Config) ([]string, error) 
 	if config.Custom == nil {
 		// Still apply first-class tool restrictions before returning.
 		for _, tool := range config.AllowedTools {
-			args = append(args, "--allowedTools", tool)
+			args = append(args, "--allowed-tools", tool)
 		}
 		for _, tool := range config.DisallowedTools {
-			args = append(args, "--disallowedTools", tool)
+			args = append(args, "--disallowed-tools", tool)
 		}
 		return args, nil
 	}
@@ -46,7 +71,7 @@ func buildWSCommandArgs(sdkURL string, config session.Config) ([]string, error) 
 		allowedTools, _ = parseStringSlice(config.Custom["allowed_tools"])
 	}
 	for _, tool := range allowedTools {
-		args = append(args, "--allowedTools", tool)
+		args = append(args, "--allowed-tools", tool)
 	}
 
 	disallowedTools := config.DisallowedTools
@@ -54,7 +79,7 @@ func buildWSCommandArgs(sdkURL string, config session.Config) ([]string, error) 
 		disallowedTools, _ = parseStringSlice(config.Custom["disallowed_tools"])
 	}
 	for _, tool := range disallowedTools {
-		args = append(args, "--disallowedTools", tool)
+		args = append(args, "--disallowed-tools", tool)
 	}
 
 	// Budget cap

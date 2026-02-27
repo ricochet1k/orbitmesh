@@ -48,7 +48,7 @@ func (p *ClaudeProvider) TestConfig(ctx context.Context, config session.Config) 
 	maps.Copy(env, config.Environment)
 
 	mgr, err := process.Start(ctx, process.Config{
-		Command:     "claude",
+		Command:     resolveClaudeCommand(config),
 		Args:        args,
 		WorkingDir:  config.WorkingDir,
 		Environment: env,

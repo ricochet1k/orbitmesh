@@ -243,9 +243,9 @@ func TestParseMCPConfig(t *testing.T) {
 
 func TestParseStringSlice(t *testing.T) {
 	tests := []struct {
-		name  string
-		input any
-		want  []string
+		name   string
+		input  any
+		want   []string
 		wantOk bool
 	}{
 		{
@@ -384,4 +384,27 @@ func TestFormatInputMessage(t *testing.T) {
 func isJSON(s string) bool {
 	var js any
 	return json.Unmarshal([]byte(s), &js) == nil
+}
+
+func TestResolveClaudeCommand(t *testing.T) {
+	t.Run("uses custom claude_command", func(t *testing.T) {
+		cfg := session.Config{Custom: map[string]any{"claude_command": "./bin/claude-real"}}
+		if got := resolveClaudeCommand(cfg); got != "./bin/claude-real" {
+			t.Fatalf("resolveClaudeCommand() = %q, want %q", got, "./bin/claude-real")
+		}
+	})
+
+	t.Run("uses env when custom missing", func(t *testing.T) {
+		t.Setenv("CLAUDE_COMMAND", "claude-real")
+		if got := resolveClaudeCommand(session.Config{}); got != "claude-real" {
+			t.Fatalf("resolveClaudeCommand() = %q, want %q", got, "claude-real")
+		}
+	})
+
+	t.Run("defaults to claude", func(t *testing.T) {
+		t.Setenv("CLAUDE_COMMAND", "")
+		if got := resolveClaudeCommand(session.Config{}); got != "claude" {
+			t.Fatalf("resolveClaudeCommand() = %q, want %q", got, "claude")
+		}
+	})
 }

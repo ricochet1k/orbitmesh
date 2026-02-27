@@ -3,10 +3,30 @@ package claude
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
+	"strings"
 
 	"github.com/ricochet1k/orbitmesh/internal/session"
 )
+
+const defaultClaudeCommand = "claude"
+
+func resolveClaudeCommand(config session.Config) string {
+	if config.Custom != nil {
+		if v, ok := config.Custom["claude_command"].(string); ok {
+			if cmd := strings.TrimSpace(v); cmd != "" {
+				return cmd
+			}
+		}
+	}
+
+	if cmd := strings.TrimSpace(os.Getenv("CLAUDE_COMMAND")); cmd != "" {
+		return cmd
+	}
+
+	return defaultClaudeCommand
+}
 
 // buildCommandArgs constructs command-line arguments for the claude CLI
 // based on the session configuration.
