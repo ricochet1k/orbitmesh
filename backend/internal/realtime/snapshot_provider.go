@@ -19,12 +19,11 @@ import (
 const sessionActivitySnapshotLimit = 100
 
 type SnapshotProvider struct {
-	executor       *service.AgentExecutor
-	sessionStorage storage.Storage
+	executor *service.AgentExecutor
 }
 
-func NewSnapshotProvider(executor *service.AgentExecutor, sessionStorage storage.Storage) *SnapshotProvider {
-	return &SnapshotProvider{executor: executor, sessionStorage: sessionStorage}
+func NewSnapshotProvider(executor *service.AgentExecutor) *SnapshotProvider {
+	return &SnapshotProvider{executor: executor}
 }
 
 func (p *SnapshotProvider) Snapshot(topic string) (any, error) {
@@ -71,11 +70,12 @@ func (p *SnapshotProvider) sessionsActivitySnapshot(sessionID string) (realtimeT
 	}
 
 	messages := make([]realtimeTypes.SessionMessage, 0)
-	if p.sessionStorage != nil {
-		storedMessages, msgErr := p.sessionStorage.GetMessages(sessionID)
-		if msgErr != nil && !errors.Is(msgErr, storage.ErrSessionNotFound) {
-			return realtimeTypes.SessionActivitySnapshot{}, msgErr
-		}
+	sm, msgErr := p.executor.GetSessionMessages(sessionID)
+	if msgErr != nil && !errors.Is(msgErr, storage.ErrSessionNotFound) {
+		return realtimeTypes.SessionActivitySnapshot{}, msgErr
+	}
+	if msgErr == nil && sm != nil {
+		storedMessages := sm.GetMessages()
 		messages = make([]realtimeTypes.SessionMessage, len(storedMessages))
 		for i, msg := range storedMessages {
 			messages[i] = realtimeTypes.SessionMessage{

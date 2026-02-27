@@ -16,6 +16,7 @@ import { AdkFields } from './-_adk'
 import { AcpFields } from './-_acp'
 import { PtyFields } from './-_pty'
 import { OpenAiFields } from './-_openai'
+import { CodexFields } from './-_codex'
 import { apiClient } from '../../../api/client'
 
 // ---------------------------------------------------------------------------
@@ -110,8 +111,8 @@ export function ProviderForm(props: ProviderFormProps) {
       if (cmd) req.custom['acp_command'] = cmd
     }
 
-    // Model (claude, claude-ws, adk, openai)
-    if (t === 'claude' || t === 'claude-ws' || t === 'adk' || t === 'openai') {
+    // Model (claude, claude-ws, adk, openai, codex)
+    if (t === 'claude' || t === 'claude-ws' || t === 'adk' || t === 'openai' || t === 'codex') {
       const model = String(provider.scratch['model'] ?? '').trim()
       if (model) req.custom['model'] = model
     }
@@ -120,6 +121,26 @@ export function ProviderForm(props: ProviderFormProps) {
     if (t === 'openai') {
       const baseURL = String(provider.scratch['base_url'] ?? '').trim()
       if (baseURL) req.custom['base_url'] = baseURL
+    }
+
+    if (t === 'codex') {
+      const effort = String(provider.scratch['effort'] ?? '').trim()
+      if (effort) req.custom['effort'] = effort
+
+      const summary = String(provider.scratch['summary'] ?? '').trim()
+      if (summary) req.custom['summary'] = summary
+
+      const approvalPolicy = String(provider.scratch['approval_policy'] ?? '').trim()
+      if (approvalPolicy) req.custom['approval_policy'] = approvalPolicy
+
+      const sandboxMode = String(provider.scratch['sandbox_mode'] ?? '').trim()
+      if (sandboxMode) req.custom['sandbox_mode'] = sandboxMode
+
+      const codexCommand = String(provider.scratch['codex_command'] ?? '').trim()
+      if (codexCommand) req.custom['codex_command'] = codexCommand
+
+      const codexArgs = String(provider.scratch['codex_args'] ?? '').trim()
+      if (codexArgs) req.custom['codex_args'] = codexArgs.split(/\s+/)
     }
 
     // ADK Vertex AI
@@ -200,8 +221,8 @@ export function ProviderForm(props: ProviderFormProps) {
         if (rawArgs) config.custom!['acp_args'] = rawArgs.split(/\s+/)
       }
 
-      // --- Model (claude, claude-ws, adk, openai) ---
-      if (t === 'claude' || t === 'claude-ws' || t === 'adk' || t === 'openai') {
+      // --- Model (claude, claude-ws, adk, openai, codex) ---
+      if (t === 'claude' || t === 'claude-ws' || t === 'adk' || t === 'openai' || t === 'codex') {
         const model = String(provider.scratch['model'] ?? '').trim()
         if (model) config.custom!['model'] = model
       }
@@ -249,6 +270,27 @@ export function ProviderForm(props: ProviderFormProps) {
           const loc = String(provider.scratch['vertex_location'] ?? '').trim()
           if (loc) config.custom!['vertex_location'] = loc
         }
+      }
+
+      // --- codex app-server extras ---
+      if (t === 'codex') {
+        const effort = String(provider.scratch['effort'] ?? '').trim()
+        if (effort) config.custom!['effort'] = effort
+
+        const summary = String(provider.scratch['summary'] ?? '').trim()
+        if (summary) config.custom!['summary'] = summary
+
+        const approvalPolicy = String(provider.scratch['approval_policy'] ?? '').trim()
+        if (approvalPolicy) config.custom!['approval_policy'] = approvalPolicy
+
+        const sandboxMode = String(provider.scratch['sandbox_mode'] ?? '').trim()
+        if (sandboxMode) config.custom!['sandbox_mode'] = sandboxMode
+
+        const codexCommand = String(provider.scratch['codex_command'] ?? '').trim()
+        if (codexCommand) config.custom!['codex_command'] = codexCommand
+
+        const codexArgs = String(provider.scratch['codex_args'] ?? '').trim()
+        if (codexArgs) config.custom!['codex_args'] = codexArgs.split(/\s+/)
       }
 
       // Drop empty custom map
@@ -315,6 +357,9 @@ export function ProviderForm(props: ProviderFormProps) {
         </Match>
         <Match when={provider.type === 'openai'}>
           <OpenAiFields provider={provider} setProvider={setProvider} />
+        </Match>
+        <Match when={provider.type === 'codex'}>
+          <CodexFields provider={provider} setProvider={setProvider} />
         </Match>
       </Switch>
 

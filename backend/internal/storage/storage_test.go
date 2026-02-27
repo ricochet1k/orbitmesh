@@ -55,7 +55,6 @@ func TestJSONFileStorage_SaveAndLoad(t *testing.T) {
 
 	session := domain.NewSession("test-session-1", "claude", "/path/to/work")
 	session.CurrentTask = "task-123"
-	session.AppendMessage(domain.MessageKindOutput, "some output")
 
 	_ = session.TransitionTo(domain.SessionStateRunning, "started")
 
@@ -87,9 +86,6 @@ func TestJSONFileStorage_SaveAndLoad(t *testing.T) {
 	}
 	if loaded.CurrentTask != session.CurrentTask {
 		t.Errorf("expected CurrentTask %q, got %q", session.CurrentTask, loaded.CurrentTask)
-	}
-	if len(loaded.Messages) != 1 || loaded.Messages[0].Contents != "some output" {
-		t.Errorf("expected output message to be persisted")
 	}
 	if len(loaded.Transitions) != len(session.Transitions) {
 		t.Errorf("expected %d transitions, got %d", len(session.Transitions), len(loaded.Transitions))
@@ -276,93 +272,47 @@ func TestJSONFileStorage_TransitionsPersist(t *testing.T) {
 	}
 }
 
-func TestJSONFileStorage_MessagePersistence(t *testing.T) {
+func TestJSONFileStorage_SessionPersistsWithoutMessages(t *testing.T) {
+	// Session no longer holds messages — they live in the JSONL log.
+	// Verify that sessions still save and load correctly.
 	tmpDir := t.TempDir()
 	storage, _ := NewJSONFileStorage(tmpDir)
 
-	// Create a session with messages
 	session := domain.NewSession("test-msg-session", "pty", "/tmp")
-	session.AppendMessage(domain.MessageKindUser, "Hello, AI!")
-	session.AppendMessage(domain.MessageKindOutput, "Hello! How can I help?")
-	session.AppendMessage(domain.MessageKindUser, "Tell me about Go")
+	session.SetCurrentTask("some-task")
 
-	// Save the session
 	if err := storage.Save(session); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 
-	// Load the session back
 	loaded, err := storage.Load("test-msg-session")
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
 
-	// Verify messages were persisted
-	if len(loaded.Messages) != 3 {
-		t.Errorf("expected 3 messages, got %d", len(loaded.Messages))
+	if loaded.ID != session.ID {
+		t.Errorf("expected ID %q, got %q", session.ID, loaded.ID)
 	}
-
-	// Check first message
-	if loaded.Messages[0].Kind != domain.MessageKindUser {
-		t.Errorf("expected kind %q, got %q", domain.MessageKindUser, loaded.Messages[0].Kind)
-	}
-	if loaded.Messages[0].Contents != "Hello, AI!" {
-		t.Errorf("expected contents 'Hello, AI!', got %q", loaded.Messages[0].Contents)
-	}
-
-	// Check last message
-	if loaded.Messages[2].Kind != domain.MessageKindUser {
-		t.Errorf("expected kind %q, got %q", domain.MessageKindUser, loaded.Messages[2].Kind)
-	}
-	if loaded.Messages[2].Contents != "Tell me about Go" {
-		t.Errorf("expected contents 'Tell me about Go', got %q", loaded.Messages[2].Contents)
+	if loaded.CurrentTask != "some-task" {
+		t.Errorf("expected CurrentTask 'some-task', got %q", loaded.CurrentTask)
 	}
 }
 
-func TestJSONFileStorage_GetMessages(t *testing.T) {
-	tmpDir := t.TempDir()
-	storage, _ := NewJSONFileStorage(tmpDir)
-
-	// Create and save a session with messages
-	session := domain.NewSession("test-get-msgs", "pty", "/tmp")
-	session.AppendMessage(domain.MessageKindSystem, "You are a helpful assistant")
-
-	if err := storage.Save(session); err != nil {
-		t.Fatalf("Save failed: %v", err)
-	}
-
-	// Retrieve messages using GetMessages
-	messages, err := storage.GetMessages("test-get-msgs")
-	if err != nil {
-		t.Fatalf("GetMessages failed: %v", err)
-	}
-
-	if len(messages) != 1 {
-		t.Errorf("expected 1 message, got %d", len(messages))
-	}
-	if messages[0].Kind != domain.MessageKindSystem {
-		t.Errorf("expected kind %q, got %q", domain.MessageKindSystem, messages[0].Kind)
-	}
-	if messages[0].Contents != "You are a helpful assistant" {
-		t.Errorf("expected contents 'You are a helpful assistant', got %q", messages[0].Contents)
-	}
-}
-
-func TestJSONFileStorage_MessageSurvivesRestart(t *testing.T) {
+func TestJSONFileStorage_SessionSurvivesRestart(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// First session: create and save
+	// First storage: create and save
 	{
 		storage, _ := NewJSONFileStorage(tmpDir)
 		session := domain.NewSession("restart-test", "pty", "/tmp")
-		session.AppendMessage(domain.MessageKindOutput, "This message should survive restart")
+		session.SetCurrentTask("task-after-restart")
 
 		if err := storage.Save(session); err != nil {
 			t.Fatalf("Save failed: %v", err)
 		}
 	}
 
-	// Second session: reload and verify
+	// Second storage: reload and verify
 	{
 		storage, _ := NewJSONFileStorage(tmpDir)
 		loaded, err := storage.Load("restart-test")
@@ -370,11 +320,8 @@ func TestJSONFileStorage_MessageSurvivesRestart(t *testing.T) {
 			t.Fatalf("Load after restart failed: %v", err)
 		}
 
-		if len(loaded.Messages) != 1 {
-			t.Errorf("expected 1 message after restart, got %d", len(loaded.Messages))
-		}
-		if loaded.Messages[0].Contents != "This message should survive restart" {
-			t.Errorf("expected contents 'This message should survive restart', got %q", loaded.Messages[0].Contents)
+		if loaded.CurrentTask != "task-after-restart" {
+			t.Errorf("expected CurrentTask to survive restart, got %q", loaded.CurrentTask)
 		}
 	}
 }

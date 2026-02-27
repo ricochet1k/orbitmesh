@@ -297,7 +297,7 @@ func apiKeyEnvVar(providerType string) string {
 		return "GOOGLE_API_KEY"
 	case "anthropic", "claude", "claude-ws", "acp":
 		return "ANTHROPIC_API_KEY"
-	case "openai":
+	case "openai", "codex":
 		return "OPENAI_API_KEY"
 	default:
 		return ""

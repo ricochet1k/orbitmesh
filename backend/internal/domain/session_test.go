@@ -191,66 +191,70 @@ func TestSessionSetCurrentTask(t *testing.T) {
 	}
 }
 
-func TestSessionAppendMessage(t *testing.T) {
-	s := NewSession("test-id", "claude", "/work")
+func TestSessionMessagesAppendMessage(t *testing.T) {
+	sm := NewSessionMessages("test-id")
 
-	s.AppendMessage(MessageKindOutput, "some output text")
+	sm.AppendMessage(MessageKindOutput, "some output text")
 
-	if len(s.Messages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(s.Messages))
+	msgs := sm.GetMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
 	}
-	if s.Messages[0].Kind != MessageKindOutput {
-		t.Errorf("expected kind %q, got %q", MessageKindOutput, s.Messages[0].Kind)
+	if msgs[0].Kind != MessageKindOutput {
+		t.Errorf("expected kind %q, got %q", MessageKindOutput, msgs[0].Kind)
 	}
-	if s.Messages[0].Contents != "some output text" {
-		t.Errorf("expected contents 'some output text', got %q", s.Messages[0].Contents)
-	}
-}
-
-func TestSessionAppendOutputDelta(t *testing.T) {
-	s := NewSession("test-id", "claude", "/work")
-
-	s.AppendOutputDelta("hello ")
-	s.AppendOutputDelta("world")
-
-	if len(s.Messages) != 1 {
-		t.Fatalf("expected deltas merged into 1 message, got %d", len(s.Messages))
-	}
-	if s.Messages[0].Contents != "hello world" {
-		t.Errorf("expected 'hello world', got %q", s.Messages[0].Contents)
+	if msgs[0].Contents != "some output text" {
+		t.Errorf("expected contents 'some output text', got %q", msgs[0].Contents)
 	}
 }
 
-func TestSessionAppendOutputDeltaToMessage(t *testing.T) {
-	s := NewSession("test-id", "claude", "/work")
+func TestSessionMessagesAppendOutputDelta(t *testing.T) {
+	sm := NewSessionMessages("test-id")
 
-	s.AppendOutputDeltaToMessage("openai-msg-1", "hello ")
-	s.AppendOutputDeltaToMessage("openai-msg-1", "world")
-	s.AppendOutputDeltaToMessage("openai-msg-2", "next")
+	sm.AppendOutputDelta("hello ")
+	sm.AppendOutputDelta("world")
 
-	if len(s.Messages) != 2 {
-		t.Fatalf("expected 2 output messages, got %d", len(s.Messages))
+	msgs := sm.GetMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected deltas merged into 1 message, got %d", len(msgs))
 	}
-	if s.Messages[0].ID != "openai-msg-1" || s.Messages[0].Contents != "hello world" {
-		t.Fatalf("unexpected first message: %+v", s.Messages[0])
-	}
-	if s.Messages[1].ID != "openai-msg-2" || s.Messages[1].Contents != "next" {
-		t.Fatalf("unexpected second message: %+v", s.Messages[1])
+	if msgs[0].Contents != "hello world" {
+		t.Errorf("expected 'hello world', got %q", msgs[0].Contents)
 	}
 }
 
-func TestSessionAppendErrorMessage(t *testing.T) {
-	s := NewSession("test-id", "claude", "/work")
+func TestSessionMessagesAppendOutputDeltaToMessage(t *testing.T) {
+	sm := NewSessionMessages("test-id")
 
-	s.AppendMessage(MessageKindError, "something went wrong")
+	sm.AppendOutputDeltaToMessage("openai-msg-1", "hello ")
+	sm.AppendOutputDeltaToMessage("openai-msg-1", "world")
+	sm.AppendOutputDeltaToMessage("openai-msg-2", "next")
 
-	if len(s.Messages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(s.Messages))
+	msgs := sm.GetMessages()
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 output messages, got %d", len(msgs))
 	}
-	if s.Messages[0].Kind != MessageKindError {
-		t.Errorf("expected kind %q, got %q", MessageKindError, s.Messages[0].Kind)
+	if msgs[0].ID != "openai-msg-1" || msgs[0].Contents != "hello world" {
+		t.Fatalf("unexpected first message: %+v", msgs[0])
 	}
-	if s.Messages[0].Contents != "something went wrong" {
-		t.Errorf("expected 'something went wrong', got %q", s.Messages[0].Contents)
+	if msgs[1].ID != "openai-msg-2" || msgs[1].Contents != "next" {
+		t.Fatalf("unexpected second message: %+v", msgs[1])
+	}
+}
+
+func TestSessionMessagesAppendErrorMessage(t *testing.T) {
+	sm := NewSessionMessages("test-id")
+
+	sm.AppendMessage(MessageKindError, "something went wrong")
+
+	msgs := sm.GetMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if msgs[0].Kind != MessageKindError {
+		t.Errorf("expected kind %q, got %q", MessageKindError, msgs[0].Kind)
+	}
+	if msgs[0].Contents != "something went wrong" {
+		t.Errorf("expected 'something went wrong', got %q", msgs[0].Contents)
 	}
 }

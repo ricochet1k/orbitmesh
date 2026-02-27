@@ -34,7 +34,6 @@ type ProviderTester interface {
 type Handler struct {
 	executor        *service.AgentExecutor
 	broadcaster     *service.EventBroadcaster
-	sessionStorage  storage.Storage
 	providerStorage *storage.ProviderConfigStorage
 	agentStorage    *storage.AgentConfigStorage
 	projectStorage  *storage.ProjectStorage
@@ -50,14 +49,13 @@ func NewHandler(executor *service.AgentExecutor, broadcaster *service.EventBroad
 	h := &Handler{
 		executor:        executor,
 		broadcaster:     broadcaster,
-		sessionStorage:  sessionStorage,
 		providerStorage: providerStorage,
 		agentStorage:    agentStorage,
 		projectStorage:  projectStorage,
 		gitDir:          resolveGitDir(),
 		dockBridge:      NewDockBridge(),
 		realtimeHub:     realtime.NewHub(),
-		snapshotter:     realtime.NewSnapshotProvider(executor, sessionStorage),
+		snapshotter:     realtime.NewSnapshotProvider(executor),
 	}
 	h.startRealtimeBridge()
 	return h
@@ -361,7 +359,7 @@ func (h *Handler) sendSessionMessage(w http.ResponseWriter, r *http.Request) {
 					envKey = "GOOGLE_API_KEY"
 				case "anthropic", "claude", "claude-ws", "acp":
 					envKey = "ANTHROPIC_API_KEY"
-				case "openai":
+				case "openai", "codex":
 					envKey = "OPENAI_API_KEY"
 				}
 				if envKey != "" {
@@ -559,7 +557,7 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 				envKey = "GOOGLE_API_KEY"
 			case "anthropic", "claude", "claude-ws", "acp":
 				envKey = "ANTHROPIC_API_KEY"
-			case "openai":
+			case "openai", "codex":
 				envKey = "OPENAI_API_KEY"
 			}
 			if envKey != "" {
@@ -727,16 +725,17 @@ func (h *Handler) stopSession(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) getSessionMessages(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
-	// Get all messages from storage
-	messages, err := h.sessionStorage.GetMessages(id)
+	// Get all messages via the executor (reads from JSONL log).
+	sm, err := h.executor.GetSessionMessages(id)
 	if err != nil {
-		if errors.Is(err, storage.ErrSessionNotFound) {
+		if errors.Is(err, storage.ErrSessionNotFound) || errors.Is(err, service.ErrSessionNotFound) {
 			writeError(w, http.StatusNotFound, "session not found", "")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to get messages", err.Error())
 		return
 	}
+	messages := sm.GetMessages()
 
 	// Parse optional ?since query parameter
 	var sinceTime *time.Time

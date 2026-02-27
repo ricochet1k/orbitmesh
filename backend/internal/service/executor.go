@@ -78,6 +78,8 @@ type AgentExecutor struct {
 	bootID             string
 	resumeTokenTTL     time.Duration
 
+	messageLogStore *storage.SessionMessagesLogStore
+
 	evalCoordinator *EvalCoordinator
 
 	recovery *recoveryManager
@@ -99,6 +101,7 @@ type ExecutorConfig struct {
 	ResumeTokenTTL     time.Duration
 	EvalStorage        entity.TypedStorage[toolcall.EvalSnapshot]
 	ToolRegistry       tools.Registry
+	MessageLogStore    *storage.SessionMessagesLogStore
 }
 
 func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
@@ -128,6 +131,7 @@ func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
 		resumeTokenStorage: cfg.ResumeTokenStorage,
 		bootID:             newBootID(),
 		resumeTokenTTL:     cfg.ResumeTokenTTL,
+		messageLogStore:    cfg.MessageLogStore,
 		ctx:                ctx,
 		cancel:             cancel,
 	}
@@ -211,19 +215,6 @@ func (e *AgentExecutor) CreateSession(ctx context.Context, id string, config ses
 		session.SetCurrentTask(taskRef)
 	}
 
-	// Set messages if provided for resumption
-	if len(config.ResumeMessages) > 0 {
-		messages := make([]domain.Message, len(config.ResumeMessages))
-		for i, msg := range config.ResumeMessages {
-			messages[i] = domain.Message{
-				ID:       msg.ID,
-				Kind:     domain.MessageKind(msg.Kind),
-				Contents: msg.Contents,
-			}
-		}
-		session.SetMessages(messages)
-	}
-
 	if e.storage != nil {
 		if err := e.storage.Save(session); err != nil {
 			return nil, fmt.Errorf("failed to save session: %w", err)
@@ -240,6 +231,20 @@ func (e *AgentExecutor) CreateSession(ctx context.Context, id string, config ses
 // This method is kept for backward compatibility but now delegates to CreateSession.
 func (e *AgentExecutor) StartSession(ctx context.Context, id string, config session.Config) (*domain.Session, error) {
 	return e.CreateSession(ctx, id, config)
+}
+
+// GetSessionMessages returns the reconstructed message history for a session.
+// It reads from the JSONL message log via messageLogStore.
+// If messageLogStore is nil, it validates the session exists and returns empty SessionMessages.
+func (e *AgentExecutor) GetSessionMessages(id string) (*domain.SessionMessages, error) {
+	if e.messageLogStore != nil {
+		return e.messageLogStore.Load(id)
+	}
+	// No message log store configured. Validate the session exists first.
+	if _, err := e.GetSession(id); err != nil {
+		return nil, err
+	}
+	return domain.NewSessionMessages(id), nil
 }
 
 func (e *AgentExecutor) GetSession(id string) (*domain.Session, error) {

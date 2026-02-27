@@ -1,6 +1,6 @@
 # OrbitMesh Agents
 
-This document defines the roles and task templates used in the OrbitMesh project for automated task management via StrandYard.
+This document defines the roles and task templates used in the OrbitMesh project for automated task management via StrandYard. OrbitMesh is still in prototyping phase, so no need for backwards compatibility or keeping legacy code.
 
 ## Roles
 

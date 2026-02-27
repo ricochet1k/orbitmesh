@@ -157,7 +157,6 @@ type Session struct {
 	UpdatedAt         time.Time
 	CurrentTask       string
 	Transitions       []StateTransition
-	Messages          []Message
 	SuspensionContext any // *session.SuspensionContext (to avoid circular import)
 
 	mu sync.RWMutex
@@ -173,7 +172,6 @@ func NewSession(id, providerType, workingDir string) *Session {
 		CreatedAt:    now,
 		UpdatedAt:    now,
 		Transitions:  make([]StateTransition, 0),
-		Messages:     make([]Message, 0),
 	}
 }
 
@@ -233,84 +231,6 @@ func (s *Session) SetPreferredProviderID(providerID string) {
 	s.UpdatedAt = time.Now()
 }
 
-// AppendMessage appends a message to the session's conversation history.
-func (s *Session) AppendMessage(kind MessageKind, contents string) {
-	s.AppendMessageRaw(kind, contents, nil)
-}
-
-// AppendMessageRaw appends a message with optional raw provider bytes preserved.
-func (s *Session) AppendMessageRaw(kind MessageKind, contents string, raw json.RawMessage) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.Messages = append(s.Messages, Message{
-		ID:        fmt.Sprintf("%s_%d", kind, time.Now().UnixNano()),
-		Kind:      kind,
-		Contents:  contents,
-		Timestamp: time.Now(),
-		Raw:       raw,
-	})
-	s.UpdatedAt = time.Now()
-}
-
-// AppendOutputDelta appends streaming text to the last output message if one
-// exists, or creates a new output message. This accumulates delta chunks into a
-// single coherent message rather than producing one entry per chunk.
-func (s *Session) AppendOutputDelta(delta string) {
-	s.AppendOutputDeltaToMessage("", delta)
-}
-
-// AppendOutputDeltaToMessage appends streaming text to a specific output message
-// when messageID is provided; otherwise it appends to the latest output message.
-func (s *Session) AppendOutputDeltaToMessage(messageID, delta string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if messageID != "" {
-		for i := len(s.Messages) - 1; i >= 0; i-- {
-			if s.Messages[i].ID == messageID {
-				if s.Messages[i].Kind == MessageKindOutput {
-					s.Messages[i].Contents += delta
-					s.UpdatedAt = time.Now()
-					return
-				}
-				break
-			}
-		}
-		s.Messages = append(s.Messages, Message{
-			ID:        messageID,
-			Kind:      MessageKindOutput,
-			Contents:  delta,
-			Timestamp: time.Now(),
-		})
-		s.UpdatedAt = time.Now()
-		return
-	}
-
-	if n := len(s.Messages); n > 0 && s.Messages[n-1].Kind == MessageKindOutput {
-		s.Messages[n-1].Contents += delta
-	} else {
-		s.Messages = append(s.Messages, Message{
-			ID:        fmt.Sprintf("%s_%d", MessageKindOutput, time.Now().UnixNano()),
-			Kind:      MessageKindOutput,
-			Contents:  delta,
-			Timestamp: time.Now(),
-		})
-	}
-	s.UpdatedAt = time.Now()
-}
-
-// SetMessages replaces the full message history (used when loading from storage).
-func (s *Session) SetMessages(messages []Message) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if messages == nil {
-		s.Messages = make([]Message, 0)
-	} else {
-		s.Messages = messages
-	}
-	s.UpdatedAt = time.Now()
-}
-
 // SetSuspensionContext stores the suspension context for a suspended session.
 func (s *Session) SetSuspensionContext(ctx any) {
 	s.mu.Lock()
@@ -343,7 +263,6 @@ type SessionSnapshot struct {
 	UpdatedAt         time.Time         `json:"updated_at"`
 	CurrentTask       string            `json:"current_task,omitempty"`
 	Transitions       []StateTransition `json:"transitions"`
-	Messages          []Message         `json:"messages,omitempty"`
 	SuspensionContext any               `json:"-"` // *session.SuspensionContext
 }
 
@@ -354,9 +273,6 @@ func (s *Session) Snapshot() SessionSnapshot {
 
 	transitions := make([]StateTransition, len(s.Transitions))
 	copy(transitions, s.Transitions)
-
-	messages := make([]Message, len(s.Messages))
-	copy(messages, s.Messages)
 
 	return SessionSnapshot{
 		ID:                  s.ID,
@@ -373,7 +289,6 @@ func (s *Session) Snapshot() SessionSnapshot {
 		UpdatedAt:           s.UpdatedAt,
 		CurrentTask:         s.CurrentTask,
 		Transitions:         transitions,
-		Messages:            messages,
 		SuspensionContext:   s.SuspensionContext,
 	}
 }
@@ -394,6 +309,144 @@ func SessionFromSnapshot(snap SessionSnapshot) *Session {
 		UpdatedAt:           snap.UpdatedAt,
 		CurrentTask:         snap.CurrentTask,
 		Transitions:         snap.Transitions,
-		Messages:            snap.Messages,
+	}
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// SessionMessages — separate entity for message history
+// ────────────────────────────────────────────────────────────────────────────
+
+// SessionMessages holds the reconstructed message history for one session.
+// It is a separate entity from Session so that listing sessions does not
+// require loading messages.
+type SessionMessages struct {
+	SessionID string
+	Messages  []Message
+
+	mu sync.RWMutex
+}
+
+// SessionMessagesSnapshot is the serialisable projection — used only for
+// in-memory snapshots, NOT for the JSONL log (which uses storage.MessageLogRecord).
+type SessionMessagesSnapshot struct {
+	SessionID string    `json:"session_id"`
+	Messages  []Message `json:"messages"`
+}
+
+// NewSessionMessages constructs an empty SessionMessages for the given session.
+func NewSessionMessages(sessionID string) *SessionMessages {
+	return &SessionMessages{
+		SessionID: sessionID,
+		Messages:  make([]Message, 0),
+	}
+}
+
+// SessionMessagesFromSnapshot reconstructs a live SessionMessages from a snapshot.
+func SessionMessagesFromSnapshot(s SessionMessagesSnapshot) *SessionMessages {
+	msgs := s.Messages
+	if msgs == nil {
+		msgs = make([]Message, 0)
+	}
+	return &SessionMessages{
+		SessionID: s.SessionID,
+		Messages:  msgs,
+	}
+}
+
+// EntityID implements entity.IDer.
+func (sm *SessionMessages) EntityID() string { return sm.SessionID }
+
+// Snapshot returns an atomic copy of the messages under a read lock.
+func (sm *SessionMessages) Snapshot() SessionMessagesSnapshot {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	msgs := make([]Message, len(sm.Messages))
+	copy(msgs, sm.Messages)
+	return SessionMessagesSnapshot{
+		SessionID: sm.SessionID,
+		Messages:  msgs,
+	}
+}
+
+// GetMessages returns a snapshot copy of all messages (safe for concurrent use).
+func (sm *SessionMessages) GetMessages() []Message {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	msgs := make([]Message, len(sm.Messages))
+	copy(msgs, sm.Messages)
+	return msgs
+}
+
+// AppendMessage appends a message to the history.
+func (sm *SessionMessages) AppendMessage(kind MessageKind, contents string) {
+	sm.AppendMessageRaw(kind, contents, nil)
+}
+
+// AppendMessageRaw appends a message with optional raw provider bytes preserved.
+func (sm *SessionMessages) AppendMessageRaw(kind MessageKind, contents string, raw json.RawMessage) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.Messages = append(sm.Messages, Message{
+		ID:        fmt.Sprintf("%s_%d", kind, time.Now().UnixNano()),
+		Kind:      kind,
+		Contents:  contents,
+		Timestamp: time.Now(),
+		Raw:       raw,
+	})
+}
+
+// AppendOutputDelta appends streaming text to the last output message if one
+// exists, or creates a new output message.
+func (sm *SessionMessages) AppendOutputDelta(delta string) {
+	sm.AppendOutputDeltaToMessage("", delta)
+}
+
+// AppendOutputDeltaToMessage appends streaming text to a specific output message
+// when messageID is provided; otherwise it appends to the latest output message.
+func (sm *SessionMessages) AppendOutputDeltaToMessage(messageID, delta string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if messageID != "" {
+		for i := len(sm.Messages) - 1; i >= 0; i-- {
+			if sm.Messages[i].ID == messageID {
+				if sm.Messages[i].Kind == MessageKindOutput {
+					sm.Messages[i].Contents += delta
+					return
+				}
+				break
+			}
+		}
+		sm.Messages = append(sm.Messages, Message{
+			ID:        messageID,
+			Kind:      MessageKindOutput,
+			Contents:  delta,
+			Timestamp: time.Now(),
+		})
+		return
+	}
+
+	if n := len(sm.Messages); n > 0 && sm.Messages[n-1].Kind == MessageKindOutput {
+		sm.Messages[n-1].Contents += delta
+	} else {
+		sm.Messages = append(sm.Messages, Message{
+			ID:        fmt.Sprintf("%s_%d", MessageKindOutput, time.Now().UnixNano()),
+			Kind:      MessageKindOutput,
+			Contents:  delta,
+			Timestamp: time.Now(),
+		})
+	}
+}
+
+// SetMessages replaces the full message history (used when loading from storage).
+func (sm *SessionMessages) SetMessages(messages []Message) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if messages == nil {
+		sm.Messages = make([]Message, 0)
+	} else {
+		sm.Messages = messages
 	}
 }

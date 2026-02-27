@@ -12,6 +12,7 @@ import type { ProviderConfigResponse } from '../../../types/api'
 export const PROVIDER_TYPES = [
   { value: 'claude-ws', label: 'Claude (WebSocket SDK)' },
   { value: 'claude',    label: 'Claude (stream-json)' },
+  { value: 'codex',     label: 'Codex (app-server)' },
   { value: 'openai',    label: 'OpenAI' },
   { value: 'acp',       label: 'ACP (generic agent)' },
   { value: 'adk',       label: 'ADK (Gemini / Google)' },
@@ -60,6 +61,9 @@ export function initialProviderEdit(base?: ProviderConfigResponse): ProviderEdit
   const liftArray  = (k: string) => {
     if (k in custom) scratch[k] = (custom[k] as string[]).join(', ')
   }
+  const liftSpaceArray = (k: string) => {
+    if (k in custom) scratch[k] = (custom[k] as string[]).join(' ')
+  }
 
   liftString('base_url')
   liftString('model')
@@ -75,6 +79,12 @@ export function initialProviderEdit(base?: ProviderConfigResponse): ProviderEdit
   liftString('vertex_location')
   liftString('acp_command')
   liftString('acp_args')
+  liftString('effort')
+  liftString('summary')
+  liftString('approval_policy')
+  liftString('sandbox_mode')
+  liftString('codex_command')
+  liftSpaceArray('codex_args')
 
   // API keys were historically stored on api_key; lift them into env scratch
   // so the env editor can display/edit them.
@@ -107,6 +117,7 @@ export function envKeyName(type: ProviderType | string): string | null {
     case 'adk':
       return 'GOOGLE_API_KEY'
     case 'openai':
+    case 'codex':
       return 'OPENAI_API_KEY'
     default:
       return null

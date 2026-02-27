@@ -27,7 +27,6 @@ type Storage interface {
 	Load(id string) (*domain.Session, error)
 	Delete(id string) error
 	List() ([]*domain.Session, error)
-	GetMessages(id string) ([]domain.Message, error)
 }
 
 type JSONFileStorage struct {
@@ -260,67 +259,6 @@ func (s *JSONFileStorage) List() ([]*domain.Session, error) {
 	}
 
 	return sessions, nil
-}
-
-func (s *JSONFileStorage) GetMessages(id string) ([]domain.Message, error) {
-	if err := validateSessionID(id); err != nil {
-		return nil, err
-	}
-
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	messagesFromLog, logErr := s.readMessagesFromJSONLUnlocked(id)
-	if logErr == nil {
-		return messagesFromLog, nil
-	}
-
-	var corruptionErr *MessageLogCorruptionError
-	if errors.As(logErr, &corruptionErr) {
-		if len(messagesFromLog) > 0 {
-			return messagesFromLog, nil
-		}
-	} else if !errors.Is(logErr, os.ErrNotExist) && !errors.Is(logErr, ErrSessionNotFound) {
-		return nil, logErr
-	}
-
-	return s.getMessagesUnlocked(id)
-}
-
-func (s *JSONFileStorage) getMessagesUnlocked(id string) ([]domain.Message, error) {
-	filePath := s.sessionPath(id)
-
-	info, err := os.Lstat(filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, ErrSessionNotFound
-		}
-		return nil, err
-	}
-
-	if info.Mode()&os.ModeSymlink != 0 {
-		return nil, fmt.Errorf("%w: %s", ErrSymlinkNotAllowed, id)
-	}
-
-	if info.Size() > maxSessionFileSize {
-		return nil, fmt.Errorf("%w: %s (%d bytes)", ErrSessionFileTooLarge, id, info.Size())
-	}
-
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	var snap domain.SessionSnapshot
-	if err := json.Unmarshal(data, &snap); err != nil {
-		return nil, err
-	}
-
-	if snap.Messages == nil {
-		return []domain.Message{}, nil
-	}
-
-	return snap.Messages, nil
 }
 
 // atomicWriteFileAt creates dir if needed and atomically writes data to destPath.
