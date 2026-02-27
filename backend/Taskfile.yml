@@ -13,9 +13,7 @@ tasks:
     cmds:
       - mkdir -p tmp dist
       - go build -o tmp/orbitmesh ./cmd/orbitmesh
-      - go build -o tmp/orbitmesh-mcp ./cmd/orbitmesh-mcp
       - cp tmp/orbitmesh dist/orbitmesh
-      - cp tmp/orbitmesh-mcp dist/orbitmesh-mcp
 
   test:
     desc: Run backend tests

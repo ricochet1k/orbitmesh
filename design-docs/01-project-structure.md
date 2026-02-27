@@ -40,8 +40,7 @@ orbitmesh/
 │       └── frontend.yml        # TypeScript pipeline
 ├── backend/
 │   ├── cmd/                    # Executables
-│   │   ├── orbitmesh/          # Main server
-│   │   └── orbitmesh-mcp/      # MCP server
+│   │   └── orbitmesh/          # Main server (+ integrated MCP bridge)
 │   ├── internal/               # Private packages
 │   │   ├── agent/              # Agent execution engine
 │   │   ├── provider/           # Provider abstraction

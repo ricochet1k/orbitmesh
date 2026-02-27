@@ -82,8 +82,7 @@ curl -X POST http://localhost:8080/api/sessions/<session-id>/resume
 orbitmesh/
 ├── backend/                 # Go backend
 │   ├── cmd/                # Executables
-│   │   ├── orbitmesh/      # Main server
-│   │   └── orbitmesh-mcp/  # MCP server
+│   │   └── orbitmesh/      # Main server + MCP bridge
 │   ├── internal/           # Internal packages
 │   │   ├── agent/          # Agent execution engine
 │   │   ├── provider/       # Provider implementations

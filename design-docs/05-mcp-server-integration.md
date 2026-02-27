@@ -32,6 +32,6 @@ Exposes internal orchestration state and monitoring.
 - **Auditing**: All MCP tool calls are logged as `MetadataEvent`s in the session transcript.
 
 ## Implementation Strategy
-1. **Scaffold**: Create `backend/cmd/orbitmesh-mcp` as the entry point.
+1. **Scaffold**: Use `backend/cmd/orbitmesh` as the entry point with the `mcp-bridge` subcommand.
 2. **Tools**: Implement tools using the `github.com/modelcontextprotocol/go-sdk/mcp` library.
 3. **Integration**: Register MCP servers in the `ADKProvider` during session startup.

@@ -131,7 +131,7 @@ task build
 ```
 
 Outputs:
-- Backend: `backend/dist/orbitmesh`, `backend/dist/orbitmesh-mcp`
+- Backend: `backend/dist/orbitmesh`
 - Frontend: `frontend/dist/`
 
 ### CI/CD Pipeline

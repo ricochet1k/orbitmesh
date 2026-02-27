@@ -887,7 +887,7 @@ func sessionToStatusResponse(s domain.SessionSnapshot, status session.Status) ap
 func dockMCPServers(sessionID string) []session.MCPServerConfig {
 	return []session.MCPServerConfig{
 		{
-			Name:    "orbitmesh-mcp",
+			Name:    "orbitmesh",
 			Command: "orbitmesh",
 			Args:    []string{"mcp-bridge", "--session-id", sessionID},
 		},
@@ -897,7 +897,7 @@ func dockMCPServers(sessionID string) []session.MCPServerConfig {
 func dockMCPConfig(sessionID string) map[string]any {
 	return map[string]any{
 		"mcpServers": map[string]any{
-			"orbitmesh-mcp": map[string]any{
+			"orbitmesh": map[string]any{
 				"command": "orbitmesh",
 				"args":    []string{"mcp-bridge", "--session-id", sessionID},
 			},
