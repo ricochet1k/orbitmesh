@@ -455,6 +455,12 @@ type SendMessageOptions struct {
 	DisallowedTools []string
 }
 
+type ExecutorDrainStatus struct {
+	AsOf        time.Time          `json:"as_of"`
+	SessionRuns entity.DrainStatus `json:"session_runs"`
+	Evals       entity.DrainStatus `json:"evals"`
+}
+
 // SendMessage sends a message to a session, starting a new run if the session is idle.
 // If the session is idle: resolves the provider and starts a new run with the message as first input.
 // If the session is running: returns a 409 Conflict error.
@@ -509,21 +515,72 @@ func (e *AgentExecutor) SendMessageWithOptions(ctx context.Context, id string, c
 	}
 }
 
-func (e *AgentExecutor) Shutdown(ctx context.Context) error {
+func (e *AgentExecutor) BeginDrain(ctx context.Context) {
 	if e.sessionRuns != nil {
 		e.sessionRuns.BeginDrain(ctx)
 	}
 	if e.evalCoordinator != nil {
 		e.evalCoordinator.BeginDrain(ctx)
 	}
+}
+
+func (e *AgentExecutor) DrainStatus() ExecutorDrainStatus {
+	status := ExecutorDrainStatus{AsOf: time.Now().UTC()}
+	if e.sessionRuns != nil {
+		status.SessionRuns = e.sessionRuns.DrainStatus()
+	}
+	if e.evalCoordinator != nil {
+		status.Evals = e.evalCoordinator.DrainStatus()
+	}
+	return status
+}
+
+func (e *AgentExecutor) AwaitDrain(ctx context.Context) error {
+	if e.sessionRuns != nil {
+		if err := e.sessionRuns.AwaitDrain(ctx); err != nil {
+			return err
+		}
+	}
+
+	if e.evalCoordinator != nil {
+		if err := e.evalCoordinator.AwaitDrain(ctx); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (e *AgentExecutor) ForceStop(ctx context.Context) error {
 	e.cancel()
 
-	e.mu.RLock()
-	sessionIDs := make([]string, 0, len(e.sessions))
-	for id := range e.sessions {
-		sessionIDs = append(sessionIDs, id)
+	sessionIDs := e.listSessionIDs()
+
+	var errs []error
+	for _, id := range sessionIDs {
+		if err := e.StopSession(ctx, id); err != nil && !errors.Is(err, ErrSessionNotFound) {
+			errs = append(errs, fmt.Errorf("stop session %s: %w", id, err))
+		}
 	}
-	e.mu.RUnlock()
+
+	for _, id := range sessionIDs {
+		if err := e.KillSession(id); err != nil && !errors.Is(err, ErrSessionNotFound) {
+			errs = append(errs, fmt.Errorf("kill session %s: %w", id, err))
+		}
+	}
+
+	if err := e.AwaitDrain(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("await drain: %w", err))
+	}
+
+	return errors.Join(errs...)
+}
+
+func (e *AgentExecutor) Shutdown(ctx context.Context) error {
+	e.BeginDrain(ctx)
+	e.cancel()
+
+	sessionIDs := e.listSessionIDs()
 
 	for _, id := range sessionIDs {
 		_ = e.StopSession(ctx, id)
@@ -545,6 +602,17 @@ func (e *AgentExecutor) Shutdown(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (e *AgentExecutor) listSessionIDs() []string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	sessionIDs := make([]string, 0, len(e.sessions))
+	for id := range e.sessions {
+		sessionIDs = append(sessionIDs, id)
+	}
+	return sessionIDs
 }
 
 func formatTaskReference(id, title string) string {

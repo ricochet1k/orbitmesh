@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/ricochet1k/orbitmesh/internal/api"
+	"github.com/ricochet1k/orbitmesh/internal/entity"
 	"github.com/ricochet1k/orbitmesh/internal/mcpws"
 	"github.com/ricochet1k/orbitmesh/internal/provider"
 	"github.com/ricochet1k/orbitmesh/internal/provider/common/acp"
@@ -35,6 +37,7 @@ import (
 const (
 	defaultPort     = "8080"
 	shutdownTimeout = 5 * time.Second
+	drainLogEvery   = 750 * time.Millisecond
 )
 
 func listenAddr() string {
@@ -42,6 +45,85 @@ func listenAddr() string {
 		return ":" + strings.TrimPrefix(raw, ":")
 	}
 	return ":" + defaultPort
+}
+
+func logShutdownEvent(event string, fields map[string]any) {
+	payload := map[string]any{
+		"event": event,
+		"at":    time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	for k, v := range fields {
+		payload[k] = v
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("shutdown_event=%s fields=%v marshal_error=%v", event, fields, err)
+		return
+	}
+	log.Printf("%s", encoded)
+}
+
+func blockersFromStatus(status service.ExecutorDrainStatus) []map[string]any {
+	blockers := make([]map[string]any, 0, len(status.SessionRuns.WaitOn)+len(status.Evals.WaitOn))
+	appendWaits := func(store string, waits []entity.DrainWait) {
+		for _, wait := range waits {
+			deps := make([]map[string]string, 0, len(wait.BlockedDeps))
+			for _, dep := range wait.BlockedDeps {
+				deps = append(deps, map[string]string{
+					"kind": dep.Kind,
+					"id":   dep.ID,
+				})
+			}
+			entry := map[string]any{
+				"store":     store,
+				"reason":    wait.Reason,
+				"entity_id": wait.EntityID,
+				"age":       wait.Age.String(),
+			}
+			if wait.EnvelopeID != "" {
+				entry["envelope_id"] = wait.EnvelopeID
+			}
+			if wait.Op != "" {
+				entry["op"] = wait.Op
+			}
+			if len(deps) > 0 {
+				entry["blocked_deps"] = deps
+			}
+			blockers = append(blockers, entry)
+		}
+	}
+
+	appendWaits("sessions", status.SessionRuns.WaitOn)
+	appendWaits("evals", status.Evals.WaitOn)
+	return blockers
+}
+
+func awaitExecutorDrainWithProgress(ctx context.Context, executor *service.AgentExecutor) error {
+	drainDone := make(chan error, 1)
+	go func() {
+		drainDone <- executor.AwaitDrain(ctx)
+	}()
+
+	ticker := time.NewTicker(drainLogEvery)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case err := <-drainDone:
+			return err
+		case <-ticker.C:
+			status := executor.DrainStatus()
+			logShutdownEvent("shutdown.drain.progress", map[string]any{
+				"session_mode":         status.SessionRuns.Mode,
+				"eval_mode":            status.Evals.Mode,
+				"session_waiter_count": len(status.SessionRuns.WaitOn),
+				"eval_waiter_count":    len(status.Evals.WaitOn),
+				"blockers":             blockersFromStatus(status),
+				"session_errors":       status.SessionRuns.Errors,
+				"eval_errors":          status.Evals.Errors,
+			})
+		}
+	}
 }
 
 func main() {
@@ -145,16 +227,66 @@ func main() {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
+	shutdownStartedAt := time.Now().UTC()
 
-	if err := executor.Shutdown(shutdownCtx); err != nil {
-		log.Printf("executor shutdown: %v", err)
+	executor.BeginDrain(shutdownCtx)
+	initialDrain := executor.DrainStatus()
+	logShutdownEvent("shutdown.drain.start", map[string]any{
+		"timeout":              shutdownTimeout.String(),
+		"session_mode":         initialDrain.SessionRuns.Mode,
+		"eval_mode":            initialDrain.Evals.Mode,
+		"session_waiter_count": len(initialDrain.SessionRuns.WaitOn),
+		"eval_waiter_count":    len(initialDrain.Evals.WaitOn),
+		"blockers":             blockersFromStatus(initialDrain),
+	})
+
+	httpShutdownCh := make(chan error, 1)
+	go func() {
+		httpShutdownCh <- srv.Shutdown(shutdownCtx)
+	}()
+
+	drainErr := awaitExecutorDrainWithProgress(shutdownCtx, executor)
+	if drainErr != nil {
+		status := executor.DrainStatus()
+		logShutdownEvent("shutdown.drain.timeout", map[string]any{
+			"error":                drainErr.Error(),
+			"elapsed":              time.Since(shutdownStartedAt).String(),
+			"session_waiter_count": len(status.SessionRuns.WaitOn),
+			"eval_waiter_count":    len(status.Evals.WaitOn),
+			"blockers":             blockersFromStatus(status),
+			"session_errors":       status.SessionRuns.Errors,
+			"eval_errors":          status.Evals.Errors,
+		})
+
+		forceCtx, forceCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if err := executor.ForceStop(forceCtx); err != nil {
+			logShutdownEvent("shutdown.force_stop.error", map[string]any{"error": err.Error()})
+		} else {
+			logShutdownEvent("shutdown.force_stop.done", map[string]any{})
+		}
+		forceCancel()
+	} else {
+		logShutdownEvent("shutdown.drain.complete", map[string]any{
+			"elapsed": time.Since(shutdownStartedAt).String(),
+		})
+		if err := executor.ForceStop(shutdownCtx); err != nil {
+			logShutdownEvent("shutdown.finalize.error", map[string]any{"error": err.Error()})
+		}
 	}
-	if err := mcpGateway.Shutdown(shutdownCtx); err != nil {
-		log.Printf("mcp gateway shutdown: %v", err)
-	}
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+
+	if err := <-httpShutdownCh; err != nil {
+		logShutdownEvent("shutdown.http.error", map[string]any{"error": err.Error()})
 		log.Fatalf("server shutdown: %v", err)
 	}
+
+	if err := mcpGateway.Shutdown(shutdownCtx); err != nil {
+		logShutdownEvent("shutdown.mcp.error", map[string]any{"error": err.Error()})
+		log.Printf("mcp gateway shutdown: %v", err)
+	}
+
+	logShutdownEvent("shutdown.complete", map[string]any{
+		"elapsed": time.Since(shutdownStartedAt).String(),
+	})
 
 	fmt.Println("OrbitMesh shut down cleanly")
 }

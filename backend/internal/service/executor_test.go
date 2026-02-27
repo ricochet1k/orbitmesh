@@ -923,6 +923,91 @@ func TestAgentExecutor_ShutdownPreventsNewSessions(t *testing.T) {
 	}
 }
 
+func TestAgentExecutor_DrainStatus_ReportsWaitersWhileDraining(t *testing.T) {
+	prov := newMockProvider()
+	executor, _ := createTestExecutor(prov)
+	defer executor.ForceStop(context.Background())
+
+	config := session.Config{
+		ProviderType: "test",
+		WorkingDir:   "/tmp/test",
+	}
+	if _, err := executor.StartSession(context.Background(), "drain-status", config); err != nil {
+		t.Fatalf("start session: %v", err)
+	}
+	if _, err := executor.SendMessage(context.Background(), "drain-status", "hello", "", ""); err != nil {
+		t.Fatalf("send message: %v", err)
+	}
+
+	executor.BeginDrain(context.Background())
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		status := executor.DrainStatus()
+		if status.SessionRuns.Mode != entity.ActiveStoreModeDraining {
+			t.Fatalf("session drain mode: want %q, got %q", entity.ActiveStoreModeDraining, status.SessionRuns.Mode)
+		}
+
+		for _, wait := range status.SessionRuns.WaitOn {
+			if wait.EntityID == "drain-status" {
+				if wait.Reason != entity.ActiveStoreWaitReasonRunningBody && wait.Reason != entity.ActiveStoreWaitReasonWaitingDependency {
+					t.Fatalf("unexpected wait reason: %q", wait.Reason)
+				}
+				return
+			}
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for drain waiter; status=%+v", status)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestAgentExecutor_ForceStop_AfterDrainTimeout(t *testing.T) {
+	prov := newMockProvider()
+	executor, _ := createTestExecutor(prov)
+	defer executor.ForceStop(context.Background())
+
+	config := session.Config{
+		ProviderType: "test",
+		WorkingDir:   "/tmp/test",
+	}
+	if _, err := executor.StartSession(context.Background(), "drain-timeout", config); err != nil {
+		t.Fatalf("start session: %v", err)
+	}
+	if _, err := executor.SendMessage(context.Background(), "drain-timeout", "hello", "", ""); err != nil {
+		t.Fatalf("send message: %v", err)
+	}
+
+	executor.BeginDrain(context.Background())
+
+	awaitCtx, awaitCancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer awaitCancel()
+	if err := executor.AwaitDrain(awaitCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("AwaitDrain: want context deadline exceeded, got %v", err)
+	}
+
+	forceCtx, forceCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer forceCancel()
+	if err := executor.ForceStop(forceCtx); err != nil {
+		t.Fatalf("ForceStop: %v", err)
+	}
+
+	status := executor.DrainStatus()
+	if len(status.SessionRuns.WaitOn) != 0 {
+		t.Fatalf("expected no session blockers after force stop, got %+v", status.SessionRuns.WaitOn)
+	}
+
+	sess, err := executor.GetSession("drain-timeout")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if sess.GetState() != domain.SessionStateIdle {
+		t.Fatalf("expected idle session after force stop, got %s", sess.GetState())
+	}
+}
+
 func TestAgentExecutor_SendMessage_DuringDrain_ReturnsShutdown(t *testing.T) {
 	prov := newMockProvider()
 	executor, _ := createTestExecutor(prov)

@@ -338,6 +338,13 @@ func (c *EvalCoordinator) AwaitDrain(ctx context.Context) error {
 	return c.evals.AwaitDrain(ctx)
 }
 
+func (c *EvalCoordinator) DrainStatus() entity.DrainStatus {
+	if c == nil || c.evals == nil {
+		return entity.DrainStatus{}
+	}
+	return c.evals.DrainStatus()
+}
+
 // checkDepsDone reports whether all DepsWaiting for h are currently terminal.
 func (c *EvalCoordinator) checkDepsDone(h entity.Handle[*toolcall.Eval, toolcall.EvalSnapshot]) bool {
 	var deps []toolcall.Dependency
