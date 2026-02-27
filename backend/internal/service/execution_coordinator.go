@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/entity"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
 	"github.com/ricochet1k/orbitmesh/internal/toolcall"
 )
 
 func (e *AgentExecutor) handleEvents(ctx context.Context, sc *sessionContext, run *session.Run, events <-chan domain.Event) {
-	defer e.wg.Done()
 	defer close(run.EventsDone)
 	defer func() {
 		if r := recover(); r != nil {
@@ -44,10 +44,8 @@ func (e *AgentExecutor) handleEvents(ctx context.Context, sc *sessionContext, ru
 			return
 		case <-checkpointTicker.C:
 			if checkpointMu.TryLock() {
-				e.wg.Go(func() {
-					e.checkpointSession(sc)
-					checkpointMu.Unlock()
-				})
+				e.checkpointSession(sc)
+				checkpointMu.Unlock()
 			}
 		case event, ok := <-events:
 			if !ok {
@@ -199,6 +197,9 @@ func (e *AgentExecutor) resumeSessionValidated(ctx context.Context, id string, t
 	sc, err := e.ensureSessionContext(id)
 	if err != nil {
 		return nil, err
+	}
+	if e.sessionRuns != nil && e.sessionRuns.LifecycleMode() != entity.ActiveStoreModeRunning {
+		return nil, ErrExecutorShutdown
 	}
 
 	if tokenID == "" {
@@ -430,64 +431,105 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 		_ = e.storage.Save(sess)
 	}
 
+	if err := e.startManagedSessionRun(id, func(runCtx context.Context) {
+		e.executeSessionStart(runCtx, sc, run, id, pType, config, content)
+	}); err != nil {
+		sc.setRun(nil)
+		if errors.Is(err, ErrExecutorShutdown) {
+			return sess, ErrExecutorShutdown
+		}
+		return sess, fmt.Errorf("failed to start managed run: %w", err)
+	}
+
+	return sess, nil
+}
+
+func (e *AgentExecutor) executeSessionStart(runCtx context.Context, sc *sessionContext, run *session.Run, id string, pType string, config session.Config, content string) {
+	defer func() {
+		if r := recover(); r != nil {
+			e.handlePanic(sc, r)
+		}
+	}()
+
 	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				e.handlePanic(sc, r)
-			}
-		}()
-
-		log.Printf("STARTING SESSION %s with provider %s", id, pType)
-
-		startCtx, startCancel := context.WithTimeout(run.Ctx, e.opTimeout)
-		defer startCancel()
-
-		events, err := run.Session.SendInput(startCtx, config, content)
-		if err != nil {
-			errMsg := fmt.Sprintf("Provider failed to start: %v", err)
-			log.Printf("SESSION START FAILED: %v", errMsg)
-			e.emitSynthesized(sc.session, domain.NewErrorEvent(id, errMsg, "SESSION_START_FAILED", nil))
-			e.finalizeRunAttempt(sc, "failed", errMsg)
-			run.SetError(err)
-
-			if e.storage != nil {
-				_ = e.storage.Save(sc.session)
-			}
-
-			e.mu.Lock()
-			sc.setRun(nil)
-			e.mu.Unlock()
-			return
+		select {
+		case <-runCtx.Done():
+			run.Cancel()
+		case <-run.Ctx.Done():
 		}
+	}()
 
-		run.MarkActive()
-		e.transitionWithSave(sc, domain.SessionStateRunning, "session started")
-		e.ensureTerminalHubForPTY(sc)
+	log.Printf("STARTING SESSION %s with provider %s", id, pType)
 
-		// e.wg.Add(1) is paired with handleEvents' defer e.wg.Done().
-		// Do not use e.wg.Go here: that would double-decrement because
-		// handleEvents already manages its own Done.
-		e.wg.Add(1)
-		e.handleEvents(run.Ctx, sc, run, events)
+	startCtx, startCancel := context.WithTimeout(run.Ctx, e.opTimeout)
+	defer startCancel()
 
-		// If the session suspended waiting for tool results, the run is kept
-		// alive so that resumeSessionWithToolResults can re-use the provider.
-		// In that case the run (and the idle transition) are handled there.
-		if sc.session.GetState() == domain.SessionStateSuspended {
-			return
-		}
+	events, err := run.Session.SendInput(startCtx, config, content)
+	if err != nil {
+		errMsg := fmt.Sprintf("Provider failed to start: %v", err)
+		log.Printf("SESSION START FAILED: %v", errMsg)
+		e.emitSynthesized(sc.session, domain.NewErrorEvent(id, errMsg, "SESSION_START_FAILED", nil))
+		e.finalizeRunAttempt(sc, "failed", errMsg)
+		run.SetError(err)
 
-		if run.Ctx.Err() == nil {
-			e.finalizeRunAttempt(sc, "completed", "")
-			e.transitionWithSave(sc, domain.SessionStateIdle, "session run completed")
+		if e.storage != nil {
+			_ = e.storage.Save(sc.session)
 		}
 
 		e.mu.Lock()
 		sc.setRun(nil)
 		e.mu.Unlock()
-	}()
+		return
+	}
 
-	return sess, nil
+	run.MarkActive()
+	e.transitionWithSave(sc, domain.SessionStateRunning, "session started")
+	e.ensureTerminalHubForPTY(sc)
+	e.handleEvents(run.Ctx, sc, run, events)
+
+	if sc.session.GetState() == domain.SessionStateSuspended {
+		return
+	}
+
+	if run.Ctx.Err() == nil {
+		e.finalizeRunAttempt(sc, "completed", "")
+		e.transitionWithSave(sc, domain.SessionStateIdle, "session run completed")
+	}
+
+	e.mu.Lock()
+	sc.setRun(nil)
+	e.mu.Unlock()
+}
+
+func (e *AgentExecutor) startManagedSessionRun(id string, execute func(context.Context)) error {
+	if e.sessionRuns == nil {
+		go execute(e.ctx)
+		return nil
+	}
+
+	_, err := e.sessionRuns.Create(id, &sessionRunEntity{ID: id, execute: execute})
+	if err != nil {
+		if errors.Is(err, entity.ErrAlreadyExists) {
+			h, getErr := e.sessionRuns.Get(id)
+			if getErr != nil {
+				return getErr
+			}
+			if mutateErr := h.Mutate(func(runEntity **sessionRunEntity) {
+				(*runEntity).execute = execute
+				(*runEntity).done = false
+			}); mutateErr != nil {
+				return mutateErr
+			}
+			_, err = e.sessionRuns.Load(id)
+		}
+	}
+	if err != nil {
+		if errors.Is(err, entity.ErrActiveStoreDraining) || errors.Is(err, entity.ErrActiveStoreStartDeferred) {
+			return ErrExecutorShutdown
+		}
+		return err
+	}
+	return nil
 }
 
 func (e *AgentExecutor) transitionWithSave(sc *sessionContext, newState domain.SessionState, reason string) {
@@ -599,19 +641,31 @@ func (e *AgentExecutor) resumeSessionWithToolResults(sessionID string, results [
 	// existing *Run (which may still be referenced by other goroutines).
 	// The old run's context was already cancelled by suspendSession.
 	resumeRun := session.NewProviderRun(run.Session, e.ctx)
-	resumeRun.MarkActive()
 	sc.setRun(resumeRun)
-	e.wg.Add(1)
-	e.handleEvents(resumeRun.Ctx, sc, resumeRun, events)
 
-	if resumeRun.Ctx.Err() == nil {
-		e.finalizeRunAttempt(sc, "completed", "")
-		e.transitionWithSave(sc, domain.SessionStateIdle, "session run completed")
+	if err := e.startManagedSessionRun(sessionID, func(runCtx context.Context) {
+		go func() {
+			select {
+			case <-runCtx.Done():
+				resumeRun.Cancel()
+			case <-resumeRun.Ctx.Done():
+			}
+		}()
+
+		resumeRun.MarkActive()
+		e.handleEvents(resumeRun.Ctx, sc, resumeRun, events)
+
+		if resumeRun.Ctx.Err() == nil {
+			e.finalizeRunAttempt(sc, "completed", "")
+			e.transitionWithSave(sc, domain.SessionStateIdle, "session run completed")
+		}
+
+		e.mu.Lock()
+		sc.setRun(nil)
+		e.mu.Unlock()
+	}); err != nil {
+		log.Printf("resumeSessionWithToolResults: failed to start managed resumed run for session %s: %v", sessionID, err)
 	}
-
-	e.mu.Lock()
-	sc.setRun(nil)
-	e.mu.Unlock()
 }
 
 func (e *AgentExecutor) handlePanic(sc *sessionContext, r any) {

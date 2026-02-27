@@ -923,6 +923,48 @@ func TestAgentExecutor_ShutdownPreventsNewSessions(t *testing.T) {
 	}
 }
 
+func TestAgentExecutor_SendMessage_DuringDrain_ReturnsShutdown(t *testing.T) {
+	prov := newMockProvider()
+	executor, _ := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	config := session.Config{
+		ProviderType: "test",
+		WorkingDir:   "/tmp/test",
+	}
+	if _, err := executor.StartSession(context.Background(), "drain-send", config); err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	executor.sessionRuns.BeginDrain(context.Background())
+
+	_, err := executor.SendMessage(context.Background(), "drain-send", "hello", "", "")
+	if !errors.Is(err, ErrExecutorShutdown) {
+		t.Fatalf("expected ErrExecutorShutdown, got %v", err)
+	}
+}
+
+func TestAgentExecutor_ResumeSession_DuringDrain_ReturnsShutdown(t *testing.T) {
+	prov := newMockProvider()
+	executor, _ := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	config := session.Config{
+		ProviderType: "test",
+		WorkingDir:   "/tmp/test",
+	}
+	if _, err := executor.StartSession(context.Background(), "drain-resume", config); err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	executor.sessionRuns.BeginDrain(context.Background())
+
+	_, err := executor.ResumeSession(context.Background(), "drain-resume")
+	if !errors.Is(err, ErrExecutorShutdown) {
+		t.Fatalf("expected ErrExecutorShutdown, got %v", err)
+	}
+}
+
 func TestAgentExecutor_FullLifecycleIntegration(t *testing.T) {
 	prov := newMockProvider()
 	executor, storage := createTestExecutor(prov)

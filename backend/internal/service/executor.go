@@ -43,6 +43,24 @@ type sessionContext struct {
 	amMu    sync.Mutex
 }
 
+type sessionRunEntity struct {
+	ID      string
+	execute func(context.Context)
+	done    bool
+}
+
+type sessionRunSnapshot struct {
+	ID   string `json:"id"`
+	Done bool   `json:"done"`
+}
+
+func (s *sessionRunEntity) Snapshot() sessionRunSnapshot {
+	if s == nil {
+		return sessionRunSnapshot{}
+	}
+	return sessionRunSnapshot{ID: s.ID, Done: s.done}
+}
+
 func (sc *sessionContext) getRun() *session.Run {
 	if sc == nil {
 		return nil
@@ -82,11 +100,11 @@ type AgentExecutor struct {
 
 	evalCoordinator *EvalCoordinator
 
-	recovery *recoveryManager
+	recovery    *recoveryManager
+	sessionRuns *entity.ActiveStore[*sessionRunEntity, sessionRunSnapshot]
 
 	ctx    context.Context
 	cancel context.CancelFunc
-	wg     sync.WaitGroup
 }
 
 type ExecutorConfig struct {
@@ -151,6 +169,29 @@ func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
 	if exec.resumeTokenTTL <= 0 {
 		exec.resumeTokenTTL = 24 * time.Hour
 	}
+
+	exec.sessionRuns = entity.NewActiveStore[*sessionRunEntity, sessionRunSnapshot](
+		nil,
+		nil,
+		func(h entity.Handle[*sessionRunEntity, sessionRunSnapshot]) func(context.Context) {
+			return func(runCtx context.Context) {
+				var execute func(context.Context)
+				h.Read(func(sre **sessionRunEntity) {
+					execute = (*sre).execute
+				})
+				if execute != nil {
+					execute(runCtx)
+				}
+				_ = h.Mutate(func(sre **sessionRunEntity) {
+					(*sre).done = true
+				})
+				h.MarkDone()
+			}
+		},
+		entity.StoreOptions[*sessionRunEntity, sessionRunSnapshot]{
+			Kind: "session_run",
+		},
+	)
 
 	// Wire up EvalCoordinator if eval storage is provided.
 	if cfg.EvalStorage != nil {
@@ -448,6 +489,9 @@ func (e *AgentExecutor) SendMessageWithOptions(ctx context.Context, id string, c
 	// Handle based on session state
 	switch state {
 	case domain.SessionStateIdle:
+		if e.sessionRuns != nil && e.sessionRuns.LifecycleMode() != entity.ActiveStoreModeRunning {
+			return sess, ErrExecutorShutdown
+		}
 		// For idle sessions, start a new run with this message
 		return e.startRunWithMessage(ctx, id, sess, content, options)
 
@@ -466,6 +510,9 @@ func (e *AgentExecutor) SendMessageWithOptions(ctx context.Context, id string, c
 }
 
 func (e *AgentExecutor) Shutdown(ctx context.Context) error {
+	if e.sessionRuns != nil {
+		e.sessionRuns.BeginDrain(ctx)
+	}
 	if e.evalCoordinator != nil {
 		e.evalCoordinator.BeginDrain(ctx)
 	}
@@ -482,26 +529,22 @@ func (e *AgentExecutor) Shutdown(ctx context.Context) error {
 		_ = e.StopSession(ctx, id)
 	}
 
-	done := make(chan struct{})
-	go func() {
-		e.wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		if e.evalCoordinator != nil {
-			if err := e.evalCoordinator.AwaitDrain(ctx); err != nil {
-				return err
+	if e.sessionRuns != nil {
+		if err := e.sessionRuns.AwaitDrain(ctx); err != nil {
+			for _, id := range sessionIDs {
+				_ = e.KillSession(id)
 			}
+			return err
 		}
-		return nil
-	case <-ctx.Done():
-		for _, id := range sessionIDs {
-			_ = e.KillSession(id)
-		}
-		return ctx.Err()
 	}
+
+	if e.evalCoordinator != nil {
+		if err := e.evalCoordinator.AwaitDrain(ctx); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func formatTaskReference(id, title string) string {
