@@ -3,6 +3,7 @@ module github.com/ricochet1k/orbitmesh
 go 1.25
 
 require (
+	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/coder/acp-go-sdk v0.6.3
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/google/uuid v1.6.0
@@ -10,6 +11,7 @@ require (
 	github.com/gzuidhof/tygo v0.2.21
 	github.com/modelcontextprotocol/go-sdk v1.2.0
 	github.com/openai/openai-go/v3 v3.22.0
+	github.com/ricochet1k/monty-wasm-go v0.0.0-20260226020500-9b07ce139173
 	github.com/ricochet1k/termemu v0.0.0-20260209182826-78fb158143ff
 	google.golang.org/adk v0.4.0
 	google.golang.org/genai v1.46.0
@@ -20,8 +22,10 @@ require (
 	cloud.google.com/go/auth v0.18.1 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	dario.cat/mergo v1.0.2 // indirect
+	github.com/PuerkitoBio/goquery v1.9.2 // indirect
 	github.com/air-verse/air v1.64.5 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
+	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/bep/godartsass/v2 v2.5.0 // indirect
 	github.com/bep/golibsass v1.2.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

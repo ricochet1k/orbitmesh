@@ -7,6 +7,18 @@ export interface MCPServerConfig {
   env?: Record<string, string>;
 }
 
+export interface MCPGatewaySettings {
+  host: string;
+  port: number;
+}
+
+export interface MCPGatewayTokenResponse {
+  session_id: string;
+  otp: string;
+  expires_at: string;
+  ws_url: string;
+}
+
 export interface SessionRequest {
   provider_type: string;
   provider_id?: string;

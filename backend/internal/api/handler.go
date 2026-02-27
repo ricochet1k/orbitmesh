@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/mcpws"
 	"github.com/ricochet1k/orbitmesh/internal/presentation"
 	"github.com/ricochet1k/orbitmesh/internal/realtime"
 	"github.com/ricochet1k/orbitmesh/internal/service"
@@ -37,6 +38,8 @@ type Handler struct {
 	providerStorage *storage.ProviderConfigStorage
 	agentStorage    *storage.AgentConfigStorage
 	projectStorage  *storage.ProjectStorage
+	mcpConfigStore  *storage.MCPGatewayConfigStorage
+	mcpGateway      *mcpws.Gateway
 	providerTester  ProviderTester
 	gitDir          string
 	dockBridge      *DockBridge
@@ -59,6 +62,11 @@ func NewHandler(executor *service.AgentExecutor, broadcaster *service.EventBroad
 	}
 	h.startRealtimeBridge()
 	return h
+}
+
+func (h *Handler) SetMCPGateway(configStore *storage.MCPGatewayConfigStorage, gateway *mcpws.Gateway) {
+	h.mcpConfigStore = configStore
+	h.mcpGateway = gateway
 }
 
 // SetProviderTester wires the provider factory so the handler can serve the
@@ -95,10 +103,13 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/sessions/{id}/dock/mcp/next", h.nextDockMCP)
 	r.Post("/api/sessions/{id}/dock/mcp/request", h.requestDockMCP)
 	r.Post("/api/sessions/{id}/dock/mcp/respond", h.respondDockMCP)
+	r.Post("/api/sessions/{id}/mcp/ws-token", h.createMCPWSToken)
 	r.Get("/api/sessions/{id}/terminal/ws", h.terminalWebSocket)
 	r.Get("/api/v1/sessions/{id}/terminal/snapshot", h.getTerminalSnapshot)
 	r.Post("/api/v1/sessions/{id}/extractor/replay", h.replayExtractor)
 	r.Get("/api/v1/providers", h.listProviders)
+	r.Get("/api/v1/settings/mcp-gateway", h.getMCPGatewaySettings)
+	r.Put("/api/v1/settings/mcp-gateway", h.putMCPGatewaySettings)
 	r.Get("/api/v1/providers/acp/runtime", h.getACPRuntimeStats)
 	r.Post("/api/v1/providers/test", h.testProvider)
 	r.Post("/api/v1/providers", h.createProvider)

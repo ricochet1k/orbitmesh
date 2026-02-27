@@ -59,6 +59,18 @@ type MCPServerConfig struct {
 	Env     map[string]string `json:"env,omitempty"`
 }
 
+type MCPGatewaySettings struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
+}
+
+type MCPGatewayTokenResponse struct {
+	SessionID string    `json:"session_id"`
+	OTP       string    `json:"otp"`
+	ExpiresAt time.Time `json:"expires_at"`
+	WSURL     string    `json:"ws_url"`
+}
+
 type SessionResponse struct {
 	ID                  string `json:"id"`
 	ProviderType        string `json:"provider_type"`
