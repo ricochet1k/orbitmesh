@@ -405,6 +405,7 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 		SessionKind:     sess.Kind,
 		Title:           sess.Title,
 		Custom:          custom,
+		SessionCustom:   sess.CustomDataCopy(),
 		Environment:     options.Environment,
 		AllowedTools:    options.AllowedTools,
 		DisallowedTools: options.DisallowedTools,

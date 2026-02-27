@@ -62,6 +62,10 @@ type Config struct {
 	ResumeMessages  []Message // Message history to resume from (for session resumption)
 	AllowedTools    []string
 	DisallowedTools []string
+	// SessionCustom carries persisted runtime state for a session (for example,
+	// provider-side session continuity IDs) and is distinct from provider
+	// configuration in Custom.
+	SessionCustom map[string]any
 }
 
 type Metrics struct {

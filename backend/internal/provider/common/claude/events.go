@@ -89,6 +89,7 @@ func handleContentBlockStart(sessionID string, msg Message) (domain.Event, bool)
 			ID:     block.ToolUseID,
 			Name:   block.ToolUseName,
 			Status: "started",
+			Input:  block.ToolInput,
 		}, msg.Raw()), true
 
 	default:
@@ -104,7 +105,7 @@ func handleContentBlockDelta(sessionID string, msg Message) (domain.Event, bool)
 		return domain.Event{}, false
 	}
 
-	if block.Text != "" {
+	if block.Type == ContentBlockTypeText && block.Text != "" {
 		// Emit text content as delta output (will be merged in storage)
 		return domain.NewDeltaOutputEvent(sessionID, block.Text, msg.Raw()), true
 	}

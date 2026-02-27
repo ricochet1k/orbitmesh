@@ -385,9 +385,10 @@ func (e *AgentExecutor) SendInput(ctx context.Context, id string, input string, 
 
 	// Build minimal config for mid-run input (runner is already started).
 	cfg := session.Config{
-		ProviderType: sc.session.ProviderType,
-		WorkingDir:   sc.session.WorkingDir,
-		ProjectID:    sc.session.ProjectID,
+		ProviderType:  sc.session.ProviderType,
+		WorkingDir:    sc.session.WorkingDir,
+		ProjectID:     sc.session.ProjectID,
+		SessionCustom: sc.session.CustomDataCopy(),
 	}
 	_, err := run.Session.SendInput(ctx, cfg, input)
 	return err

@@ -2,9 +2,12 @@ package storage
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,12 +66,31 @@ func (e *LogCorruptionError) Error() string {
 type JSONLLogStorage struct {
 	dir string // e.g. <baseDir>/sessions
 	mu  sync.RWMutex
+
+	indices      map[string]*streamIndex
+	lastSync     time.Time
+	syncInterval time.Duration
+}
+
+type streamIndex struct {
+	maxSeq int64
+	lines  []indexedLine
+}
+
+type indexedLine struct {
+	offset int64
+	length int
+	record *MessageLogRecord
 }
 
 // NewJSONLLogStorage returns a JSONLLogStorage that stores log files under dir.
 // The directory is created if it does not exist.
 func NewJSONLLogStorage(dir string) *JSONLLogStorage {
-	return &JSONLLogStorage{dir: dir}
+	return &JSONLLogStorage{
+		dir:          dir,
+		indices:      make(map[string]*streamIndex),
+		syncInterval: 75 * time.Millisecond,
+	}
 }
 
 // Ensure JSONLLogStorage satisfies entity.LogStorage at compile time.
@@ -92,21 +114,39 @@ func (s *JSONLLogStorage) Append(id string, record MessageLogRecord) (MessageLog
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	idx, err := s.streamIndexLocked(id)
+	if err != nil {
+		return MessageLogRecord{}, err
+	}
+
+	if record.Projection == MessageProjectionOutputDelta {
+		merged, handled, err := s.tryApplyDeltaLocked(id, idx, record)
+		if err != nil {
+			return MessageLogRecord{}, err
+		}
+		if handled {
+			return merged, nil
+		}
+
+		if len(record.Raw) > 0 {
+			record.Projection = MessageProjectionAppendRaw
+		} else {
+			record.Projection = MessageProjectionAppend
+		}
+	}
+
 	// Ensure the directory exists before opening the file.
 	if err := os.MkdirAll(s.dir, 0o700); err != nil {
 		return MessageLogRecord{}, fmt.Errorf("jsonl_log_storage: mkdir %s: %w", s.dir, err)
 	}
 
-	seq, err := s.nextSeqLocked(id)
-	if err != nil {
-		return MessageLogRecord{}, err
-	}
-	record.Seq = seq
+	record.Seq = idx.maxSeq + 1
 
 	line, err := json.Marshal(record)
 	if err != nil {
 		return MessageLogRecord{}, fmt.Errorf("jsonl_log_storage: marshal record: %w", err)
 	}
+	line = append(line, '\n')
 
 	path := s.logPath(id)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
@@ -115,13 +155,24 @@ func (s *JSONLLogStorage) Append(id string, record MessageLogRecord) (MessageLog
 	}
 	defer f.Close()
 
-	if _, err := f.Write(append(line, '\n')); err != nil {
+	if _, err := f.Write(line); err != nil {
 		return MessageLogRecord{}, fmt.Errorf("jsonl_log_storage: write record: %w", err)
 	}
 
-	if err := f.Sync(); err != nil {
-		return MessageLogRecord{}, fmt.Errorf("jsonl_log_storage: sync: %w", err)
+	if s.shouldSyncLocked() {
+		if err := f.Sync(); err != nil {
+			return MessageLogRecord{}, fmt.Errorf("jsonl_log_storage: sync: %w", err)
+		}
 	}
+
+	var offset int64
+	if n := len(idx.lines); n > 0 {
+		last := idx.lines[n-1]
+		offset = last.offset + int64(last.length)
+	}
+	recCopy := record
+	idx.lines = append(idx.lines, indexedLine{offset: offset, length: len(line), record: &recCopy})
+	idx.maxSeq = record.Seq
 
 	return record, nil
 }
@@ -227,7 +278,192 @@ func (s *JSONLLogStorage) Delete(id string) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("jsonl_log_storage: delete %s: %w", path, err)
 	}
+	delete(s.indices, id)
 	return nil
+}
+
+func (s *JSONLLogStorage) streamIndexLocked(id string) (*streamIndex, error) {
+	if idx, ok := s.indices[id]; ok {
+		return idx, nil
+	}
+
+	path := s.logPath(id)
+	f, err := os.Open(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			idx := &streamIndex{}
+			s.indices[id] = idx
+			return idx, nil
+		}
+		return nil, fmt.Errorf("jsonl_log_storage: open %s for index: %w", path, err)
+	}
+	defer f.Close()
+
+	reader := bufio.NewReader(f)
+	idx := &streamIndex{}
+	var offset int64
+
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			entry := indexedLine{offset: offset, length: len(line)}
+			trimmed := strings.TrimSpace(string(line))
+			if trimmed != "" {
+				var rec MessageLogRecord
+				if err := json.Unmarshal([]byte(trimmed), &rec); err == nil && rec.Seq > 0 && !rec.Timestamp.IsZero() {
+					recCopy := rec
+					entry.record = &recCopy
+					if rec.Seq > idx.maxSeq {
+						idx.maxSeq = rec.Seq
+					}
+				}
+			}
+			idx.lines = append(idx.lines, entry)
+			offset += int64(len(line))
+		}
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			return nil, fmt.Errorf("jsonl_log_storage: scan %s for index: %w", path, readErr)
+		}
+	}
+
+	s.indices[id] = idx
+	return idx, nil
+}
+
+func (s *JSONLLogStorage) tryApplyDeltaLocked(id string, idx *streamIndex, delta MessageLogRecord) (MessageLogRecord, bool, error) {
+	lineIdx, scannedBackwards := findDeltaTargetLine(idx, delta.TargetMessageID)
+	if lineIdx < 0 {
+		return MessageLogRecord{}, false, nil
+	}
+	if scannedBackwards {
+		target := "<latest-output>"
+		if delta.TargetMessageID != "" {
+			target = delta.TargetMessageID
+		}
+		log.Printf("jsonl_log_storage: session %s delta required backward scan for target %s", id, target)
+	}
+
+	line := idx.lines[lineIdx]
+	if line.record == nil {
+		return MessageLogRecord{}, false, nil
+	}
+
+	merged := *line.record
+	merged.Contents += delta.Contents
+	if merged.TargetMessageID == "" && delta.TargetMessageID != "" {
+		merged.TargetMessageID = delta.TargetMessageID
+	}
+
+	marshaled, err := json.Marshal(merged)
+	if err != nil {
+		return MessageLogRecord{}, false, fmt.Errorf("jsonl_log_storage: marshal merged record: %w", err)
+	}
+	marshaled = append(marshaled, '\n')
+
+	path := s.logPath(id)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return MessageLogRecord{}, false, fmt.Errorf("jsonl_log_storage: read %s for rewrite: %w", path, err)
+	}
+
+	start := line.offset
+	if start < 0 || start > int64(len(data)) {
+		return MessageLogRecord{}, false, fmt.Errorf("jsonl_log_storage: invalid rewrite offset for %s", path)
+	}
+
+	var out bytes.Buffer
+	out.Grow(len(data) - line.length + len(marshaled))
+	out.Write(data[:start])
+	out.Write(marshaled)
+	for i := lineIdx + 1; i < len(idx.lines); i++ {
+		entry := idx.lines[i]
+		entryStart := entry.offset
+		entryEnd := entry.offset + int64(entry.length)
+		if entryStart < 0 || entryEnd < entryStart || entryEnd > int64(len(data)) {
+			return MessageLogRecord{}, false, fmt.Errorf("jsonl_log_storage: invalid line bounds while rewriting %s", path)
+		}
+		out.Write(data[entryStart:entryEnd])
+	}
+
+	tmpPath := path + ".tmp"
+	tmp, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return MessageLogRecord{}, false, fmt.Errorf("jsonl_log_storage: open temp %s: %w", tmpPath, err)
+	}
+	if _, err := tmp.Write(out.Bytes()); err != nil {
+		tmp.Close()
+		return MessageLogRecord{}, false, fmt.Errorf("jsonl_log_storage: write temp %s: %w", tmpPath, err)
+	}
+	if s.shouldSyncLocked() {
+		if err := tmp.Sync(); err != nil {
+			tmp.Close()
+			return MessageLogRecord{}, false, fmt.Errorf("jsonl_log_storage: sync temp %s: %w", tmpPath, err)
+		}
+	}
+	if err := tmp.Close(); err != nil {
+		return MessageLogRecord{}, false, fmt.Errorf("jsonl_log_storage: close temp %s: %w", tmpPath, err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return MessageLogRecord{}, false, fmt.Errorf("jsonl_log_storage: replace %s: %w", path, err)
+	}
+
+	shift := len(marshaled) - line.length
+	idx.lines[lineIdx].length = len(marshaled)
+	idx.lines[lineIdx].record = &merged
+	if shift != 0 {
+		for i := lineIdx + 1; i < len(idx.lines); i++ {
+			idx.lines[i].offset += int64(shift)
+		}
+	}
+
+	return merged, true, nil
+}
+
+func findDeltaTargetLine(idx *streamIndex, targetID string) (int, bool) {
+	if idx == nil || len(idx.lines) == 0 {
+		return -1, false
+	}
+
+	last := len(idx.lines) - 1
+	if rec := idx.lines[last].record; rec != nil && rec.Kind == domain.MessageKindOutput && rec.Projection != MessageProjectionOutputDelta {
+		if targetID == "" || recordMessageID(*rec) == targetID {
+			return last, false
+		}
+	}
+
+	for i := last - 1; i >= 0; i-- {
+		rec := idx.lines[i].record
+		if rec == nil || rec.Kind != domain.MessageKindOutput || rec.Projection == MessageProjectionOutputDelta {
+			continue
+		}
+		if targetID == "" || recordMessageID(*rec) == targetID {
+			return i, true
+		}
+	}
+
+	return -1, false
+}
+
+func recordMessageID(rec MessageLogRecord) string {
+	if rec.TargetMessageID != "" && rec.Projection != MessageProjectionOutputDelta {
+		return rec.TargetMessageID
+	}
+	return fmt.Sprintf("log_%d", rec.Seq)
+}
+
+func (s *JSONLLogStorage) shouldSyncLocked() bool {
+	if s.syncInterval <= 0 {
+		return true
+	}
+	now := time.Now()
+	if s.lastSync.IsZero() || now.Sub(s.lastSync) >= s.syncInterval {
+		s.lastSync = now
+		return true
+	}
+	return false
 }
 
 // nextSeqLocked scans the log file to find the current maximum sequence number

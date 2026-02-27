@@ -408,3 +408,43 @@ func TestResolveClaudeCommand(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildCommandArgs_AutoResumeFromSessionCustom(t *testing.T) {
+	args, err := buildCommandArgs(session.Config{
+		SessionCustom: map[string]any{"claude_session_id": "sess_123"},
+	})
+	if err != nil {
+		t.Fatalf("buildCommandArgs() unexpected error: %v", err)
+	}
+
+	hasResume := false
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--resume" && args[i+1] == "sess_123" {
+			hasResume = true
+			break
+		}
+	}
+	if !hasResume {
+		t.Fatalf("expected --resume sess_123 in args, got %v", args)
+	}
+}
+
+func TestBuildCommandArgs_AutoContinueFromSessionCustom(t *testing.T) {
+	args, err := buildCommandArgs(session.Config{
+		SessionCustom: map[string]any{"claude_has_prior_session": true},
+	})
+	if err != nil {
+		t.Fatalf("buildCommandArgs() unexpected error: %v", err)
+	}
+
+	hasContinue := false
+	for _, arg := range args {
+		if arg == "--continue" {
+			hasContinue = true
+			break
+		}
+	}
+	if !hasContinue {
+		t.Fatalf("expected --continue in args, got %v", args)
+	}
+}

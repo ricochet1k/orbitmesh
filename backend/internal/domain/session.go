@@ -153,6 +153,7 @@ type Session struct {
 	// acp_command) so it can be re-supplied when starting a new run on an
 	// idle session via SendMessage.
 	ProviderCustom    map[string]any
+	CustomData        map[string]any
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	CurrentTask       string
@@ -231,6 +232,29 @@ func (s *Session) SetPreferredProviderID(providerID string) {
 	s.UpdatedAt = time.Now()
 }
 
+func (s *Session) SetCustomDataValue(key string, value any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.CustomData == nil {
+		s.CustomData = make(map[string]any)
+	}
+	s.CustomData[key] = value
+	s.UpdatedAt = time.Now()
+}
+
+func (s *Session) CustomDataCopy() map[string]any {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.CustomData) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(s.CustomData))
+	for k, v := range s.CustomData {
+		out[k] = v
+	}
+	return out
+}
+
 // SetSuspensionContext stores the suspension context for a suspended session.
 func (s *Session) SetSuspensionContext(ctx any) {
 	s.mu.Lock()
@@ -259,6 +283,7 @@ type SessionSnapshot struct {
 	WorkingDir        string            `json:"working_dir"`
 	ProjectID         string            `json:"project_id,omitempty"`
 	ProviderCustom    map[string]any    `json:"provider_custom,omitempty"`
+	CustomData        map[string]any    `json:"custom_data,omitempty"`
 	CreatedAt         time.Time         `json:"created_at"`
 	UpdatedAt         time.Time         `json:"updated_at"`
 	CurrentTask       string            `json:"current_task,omitempty"`
@@ -285,6 +310,7 @@ func (s *Session) Snapshot() SessionSnapshot {
 		WorkingDir:          s.WorkingDir,
 		ProjectID:           s.ProjectID,
 		ProviderCustom:      s.ProviderCustom,
+		CustomData:          s.CustomData,
 		CreatedAt:           s.CreatedAt,
 		UpdatedAt:           s.UpdatedAt,
 		CurrentTask:         s.CurrentTask,
@@ -305,6 +331,7 @@ func SessionFromSnapshot(snap SessionSnapshot) *Session {
 		WorkingDir:          snap.WorkingDir,
 		ProjectID:           snap.ProjectID,
 		ProviderCustom:      snap.ProviderCustom,
+		CustomData:          snap.CustomData,
 		CreatedAt:           snap.CreatedAt,
 		UpdatedAt:           snap.UpdatedAt,
 		CurrentTask:         snap.CurrentTask,

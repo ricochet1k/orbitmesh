@@ -49,6 +49,11 @@ func buildCommandArgs(config session.Config) ([]string, error) {
 		for _, tool := range config.DisallowedTools {
 			args = append(args, "--disallowed-tools", tool)
 		}
+		if resumeID := sessionCustomString(config.SessionCustom, "claude_session_id"); resumeID != "" {
+			args = append(args, "--resume", resumeID)
+		} else if sessionCustomBool(config.SessionCustom, "claude_has_prior_session") {
+			args = append(args, "--continue")
+		}
 		return args, nil
 	}
 
@@ -164,6 +169,10 @@ func buildCommandArgs(config session.Config) ([]string, error) {
 	// Session ID
 	if sessionID, ok := config.Custom["session_id"].(string); ok && sessionID != "" {
 		args = append(args, "--session-id", sessionID)
+	} else if resumeID := sessionCustomString(config.SessionCustom, "claude_session_id"); resumeID != "" {
+		args = append(args, "--resume", resumeID)
+	} else if sessionCustomBool(config.SessionCustom, "claude_has_prior_session") {
+		args = append(args, "--continue")
 	}
 
 	// Betas
@@ -282,6 +291,33 @@ func parseFloat(value any) (float64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func sessionCustomString(custom map[string]any, key string) string {
+	if custom == nil {
+		return ""
+	}
+	v, ok := custom[key]
+	if !ok {
+		return ""
+	}
+	s, ok := v.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(s)
+}
+
+func sessionCustomBool(custom map[string]any, key string) bool {
+	if custom == nil {
+		return false
+	}
+	v, ok := custom[key]
+	if !ok {
+		return false
+	}
+	b, ok := v.(bool)
+	return ok && b
 }
 
 // formatInputMessage formats user input as a stream-json message for Claude.

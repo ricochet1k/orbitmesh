@@ -52,6 +52,11 @@ func buildWSCommandArgs(sdkURL string, config session.Config) ([]string, error) 
 		for _, tool := range config.DisallowedTools {
 			args = append(args, "--disallowed-tools", tool)
 		}
+		if resumeID := sessionCustomString(config.SessionCustom, "claude_session_id"); resumeID != "" {
+			args = append(args, "--resume", resumeID)
+		} else if sessionCustomBool(config.SessionCustom, "claude_has_prior_session") {
+			args = append(args, "--continue")
+		}
 		return args, nil
 	}
 
@@ -95,6 +100,10 @@ func buildWSCommandArgs(sdkURL string, config session.Config) ([]string, error) 
 	// Session resume
 	if resumeID, ok := config.Custom["resume_session_id"].(string); ok && resumeID != "" {
 		args = append(args, "--resume", resumeID)
+	} else if resumeID := sessionCustomString(config.SessionCustom, "claude_session_id"); resumeID != "" {
+		args = append(args, "--resume", resumeID)
+	} else if sessionCustomBool(config.SessionCustom, "claude_has_prior_session") {
+		args = append(args, "--continue")
 	}
 
 	// Fork mode (resume but with new session ID)
@@ -209,4 +218,31 @@ func parseFloat(value any) (float64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func sessionCustomString(custom map[string]any, key string) string {
+	if custom == nil {
+		return ""
+	}
+	v, ok := custom[key]
+	if !ok {
+		return ""
+	}
+	s, ok := v.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(s)
+}
+
+func sessionCustomBool(custom map[string]any, key string) bool {
+	if custom == nil {
+		return false
+	}
+	v, ok := custom[key]
+	if !ok {
+		return false
+	}
+	b, ok := v.(bool)
+	return ok && b
 }

@@ -381,19 +381,15 @@ func (p *ClaudeWSProvider) handleSystemMsg(rm RawMessage) {
 		if msg.Status != nil {
 			status = *msg.Status
 		}
-		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "system_status", map[string]any{
-			"status": status,
-		}, rm.Raw))
+		if status != "" {
+			p.events.Emit(domain.NewSystemMessageEvent(p.sessionID, fmt.Sprintf("Claude status: %s", status)))
+		}
 
 	case "compact_boundary":
-		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "compact_boundary", map[string]any{
-			"raw": string(rm.Raw),
-		}, rm.Raw))
+		p.events.Emit(domain.NewSystemMessageEvent(p.sessionID, "Claude reached a context compaction boundary"))
 
 	case "task_notification":
-		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "task_notification", map[string]any{
-			"raw": string(rm.Raw),
-		}, rm.Raw))
+		p.events.Emit(domain.NewSystemMessageEvent(p.sessionID, "Claude emitted a task notification"))
 
 	default:
 		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "system_message", map[string]any{
@@ -570,24 +566,6 @@ func (p *ClaudeWSProvider) handleResultMsg(rm RawMessage) {
 		p.emitEvent(domain.NewMetricEvent(p.sessionID, msg.Usage.InputTokens, msg.Usage.OutputTokens, 0, rm.Raw), rm.Raw)
 	}
 
-	metadata := map[string]any{
-		"subtype":         msg.Subtype,
-		"is_error":        msg.IsError,
-		"duration_ms":     msg.DurationMS,
-		"duration_api_ms": msg.DurationAPIMS,
-		"num_turns":       msg.NumTurns,
-		"total_cost_usd":  msg.TotalCostUSD,
-	}
-	if msg.StopReason != nil {
-		metadata["stop_reason"] = *msg.StopReason
-	}
-	if msg.Result != "" {
-		metadata["result"] = msg.Result
-	}
-	if len(msg.Errors) > 0 {
-		metadata["errors"] = msg.Errors
-	}
-
 	if msg.IsError {
 		errText := strings.Join(msg.Errors, "; ")
 		if errText == "" {
@@ -596,7 +574,13 @@ func (p *ClaudeWSProvider) handleResultMsg(rm RawMessage) {
 		p.emitEvent(domain.NewErrorEvent(p.sessionID, errText, msg.Subtype, rm.Raw), rm.Raw)
 	}
 
-	p.events.Emit(domain.NewPlanEvent(p.sessionID, domain.PlanData{Description: fmt.Sprint(metadata)}, rm.Raw))
+	if msg.Result != "" {
+		p.emitEvent(domain.NewOutputEvent(p.sessionID, msg.Result, rm.Raw), rm.Raw)
+	}
+
+	if msg.StopReason != nil && *msg.StopReason != "" {
+		p.events.Emit(domain.NewSystemMessageEvent(p.sessionID, fmt.Sprintf("Claude stop reason: %s", *msg.StopReason)))
+	}
 }
 
 func (p *ClaudeWSProvider) handleControlRequest(rm RawMessage) {
@@ -687,10 +671,11 @@ func (p *ClaudeWSProvider) handleToolProgress(rm RawMessage) {
 	if err := json.Unmarshal(rm.Raw, &msg); err != nil {
 		return
 	}
-	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "tool_progress", map[string]any{
-		"tool_name":            msg.ToolName,
-		"tool_use_id":          msg.ToolUseID,
-		"elapsed_time_seconds": msg.ElapsedTimeSeconds,
+	p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+		ID:     msg.ToolUseID,
+		Name:   msg.ToolName,
+		Status: "running",
+		Title:  fmt.Sprintf("running for %.1fs", msg.ElapsedTimeSeconds),
 	}, rm.Raw))
 }
 
@@ -701,9 +686,9 @@ func (p *ClaudeWSProvider) handleToolUseSummary(rm RawMessage) {
 	if err := json.Unmarshal(rm.Raw, &v); err != nil {
 		return
 	}
-	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "tool_use_summary", map[string]any{
-		"summary": v.Summary,
-	}, rm.Raw))
+	if v.Summary != "" {
+		p.events.Emit(domain.NewThoughtEvent(p.sessionID, v.Summary, nil))
+	}
 }
 
 func (p *ClaudeWSProvider) handleAuthStatus(rm RawMessage) {
@@ -715,11 +700,12 @@ func (p *ClaudeWSProvider) handleAuthStatus(rm RawMessage) {
 	if err := json.Unmarshal(rm.Raw, &v); err != nil {
 		return
 	}
-	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "auth_status", map[string]any{
-		"is_authenticating": v.IsAuthenticating,
-		"output":            v.Output,
-		"error":             v.Error,
-	}, rm.Raw))
+	if v.IsAuthenticating {
+		p.events.Emit(domain.NewSystemMessageEvent(p.sessionID, "Claude authentication in progress"))
+	}
+	if v.Error != "" {
+		p.events.Emit(domain.NewErrorEvent(p.sessionID, v.Error, "AUTH_STATUS", rm.Raw))
+	}
 }
 
 // processInput reads from the input buffer and sends user messages over WS.

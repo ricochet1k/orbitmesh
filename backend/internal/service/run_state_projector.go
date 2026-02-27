@@ -122,7 +122,10 @@ func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.
 				sc.session.SetCurrentTask(task)
 			}
 		}
-		e.appendSessionMessageRaw(sc.session, domain.MessageKindSystem, data.Key, event.Raw, event.Timestamp)
+		e.updateSessionCustomDataFromMetadata(sc.session, data)
+		if !isInternalMetadataKey(data.Key) {
+			e.appendSessionMessageRaw(sc.session, domain.MessageKindSystem, formatMetadataContent(data), event.Raw, event.Timestamp)
+		}
 	case domain.MetricData:
 		e.appendSessionMessageRaw(sc.session, domain.MessageKindMetric,
 			fmt.Sprintf("in=%d out=%d requests=%d", data.TokensIn, data.TokensOut, data.RequestCount), event.Raw, event.Timestamp)
@@ -142,4 +145,52 @@ func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.
 		_ = e.storage.Save(sc.session)
 	}
 	e.touchRunAttempt(sc)
+}
+
+func (e *AgentExecutor) updateSessionCustomDataFromMetadata(sess *domain.Session, data domain.MetadataData) {
+	if data.Key != "system_init" {
+		return
+	}
+	v, ok := data.Value.(map[string]any)
+	if !ok {
+		return
+	}
+	sessionID, ok := v["claude_session_id"].(string)
+	if !ok || strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	sess.SetCustomDataValue("claude_session_id", sessionID)
+	sess.SetCustomDataValue("claude_has_prior_session", true)
+}
+
+func isInternalMetadataKey(key string) bool {
+	switch key {
+	case "system_init", "assistant_snapshot", "message_start", "message_complete",
+		"content_block_stop", "stop_reason", "system_status", "compact_boundary",
+		"task_notification", "tool_progress", "tool_use_summary", "auth_status",
+		"stderr", "parse_error", "unknown_message_type", "unknown_ws_message",
+		"unknown_control_request", "circuit_breaker_cooldown":
+		return true
+	default:
+		return false
+	}
+}
+
+func formatMetadataContent(data domain.MetadataData) string {
+	if data.Value == nil {
+		return data.Key
+	}
+	switch v := data.Value.(type) {
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return data.Key
+		}
+		return fmt.Sprintf("%s: %s", data.Key, v)
+	default:
+		b, err := json.Marshal(v)
+		if err != nil {
+			return data.Key
+		}
+		return fmt.Sprintf("%s: %s", data.Key, string(b))
+	}
 }

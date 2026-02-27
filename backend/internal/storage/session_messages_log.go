@@ -64,7 +64,7 @@ func rebuildMessagesFromExportedRecords(records []MessageLogRecord) []domain.Mes
 		}
 
 		messages = append(messages, domain.Message{
-			ID:        fmt.Sprintf("log_%d", rec.Seq),
+			ID:        messageIDForRecord(rec),
 			Kind:      rec.Kind,
 			Contents:  rec.Contents,
 			Timestamp: rec.Timestamp,
@@ -73,4 +73,11 @@ func rebuildMessagesFromExportedRecords(records []MessageLogRecord) []domain.Mes
 	}
 
 	return messages
+}
+
+func messageIDForRecord(rec MessageLogRecord) string {
+	if rec.TargetMessageID != "" && rec.Projection != MessageProjectionOutputDelta {
+		return rec.TargetMessageID
+	}
+	return fmt.Sprintf("log_%d", rec.Seq)
 }

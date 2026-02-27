@@ -1,10 +1,13 @@
 package storage
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -123,6 +126,98 @@ func TestSessionMessagesLogStore_LoadFrom(t *testing.T) {
 	}
 	if msgs[1].Contents != "third" {
 		t.Errorf("msg[1]: want %q, got %q", "third", msgs[1].Contents)
+	}
+}
+
+func TestSessionMessagesLogStore_DeltaMutatesLatestLogEntry(t *testing.T) {
+	dir := t.TempDir()
+	store := NewSessionMessagesLogStore(dir)
+	sessionID := "test-session-delta-mutate-latest"
+	ts := time.Now().UTC()
+
+	_, err := store.Append(sessionID, MessageLogRecord{
+		Timestamp:  ts,
+		Projection: MessageProjectionAppend,
+		Kind:       domain.MessageKindOutput,
+		Contents:   "hello",
+	})
+	if err != nil {
+		t.Fatalf("append output: %v", err)
+	}
+
+	_, err = store.Append(sessionID, MessageLogRecord{
+		Timestamp:  ts.Add(time.Second),
+		Projection: MessageProjectionOutputDelta,
+		Kind:       domain.MessageKindOutput,
+		Contents:   " world",
+	})
+	if err != nil {
+		t.Fatalf("append delta: %v", err)
+	}
+
+	records := readLogRecordsFromDisk(t, dir, sessionID)
+	if len(records) != 1 {
+		t.Fatalf("expected a single rewritten log entry, got %d", len(records))
+	}
+	if records[0].Projection == MessageProjectionOutputDelta {
+		t.Fatalf("delta projection should not be persisted, got %q", records[0].Projection)
+	}
+	if records[0].Contents != "hello world" {
+		t.Fatalf("expected merged contents, got %q", records[0].Contents)
+	}
+}
+
+func TestSessionMessagesLogStore_DeltaTargetRewritesMatchingEntry(t *testing.T) {
+	dir := t.TempDir()
+	store := NewSessionMessagesLogStore(dir)
+	sessionID := "test-session-delta-target-rewrite"
+	ts := time.Now().UTC()
+
+	first, err := store.Append(sessionID, MessageLogRecord{
+		Timestamp:  ts,
+		Projection: MessageProjectionAppend,
+		Kind:       domain.MessageKindOutput,
+		Contents:   "first",
+	})
+	if err != nil {
+		t.Fatalf("append first: %v", err)
+	}
+
+	_, err = store.Append(sessionID, MessageLogRecord{
+		Timestamp:  ts.Add(time.Second),
+		Projection: MessageProjectionAppend,
+		Kind:       domain.MessageKindOutput,
+		Contents:   "second",
+	})
+	if err != nil {
+		t.Fatalf("append second: %v", err)
+	}
+
+	_, err = store.Append(sessionID, MessageLogRecord{
+		Timestamp:       ts.Add(2 * time.Second),
+		Projection:      MessageProjectionOutputDelta,
+		Kind:            domain.MessageKindOutput,
+		Contents:        "+",
+		TargetMessageID: "log_" + strconv.FormatInt(first.Seq, 10),
+	})
+	if err != nil {
+		t.Fatalf("append targeted delta: %v", err)
+	}
+
+	records := readLogRecordsFromDisk(t, dir, sessionID)
+	if len(records) != 2 {
+		t.Fatalf("expected 2 records after rewrite, got %d", len(records))
+	}
+	if records[0].Contents != "first+" {
+		t.Fatalf("expected first record to be rewritten, got %q", records[0].Contents)
+	}
+	if records[1].Contents != "second" {
+		t.Fatalf("expected second record unchanged, got %q", records[1].Contents)
+	}
+	for i, rec := range records {
+		if rec.Projection == MessageProjectionOutputDelta {
+			t.Fatalf("record[%d] unexpectedly stored delta projection", i)
+		}
 	}
 }
 
@@ -381,4 +476,34 @@ func TestLogCorruptionError_IsExported(t *testing.T) {
 	if target.CorruptLines != 3 {
 		t.Errorf("CorruptLines: want 3, got %d", target.CorruptLines)
 	}
+}
+
+func readLogRecordsFromDisk(t *testing.T, dir, sessionID string) []MessageLogRecord {
+	t.Helper()
+
+	path := filepath.Join(dir, sessionID+".jsonl")
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open %s: %v", path, err)
+	}
+	defer f.Close()
+
+	var records []MessageLogRecord
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var rec MessageLogRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("decode log line %q: %v", line, err)
+		}
+		records = append(records, rec)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan %s: %v", path, err)
+	}
+
+	return records
 }
