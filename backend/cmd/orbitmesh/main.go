@@ -45,6 +45,10 @@ func listenAddr() string {
 }
 
 func main() {
+	if maybeRunMCPBridge() {
+		return
+	}
+
 	if err := tools.RegisterDefaultTools(tools.Global()); err != nil {
 		log.Fatalf("tools register defaults: %v", err)
 	}

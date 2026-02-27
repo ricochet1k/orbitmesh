@@ -603,6 +603,10 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if sessionKind == domain.SessionKindDock {
 		config.MCPServers = dockMCPServers(id)
+		if config.Custom == nil {
+			config.Custom = map[string]any{}
+		}
+		config.Custom["mcp_config"] = dockMCPConfig(id)
 	} else if len(req.MCPServers) > 0 {
 		config.MCPServers = make([]session.MCPServerConfig, len(req.MCPServers))
 		for i, s := range req.MCPServers {
@@ -884,10 +888,18 @@ func dockMCPServers(sessionID string) []session.MCPServerConfig {
 	return []session.MCPServerConfig{
 		{
 			Name:    "orbitmesh-mcp",
-			Command: "orbitmesh-mcp",
-			Args:    []string{"dock"},
-			Env: map[string]string{
-				"ORBITMESH_DOCK_SESSION_ID": sessionID,
+			Command: "orbitmesh",
+			Args:    []string{"mcp-bridge", "--session-id", sessionID},
+		},
+	}
+}
+
+func dockMCPConfig(sessionID string) map[string]any {
+	return map[string]any{
+		"mcpServers": map[string]any{
+			"orbitmesh-mcp": map[string]any{
+				"command": "orbitmesh",
+				"args":    []string{"mcp-bridge", "--session-id", sessionID},
 			},
 		},
 	}
