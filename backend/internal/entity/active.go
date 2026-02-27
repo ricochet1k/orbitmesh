@@ -2,6 +2,7 @@ package entity
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -59,6 +60,13 @@ func WithDrainStartPolicy[T Snapshotter[S], S any](policy DrainStartPolicy) Acti
 	}
 }
 
+// WithDeferredOpStorage enables persisted deferred-op queue behavior.
+func WithDeferredOpStorage[T Snapshotter[S], S any](storage TypedStorage[DeferredOpEnvelope]) ActiveStoreOption[T, S] {
+	return func(s *ActiveStore[T, S]) {
+		s.deferredStorage = storage
+	}
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // ActiveStore
 // ────────────────────────────────────────────────────────────────────────────
@@ -80,6 +88,10 @@ type ActiveStore[T Snapshotter[S], S any] struct {
 	mode             ActiveStoreLifecycleMode
 	drainStartPolicy DrainStartPolicy
 	drained          chan struct{}
+
+	deferredStorage TypedStorage[DeferredOpEnvelope]
+	deferredMu      sync.Mutex
+	deferredIndex   deferredIndex
 }
 
 // run holds the goroutine lifecycle state for one entity.
@@ -116,15 +128,25 @@ func NewActiveStore[T Snapshotter[S], S any](
 // Create inserts a new entity and immediately starts its goroutine.
 // Returns a RunHandle whose goroutine is already running.
 func (s *ActiveStore[T, S]) Create(id string, initial T) (RunHandle[T, S], error) {
-	if err := s.checkStartAllowed(ActiveStoreStartCreate, id); err != nil {
-		return RunHandle[T, S]{}, err
-	}
 	h, err := s.Store.Create(id, initial)
 	if err != nil {
 		return RunHandle[T, S]{}, err
 	}
 	rh, err := s.startRun(ActiveStoreStartCreate, h)
 	if err != nil {
+		if isStartDeferredErr(err) && s.deferredStorage != nil {
+			payload, marshalErr := json.Marshal(deferredCreatePayload[S]{Snapshot: initial.Snapshot()})
+			if marshalErr != nil {
+				_ = h.Delete()
+				return RunHandle[T, S]{}, fmt.Errorf("entity.ActiveStore.Create: encode deferred payload %s: %w", id, marshalErr)
+			}
+			if enqueueErr := s.enqueueDeferredStart(ActiveStoreStartCreate, id, payload); enqueueErr != nil {
+				_ = h.Delete()
+				return RunHandle[T, S]{}, enqueueErr
+			}
+			_ = h.Delete()
+			return RunHandle[T, S]{}, fmt.Errorf("%w: %s %s", ErrActiveStoreStartDeferred, ActiveStoreStartCreate, id)
+		}
 		_ = h.Delete()
 		return RunHandle[T, S]{}, err
 	}
@@ -134,14 +156,21 @@ func (s *ActiveStore[T, S]) Create(id string, initial T) (RunHandle[T, S], error
 // Load retrieves an entity from storage (or the in-memory cache) and
 // starts its goroutine if it is not already running.
 func (s *ActiveStore[T, S]) Load(id string) (RunHandle[T, S], error) {
-	if err := s.checkStartAllowed(ActiveStoreStartLoad, id); err != nil {
-		return RunHandle[T, S]{}, err
-	}
 	h, err := s.Store.Get(id)
 	if err != nil {
 		return RunHandle[T, S]{}, err
 	}
-	return s.startRun(ActiveStoreStartLoad, h)
+	rh, err := s.startRun(ActiveStoreStartLoad, h)
+	if err != nil {
+		if isStartDeferredErr(err) && s.deferredStorage != nil {
+			if enqueueErr := s.enqueueDeferredStart(ActiveStoreStartLoad, id, nil); enqueueErr != nil {
+				return RunHandle[T, S]{}, enqueueErr
+			}
+			return RunHandle[T, S]{}, fmt.Errorf("%w: %s %s", ErrActiveStoreStartDeferred, ActiveStoreStartLoad, id)
+		}
+		return RunHandle[T, S]{}, err
+	}
+	return rh, nil
 }
 
 // OnRestart iterates all persisted entities, calls hook for each one, and then
@@ -157,11 +186,14 @@ func (s *ActiveStore[T, S]) OnRestart(ctx context.Context, hook RestartHook[T, S
 	}
 	for _, h := range handles {
 		if _, err := s.startRun(ActiveStoreStartRestart, h); err != nil {
-			if errors.Is(err, ErrActiveStoreDraining) || errors.Is(err, ErrActiveStoreStartDeferred) {
+			if isStartDeferredErr(err) {
 				continue
 			}
 			return fmt.Errorf("entity.ActiveStore.OnRestart: start run %s: %w", h.ID(), err)
 		}
+	}
+	if err := s.replayDeferredOps(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -274,6 +306,10 @@ func (s *ActiveStore[T, S]) startDeniedErrLocked(op ActiveStoreStartOp, id strin
 	default:
 		return fmt.Errorf("%w: %s %s", ErrActiveStoreDraining, op, id)
 	}
+}
+
+func isStartDeferredErr(err error) bool {
+	return errors.Is(err, ErrActiveStoreStartDeferred) || errors.Is(err, ErrActiveStoreDraining)
 }
 
 // stopForwarding cancels the goroutine for id and all reverse-dep watchers of it.

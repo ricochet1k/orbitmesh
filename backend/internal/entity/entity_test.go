@@ -2,6 +2,7 @@ package entity_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -817,6 +818,268 @@ func TestActiveStore_AwaitDrain_ReturnsWhenRunningWorkCompletes(t *testing.T) {
 
 	if err := <-errCh; err != nil {
 		t.Fatalf("AwaitDrain after all runs complete: %v", err)
+	}
+}
+
+func TestActiveStore_DeferredQueue_EnqueueOnDrain(t *testing.T) {
+	entityStorage := newMemStorage(func(s counterSnap) string { return s.ID })
+	deferredStorage := newMemStorage(func(s entity.DeferredOpEnvelope) string { return s.EnvelopeID })
+
+	s := entity.NewActiveStore[*counter, counterSnap](
+		entityStorage,
+		nil,
+		func(h entity.Handle[*counter, counterSnap]) func(ctx context.Context) {
+			return func(ctx context.Context) { <-ctx.Done() }
+		},
+		entity.StoreOptions[*counter, counterSnap]{
+			Kind:           "counter",
+			FromSnapshot:   func(s counterSnap) *counter { return &counter{ID: s.ID, Val: s.Val} },
+			IDFromSnapshot: func(s counterSnap) string { return s.ID },
+		},
+		entity.WithDeferredOpStorage[*counter, counterSnap](deferredStorage),
+	)
+
+	s.BeginDrain(context.Background())
+	_, err := s.Create("defer-create", &counter{ID: "defer-create", Val: 7})
+	if !errors.Is(err, entity.ErrActiveStoreStartDeferred) {
+		t.Fatalf("Create while draining: want ErrActiveStoreStartDeferred, got %v", err)
+	}
+
+	if _, err := s.Store.Get("defer-create"); !errors.Is(err, entity.ErrNotFound) {
+		t.Fatalf("deferred create should not remain in store, got err=%v", err)
+	}
+
+	envelopes, err := deferredStorage.List()
+	if err != nil {
+		t.Fatalf("deferredStorage.List: %v", err)
+	}
+	if len(envelopes) != 1 {
+		t.Fatalf("want 1 deferred envelope, got %d", len(envelopes))
+	}
+	env := envelopes[0]
+	if env.Kind != "counter" || env.EntityID != "defer-create" || env.Op != entity.ActiveStoreStartCreate {
+		t.Fatalf("unexpected deferred envelope: %+v", env)
+	}
+	if env.IdempotencyKey == "" || env.EnqueuedAt.IsZero() || len(env.Payload) == 0 {
+		t.Fatalf("deferred envelope missing required fields: %+v", env)
+	}
+}
+
+func TestActiveStore_DeferredQueue_ReplayOnRestart(t *testing.T) {
+	entityStorage := newMemStorage(func(s counterSnap) string { return s.ID })
+	deferredStorage := newMemStorage(func(s entity.DeferredOpEnvelope) string { return s.EnvelopeID })
+	started := make(chan string, 1)
+
+	s1 := entity.NewActiveStore[*counter, counterSnap](
+		entityStorage,
+		nil,
+		func(h entity.Handle[*counter, counterSnap]) func(ctx context.Context) {
+			return func(ctx context.Context) {
+				select {
+				case started <- h.ID():
+				default:
+				}
+				<-ctx.Done()
+			}
+		},
+		entity.StoreOptions[*counter, counterSnap]{
+			Kind:           "counter",
+			FromSnapshot:   func(s counterSnap) *counter { return &counter{ID: s.ID, Val: s.Val} },
+			IDFromSnapshot: func(s counterSnap) string { return s.ID },
+		},
+		entity.WithDeferredOpStorage[*counter, counterSnap](deferredStorage),
+	)
+
+	s1.BeginDrain(context.Background())
+	_, err := s1.Create("replay-create", &counter{ID: "replay-create", Val: 3})
+	if !errors.Is(err, entity.ErrActiveStoreStartDeferred) {
+		t.Fatalf("Create while draining: want ErrActiveStoreStartDeferred, got %v", err)
+	}
+
+	s2 := entity.NewActiveStore[*counter, counterSnap](
+		entityStorage,
+		nil,
+		func(h entity.Handle[*counter, counterSnap]) func(ctx context.Context) {
+			return func(ctx context.Context) {
+				select {
+				case started <- h.ID():
+				default:
+				}
+				<-ctx.Done()
+			}
+		},
+		entity.StoreOptions[*counter, counterSnap]{
+			Kind:           "counter",
+			FromSnapshot:   func(s counterSnap) *counter { return &counter{ID: s.ID, Val: s.Val} },
+			IDFromSnapshot: func(s counterSnap) string { return s.ID },
+		},
+		entity.WithDeferredOpStorage[*counter, counterSnap](deferredStorage),
+	)
+
+	if err := s2.OnRestart(context.Background(), func(entity.Handle[*counter, counterSnap]) error { return nil }); err != nil {
+		t.Fatalf("OnRestart: %v", err)
+	}
+
+	select {
+	case got := <-started:
+		if got != "replay-create" {
+			t.Fatalf("unexpected started id: %s", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("deferred operation was not replayed")
+	}
+
+	envelopes, err := deferredStorage.List()
+	if err != nil {
+		t.Fatalf("deferredStorage.List: %v", err)
+	}
+	if len(envelopes) != 0 {
+		t.Fatalf("expected deferred queue to be empty after replay, got %d", len(envelopes))
+	}
+}
+
+func TestActiveStore_DeferredQueue_IdempotentReplay_NoDuplicateStarts(t *testing.T) {
+	entityStorage := newMemStorage(func(s counterSnap) string { return s.ID })
+	deferredStorage := newMemStorage(func(s entity.DeferredOpEnvelope) string { return s.EnvelopeID })
+	if err := entityStorage.Save(counterSnap{ID: "dup", Val: 1}); err != nil {
+		t.Fatalf("seed entity storage: %v", err)
+	}
+
+	base := time.Now().UTC()
+	key := "counter:load:dup"
+	if err := deferredStorage.Save(entity.DeferredOpEnvelope{
+		EnvelopeID:     "env-1",
+		Kind:           "counter",
+		EntityID:       "dup",
+		Op:             entity.ActiveStoreStartLoad,
+		IdempotencyKey: key,
+		EnqueuedAt:     base,
+	}); err != nil {
+		t.Fatalf("save env-1: %v", err)
+	}
+	if err := deferredStorage.Save(entity.DeferredOpEnvelope{
+		EnvelopeID:     "env-2",
+		Kind:           "counter",
+		EntityID:       "dup",
+		Op:             entity.ActiveStoreStartLoad,
+		IdempotencyKey: key,
+		EnqueuedAt:     base.Add(time.Millisecond),
+	}); err != nil {
+		t.Fatalf("save env-2: %v", err)
+	}
+
+	var (
+		startMu    sync.Mutex
+		startCount = map[string]int{}
+	)
+	s := entity.NewActiveStore[*counter, counterSnap](
+		entityStorage,
+		nil,
+		func(h entity.Handle[*counter, counterSnap]) func(ctx context.Context) {
+			startMu.Lock()
+			startCount[h.ID()]++
+			startMu.Unlock()
+			return func(ctx context.Context) {
+				<-ctx.Done()
+			}
+		},
+		entity.StoreOptions[*counter, counterSnap]{
+			Kind:           "counter",
+			FromSnapshot:   func(s counterSnap) *counter { return &counter{ID: s.ID, Val: s.Val} },
+			IDFromSnapshot: func(s counterSnap) string { return s.ID },
+		},
+		entity.WithDeferredOpStorage[*counter, counterSnap](deferredStorage),
+	)
+
+	if err := s.OnRestart(context.Background(), func(entity.Handle[*counter, counterSnap]) error { return nil }); err != nil {
+		t.Fatalf("OnRestart: %v", err)
+	}
+
+	startMu.Lock()
+	gotStarts := startCount["dup"]
+	startMu.Unlock()
+	if gotStarts != 1 {
+		t.Fatalf("want exactly 1 start for dup, got %d", gotStarts)
+	}
+
+	envelopes, err := deferredStorage.List()
+	if err != nil {
+		t.Fatalf("deferredStorage.List: %v", err)
+	}
+	if len(envelopes) != 0 {
+		t.Fatalf("expected duplicate deferred envelopes to be cleared, got %d", len(envelopes))
+	}
+}
+
+func TestActiveStore_DeferredQueue_ReplayOrderingFIFO(t *testing.T) {
+	entityStorage := newMemStorage(func(s counterSnap) string { return s.ID })
+	deferredStorage := newMemStorage(func(s entity.DeferredOpEnvelope) string { return s.EnvelopeID })
+
+	firstPayload, err := json.Marshal(map[string]counterSnap{"snapshot": counterSnap{ID: "first", Val: 1}})
+	if err != nil {
+		t.Fatalf("marshal first payload: %v", err)
+	}
+	secondPayload, err := json.Marshal(map[string]counterSnap{"snapshot": counterSnap{ID: "second", Val: 2}})
+	if err != nil {
+		t.Fatalf("marshal second payload: %v", err)
+	}
+
+	base := time.Now().UTC()
+	if err := deferredStorage.Save(entity.DeferredOpEnvelope{
+		EnvelopeID:     "fifo-1",
+		Kind:           "counter",
+		EntityID:       "first",
+		Op:             entity.ActiveStoreStartCreate,
+		Payload:        firstPayload,
+		IdempotencyKey: "counter:create:first",
+		EnqueuedAt:     base,
+	}); err != nil {
+		t.Fatalf("save fifo-1: %v", err)
+	}
+	if err := deferredStorage.Save(entity.DeferredOpEnvelope{
+		EnvelopeID:     "fifo-2",
+		Kind:           "counter",
+		EntityID:       "second",
+		Op:             entity.ActiveStoreStartCreate,
+		Payload:        secondPayload,
+		IdempotencyKey: "counter:create:second",
+		EnqueuedAt:     base.Add(time.Millisecond),
+	}); err != nil {
+		t.Fatalf("save fifo-2: %v", err)
+	}
+
+	var (
+		startedMu sync.Mutex
+		started   []string
+	)
+	s := entity.NewActiveStore[*counter, counterSnap](
+		entityStorage,
+		nil,
+		func(h entity.Handle[*counter, counterSnap]) func(ctx context.Context) {
+			startedMu.Lock()
+			started = append(started, h.ID())
+			startedMu.Unlock()
+			return func(ctx context.Context) {
+				<-ctx.Done()
+			}
+		},
+		entity.StoreOptions[*counter, counterSnap]{
+			Kind:           "counter",
+			FromSnapshot:   func(s counterSnap) *counter { return &counter{ID: s.ID, Val: s.Val} },
+			IDFromSnapshot: func(s counterSnap) string { return s.ID },
+		},
+		entity.WithDeferredOpStorage[*counter, counterSnap](deferredStorage),
+	)
+
+	if err := s.OnRestart(context.Background(), func(entity.Handle[*counter, counterSnap]) error { return nil }); err != nil {
+		t.Fatalf("OnRestart: %v", err)
+	}
+
+	startedMu.Lock()
+	ordered := append([]string(nil), started...)
+	startedMu.Unlock()
+	if len(ordered) != 2 || ordered[0] != "first" || ordered[1] != "second" {
+		t.Fatalf("expected FIFO replay order [first second], got %v", ordered)
 	}
 }
 
