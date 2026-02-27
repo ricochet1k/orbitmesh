@@ -117,9 +117,44 @@ func (s *ActiveStore[T, S]) replayDeferredOps() error {
 		return nil
 	}
 
+	filtered, err := s.listDeferredOps()
+	if err != nil {
+		return err
+	}
+
+	processedKeys := make(map[string]struct{}, len(filtered))
+	for _, env := range filtered {
+		if _, seen := processedKeys[env.IdempotencyKey]; seen {
+			s.clearDeferredEnvelope(env)
+			continue
+		}
+
+		err := func() error {
+			s.setReplayPending(env)
+			defer s.clearReplayPending()
+			return s.replayDeferredEnvelope(env)
+		}()
+		if err != nil {
+			if isStartDeferredErr(err) {
+				continue
+			}
+			return err
+		}
+		processedKeys[env.IdempotencyKey] = struct{}{}
+		s.clearDeferredEnvelope(env)
+	}
+
+	return nil
+}
+
+func (s *ActiveStore[T, S]) listDeferredOps() ([]DeferredOpEnvelope, error) {
+	if s.deferredStorage == nil {
+		return nil, nil
+	}
+
 	envelopes, err := s.deferredStorage.List()
 	if err != nil {
-		return fmt.Errorf("entity.ActiveStore.replayDeferredOps: list: %w", err)
+		return nil, fmt.Errorf("entity.ActiveStore: list deferred ops: %w", err)
 	}
 
 	filtered := make([]DeferredOpEnvelope, 0, len(envelopes))
@@ -136,24 +171,22 @@ func (s *ActiveStore[T, S]) replayDeferredOps() error {
 		return filtered[i].EnqueuedAt.Before(filtered[j].EnqueuedAt)
 	})
 
-	processedKeys := make(map[string]struct{}, len(filtered))
-	for _, env := range filtered {
-		if _, seen := processedKeys[env.IdempotencyKey]; seen {
-			s.clearDeferredEnvelope(env)
-			continue
-		}
+	return filtered, nil
+}
 
-		if err := s.replayDeferredEnvelope(env); err != nil {
-			if isStartDeferredErr(err) {
-				continue
-			}
-			return err
-		}
-		processedKeys[env.IdempotencyKey] = struct{}{}
-		s.clearDeferredEnvelope(env)
-	}
+func (s *ActiveStore[T, S]) setReplayPending(env DeferredOpEnvelope) {
+	s.replayMu.Lock()
+	defer s.replayMu.Unlock()
+	copyEnv := env
+	s.replayPending = &copyEnv
+	s.replayPendingSince = time.Now().UTC()
+}
 
-	return nil
+func (s *ActiveStore[T, S]) clearReplayPending() {
+	s.replayMu.Lock()
+	defer s.replayMu.Unlock()
+	s.replayPending = nil
+	s.replayPendingSince = time.Time{}
 }
 
 func (s *ActiveStore[T, S]) replayDeferredEnvelope(env DeferredOpEnvelope) error {

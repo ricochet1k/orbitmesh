@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // ActiveStoreLifecycleMode tracks the store's run-start lifecycle state.
@@ -92,12 +93,17 @@ type ActiveStore[T Snapshotter[S], S any] struct {
 	deferredStorage TypedStorage[DeferredOpEnvelope]
 	deferredMu      sync.Mutex
 	deferredIndex   deferredIndex
+
+	replayMu           sync.Mutex
+	replayPending      *DeferredOpEnvelope
+	replayPendingSince time.Time
 }
 
 // run holds the goroutine lifecycle state for one entity.
 type run struct {
-	cancel context.CancelFunc
-	done   chan struct{} // closed when the goroutine returns
+	cancel    context.CancelFunc
+	done      chan struct{} // closed when the goroutine returns
+	startedAt time.Time
 }
 
 // NewActiveStore constructs an ActiveStore.  makeBody is called once per entity
@@ -250,8 +256,9 @@ func (s *ActiveStore[T, S]) startRun(op ActiveStoreStartOp, h Handle[T, S]) (Run
 
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &run{
-		cancel: cancel,
-		done:   make(chan struct{}),
+		cancel:    cancel,
+		done:      make(chan struct{}),
+		startedAt: time.Now().UTC(),
 	}
 	if len(s.runs) == 0 {
 		s.drained = make(chan struct{})

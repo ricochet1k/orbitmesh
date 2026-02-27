@@ -821,6 +821,136 @@ func TestActiveStore_AwaitDrain_ReturnsWhenRunningWorkCompletes(t *testing.T) {
 	}
 }
 
+func TestActiveStore_DrainStatus_NormalRunning(t *testing.T) {
+	s := newActiveCounterStore()
+	rh, err := s.Create("status-running", &counter{ID: "status-running", Val: 0})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	status := s.DrainStatus()
+	if status.Mode != entity.ActiveStoreModeRunning {
+		t.Fatalf("DrainStatus mode: want %q, got %q", entity.ActiveStoreModeRunning, status.Mode)
+	}
+
+	var running *entity.DrainWait
+	for i := range status.WaitOn {
+		if status.WaitOn[i].EntityID == "status-running" {
+			running = &status.WaitOn[i]
+			break
+		}
+	}
+	if running == nil {
+		t.Fatalf("DrainStatus missing running waiter: %+v", status.WaitOn)
+	}
+	if running.Reason != entity.ActiveStoreWaitReasonRunningBody {
+		t.Fatalf("wait reason: want %q, got %q", entity.ActiveStoreWaitReasonRunningBody, running.Reason)
+	}
+	if running.Age < 0 {
+		t.Fatalf("wait age should be non-negative, got %s", running.Age)
+	}
+
+	rh.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := rh.Wait(ctx); err != nil {
+		t.Fatalf("Wait after Stop: %v", err)
+	}
+}
+
+func TestActiveStore_DrainStatus_DrainingIncludesDependenciesAndDeferredOps(t *testing.T) {
+	entityStorage := newMemStorage(func(s counterSnap) string { return s.ID })
+	deferredStorage := newMemStorage(func(s entity.DeferredOpEnvelope) string { return s.EnvelopeID })
+
+	s := entity.NewActiveStore[*counter, counterSnap](
+		entityStorage,
+		nil,
+		func(h entity.Handle[*counter, counterSnap]) func(ctx context.Context) {
+			return func(ctx context.Context) { <-ctx.Done() }
+		},
+		entity.StoreOptions[*counter, counterSnap]{
+			Kind:           "counter",
+			FromSnapshot:   func(s counterSnap) *counter { return &counter{ID: s.ID, Val: s.Val} },
+			IDFromSnapshot: func(s counterSnap) string { return s.ID },
+		},
+		entity.WithDeferredOpStorage[*counter, counterSnap](deferredStorage),
+		entity.WithDrainStartPolicy[*counter, counterSnap](func(entity.ActiveStoreStartOp, string) entity.DrainStartPolicyDecision {
+			return entity.DrainStartDefer
+		}),
+	)
+
+	dep, err := s.Create("dep", &counter{ID: "dep", Val: 0})
+	if err != nil {
+		t.Fatalf("Create dep: %v", err)
+	}
+	waiter, err := s.Create("waiter", &counter{ID: "waiter", Val: 0})
+	if err != nil {
+		t.Fatalf("Create waiter: %v", err)
+	}
+	if err := waiter.Watch([]entity.Dep{{Kind: "counter", ID: "dep"}}); err != nil {
+		t.Fatalf("Watch waiter: %v", err)
+	}
+
+	s.BeginDrain(context.Background())
+	if _, err := s.Create("deferred", &counter{ID: "deferred", Val: 0}); !errors.Is(err, entity.ErrActiveStoreStartDeferred) {
+		t.Fatalf("Create while draining: want ErrActiveStoreStartDeferred, got %v", err)
+	}
+
+	status := s.DrainStatus()
+	if status.Mode != entity.ActiveStoreModeDraining {
+		t.Fatalf("DrainStatus mode: want %q, got %q", entity.ActiveStoreModeDraining, status.Mode)
+	}
+
+	var foundWaitingDep bool
+	var foundDeferred bool
+	for _, wait := range status.WaitOn {
+		if wait.EntityID == "waiter" && wait.Reason == entity.ActiveStoreWaitReasonWaitingDependency {
+			foundWaitingDep = len(wait.BlockedDeps) == 1 && wait.BlockedDeps[0].Kind == "counter" && wait.BlockedDeps[0].ID == "dep"
+		}
+		if wait.EntityID == "deferred" && wait.Reason == entity.ActiveStoreWaitReasonDeferredOp && wait.Op == entity.ActiveStoreStartCreate {
+			foundDeferred = true
+		}
+	}
+	if !foundWaitingDep {
+		t.Fatalf("DrainStatus missing waiting dependency blocker for waiter: %+v", status.WaitOn)
+	}
+	if !foundDeferred {
+		t.Fatalf("DrainStatus missing deferred op blocker: %+v", status.WaitOn)
+	}
+
+	dep.Stop()
+	waiter.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := dep.Wait(ctx); err != nil {
+		t.Fatalf("Wait dep: %v", err)
+	}
+	if err := waiter.Wait(ctx); err != nil {
+		t.Fatalf("Wait waiter: %v", err)
+	}
+}
+
+func TestActiveStore_DrainStatus_AfterCompletionEmpty(t *testing.T) {
+	s := newActiveCounterStore()
+	rh, err := s.Create("status-done", &counter{ID: "status-done", Val: 0})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	s.BeginDrain(context.Background())
+	rh.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := rh.Wait(ctx); err != nil {
+		t.Fatalf("Wait after Stop: %v", err)
+	}
+
+	status := s.DrainStatus()
+	if len(status.WaitOn) != 0 {
+		t.Fatalf("DrainStatus should be empty after completion, got %+v", status.WaitOn)
+	}
+}
+
 func TestActiveStore_DeferredQueue_EnqueueOnDrain(t *testing.T) {
 	entityStorage := newMemStorage(func(s counterSnap) string { return s.ID })
 	deferredStorage := newMemStorage(func(s entity.DeferredOpEnvelope) string { return s.EnvelopeID })
