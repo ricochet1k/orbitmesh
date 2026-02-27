@@ -2,9 +2,62 @@ package entity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 )
+
+// ActiveStoreLifecycleMode tracks the store's run-start lifecycle state.
+type ActiveStoreLifecycleMode string
+
+const (
+	ActiveStoreModeRunning  ActiveStoreLifecycleMode = "running"
+	ActiveStoreModeDraining ActiveStoreLifecycleMode = "draining"
+	ActiveStoreModeStopping ActiveStoreLifecycleMode = "stopping"
+)
+
+// ActiveStoreStartOp identifies the call path attempting to start a run.
+type ActiveStoreStartOp string
+
+const (
+	ActiveStoreStartCreate  ActiveStoreStartOp = "create"
+	ActiveStoreStartLoad    ActiveStoreStartOp = "load"
+	ActiveStoreStartRestart ActiveStoreStartOp = "restart"
+)
+
+// DrainStartPolicyDecision controls what ActiveStore does with new starts while draining.
+type DrainStartPolicyDecision int
+
+const (
+	DrainStartReject DrainStartPolicyDecision = iota
+	DrainStartDefer
+)
+
+// DrainStartPolicy decides how to treat new start attempts while draining.
+type DrainStartPolicy func(op ActiveStoreStartOp, id string) DrainStartPolicyDecision
+
+var (
+	// ErrActiveStoreDraining indicates new runs are rejected while draining.
+	ErrActiveStoreDraining = errors.New("entity active store is draining")
+	// ErrActiveStoreStartDeferred indicates callers should defer a start attempt.
+	ErrActiveStoreStartDeferred = errors.New("entity active store start deferred")
+)
+
+func defaultDrainStartPolicy(ActiveStoreStartOp, string) DrainStartPolicyDecision {
+	return DrainStartReject
+}
+
+// ActiveStoreOption configures ActiveStore behavior beyond StoreOptions.
+type ActiveStoreOption[T Snapshotter[S], S any] func(*ActiveStore[T, S])
+
+// WithDrainStartPolicy sets behavior for new starts while the store is draining.
+func WithDrainStartPolicy[T Snapshotter[S], S any](policy DrainStartPolicy) ActiveStoreOption[T, S] {
+	return func(s *ActiveStore[T, S]) {
+		if policy != nil {
+			s.drainStartPolicy = policy
+		}
+	}
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // ActiveStore
@@ -23,6 +76,10 @@ type ActiveStore[T Snapshotter[S], S any] struct {
 
 	runsMu sync.Mutex
 	runs   map[string]*run // goroutine bookkeeping per entity id
+
+	mode             ActiveStoreLifecycleMode
+	drainStartPolicy DrainStartPolicy
+	drained          chan struct{}
 }
 
 // run holds the goroutine lifecycle state for one entity.
@@ -39,32 +96,52 @@ func NewActiveStore[T Snapshotter[S], S any](
 	bus EventBus,
 	makeBody func(h Handle[T, S]) func(ctx context.Context),
 	opts StoreOptions[T, S],
+	activeOpts ...ActiveStoreOption[T, S],
 ) *ActiveStore[T, S] {
-	return &ActiveStore[T, S]{
-		Store:    NewStore(storage, bus, opts),
-		makeBody: makeBody,
-		runs:     make(map[string]*run),
+	s := &ActiveStore[T, S]{
+		Store:            NewStore(storage, bus, opts),
+		makeBody:         makeBody,
+		runs:             make(map[string]*run),
+		mode:             ActiveStoreModeRunning,
+		drainStartPolicy: defaultDrainStartPolicy,
+		drained:          make(chan struct{}),
 	}
+	close(s.drained)
+	for _, opt := range activeOpts {
+		opt(s)
+	}
+	return s
 }
 
 // Create inserts a new entity and immediately starts its goroutine.
 // Returns a RunHandle whose goroutine is already running.
 func (s *ActiveStore[T, S]) Create(id string, initial T) (RunHandle[T, S], error) {
+	if err := s.checkStartAllowed(ActiveStoreStartCreate, id); err != nil {
+		return RunHandle[T, S]{}, err
+	}
 	h, err := s.Store.Create(id, initial)
 	if err != nil {
 		return RunHandle[T, S]{}, err
 	}
-	return s.startRun(h), nil
+	rh, err := s.startRun(ActiveStoreStartCreate, h)
+	if err != nil {
+		_ = h.Delete()
+		return RunHandle[T, S]{}, err
+	}
+	return rh, nil
 }
 
 // Load retrieves an entity from storage (or the in-memory cache) and
 // starts its goroutine if it is not already running.
 func (s *ActiveStore[T, S]) Load(id string) (RunHandle[T, S], error) {
+	if err := s.checkStartAllowed(ActiveStoreStartLoad, id); err != nil {
+		return RunHandle[T, S]{}, err
+	}
 	h, err := s.Store.Get(id)
 	if err != nil {
 		return RunHandle[T, S]{}, err
 	}
-	return s.startRun(h), nil
+	return s.startRun(ActiveStoreStartLoad, h)
 }
 
 // OnRestart iterates all persisted entities, calls hook for each one, and then
@@ -79,15 +156,56 @@ func (s *ActiveStore[T, S]) OnRestart(ctx context.Context, hook RestartHook[T, S
 		return fmt.Errorf("entity.ActiveStore.OnRestart: list: %w", err)
 	}
 	for _, h := range handles {
-		s.startRun(h)
+		if _, err := s.startRun(ActiveStoreStartRestart, h); err != nil {
+			if errors.Is(err, ErrActiveStoreDraining) || errors.Is(err, ErrActiveStoreStartDeferred) {
+				continue
+			}
+			return fmt.Errorf("entity.ActiveStore.OnRestart: start run %s: %w", h.ID(), err)
+		}
 	}
 	return nil
 }
 
+// LifecycleMode returns the store's current lifecycle mode.
+func (s *ActiveStore[T, S]) LifecycleMode() ActiveStoreLifecycleMode {
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
+	return s.mode
+}
+
+// BeginDrain transitions the store into draining mode.
+// Existing runs are allowed to continue; new starts are policy-controlled.
+func (s *ActiveStore[T, S]) BeginDrain(context.Context) {
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
+	if s.mode == ActiveStoreModeStopping {
+		return
+	}
+	s.mode = ActiveStoreModeDraining
+}
+
+// AwaitDrain waits for all currently running work to complete.
+func (s *ActiveStore[T, S]) AwaitDrain(ctx context.Context) error {
+	s.runsMu.Lock()
+	drained := s.drained
+	s.runsMu.Unlock()
+
+	select {
+	case <-drained:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // startRun starts a goroutine for the entity if one is not already running.
 // It is idempotent: calling it twice for the same id is safe.
-func (s *ActiveStore[T, S]) startRun(h Handle[T, S]) RunHandle[T, S] {
+func (s *ActiveStore[T, S]) startRun(op ActiveStoreStartOp, h Handle[T, S]) (RunHandle[T, S], error) {
 	s.runsMu.Lock()
+	if err := s.startDeniedErrLocked(op, h.id); err != nil {
+		s.runsMu.Unlock()
+		return RunHandle[T, S]{}, err
+	}
 	if r, ok := s.runs[h.id]; ok {
 		s.runsMu.Unlock()
 		// Already running — return a RunHandle backed by the existing run.
@@ -95,13 +213,16 @@ func (s *ActiveStore[T, S]) startRun(h Handle[T, S]) RunHandle[T, S] {
 			Handle: h,
 			store:  s,
 			r:      r,
-		}
+		}, nil
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &run{
 		cancel: cancel,
 		done:   make(chan struct{}),
+	}
+	if len(s.runs) == 0 {
+		s.drained = make(chan struct{})
 	}
 	s.runs[h.id] = r
 	s.runsMu.Unlock()
@@ -117,7 +238,7 @@ func (s *ActiveStore[T, S]) startRun(h Handle[T, S]) RunHandle[T, S] {
 		Handle: h,
 		store:  s,
 		r:      r,
-	}
+	}, nil
 }
 
 // cleanRun removes the run record when the goroutine exits naturally.
@@ -127,6 +248,31 @@ func (s *ActiveStore[T, S]) cleanRun(id string, r *run) {
 	defer s.runsMu.Unlock()
 	if s.runs[id] == r {
 		delete(s.runs, id)
+		if len(s.runs) == 0 {
+			close(s.drained)
+		}
+	}
+}
+
+func (s *ActiveStore[T, S]) checkStartAllowed(op ActiveStoreStartOp, id string) error {
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
+	return s.startDeniedErrLocked(op, id)
+}
+
+func (s *ActiveStore[T, S]) startDeniedErrLocked(op ActiveStoreStartOp, id string) error {
+	if s.mode != ActiveStoreModeDraining {
+		return nil
+	}
+	decision := DrainStartReject
+	if s.drainStartPolicy != nil {
+		decision = s.drainStartPolicy(op, id)
+	}
+	switch decision {
+	case DrainStartDefer:
+		return fmt.Errorf("%w: %s %s", ErrActiveStoreStartDeferred, op, id)
+	default:
+		return fmt.Errorf("%w: %s %s", ErrActiveStoreDraining, op, id)
 	}
 }
 

@@ -712,6 +712,114 @@ func TestRunHandle_Stop_ForwardsToRevDeps(t *testing.T) {
 	}
 }
 
+func TestActiveStore_BeginDrain_TransitionsMode(t *testing.T) {
+	s := newActiveCounterStore()
+	if got := s.LifecycleMode(); got != entity.ActiveStoreModeRunning {
+		t.Fatalf("initial mode: want %q, got %q", entity.ActiveStoreModeRunning, got)
+	}
+
+	s.BeginDrain(context.Background())
+
+	if got := s.LifecycleMode(); got != entity.ActiveStoreModeDraining {
+		t.Fatalf("mode after BeginDrain: want %q, got %q", entity.ActiveStoreModeDraining, got)
+	}
+}
+
+func TestActiveStore_CreateLoad_WhileDraining_DoesNotStartNewRuns(t *testing.T) {
+	s := newActiveCounterStore()
+
+	if _, err := s.Store.Create("seed", &counter{ID: "seed", Val: 10}); err != nil {
+		t.Fatalf("seed create: %v", err)
+	}
+
+	s.BeginDrain(context.Background())
+
+	if _, err := s.Create("new", &counter{ID: "new", Val: 0}); !errors.Is(err, entity.ErrActiveStoreDraining) {
+		t.Fatalf("Create while draining: want ErrActiveStoreDraining, got %v", err)
+	}
+	if _, err := s.Load("seed"); !errors.Is(err, entity.ErrActiveStoreDraining) {
+		t.Fatalf("Load while draining: want ErrActiveStoreDraining, got %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := s.AwaitDrain(ctx); err != nil {
+		t.Fatalf("AwaitDrain with no runs should return immediately: %v", err)
+	}
+}
+
+func TestActiveStore_BeginDrain_ExistingRunsRemainUntilCompletion(t *testing.T) {
+	s := newActiveCounterStore()
+	rh, err := s.Create("live", &counter{ID: "live", Val: 0})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	s.BeginDrain(context.Background())
+
+	select {
+	case <-rh.Done():
+		t.Fatal("existing run should continue during drain")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	rh.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := rh.Wait(ctx); err != nil {
+		t.Fatalf("Wait after Stop: %v", err)
+	}
+}
+
+func TestActiveStore_AwaitDrain_ReturnsWhenRunningWorkCompletes(t *testing.T) {
+	s := newActiveCounterStore()
+	rh1, err := s.Create("drain-1", &counter{ID: "drain-1", Val: 0})
+	if err != nil {
+		t.Fatalf("Create drain-1: %v", err)
+	}
+	rh2, err := s.Create("drain-2", &counter{ID: "drain-2", Val: 0})
+	if err != nil {
+		t.Fatalf("Create drain-2: %v", err)
+	}
+
+	s.BeginDrain(context.Background())
+
+	awaitCtx, cancelAwait := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelAwait()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.AwaitDrain(awaitCtx)
+	}()
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("AwaitDrain returned before runs finished: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	rh1.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := rh1.Wait(ctx); err != nil {
+		t.Fatalf("Wait drain-1: %v", err)
+	}
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("AwaitDrain returned with one run still active: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	rh2.Stop()
+	if err := rh2.Wait(ctx); err != nil {
+		t.Fatalf("Wait drain-2: %v", err)
+	}
+
+	if err := <-errCh; err != nil {
+		t.Fatalf("AwaitDrain after all runs complete: %v", err)
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Concurrency stress test
 // ─────────────────────────────────────────────────────────────────────────────
