@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"maps"
 	"os"
@@ -62,10 +63,18 @@ type ClaudeWSProvider struct {
 	// claudeSessionID is received from the CLI's system/init message.
 	claudeSessionID string
 
-	connReady chan struct{} // closed when wsConn is established
+	connReady     chan struct{} // closed when wsConn is established
+	connReadyOnce sync.Once
 
-	started bool
+	starting bool
+	started  bool
+
+	stderrMu   sync.Mutex
+	stderrTail string
+	stderrDone chan error
 }
+
+const maxStartupStderrTailBytes = 4096
 
 // NewClaudeWSProvider creates a new WebSocket-mode Claude provider.
 // permHandler may be nil (auto-allow all tools).
@@ -78,6 +87,7 @@ func NewClaudeWSProvider(sessionID string, permHandler tools.PermissionHandler) 
 		circuitBreaker: circuit.NewBreaker(3, 30*time.Second),
 		permHandler:    permHandler,
 		connReady:      make(chan struct{}),
+		stderrDone:     make(chan error, 1),
 	}
 	return p
 }
@@ -86,14 +96,15 @@ func NewClaudeWSProvider(sessionID string, permHandler tools.PermissionHandler) 
 // WebSocket server, launches the Claude subprocess, and sends the initial
 // prompt.  On subsequent calls it queues input to the running agent.
 func (p *ClaudeWSProvider) SendInput(ctx context.Context, config session.Config, input string) (<-chan domain.Event, error) {
-	p.mu.Lock()
-	if !p.started {
-		if err := p.start(ctx, config); err != nil {
-			p.mu.Unlock()
+	p.mu.RLock()
+	started := p.started
+	p.mu.RUnlock()
+
+	if !started {
+		if err := p.start(ctx, config); err != nil && !errors.Is(err, ErrAlreadyStarted) {
 			return nil, err
 		}
 	}
-	p.mu.Unlock()
 
 	if err := p.inputBuffer.Send(ctx, input); err != nil {
 		return nil, err
@@ -102,17 +113,31 @@ func (p *ClaudeWSProvider) SendInput(ctx context.Context, config session.Config,
 }
 
 // start launches the WebSocket server and the Claude subprocess.
-// Caller must hold p.mu (write lock).
-func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) error {
-	if p.started {
+func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) (err error) {
+	p.mu.Lock()
+	if p.started || p.starting {
+		p.mu.Unlock()
 		return ErrAlreadyStarted
 	}
 	if p.circuitBreaker.IsInCooldown() {
+		p.mu.Unlock()
 		return fmt.Errorf("provider in cooldown for %v", p.circuitBreaker.CooldownRemaining())
 	}
-
+	p.starting = true
 	p.config = config
 	p.ctx, p.cancel = context.WithCancel(context.WithoutCancel(ctx))
+	p.stderrTail = ""
+	p.stderrDone = make(chan error, 1)
+	p.mu.Unlock()
+
+	defer func() {
+		p.mu.Lock()
+		p.starting = false
+		if err == nil {
+			p.started = true
+		}
+		p.mu.Unlock()
+	}()
 
 	p.state.SetState(session.StateStarting)
 	p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateIdle, domain.SessionStateRunning, "starting claudews provider", nil))
@@ -123,7 +148,9 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) err
 		p.handleFailure(err)
 		return err
 	}
+	p.mu.Lock()
 	p.wsServer = srv
+	p.mu.Unlock()
 	srv.Serve(p.ctx)
 	log.Printf("[claudews] Listening on %v", srv.ln.Addr())
 
@@ -156,7 +183,9 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) err
 		p.handleFailure(err)
 		return fmt.Errorf("failed to start claude process: %w", err)
 	}
+	p.mu.Lock()
 	p.processMgr = mgr
+	p.mu.Unlock()
 
 	// Drain stderr in a goroutine so the process doesn't block.
 	p.wg.Go(p.drainStderr)
@@ -165,9 +194,20 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) err
 	select {
 	case <-p.connReady:
 		// Connection established; state transition happens in handleConnection.
+	case readErr := <-p.stderrDone:
+		var startupErr error
+		if readErr == nil || errors.Is(readErr, io.EOF) {
+			startupErr = fmt.Errorf("claude CLI exited before WebSocket connection")
+		} else {
+			startupErr = fmt.Errorf("claude CLI stderr closed before WebSocket connection: %w", readErr)
+		}
+		err := p.withRecentStderr(startupErr)
+		p.handleFailure(err)
+		return err
 	case <-time.After(15 * time.Second):
-		p.handleFailure(fmt.Errorf("timed out waiting for claude CLI to connect"))
-		return fmt.Errorf("timed out waiting for claude CLI WebSocket connection")
+		err := p.withRecentStderr(fmt.Errorf("timed out waiting for claude CLI WebSocket connection"))
+		p.handleFailure(err)
+		return err
 	case <-p.ctx.Done():
 		return fmt.Errorf("context cancelled before claude CLI connected")
 	}
@@ -177,7 +217,6 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) err
 
 	p.state.SetState(session.StateRunning)
 	// Already emitted idle->running at startup
-	p.started = true
 
 	return nil
 }
@@ -273,7 +312,9 @@ func (p *ClaudeWSProvider) handleConnection(conn *wsConn) {
 	p.mu.Unlock()
 
 	// Signal that the connection is ready (unblocks Start).
-	close(p.connReady)
+	p.connReadyOnce.Do(func() {
+		close(p.connReady)
+	})
 
 	// Keep the connection alive with periodic pings.
 	conn.StartPing(p.ctx, 10*time.Second)
@@ -733,7 +774,12 @@ func (p *ClaudeWSProvider) processInput() {
 
 // drainStderr reads and emits stderr lines from the subprocess.
 func (p *ClaudeWSProvider) drainStderr() {
+	doneCh := p.stderrDone
 	if p.processMgr == nil || p.processMgr.Stderr() == nil {
+		select {
+		case doneCh <- nil:
+		default:
+		}
 		return
 	}
 
@@ -746,12 +792,82 @@ func (p *ClaudeWSProvider) drainStderr() {
 		}
 		n, err := p.processMgr.Stderr().Read(buf)
 		if n > 0 {
-			p.events.Emit(domain.NewMetadataEvent(p.sessionID, "stderr", map[string]any{"stderr": string(buf[:n])}, nil))
+			chunk := string(buf[:n])
+			p.appendStderr(chunk)
+			if msg, ok := extractStderrError(chunk); ok {
+				p.events.Emit(domain.NewErrorEvent(p.sessionID, msg, "STDERR", nil))
+			} else {
+				p.events.Emit(domain.NewMetadataEvent(p.sessionID, "stderr", map[string]any{"stderr": chunk}, nil))
+			}
 		}
 		if err != nil {
+			select {
+			case doneCh <- err:
+			default:
+			}
 			return
 		}
 	}
+}
+
+func extractStderrError(chunk string) (string, bool) {
+	trimmed := strings.TrimSpace(chunk)
+	if trimmed == "" {
+		return "", false
+	}
+	if strings.HasPrefix(trimmed, "Error:") || strings.HasPrefix(trimmed, "error:") {
+		return trimmed, true
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return "", false
+	}
+	if line, ok := payload["line"].(string); ok {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Error:") || strings.HasPrefix(line, "error:") {
+			return line, true
+		}
+	}
+	if stderr, ok := payload["stderr"].(string); ok {
+		stderr = strings.TrimSpace(stderr)
+		if strings.HasPrefix(stderr, "Error:") || strings.HasPrefix(stderr, "error:") {
+			return stderr, true
+		}
+	}
+
+	return "", false
+}
+
+func (p *ClaudeWSProvider) appendStderr(chunk string) {
+	if chunk == "" {
+		return
+	}
+	p.stderrMu.Lock()
+	defer p.stderrMu.Unlock()
+	p.stderrTail += chunk
+	if len(p.stderrTail) > maxStartupStderrTailBytes {
+		p.stderrTail = p.stderrTail[len(p.stderrTail)-maxStartupStderrTailBytes:]
+	}
+}
+
+func (p *ClaudeWSProvider) withRecentStderr(err error) error {
+	if err == nil {
+		return nil
+	}
+	p.stderrMu.Lock()
+	tail := p.stderrTail
+	p.stderrMu.Unlock()
+	tail = strings.TrimSpace(tail)
+	if tail == "" {
+		return err
+	}
+	tail = strings.ReplaceAll(tail, "\r", "")
+	tail = strings.ReplaceAll(tail, "\n", " | ")
+	if len(tail) > 600 {
+		tail = "..." + tail[len(tail)-600:]
+	}
+	return fmt.Errorf("%w; recent stderr: %s", err, tail)
 }
 
 // emitEvent sends a domain event and updates internal state.

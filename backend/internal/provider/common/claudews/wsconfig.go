@@ -38,7 +38,6 @@ func resolveClaudeCommand(config session.Config) string {
 func buildWSCommandArgs(sdkURL string, config session.Config) ([]string, error) {
 	args := []string{
 		"--sdk-url", sdkURL,
-		"-p", "", // placeholder prompt (ignored when --sdk-url is set)
 		"--output-format=stream-json",
 		"--input-format=stream-json",
 		"--verbose", // include stream_event messages for streaming
@@ -67,7 +66,7 @@ func buildWSCommandArgs(sdkURL string, config session.Config) ([]string, error) 
 
 	// Permission mode
 	if permMode, ok := config.Custom["permission_mode"].(string); ok && permMode != "" {
-		args = append(args, "--permission-mode", permMode)
+		args = append(args, "--permission-mode", normalizePermissionMode(permMode))
 	}
 
 	// Tool allow/deny lists — first-class fields take precedence; fall back to Custom map.
@@ -218,6 +217,15 @@ func parseFloat(value any) (float64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func normalizePermissionMode(mode string) string {
+	trimmed := strings.TrimSpace(mode)
+	if trimmed == "autoEdit" {
+		// Legacy value from older UI versions; current CLI expects acceptEdits.
+		return "acceptEdits"
+	}
+	return trimmed
 }
 
 func sessionCustomString(custom map[string]any, key string) string {

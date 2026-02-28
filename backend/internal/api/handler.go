@@ -338,14 +338,30 @@ func (h *Handler) sendSessionMessage(w http.ResponseWriter, r *http.Request) {
 
 	agentID := strings.TrimSpace(req.AgentID)
 	model := strings.TrimSpace(req.Model)
+	resolvedProviderID := strings.TrimSpace(req.ProviderID)
+	resolvedProviderType := strings.TrimSpace(req.ProviderType)
+
+	if resolvedProviderID == "" {
+		if sess, err := h.executor.GetSession(id); err == nil {
+			if sess.PreferredProviderID != "" {
+				resolvedProviderID = strings.TrimSpace(sess.PreferredProviderID)
+			}
+			if resolvedProviderType == "" {
+				resolvedProviderType = strings.TrimSpace(sess.ProviderType)
+			}
+		}
+	}
 
 	var custom map[string]any
 	var environment map[string]string
 
 	// Look up stored provider config so its Custom and Env values are applied
 	// to every message send, not just the initial session creation.
-	if req.ProviderID != "" && h.providerStorage != nil {
-		if provCfg, err := h.providerStorage.Get(req.ProviderID); err == nil {
+	if resolvedProviderID != "" && h.providerStorage != nil {
+		if provCfg, err := h.providerStorage.Get(resolvedProviderID); err == nil {
+			if resolvedProviderType == "" {
+				resolvedProviderType = provCfg.Type
+			}
 			if len(provCfg.Custom) > 0 {
 				custom = make(map[string]any, len(provCfg.Custom))
 				for k, v := range provCfg.Custom {
@@ -415,8 +431,8 @@ func (h *Handler) sendSessionMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess, err := h.executor.SendMessageWithOptions(r.Context(), id, req.Content, service.SendMessageOptions{
-		ProviderID:      req.ProviderID,
-		ProviderType:    req.ProviderType,
+		ProviderID:      resolvedProviderID,
+		ProviderType:    resolvedProviderType,
 		AgentID:         agentID,
 		Custom:          custom,
 		Environment:     environment,
@@ -574,29 +590,6 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 			if envKey != "" {
 				if _, ok := config.Environment[envKey]; !ok {
 					config.Environment[envKey] = providerConfig.APIKey
-				}
-			}
-		}
-		if len(providerConfig.Custom) > 0 {
-			if config.Custom == nil {
-				config.Custom = map[string]any{}
-			}
-			for k, v := range providerConfig.Custom {
-				if _, ok := config.Custom[k]; !ok {
-					config.Custom[k] = v
-				}
-			}
-		}
-		if providerConfig.Type == "pty" && len(providerConfig.Command) > 0 {
-			if config.Custom == nil {
-				config.Custom = map[string]any{}
-			}
-			if _, ok := config.Custom["command"]; !ok {
-				config.Custom["command"] = providerConfig.Command[0]
-			}
-			if len(providerConfig.Command) > 1 {
-				if _, ok := config.Custom["args"]; !ok {
-					config.Custom["args"] = providerConfig.Command[1:]
 				}
 			}
 		}

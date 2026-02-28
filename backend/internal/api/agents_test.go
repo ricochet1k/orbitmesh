@@ -352,10 +352,7 @@ func TestSendMessage_WithAgentAndModelOverrides(t *testing.T) {
 	if sess.AgentID != "agent_001" {
 		t.Fatalf("session.AgentID = %q, want %q", sess.AgentID, "agent_001")
 	}
-	if got := sess.ProviderCustom["model"]; got != "session-override-model" {
-		t.Fatalf("session.ProviderCustom[model] = %v, want %q", got, "session-override-model")
-	}
-	if got := sess.ProviderCustom["permission_mode"]; got != "acceptEdits" {
-		t.Fatalf("session.ProviderCustom[permission_mode] = %v, want %q", got, "acceptEdits")
+	if len(sess.ProviderCustom) != 0 {
+		t.Fatalf("expected session.ProviderCustom to remain empty, got %v", sess.ProviderCustom)
 	}
 }

@@ -55,10 +55,13 @@ export function ClaudeSharedFields(props: Props) {
           value={permissionMode()}
           onChange={(e) => props.setProvider('scratch', 'permission_mode', e.currentTarget.value)}
         >
-          <option value="">Default</option>
+          <option value="">Use provider default</option>
           <option value="acceptEdits">Accept edits</option>
-          <option value="autoEdit">Auto-edit</option>
           <option value="bypassPermissions">Bypass permissions</option>
+          <option value="default">Default</option>
+          <option value="delegate">Delegate</option>
+          <option value="dontAsk">Don't ask</option>
+          <option value="plan">Plan</option>
         </select>
       </FormGroup>
 

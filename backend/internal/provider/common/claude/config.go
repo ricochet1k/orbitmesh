@@ -35,6 +35,7 @@ func buildCommandArgs(config session.Config) ([]string, error) {
 		"-p", // Programmatic mode
 		"--output-format=stream-json",
 		"--input-format=stream-json",
+		"--verbose",
 		"--include-partial-messages",
 	}
 
@@ -111,7 +112,7 @@ func buildCommandArgs(config session.Config) ([]string, error) {
 
 	// Permission mode
 	if permMode, ok := config.Custom["permission_mode"].(string); ok && permMode != "" {
-		args = append(args, "--permission-mode", permMode)
+		args = append(args, "--permission-mode", normalizePermissionMode(permMode))
 	}
 
 	// JSON schema for structured output
@@ -202,6 +203,15 @@ func buildCommandArgs(config session.Config) ([]string, error) {
 	}
 
 	return args, nil
+}
+
+func normalizePermissionMode(mode string) string {
+	trimmed := strings.TrimSpace(mode)
+	if trimmed == "autoEdit" {
+		// Legacy value from older UI versions; current CLI expects acceptEdits.
+		return "acceptEdits"
+	}
+	return trimmed
 }
 
 // parseMCPConfig handles various formats of MCP configuration.
@@ -322,10 +332,13 @@ func sessionCustomBool(custom map[string]any, key string) bool {
 
 // formatInputMessage formats user input as a stream-json message for Claude.
 func formatInputMessage(input string) string {
-	// Create a simple user message in the format Claude expects
+	// Create a stream-json user envelope expected by current Claude CLI.
 	msg := map[string]any{
-		"type":    "user_message",
-		"content": input,
+		"type": "user",
+		"message": map[string]any{
+			"role":    "user",
+			"content": input,
+		},
 	}
 	jsonBytes, err := json.Marshal(msg)
 	if err != nil {

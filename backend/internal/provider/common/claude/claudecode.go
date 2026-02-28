@@ -3,6 +3,7 @@ package claude
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -270,11 +271,39 @@ func (p *ClaudeCodeProvider) processStderr() {
 			continue
 		}
 
+		if msg, ok := extractStderrLineError(line); ok {
+			p.events.Emit(domain.NewErrorEvent(p.sessionID, msg, "STDERR", nil))
+			continue
+		}
+
 		// Emit stderr output as metadata
 		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "stderr", map[string]any{
 			"line": line,
 		}, nil))
 	}
+}
+
+func extractStderrLineError(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return "", false
+	}
+	if strings.HasPrefix(trimmed, "Error:") || strings.HasPrefix(trimmed, "error:") {
+		return trimmed, true
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return "", false
+	}
+	if nested, ok := payload["line"].(string); ok {
+		nested = strings.TrimSpace(nested)
+		if strings.HasPrefix(nested, "Error:") || strings.HasPrefix(nested, "error:") {
+			return nested, true
+		}
+	}
+
+	return "", false
 }
 
 // processInput handles sending queued input to Claude's stdin.

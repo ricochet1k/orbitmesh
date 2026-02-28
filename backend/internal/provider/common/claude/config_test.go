@@ -26,6 +26,7 @@ func TestBuildCommandArgs(t *testing.T) {
 				"-p",
 				"--output-format=stream-json",
 				"--input-format=stream-json",
+				"--verbose",
 				"--include-partial-messages",
 				"--system-prompt", "You are a helpful assistant",
 				"--model", "sonnet",
@@ -44,6 +45,7 @@ func TestBuildCommandArgs(t *testing.T) {
 				"-p",
 				"--output-format=stream-json",
 				"--input-format=stream-json",
+				"--verbose",
 				"--include-partial-messages",
 				"--mcp-config", `{"mcpServers": {}}`,
 				"--strict-mcp-config",
@@ -63,6 +65,7 @@ func TestBuildCommandArgs(t *testing.T) {
 				"-p",
 				"--output-format=stream-json",
 				"--input-format=stream-json",
+				"--verbose",
 				"--include-partial-messages",
 				"--max-budget-usd", "10.5",
 				"--allowed-tools", "Bash",
@@ -83,6 +86,7 @@ func TestBuildCommandArgs(t *testing.T) {
 				"-p",
 				"--output-format=stream-json",
 				"--input-format=stream-json",
+				"--verbose",
 				"--include-partial-messages",
 				"--permission-mode", "plan",
 				"--effort", "high",
@@ -105,6 +109,7 @@ func TestBuildCommandArgs(t *testing.T) {
 				"-p",
 				"--output-format=stream-json",
 				"--input-format=stream-json",
+				"--verbose",
 				"--include-partial-messages",
 				"--json-schema", `{"properties":{"name":{"type":"string"}},"type":"object"}`,
 			},
@@ -120,6 +125,7 @@ func TestBuildCommandArgs(t *testing.T) {
 				"-p",
 				"--output-format=stream-json",
 				"--input-format=stream-json",
+				"--verbose",
 				"--include-partial-messages",
 				"--system-prompt", "Default system prompt",
 			},
@@ -137,6 +143,7 @@ func TestBuildCommandArgs(t *testing.T) {
 				"-p",
 				"--output-format=stream-json",
 				"--input-format=stream-json",
+				"--verbose",
 				"--include-partial-messages",
 				"--system-prompt", "Base prompt",
 				"--append-system-prompt", "Additional instructions",
@@ -372,12 +379,18 @@ func TestFormatInputMessage(t *testing.T) {
 		t.Fatalf("formatInputMessage() produced invalid JSON: %v", err)
 	}
 
-	if msg["type"] != "user_message" {
-		t.Errorf("formatInputMessage() type = %v, want 'user_message'", msg["type"])
+	if msg["type"] != "user" {
+		t.Errorf("formatInputMessage() type = %v, want 'user'", msg["type"])
 	}
-
-	if msg["content"] != input {
-		t.Errorf("formatInputMessage() content = %v, want %v", msg["content"], input)
+	inner, ok := msg["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("formatInputMessage() message = %T, want object", msg["message"])
+	}
+	if inner["role"] != "user" {
+		t.Errorf("formatInputMessage() message.role = %v, want 'user'", inner["role"])
+	}
+	if inner["content"] != input {
+		t.Errorf("formatInputMessage() message.content = %v, want %v", inner["content"], input)
 	}
 }
 
@@ -446,5 +459,27 @@ func TestBuildCommandArgs_AutoContinueFromSessionCustom(t *testing.T) {
 	}
 	if !hasContinue {
 		t.Fatalf("expected --continue in args, got %v", args)
+	}
+}
+
+func TestBuildCommandArgs_NormalizesLegacyPermissionMode(t *testing.T) {
+	args, err := buildCommandArgs(session.Config{
+		Custom: map[string]any{"permission_mode": "autoEdit"},
+	})
+	if err != nil {
+		t.Fatalf("buildCommandArgs() unexpected error: %v", err)
+	}
+
+	found := false
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--permission-mode" {
+			found = true
+			if args[i+1] != "acceptEdits" {
+				t.Fatalf("expected autoEdit to normalize to acceptEdits, got %q", args[i+1])
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected --permission-mode in args, got %v", args)
 	}
 }

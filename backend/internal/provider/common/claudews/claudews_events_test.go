@@ -1,6 +1,8 @@
 package claudews
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
@@ -57,4 +59,53 @@ func TestHandleToolProgress_EmitsToolCallRunning(t *testing.T) {
 	default:
 		t.Fatal("expected an event")
 	}
+}
+
+func TestWithRecentStderr_IncludesTail(t *testing.T) {
+	p := NewClaudeWSProvider("s1", nil)
+	p.appendStderr("line 1\nline 2\n")
+
+	err := p.withRecentStderr(errors.New("startup timeout"))
+	if err == nil {
+		t.Fatal("expected wrapped error")
+	}
+
+	msg := err.Error()
+	if !strings.Contains(msg, "startup timeout") {
+		t.Fatalf("expected base error in message, got %q", msg)
+	}
+	if !strings.Contains(msg, "recent stderr:") {
+		t.Fatalf("expected recent stderr suffix, got %q", msg)
+	}
+	if !strings.Contains(msg, "line 1") || !strings.Contains(msg, "line 2") {
+		t.Fatalf("expected stderr lines in message, got %q", msg)
+	}
+}
+
+func TestExtractStderrError(t *testing.T) {
+	t.Run("plain error line", func(t *testing.T) {
+		msg, ok := extractStderrError("Error: invalid permission mode")
+		if !ok {
+			t.Fatal("expected stderr error to be detected")
+		}
+		if msg != "Error: invalid permission mode" {
+			t.Fatalf("unexpected error message %q", msg)
+		}
+	})
+
+	t.Run("json wrapped line", func(t *testing.T) {
+		msg, ok := extractStderrError(`{"line":"Error: bad input format"}`)
+		if !ok {
+			t.Fatal("expected JSON wrapped stderr error to be detected")
+		}
+		if msg != "Error: bad input format" {
+			t.Fatalf("unexpected error message %q", msg)
+		}
+	})
+
+	t.Run("non error", func(t *testing.T) {
+		if _, ok := extractStderrError("warning: retrying"); ok {
+			t.Fatal("did not expect warning to be treated as error")
+		}
+	})
 }

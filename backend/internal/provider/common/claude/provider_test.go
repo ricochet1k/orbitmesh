@@ -2,12 +2,57 @@ package claude
 
 import (
 	"context"
+	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 )
+
+func TestProvider_TestConfig_RealClaudeInitialize(t *testing.T) {
+	command := resolveClaudeCommand(session.Config{})
+	if _, err := exec.LookPath(command); err != nil {
+		t.Skipf("claude CLI not found for command %q", command)
+	}
+
+	p := NewClaudeProvider()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	if err := p.TestConfig(ctx, session.Config{WorkingDir: t.TempDir()}); err != nil {
+		t.Fatalf("expected TestConfig initialize probe to succeed with real Claude CLI: %v", err)
+	}
+}
+
+func TestExtractStderrLineError(t *testing.T) {
+	t.Run("plain error line", func(t *testing.T) {
+		msg, ok := extractStderrLineError("Error: bad input")
+		if !ok {
+			t.Fatal("expected line to be detected as error")
+		}
+		if msg != "Error: bad input" {
+			t.Fatalf("unexpected message %q", msg)
+		}
+	})
+
+	t.Run("json wrapped error", func(t *testing.T) {
+		msg, ok := extractStderrLineError(`{"line":"Error: wrapped failure"}`)
+		if !ok {
+			t.Fatal("expected JSON-wrapped line to be detected as error")
+		}
+		if msg != "Error: wrapped failure" {
+			t.Fatalf("unexpected message %q", msg)
+		}
+	})
+
+	t.Run("non error line", func(t *testing.T) {
+		if _, ok := extractStderrLineError("warning: retrying"); ok {
+			t.Fatal("did not expect warning line to be treated as error")
+		}
+	})
+}
 
 func TestNewClaudeCodeProvider(t *testing.T) {
 	sessionID := "test-session-123"

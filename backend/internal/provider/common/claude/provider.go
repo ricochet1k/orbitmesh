@@ -1,15 +1,10 @@
 package claude
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"maps"
-	"os"
-	"strings"
 	"time"
 
-	"github.com/ricochet1k/orbitmesh/internal/provider/process"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 )
 
@@ -25,70 +20,33 @@ func (p *ClaudeProvider) CreateSession(sessionID string, config session.Config) 
 	return NewClaudeCodeProvider(sessionID), nil
 }
 
-// TestConfig implements provider.Provider.  It spawns the claude CLI in
-// stream-JSON mode, writes a minimal ping message to stdin, and verifies that
-// the process starts and its stdout stream is readable.  This exercises the
-// full binary start-up and stdin/stdout pipe connection without sending a real
-// user prompt.
+// TestConfig implements provider.Provider. It exercises startup and stream
+// wiring without sending a user prompt, so it avoids token spend while still
+// validating the configured binary, working directory, and process setup path.
 func (p *ClaudeProvider) TestConfig(ctx context.Context, config session.Config) error {
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
-	args, err := buildCommandArgs(config)
+	provider := NewClaudeCodeProvider("test-config")
+	provider.mu.Lock()
+	err := provider.start(config)
+	provider.mu.Unlock()
 	if err != nil {
-		return fmt.Errorf("invalid config: %w", err)
+		return fmt.Errorf("failed claude startup probe: %w", err)
 	}
-
-	env := make(map[string]string)
-	for _, kv := range os.Environ() {
-		if parts := strings.SplitN(kv, "=", 2); len(parts) == 2 {
-			env[parts[0]] = parts[1]
-		}
-	}
-	maps.Copy(env, config.Environment)
-
-	mgr, err := process.Start(ctx, process.Config{
-		Command:     resolveClaudeCommand(config),
-		Args:        args,
-		WorkingDir:  config.WorkingDir,
-		Environment: env,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to start claude process: %w", err)
-	}
-	defer mgr.Kill()
-
-	// Write a minimal stream-JSON ping so the process does not block waiting
-	// for input.  The content doesn't matter; we just want it to produce
-	// output on stdout (even an error JSON line is fine — it proves the pipes
-	// are connected and the binary is running).
-	pingMsg := formatInputMessage("ping")
-	if _, err := mgr.Stdin().Write([]byte(pingMsg + "\n")); err != nil {
-		return fmt.Errorf("failed to write to claude stdin: %w", err)
-	}
-	// Close stdin so the process knows input is finished.
-	_ = mgr.Stdin().Close()
-
-	// Read the first line from stdout; any output (including an error JSON
-	// message) confirms that the process is running and streams are connected.
-	scanner := bufio.NewScanner(mgr.Stdout())
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
-	done := make(chan error, 1)
-	go func() {
-		if scanner.Scan() {
-			done <- nil // got a line — success
-		} else if err := scanner.Err(); err != nil {
-			done <- fmt.Errorf("claude stdout read error: %w", err)
-		} else {
-			done <- fmt.Errorf("claude process exited without producing output")
-		}
-	}()
+	defer provider.Stop(context.Background())
 
 	select {
-	case err := <-done:
-		return err
+	case <-time.After(250 * time.Millisecond):
+		status := provider.Status()
+		if status.State == session.StateError && status.Error != nil {
+			return fmt.Errorf("claude provider entered error state during startup probe: %w", status.Error)
+		}
+		if status.State != session.StateRunning {
+			return fmt.Errorf("claude provider did not reach running state during startup probe (state=%s)", status.State)
+		}
+		return nil
 	case <-ctx.Done():
-		return fmt.Errorf("timed out waiting for claude to respond: %w", ctx.Err())
+		return fmt.Errorf("timed out waiting for claude startup probe: %w", ctx.Err())
 	}
 }
