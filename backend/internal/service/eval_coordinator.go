@@ -447,6 +447,60 @@ func (h *coordEvalHandle) Suspend(handlerState json.RawMessage, deps []toolcall.
 	return h.h.Watch(toEntityDeps(deps))
 }
 
+// DispatchSubtool creates a child eval in the same session/attempt as the
+// current eval and returns it as a dependency token.
+func (h *coordEvalHandle) DispatchSubtool(toolName string, input json.RawMessage) (toolcall.Dependency, error) {
+	var sessionID string
+	var attemptID string
+	h.h.Read(func(e **toolcall.Eval) {
+		sessionID = (*e).SessionID
+		attemptID = (*e).AttemptID
+	})
+	if sessionID == "" {
+		return toolcall.Dependency{}, fmt.Errorf("cannot dispatch subtool %q: missing session id", toolName)
+	}
+	deps, err := h.c.DispatchBatch(sessionID, []DispatchOptions{{
+		ToolName:  toolName,
+		Input:     input,
+		SessionID: sessionID,
+		AttemptID: attemptID,
+	}})
+	if err != nil {
+		return toolcall.Dependency{}, err
+	}
+	if len(deps) != 1 {
+		return toolcall.Dependency{}, fmt.Errorf("unexpected subtool dependency count: %d", len(deps))
+	}
+	return deps[0], nil
+}
+
+// ResolveDependency returns the terminal outcome for dep.
+func (h *coordEvalHandle) ResolveDependency(dep toolcall.Dependency) (string, bool, error) {
+	if dep.Kind != "eval" {
+		return "", false, fmt.Errorf("unsupported dependency kind: %s", dep.Kind)
+	}
+	dh, err := h.c.evals.Get(dep.ID)
+	if err != nil {
+		return "", false, err
+	}
+	var state toolcall.EvalState
+	var result string
+	var evalErr string
+	dh.Read(func(e **toolcall.Eval) {
+		state = (*e).State
+		result = (*e).Result
+		evalErr = (*e).Error
+	})
+	switch state {
+	case toolcall.EvalStateDone:
+		return result, false, nil
+	case toolcall.EvalStateError:
+		return evalErr, true, nil
+	default:
+		return "", false, fmt.Errorf("dependency %s is not terminal (state=%s)", dep.ID, state)
+	}
+}
+
 func toEntityDeps(deps []toolcall.Dependency) []entity.Dep {
 	out := make([]entity.Dep, len(deps))
 	for i, dep := range deps {

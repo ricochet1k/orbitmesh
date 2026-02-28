@@ -49,6 +49,14 @@ type EvalHandle interface {
 	// ResumeFunc (or Run again if ResumeFunc is nil) when all deps resolve.
 	Suspend(handlerState json.RawMessage, deps []toolcall.Dependency) error
 
+	// DispatchSubtool creates a child eval in the same session/attempt and
+	// returns the dependency token to wait on.
+	DispatchSubtool(toolName string, input json.RawMessage) (toolcall.Dependency, error)
+
+	// ResolveDependency returns the terminal outcome for a dependency.
+	// isError is true when the dependency completed with EvalStateError.
+	ResolveDependency(dep toolcall.Dependency) (result string, isError bool, err error)
+
 	// OnCancel registers a function to call if the eval is cancelled externally.
 	// Only the most recently registered function is kept.
 	OnCancel(fn func())

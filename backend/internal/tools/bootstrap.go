@@ -3,6 +3,7 @@ package tools
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/ricochet1k/monty-wasm-go/pkg/monty"
 
+	"github.com/ricochet1k/orbitmesh/internal/toolcall"
 	apiTypes "github.com/ricochet1k/orbitmesh/pkg/api"
 )
 
@@ -40,7 +42,7 @@ func RegisterDefaultTools(reg Registry) error {
 		{Name: "add_task", Description: "Create a new task using a template", InputSchema: json.RawMessage(`{"type":"object","properties":{"type":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"},"role":{"type":"string"},"priority":{"type":"string"},"parent":{"type":"string"}},"required":["type","title"]}`), Handler: addTaskTool},
 		{Name: "claim_task", Description: "Claim a task by marking it in progress", InputSchema: json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"}},"required":["task_id"]}`), Handler: claimTaskTool},
 		{Name: "webfetch", Description: "Fetch a URL, convert HTML to Markdown, and optionally filter by regex with context", InputSchema: json.RawMessage(`{"type":"object","properties":{"url":{"type":"string"},"regex":{"type":"string"},"context_lines":{"type":"integer"},"timeout_seconds":{"type":"integer"}},"required":["url"]}`), Handler: webfetchTool},
-		{Name: "run_code", Description: "Run code in a restricted subset of Python with top-level async support", InputSchema: json.RawMessage(`{"type":"object","properties":{"code":{"type":"string"}},"required":["code"]}`), Handler: runCodeTool},
+		{Name: "run_code", Description: "Run code in a restricted subset of Python with top-level async support", InputSchema: json.RawMessage(`{"type":"object","properties":{"code":{"type":"string"}},"required":["code"]}`), AsyncHandler: &AsyncHandler{Run: runCodeToolRun, ResumeFunc: runCodeToolResume}},
 		{Name: "list_ui_components", Description: "List MCP-enabled UI components available on the live page", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`), Handler: listUIComponentsTool},
 		{Name: "dispatch_ui_action", Description: "Dispatch an MCP UI action to a component on the live page", InputSchema: json.RawMessage(`{"type":"object","properties":{"component_id":{"type":"string"},"action":{"type":"string"},"payload":{}},"required":["component_id","action"]}`), Handler: dispatchUIActionTool},
 		{Name: "multi_edit_ui", Description: "Edit multiple MCP input components on the live page", InputSchema: json.RawMessage(`{"type":"object","properties":{"fields":{}},"required":["fields"]}`), Handler: multiEditUITool},
@@ -339,63 +341,136 @@ func filterMarkdownByRegex(markdown string, pattern string, contextLines int) (s
 	return b.String(), nil
 }
 
-func runCodeTool(ctx context.Context, input json.RawMessage) (string, error) {
+type runCodeHandlerState struct {
+	Dependency  toolcall.Dependency `json:"dependency"`
+	SnapshotB64 string              `json:"snapshot_b64"`
+}
+
+func runCodeToolRun(ctx context.Context, input json.RawMessage, h EvalHandle) error {
 	var args struct {
 		Code string `json:"code"`
 	}
 	if err := json.Unmarshal(input, &args); err != nil {
-		return "", err
+		return err
 	}
 	code := strings.TrimSpace(args.Code)
 	if code == "" {
-		return "", errors.New("code is required")
+		return errors.New("code is required")
 	}
 	runtime, err := monty.NewRuntime(ctx)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer runtime.Close(ctx)
 	program, err := runtime.Compile(ctx, code, monty.CompileOptions{ScriptName: "run_code.py", ExternalFunctions: runCodeExternalFunctions})
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer program.Close(ctx)
-	progress, err := program.Start(ctx)
+	progress, err := program.Start(ctx, []any{}...)
 	if err != nil {
-		return "", err
+		return err
 	}
+	return runCodeAdvance(ctx, h, progress)
+}
+
+func runCodeToolResume(ctx context.Context, h EvalHandle) error {
+	var state runCodeHandlerState
+	if err := json.Unmarshal(h.State(), &state); err != nil {
+		return err
+	}
+	if state.Dependency.Kind == "" || state.Dependency.ID == "" {
+		return errors.New("run_code resume missing dependency state")
+	}
+	if strings.TrimSpace(state.SnapshotB64) == "" {
+		return errors.New("run_code resume missing continuation snapshot")
+	}
+	snapshot, err := base64.StdEncoding.DecodeString(state.SnapshotB64)
+	if err != nil {
+		return fmt.Errorf("decode run_code continuation snapshot: %w", err)
+	}
+	runtime, err := monty.NewRuntime(ctx)
+	if err != nil {
+		return err
+	}
+	defer runtime.Close(ctx)
+	continuation, err := runtime.LoadContinuation(ctx, snapshot)
+	if err != nil {
+		return fmt.Errorf("load run_code continuation snapshot: %w", err)
+	}
+	defer continuation.Close(ctx)
+	result, isError, err := h.ResolveDependency(state.Dependency)
+	if err != nil {
+		return err
+	}
+	var progress monty.Progress
+	if isError {
+		progress, err = continuation.Throw(ctx, result)
+	} else {
+		returned := runCodeParseResult(result)
+		progress, err = continuation.Return(ctx, returned)
+	}
+	if err != nil {
+		return err
+	}
+	return runCodeAdvance(ctx, h, progress)
+}
+
+func runCodeAdvance(ctx context.Context, h EvalHandle, progress monty.Progress) error {
 	for {
 		switch progress.Kind {
 		case monty.KindComplete:
-			return string(progress.Result), nil
+			h.Complete(string(progress.Result))
+			return nil
 		case monty.KindFunctionCall:
 			if progress.Call == nil {
-				return "", errors.New("runtime produced empty function call")
+				return errors.New("runtime produced empty function call")
 			}
-			res, ferr := invokeExternalFunction(ctx, progress.Call)
-			if ferr != nil {
-				progress, err = progress.Call.Throw(ctx, ferr.Error())
-			} else {
-				progress, err = progress.Call.Return(ctx, res)
+			if !containsString(runCodeExternalFunctions, progress.Call.Name) {
+				progressNext, err := progress.Call.Throw(ctx, fmt.Sprintf("unknown external function: %s", progress.Call.Name))
+				if err != nil {
+					return err
+				}
+				progress = progressNext
+				continue
 			}
+			rawInput, err := runCodeCallInput(progress.Call)
 			if err != nil {
-				return "", err
+				return err
 			}
+			dep, err := h.DispatchSubtool(progress.Call.Name, rawInput)
+			if err != nil {
+				return err
+			}
+			snapshot, err := progress.Call.Dump(ctx)
+			if err != nil {
+				return err
+			}
+			progress.Call.Close(ctx)
+			stateRaw, err := json.Marshal(runCodeHandlerState{Dependency: dep, SnapshotB64: base64.StdEncoding.EncodeToString(snapshot)})
+			if err != nil {
+				return err
+			}
+			if err := h.Suspend(stateRaw, []toolcall.Dependency{dep}); err != nil {
+				return err
+			}
+			return nil
 		case monty.KindOSCall:
 			if progress.OSCall == nil {
-				return "", errors.New("runtime produced empty OS call")
+				return errors.New("runtime produced empty OS call")
 			}
-			progress, err = progress.OSCall.Throw(ctx, fmt.Sprintf("OS call %q is not permitted", progress.OSCall.Name))
+			nextProgress, err := progress.OSCall.Throw(ctx, fmt.Sprintf("OS call %q is not permitted", progress.OSCall.Name))
 			if err != nil {
-				return "", err
+				return err
 			}
+			progress = nextProgress
 		default:
-			return "", fmt.Errorf("unsupported runtime state: %v", progress.Kind)
+			return fmt.Errorf("unsupported runtime state: %v", progress.Kind)
 		}
 	}
 }
 
-func invokeExternalFunction(ctx context.Context, call *monty.Call) (any, error) {
+func runCodeCallInput(call *monty.Call) (json.RawMessage, error) {
 	args := make(map[string]any, len(call.Kwargs))
 	for i, kw := range call.Kwargs {
 		var k string
@@ -415,19 +490,24 @@ func invokeExternalFunction(ctx context.Context, call *monty.Call) (any, error) 
 	if err != nil {
 		return nil, err
 	}
-	def, ok := Global().Lookup(call.Name)
-	if !ok || def.Handler == nil {
-		return nil, fmt.Errorf("unknown external function: %s", call.Name)
-	}
-	out, err := def.Handler(ctx, raw)
-	if err != nil {
-		return nil, err
-	}
+	return raw, nil
+}
+
+func runCodeParseResult(result string) any {
 	var parsed any
-	if json.Unmarshal([]byte(out), &parsed) == nil {
-		return parsed, nil
+	if json.Unmarshal([]byte(result), &parsed) == nil {
+		return parsed
 	}
-	return out, nil
+	return result
+}
+
+func containsString(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+	return false
 }
 
 func listUIComponentsTool(ctx context.Context, _ json.RawMessage) (string, error) {
