@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/provider/buffer"
+	"github.com/ricochet1k/orbitmesh/internal/provider/process"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 )
 
@@ -294,5 +297,105 @@ func TestProvider_TestConfig_RealCodexInitialize(t *testing.T) {
 
 	if err := p.TestConfig(ctx, session.Config{WorkingDir: t.TempDir()}); err != nil {
 		t.Fatalf("expected TestConfig initialize probe to succeed with real codex CLI: %v", err)
+	}
+}
+
+func TestSendInput_QueueTimeoutEmitsErrorEvent(t *testing.T) {
+	p := NewCodexProvider("sess_queue_timeout", Config{})
+	p.started = true
+	p.inputBuffer = buffer.NewInputBuffer(1)
+
+	if err := p.inputBuffer.Send(context.Background(), "first"); err != nil {
+		t.Fatalf("prime queue: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+	<-ctx.Done()
+
+	if _, err := p.SendInput(ctx, session.Config{}, "second"); err == nil {
+		t.Fatal("expected SendInput error with expired context")
+	}
+
+	select {
+	case ev := <-p.events.Events():
+		if ev.Type != domain.EventTypeError {
+			t.Fatalf("expected error event, got %v", ev.Type)
+		}
+		errData, ok := ev.Error()
+		if !ok {
+			t.Fatal("expected error payload")
+		}
+		if errData.Code != "CODEX_SEND_INPUT" {
+			t.Fatalf("expected CODEX_SEND_INPUT code, got %q", errData.Code)
+		}
+	default:
+		t.Fatal("expected SendInput failure event")
+	}
+}
+
+func TestSendRequestCtx_RespectsTimeout(t *testing.T) {
+	procCtx, procCancel := context.WithCancel(context.Background())
+	defer procCancel()
+
+	mgr, err := process.Start(procCtx, process.Config{
+		Command: "sh",
+		Args:    []string{"-c", "cat >/dev/null; sleep 60"},
+	})
+	if err != nil {
+		t.Fatalf("failed to start helper process: %v", err)
+	}
+	defer mgr.Kill()
+
+	p := NewCodexProvider("sess_timeout", Config{})
+	p.processMgr = mgr
+	p.ctx = procCtx
+
+	_, err = p.sendRequestCtx(context.Background(), "turn/start", map[string]any{"threadId": "thr_1"}, 50*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "turn/start timed out") {
+		t.Fatalf("expected timeout error, got %v", err)
+	}
+}
+
+func TestHandleNotification_AgentMessageDeltaSuppressesDuplicateFinalOutput(t *testing.T) {
+	p := NewCodexProvider("sess_dedupe", Config{})
+
+	p.handleNotification("item/agentMessage/delta", json.RawMessage(`{
+	  "threadId":"thr_1",
+	  "turnId":"turn_1",
+	  "itemId":"msg_1",
+	  "delta":"ok"
+	}`), nil)
+	p.handleNotification("item/completed", json.RawMessage(`{
+	  "item": {
+	    "type":"agentMessage",
+	    "id":"msg_1",
+	    "text":"ok",
+	    "phase":"final_answer"
+	  }
+	}`), nil)
+
+	events := make([]domain.Event, 0, 4)
+	for {
+		select {
+		case ev := <-p.events.Events():
+			events = append(events, ev)
+		default:
+			goto done
+		}
+	}
+
+done:
+	outputCount := 0
+	for _, ev := range events {
+		if ev.Type == domain.EventTypeOutput {
+			outputCount++
+		}
+	}
+	if outputCount != 1 {
+		t.Fatalf("expected exactly one output event, got %d", outputCount)
 	}
 }

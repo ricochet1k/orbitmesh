@@ -28,6 +28,11 @@ var (
 	ErrNoActiveSession = errors.New("no active acp session")
 )
 
+const (
+	acpPromptTimeout = 8 * time.Second
+	acpStartTimeout  = 6 * time.Second
+)
+
 // Session implements session.Session for ACP-compatible agents.
 type Session struct {
 	mu        sync.RWMutex
@@ -94,28 +99,39 @@ func NewSession(sessionID string, providerConfig Config, sessionConfig session.C
 func (s *Session) SendInput(ctx context.Context, config session.Config, input string) (<-chan domain.Event, error) {
 	s.mu.Lock()
 	if !s.started {
-		if err := s.start(config); err != nil {
+		if err := s.start(ctx, config); err != nil {
 			s.mu.Unlock()
+			s.events.Emit(domain.NewErrorEvent(s.sessionID, fmt.Sprintf("failed to start ACP session: %v", err), "ACP_SEND_INPUT", nil))
 			return nil, err
 		}
 	}
 	if s.acpSessionID == nil {
 		s.mu.Unlock()
+		s.events.Emit(domain.NewErrorEvent(s.sessionID, ErrNoActiveSession.Error(), "ACP_SEND_INPUT", nil))
 		return nil, ErrNoActiveSession
 	}
 	acpSessionID := *s.acpSessionID
 	runtime := s.runtime
 	s.mu.Unlock()
 
-	go s.runPrompt(runtime, acpSessionID, input)
+	go s.runPrompt(ctx, runtime, acpSessionID, input)
 	return s.events.Events(), nil
 }
 
 // start initializes/borrows a shared ACP process runtime and creates an ACP session.
 // Caller must hold s.mu (write lock).
-func (s *Session) start(config session.Config) error {
+func (s *Session) start(ctx context.Context, config session.Config) error {
 	if s.started {
 		return ErrAlreadyStarted
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	startCtx := ctx
+	if deadline, hasDeadline := ctx.Deadline(); !hasDeadline || time.Until(deadline) > acpStartTimeout {
+		var cancel context.CancelFunc
+		startCtx, cancel = context.WithTimeout(ctx, acpStartTimeout)
+		defer cancel()
 	}
 
 	// Update config if provided
@@ -158,7 +174,7 @@ func (s *Session) start(config session.Config) error {
 
 	environment := mergeEnvironment(s.providerConfig.Environment, config.Environment)
 
-	runtime, err := sharedRuntimePool.acquire(process.Config{
+	runtime, err := sharedRuntimePool.acquire(startCtx, process.Config{
 		Command:     command,
 		Args:        args,
 		WorkingDir:  workingDir,
@@ -174,7 +190,7 @@ func (s *Session) start(config session.Config) error {
 	s.terminalManager = NewTerminalManager(s.sessionID, workingDir, runtime.ctx)
 
 	// Create an ACP session
-	if err := s.createACPSession(); err != nil {
+	if err := s.createACPSession(startCtx); err != nil {
 		s.handleFailure(err)
 		return err
 	}
@@ -199,7 +215,7 @@ func (s *Session) start(config session.Config) error {
 }
 
 // createACPSession creates a new ACP session.
-func (s *Session) createACPSession() error {
+func (s *Session) createACPSession(ctx context.Context) error {
 	// Get working directory
 	cwd := s.sessionConfig.WorkingDir
 	if cwd == "" {
@@ -227,7 +243,7 @@ func (s *Session) createACPSession() error {
 	if mcpServers == nil {
 		mcpServers = []acpsdk.McpServer{}
 	}
-	sessionID, err := s.runtime.createSession(s, sessionRuntimeConfig{cwd: cwd, mcpServers: mcpServers})
+	sessionID, err := s.runtime.createSession(ctx, s, sessionRuntimeConfig{cwd: cwd, mcpServers: mcpServers})
 	if err != nil {
 		return err
 	}
@@ -239,14 +255,14 @@ func (s *Session) createACPSession() error {
 	return nil
 }
 
-func (s *Session) runPrompt(runtime *sharedRuntime, acpSessionID string, input string) {
+func (s *Session) runPrompt(ctx context.Context, runtime *sharedRuntime, acpSessionID string, input string) {
 	if runtime == nil {
 		s.events.Emit(domain.NewErrorEvent(s.sessionID, ErrNotStarted.Error(), "ACP_PROMPT_ERROR", nil))
 		s.completePrompt("acp runtime unavailable")
 		return
 	}
 
-	if err := s.sendPrompt(runtime, acpSessionID, input); err != nil {
+	if err := s.sendPrompt(ctx, runtime, acpSessionID, input); err != nil {
 		s.events.Emit(domain.NewErrorEvent(s.sessionID, err.Error(), "ACP_PROMPT_ERROR", nil))
 	}
 
@@ -324,7 +340,7 @@ func (s *Session) Status() session.Status {
 
 // processStderr reads error output from the agent's stderr.
 // sendPrompt sends a prompt via the ACP protocol.
-func (s *Session) sendPrompt(runtime *sharedRuntime, acpSessionID string, input string) error {
+func (s *Session) sendPrompt(ctx context.Context, runtime *sharedRuntime, acpSessionID string, input string) error {
 	s.mu.RLock()
 	s.mu.RUnlock()
 
@@ -333,6 +349,9 @@ func (s *Session) sendPrompt(runtime *sharedRuntime, acpSessionID string, input 
 	}
 	if acpSessionID == "" {
 		return ErrNoActiveSession
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	// Track user message for snapshots
@@ -353,7 +372,17 @@ func (s *Session) sendPrompt(runtime *sharedRuntime, acpSessionID string, input 
 	}
 
 	// Send the prompt request
-	resp, err := runtime.conn.Prompt(runtime.ctx, req)
+	promptCtx, promptCancel := context.WithCancel(ctx)
+	defer promptCancel()
+	stopCancelOnRuntimeStop := context.AfterFunc(runtime.ctx, promptCancel)
+	defer stopCancelOnRuntimeStop()
+	if _, hasDeadline := promptCtx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		promptCtx, cancel = context.WithTimeout(promptCtx, acpPromptTimeout)
+		defer cancel()
+	}
+
+	resp, err := runtime.conn.Prompt(promptCtx, req)
 	if err != nil {
 		return fmt.Errorf("failed to send prompt: %w", err)
 	}

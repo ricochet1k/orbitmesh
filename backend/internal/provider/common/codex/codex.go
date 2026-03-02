@@ -27,6 +27,10 @@ var (
 	ErrAlreadyStarted = errors.New("codex provider already started")
 )
 
+const (
+	codexTurnRequestTimeout = 8 * time.Second
+)
+
 type rpcError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
@@ -96,6 +100,7 @@ func (p *CodexProvider) SendInput(ctx context.Context, config session.Config, in
 	p.mu.Unlock()
 
 	if err := p.inputBuffer.Send(ctx, input); err != nil {
+		p.events.Emit(domain.NewErrorEvent(p.sessionID, fmt.Sprintf("failed to queue input: %v", err), "CODEX_SEND_INPUT", nil))
 		return nil, err
 	}
 
@@ -124,7 +129,7 @@ func (p *CodexProvider) start(ctx context.Context, config session.Config) error 
 	if workingDir == "" {
 		workingDir = p.staticCfg.WorkingDir
 	}
-	if !supportsAppServer(p.ctx, cmd, env, workingDir) {
+	if !supportsAppServer(ctx, cmd, env, workingDir) {
 		err := fmt.Errorf("installed codex CLI does not support app-server; update codex to a version with app-server support")
 		p.handleFailure(err)
 		return err
@@ -153,7 +158,7 @@ func (p *CodexProvider) start(ctx context.Context, config session.Config) error 
 			"version": "0.1.0",
 		},
 	}
-	if _, err := p.sendRequest("initialize", initParams, 10*time.Second); err != nil {
+	if _, err := p.sendRequestCtx(ctx, "initialize", initParams, 10*time.Second); err != nil {
 		p.handleFailure(err)
 		return err
 	}
@@ -162,7 +167,7 @@ func (p *CodexProvider) start(ctx context.Context, config session.Config) error 
 		return err
 	}
 
-	threadRes, err := p.sendRequest("thread/start", buildThreadStartParams(config), 12*time.Second)
+	threadRes, err := p.sendRequestCtx(ctx, "thread/start", buildThreadStartParams(config), 12*time.Second)
 	if err != nil {
 		p.handleFailure(err)
 		return err
@@ -257,13 +262,13 @@ func (p *CodexProvider) processInput() {
 						"text": input,
 					}},
 				}
-				if _, err := p.sendRequest("turn/steer", params, 30*time.Second); err != nil {
+				if _, err := p.sendRequestCtx(p.ctx, "turn/steer", params, codexTurnRequestTimeout); err != nil {
 					p.events.Emit(domain.NewErrorEvent(p.sessionID, err.Error(), "CODEX_TURN_STEER_ERROR", nil))
 				}
 				continue
 			}
 
-			res, err := p.sendRequest("turn/start", buildTurnStartParams(threadID, input, cfg), 30*time.Second)
+			res, err := p.sendRequestCtx(p.ctx, "turn/start", buildTurnStartParams(threadID, input, cfg), codexTurnRequestTimeout)
 			if err != nil {
 				p.events.Emit(domain.NewErrorEvent(p.sessionID, err.Error(), "CODEX_TURN_START_ERROR", nil))
 				continue
@@ -528,6 +533,11 @@ func (p *CodexProvider) handleItemNotification(method string, params json.RawMes
 		}
 		text := extractAgentMessageText(item)
 		if text != "" {
+			if strings.TrimSpace(p.state.Status().Output) == strings.TrimSpace(text) {
+				return
+			}
+		}
+		if text != "" {
 			p.state.SetOutput(text)
 			p.events.Emit(domain.NewOutputEvent(p.sessionID, text, raw))
 		}
@@ -614,6 +624,23 @@ func (p *CodexProvider) handleCodexEventItemNotification(method string, params j
 }
 
 func (p *CodexProvider) sendRequest(method string, params any, timeout time.Duration) (json.RawMessage, error) {
+	return p.sendRequestCtx(p.ctx, method, params, timeout)
+}
+
+func (p *CodexProvider) sendRequestCtx(ctx context.Context, method string, params any, timeout time.Duration) (json.RawMessage, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil, fmt.Errorf("%s cancelled: %w", method, ctx.Err())
+		}
+		if remaining < timeout {
+			timeout = remaining
+		}
+	}
+
 	id := p.rpcID.Add(1)
 	msg := map[string]any{"method": method, "id": id}
 	if params != nil {
@@ -646,6 +673,11 @@ func (p *CodexProvider) sendRequest(method string, params any, timeout time.Dura
 		delete(p.pending, id)
 		p.pendingMu.Unlock()
 		return nil, fmt.Errorf("%s timed out", method)
+	case <-ctx.Done():
+		p.pendingMu.Lock()
+		delete(p.pending, id)
+		p.pendingMu.Unlock()
+		return nil, fmt.Errorf("%s cancelled: %w", method, ctx.Err())
 	case <-p.ctx.Done():
 		return nil, fmt.Errorf("%s cancelled", method)
 	}

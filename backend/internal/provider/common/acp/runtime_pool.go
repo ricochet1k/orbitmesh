@@ -18,6 +18,11 @@ import (
 
 const defaultProcessIdleTTL = 3 * time.Minute
 
+const (
+	acpInitializeTimeout  = 11 * time.Second
+	acpSessionOpenTimeout = 8 * time.Second
+)
+
 var sharedRuntimePool = newRuntimePool(defaultProcessIdleTTL)
 
 type runtimePool struct {
@@ -40,7 +45,7 @@ func newRuntimePool(idleTTL time.Duration) *runtimePool {
 	}
 }
 
-func (p *runtimePool) acquire(cfg process.Config) (*sharedRuntime, error) {
+func (p *runtimePool) acquire(ctx context.Context, cfg process.Config) (*sharedRuntime, error) {
 	key := runtimeKey(cfg)
 
 	p.mu.Lock()
@@ -51,7 +56,7 @@ func (p *runtimePool) acquire(cfg process.Config) (*sharedRuntime, error) {
 	}
 	p.mu.Unlock()
 
-	rt, err := newSharedRuntime(key, cfg, p)
+	rt, err := newSharedRuntime(ctx, key, cfg, p)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +127,7 @@ type sharedRuntime struct {
 	shutdownOnce sync.Once
 }
 
-func newSharedRuntime(key string, cfg process.Config, pool *runtimePool) (*sharedRuntime, error) {
+func newSharedRuntime(initCtx context.Context, key string, cfg process.Config, pool *runtimePool) (*sharedRuntime, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	mgr, err := process.Start(ctx, cfg)
@@ -143,7 +148,7 @@ func newSharedRuntime(key string, cfg process.Config, pool *runtimePool) (*share
 	rt.adapter = newACPClientAdapter(rt)
 	rt.conn = acpsdk.NewClientSideConnection(rt.adapter, mgr.Stdin(), mgr.Stdout())
 
-	if err := rt.initialize(); err != nil {
+	if err := rt.initialize(initCtx); err != nil {
 		_ = mgr.Kill()
 		cancel()
 		return nil, err
@@ -156,7 +161,17 @@ func newSharedRuntime(key string, cfg process.Config, pool *runtimePool) (*share
 	return rt, nil
 }
 
-func (rt *sharedRuntime) initialize() error {
+func (rt *sharedRuntime) initialize(ctx context.Context) error {
+	if ctx == nil {
+		ctx = rt.ctx
+	}
+	initCtx := ctx
+	if _, hasDeadline := initCtx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		initCtx, cancel = context.WithTimeout(ctx, acpInitializeTimeout)
+		defer cancel()
+	}
+
 	initReq := acpsdk.InitializeRequest{
 		ProtocolVersion: acpsdk.ProtocolVersionNumber,
 		ClientCapabilities: acpsdk.ClientCapabilities{
@@ -167,16 +182,25 @@ func (rt *sharedRuntime) initialize() error {
 			Terminal: true,
 		},
 	}
-	if _, err := rt.conn.Initialize(rt.ctx, initReq); err != nil {
+	if _, err := rt.conn.Initialize(initCtx, initReq); err != nil {
 		return fmt.Errorf("initialize failed: %w", err)
 	}
 	return nil
 }
 
-func (rt *sharedRuntime) createSession(s *Session, cfg sessionRuntimeConfig) (string, error) {
+func (rt *sharedRuntime) createSession(ctx context.Context, s *Session, cfg sessionRuntimeConfig) (string, error) {
 	rt.cancelIdleShutdown()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	openCtx := ctx
+	if _, hasDeadline := openCtx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		openCtx, cancel = context.WithTimeout(ctx, acpSessionOpenTimeout)
+		defer cancel()
+	}
 
-	resp, err := rt.conn.NewSession(rt.ctx, acpsdk.NewSessionRequest{
+	resp, err := rt.conn.NewSession(openCtx, acpsdk.NewSessionRequest{
 		Cwd:        cfg.cwd,
 		McpServers: cfg.mcpServers,
 	})

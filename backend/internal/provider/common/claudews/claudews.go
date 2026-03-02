@@ -65,6 +65,9 @@ type ClaudeWSProvider struct {
 
 	connReady     chan struct{} // closed when wsConn is established
 	connReadyOnce sync.Once
+	initReady     chan struct{} // closed when system/init is received
+	initReadyOnce sync.Once
+	inboundSignal chan struct{}
 
 	starting bool
 	started  bool
@@ -87,6 +90,8 @@ func NewClaudeWSProvider(sessionID string, permHandler tools.PermissionHandler) 
 		circuitBreaker: circuit.NewBreaker(3, 30*time.Second),
 		permHandler:    permHandler,
 		connReady:      make(chan struct{}),
+		initReady:      make(chan struct{}),
+		inboundSignal:  make(chan struct{}, 1),
 		stderrDone:     make(chan error, 1),
 	}
 	return p
@@ -105,8 +110,8 @@ func (p *ClaudeWSProvider) SendInput(ctx context.Context, config session.Config,
 			return nil, err
 		}
 	}
-
 	if err := p.inputBuffer.Send(ctx, input); err != nil {
+		p.events.Emit(domain.NewErrorEvent(p.sessionID, fmt.Sprintf("failed to queue input: %v", err), "CLAUDEWS_SEND_INPUT", nil))
 		return nil, err
 	}
 	return p.events.Events(), nil
@@ -126,6 +131,11 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) (er
 	p.starting = true
 	p.config = config
 	p.ctx, p.cancel = context.WithCancel(context.WithoutCancel(ctx))
+	p.connReady = make(chan struct{})
+	p.connReadyOnce = sync.Once{}
+	p.initReady = make(chan struct{})
+	p.initReadyOnce = sync.Once{}
+	p.inboundSignal = make(chan struct{}, 1)
 	p.stderrTail = ""
 	p.stderrDone = make(chan error, 1)
 	p.mu.Unlock()
@@ -190,7 +200,7 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) (er
 	// Drain stderr in a goroutine so the process doesn't block.
 	p.wg.Go(p.drainStderr)
 
-	// ── 5. Wait for the CLI to connect (up to 15 s) ──────────────────────────
+	// ── 5. Wait for the CLI to connect (up to 15 s) ───────────────────────────
 	select {
 	case <-p.connReady:
 		// Connection established; state transition happens in handleConnection.
@@ -206,6 +216,10 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) (er
 		return err
 	case <-time.After(15 * time.Second):
 		err := p.withRecentStderr(fmt.Errorf("timed out waiting for claude CLI WebSocket connection"))
+		p.handleFailure(err)
+		return err
+	case <-ctx.Done():
+		err := fmt.Errorf("context cancelled before claude CLI connected: %w", ctx.Err())
 		p.handleFailure(err)
 		return err
 	case <-p.ctx.Done():
@@ -354,6 +368,11 @@ func (p *ClaudeWSProvider) handleConnection(conn *wsConn) {
 
 // dispatchMessage routes an incoming WebSocket message to the appropriate handler.
 func (p *ClaudeWSProvider) dispatchMessage(data []byte) {
+	select {
+	case p.inboundSignal <- struct{}{}:
+	default:
+	}
+
 	rm, err := unmarshalRaw(data)
 	if err != nil {
 		p.events.Emit(domain.NewErrorEvent(p.sessionID, err.Error(), "WS_PARSE_ERROR", data))
@@ -398,6 +417,9 @@ func (p *ClaudeWSProvider) handleSystemMsg(rm RawMessage) {
 		p.mu.Lock()
 		p.claudeSessionID = msg.SessionID
 		p.mu.Unlock()
+		p.initReadyOnce.Do(func() {
+			close(p.initReady)
+		})
 
 		tools := make([]any, len(msg.Tools))
 		for i, t := range msg.Tools {
@@ -768,11 +790,50 @@ func (p *ClaudeWSProvider) processInput() {
 			p.mu.RUnlock()
 
 			if conn == nil {
+				p.events.Emit(domain.NewErrorEvent(p.sessionID, "claudews websocket is not connected", "WS_NOT_CONNECTED", nil))
 				continue
 			}
-			if err := conn.Send(NewUserMessage(input, sid)); err != nil {
+			msg := any(NewUserMessage(input, sid))
+			if sid == "" {
+				msg = map[string]any{
+					"type": "user",
+					"message": map[string]any{
+						"role":    "user",
+						"content": input,
+					},
+					"parent_tool_use_id": nil,
+				}
+				p.events.Emit(domain.NewMetadataEvent(p.sessionID, "session_id_pending", map[string]any{
+					"note": "sending prompt before system/init provided session_id",
+				}, nil))
+			}
+			drained := false
+			for !drained {
+				select {
+				case <-p.inboundSignal:
+				default:
+					drained = true
+				}
+			}
+
+			if err := conn.Send(msg); err != nil {
 				p.events.Emit(domain.NewErrorEvent(p.sessionID, err.Error(), "WS_SEND_ERROR", nil))
 				return
+			}
+
+			wait := time.NewTimer(6 * time.Second)
+			select {
+			case <-p.ctx.Done():
+				if !wait.Stop() {
+					<-wait.C
+				}
+				return
+			case <-p.inboundSignal:
+				if !wait.Stop() {
+					<-wait.C
+				}
+			case <-wait.C:
+				p.events.Emit(domain.NewErrorEvent(p.sessionID, "no claudews response received within 6s after prompt send", "WS_NO_RESPONSE", nil))
 			}
 		}
 	}

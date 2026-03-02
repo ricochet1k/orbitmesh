@@ -1,11 +1,15 @@
 package claudews
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/provider/buffer"
+	"github.com/ricochet1k/orbitmesh/internal/session"
 )
 
 func TestHandleResultMsg_EmitsOutputNotPlan(t *testing.T) {
@@ -108,4 +112,39 @@ func TestExtractStderrError(t *testing.T) {
 			t.Fatal("did not expect warning to be treated as error")
 		}
 	})
+}
+
+func TestSendInput_QueueTimeoutEmitsErrorEvent(t *testing.T) {
+	p := NewClaudeWSProvider("s1", nil)
+	p.started = true
+	close(p.initReady)
+	p.inputBuffer = buffer.NewInputBuffer(1)
+
+	if err := p.inputBuffer.Send(context.Background(), "first"); err != nil {
+		t.Fatalf("prime queue: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+	<-ctx.Done()
+
+	if _, err := p.SendInput(ctx, session.Config{}, "second"); err == nil {
+		t.Fatal("expected SendInput error when queue send context is done")
+	}
+
+	select {
+	case ev := <-p.events.Events():
+		if ev.Type != domain.EventTypeError {
+			t.Fatalf("expected error event, got %v", ev.Type)
+		}
+		errData, ok := ev.Error()
+		if !ok {
+			t.Fatal("expected error payload")
+		}
+		if errData.Code != "CLAUDEWS_SEND_INPUT" {
+			t.Fatalf("expected CLAUDEWS_SEND_INPUT code, got %q", errData.Code)
+		}
+	default:
+		t.Fatal("expected SendInput failure event")
+	}
 }

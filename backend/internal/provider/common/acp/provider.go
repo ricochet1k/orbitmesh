@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
+	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/provider"
 	"github.com/ricochet1k/orbitmesh/internal/provider/process"
@@ -55,20 +57,22 @@ func (p *Provider) TestConfig(ctx context.Context, config session.Config) error 
 
 	environment := mergeEnvironment(p.config.Environment, config.Environment)
 
-	// Use a private pool so the test runtime is isolated from the shared pool.
-	testPool := newRuntimePool(1) // 1 ns TTL; we shut it down explicitly
-	rt, err := newSharedRuntime("test", process.Config{
+	if _, err := exec.LookPath(command); err != nil {
+		return fmt.Errorf("acp command not found: %w", err)
+	}
+
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	mgr, err := process.Start(probeCtx, process.Config{
 		Command:     command,
 		Args:        args,
 		WorkingDir:  workingDir,
 		Environment: environment,
-	}, testPool)
+	})
 	if err != nil {
-		return fmt.Errorf("ACP agent failed to start or initialize: %w", err)
+		return fmt.Errorf("ACP agent failed to start: %w", err)
 	}
-
-	// Cancel the idle timer and shut the test runtime down immediately.
-	rt.cancelIdleShutdown()
-	_ = rt.shutdown()
+	_ = mgr.Stop(500 * time.Millisecond)
 	return nil
 }

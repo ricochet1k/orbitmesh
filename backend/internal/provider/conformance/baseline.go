@@ -21,6 +21,7 @@ const excludedProviderType = "pty"
 const (
 	liveStartupTimeout   = 8 * time.Second
 	liveRoundtripTimeout = 12 * time.Second
+	liveRoundtripIdleGap = 1200 * time.Millisecond
 	liveRoundtripPrompt  = "Reply with exactly: ok"
 )
 
@@ -441,18 +442,24 @@ func (r *BaselineRunner) runLiveStartupProbe(ctx context.Context, providerType s
 	probeCtx, cancel := context.WithTimeout(ctx, liveStartupTimeout)
 	defer cancel()
 
-	err := r.tester.TestConfig(probeCtx, providerType, cfg)
+	testConfigErrCh := make(chan error, 1)
+	go func() {
+		testConfigErrCh <- r.tester.TestConfig(probeCtx, providerType, cfg)
+	}()
+
+	var err error
+	select {
+	case <-probeCtx.Done():
+		err = probeCtx.Err()
+	case err = <-testConfigErrCh:
+	}
+
 	if err != nil {
-		classification := classifyFailure(err.Error())
-		status := RunStatusFailed
-		if errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
-			classification = FailureTimeout
-			status = RunStatusTimedOut
-		}
+		classification, message, status := classifyLiveProbeError(providerType, cfg, err, probeCtx.Err())
 		return liveScenarioResult{
 			Detail:    fmt.Sprintf("startup probe failed: %v", err),
 			Duration:  time.Since(start),
-			Failure:   &FailureReport{Classification: classification, Message: err.Error()},
+			Failure:   &FailureReport{Classification: classification, Message: message},
 			RunStatus: status,
 		}
 	}
@@ -470,28 +477,79 @@ func (r *BaselineRunner) runLiveMessageRoundtrip(ctx context.Context, providerTy
 	defer cancel()
 
 	runID := fmt.Sprintf("providercheck-%s-%d", providerType, time.Now().UTC().UnixNano())
-	sess, err := r.tester.CreateSession(providerType, runID, cfg)
+	type createSessionResult struct {
+		session session.Session
+		err     error
+	}
+	createResultCh := make(chan createSessionResult, 1)
+	go func() {
+		sess, err := r.tester.CreateSession(providerType, runID, cfg)
+		createResultCh <- createSessionResult{session: sess, err: err}
+	}()
+
+	var (
+		sess session.Session
+		err  error
+	)
+	select {
+	case <-runCtx.Done():
+		classification, message, status := classifyLiveProbeError(providerType, cfg, runCtx.Err(), runCtx.Err())
+		return liveScenarioResult{
+			Detail:    "message roundtrip startup timed out",
+			Duration:  time.Since(start),
+			Failure:   &FailureReport{Classification: classification, Message: message},
+			RunStatus: status,
+		}
+	case createResult := <-createResultCh:
+		sess = createResult.session
+		err = createResult.err
+	}
+
 	if err != nil {
+		classification, message, status := classifyLiveProbeError(providerType, cfg, err, runCtx.Err())
 		return liveScenarioResult{
 			Detail:    fmt.Sprintf("message roundtrip startup failed: %v", err),
 			Duration:  time.Since(start),
-			Failure:   &FailureReport{Classification: FailureStartup, Message: err.Error()},
-			RunStatus: RunStatusFailed,
+			Failure:   &FailureReport{Classification: classification, Message: message},
+			RunStatus: status,
 		}
 	}
 	defer func() {
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer stopCancel()
-		_ = sess.Stop(stopCtx)
+		_ = stopSessionWithGuard(sess, 2*time.Second)
 	}()
 
-	events, err := sess.SendInput(runCtx, cfg, liveRoundtripPrompt)
+	type sendInputResult struct {
+		events <-chan domain.Event
+		err    error
+	}
+	sendResultCh := make(chan sendInputResult, 1)
+	go func() {
+		events, err := sess.SendInput(runCtx, cfg, liveRoundtripPrompt)
+		sendResultCh <- sendInputResult{events: events, err: err}
+	}()
+
+	var events <-chan domain.Event
+	select {
+	case <-runCtx.Done():
+		classification, message, status := classifyLiveProbeError(providerType, cfg, runCtx.Err(), runCtx.Err())
+		return liveScenarioResult{
+			Detail:    "message roundtrip send timed out",
+			Duration:  time.Since(start),
+			Failure:   &FailureReport{Classification: classification, Message: message},
+			RunStatus: status,
+		}
+	case sendResult := <-sendResultCh:
+		events = sendResult.events
+		err = sendResult.err
+	}
+
 	if err != nil {
+		classification, message, status := classifyLiveProbeError(providerType, cfg, err, runCtx.Err())
 		return liveScenarioResult{
 			Detail:    fmt.Sprintf("message roundtrip send failed: %v", err),
 			Duration:  time.Since(start),
-			Failure:   &FailureReport{Classification: FailureStartup, Message: err.Error()},
-			RunStatus: RunStatusFailed,
+			Failure:   &FailureReport{Classification: classification, Message: message},
+			RunStatus: status,
 		}
 	}
 
@@ -499,23 +557,83 @@ func (r *BaselineRunner) runLiveMessageRoundtrip(ctx context.Context, providerTy
 	normalized := make([]json.RawMessage, 0, 8)
 	output := strings.Builder{}
 	metricTotal := int64(0)
+	var idleTimer *time.Timer
+	var idleTimerC <-chan time.Time
+	stopIdleTimer := func() {
+		if idleTimer == nil {
+			return
+		}
+		if !idleTimer.Stop() {
+			select {
+			case <-idleTimer.C:
+			default:
+			}
+		}
+		idleTimerC = nil
+	}
+	resetIdleTimer := func() {
+		if idleTimer == nil {
+			idleTimer = time.NewTimer(liveRoundtripIdleGap)
+			idleTimerC = idleTimer.C
+			return
+		}
+		if !idleTimer.Stop() {
+			select {
+			case <-idleTimer.C:
+			default:
+			}
+		}
+		idleTimer.Reset(liveRoundtripIdleGap)
+		idleTimerC = idleTimer.C
+	}
+	defer stopIdleTimer()
+	turnCompleteReason := ""
 	for {
 		select {
 		case <-runCtx.Done():
+			classification, message, status := classifyLiveProbeError(providerType, cfg, runCtx.Err(), runCtx.Err())
 			return liveScenarioResult{
-				Detail:             "message roundtrip timed out",
+				Detail:             "message roundtrip timed out waiting for turn completion",
 				Duration:           time.Since(start),
 				Usage:              Usage{Tokens: metricTotal},
 				ProviderTranscript: transcript,
 				NormalizedEvents:   normalized,
 				Failure: &FailureReport{
-					Classification: FailureTimeout,
-					Message:        runCtx.Err().Error(),
+					Classification: classification,
+					Message:        message,
 				},
-				RunStatus: RunStatusTimedOut,
+				RunStatus: status,
 			}
+		case <-idleTimerC:
+			if isTerseOKResponse(strings.TrimSpace(output.String())) {
+				return liveScenarioResult{
+					Detail:             "message roundtrip ok (stream idle)",
+					Duration:           time.Since(start),
+					Usage:              Usage{Tokens: metricTotal},
+					ProviderTranscript: transcript,
+					NormalizedEvents:   normalized,
+					RunStatus:          RunStatusPassed,
+				}
+			}
+			idleTimerC = nil
 		case event, ok := <-events:
+			if runCtx.Err() != nil {
+				classification, message, status := classifyLiveProbeError(providerType, cfg, runCtx.Err(), runCtx.Err())
+				return liveScenarioResult{
+					Detail:             "message roundtrip timed out waiting for turn completion",
+					Duration:           time.Since(start),
+					Usage:              Usage{Tokens: metricTotal},
+					ProviderTranscript: transcript,
+					NormalizedEvents:   normalized,
+					Failure:            &FailureReport{Classification: classification, Message: message},
+					RunStatus:          status,
+				}
+			}
+
 			if !ok {
+				if turnCompleteReason != "" {
+					return evaluateRoundtripOutput(output.String(), metricTotal, transcript, normalized, start, turnCompleteReason)
+				}
 				text := strings.TrimSpace(output.String())
 				if text == "" {
 					return liveScenarioResult{
@@ -574,6 +692,7 @@ func (r *BaselineRunner) runLiveMessageRoundtrip(ctx context.Context, providerTy
 			}
 			if event.Type == domain.EventTypeError {
 				if errData, ok := event.Error(); ok {
+					classification, message, _ := classifyLiveProbeError(providerType, cfg, errors.New(errData.Message), runCtx.Err())
 					return liveScenarioResult{
 						Detail:             fmt.Sprintf("message roundtrip error event: %s", errData.Message),
 						Duration:           time.Since(start),
@@ -581,10 +700,24 @@ func (r *BaselineRunner) runLiveMessageRoundtrip(ctx context.Context, providerTy
 						ProviderTranscript: transcript,
 						NormalizedEvents:   normalized,
 						Failure: &FailureReport{
-							Classification: classifyFailure(errData.Message),
-							Message:        errData.Message,
+							Classification: classification,
+							Message:        message,
 						},
 						RunStatus: RunStatusFailed,
+					}
+				}
+			}
+
+			if reason, complete := eventIndicatesTurnComplete(event); complete {
+				turnCompleteReason = reason
+				if isTerseOKResponse(strings.TrimSpace(output.String())) {
+					return liveScenarioResult{
+						Detail:             fmt.Sprintf("message roundtrip ok (%s)", reason),
+						Duration:           time.Since(start),
+						Usage:              Usage{Tokens: metricTotal},
+						ProviderTranscript: transcript,
+						NormalizedEvents:   normalized,
+						RunStatus:          RunStatusPassed,
 					}
 				}
 			}
@@ -594,8 +727,151 @@ func (r *BaselineRunner) runLiveMessageRoundtrip(ctx context.Context, providerTy
 				normalized = append(normalized, normalizedEvent)
 			}
 			transcript = append(transcript, extractProviderFrame(event, normalizedEvent))
+
+			if isTerseOKResponse(strings.TrimSpace(output.String())) {
+				resetIdleTimer()
+			} else {
+				stopIdleTimer()
+			}
 		}
 	}
+}
+
+func stopSessionWithGuard(sess session.Session, timeout time.Duration) error {
+	if sess == nil {
+		return nil
+	}
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), timeout)
+	defer stopCancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- sess.Stop(stopCtx)
+	}()
+
+	select {
+	case <-stopCtx.Done():
+		return stopCtx.Err()
+	case err := <-errCh:
+		return err
+	}
+}
+
+func evaluateRoundtripOutput(output string, metricTotal int64, transcript, normalized []json.RawMessage, start time.Time, completionReason string) liveScenarioResult {
+	text := strings.TrimSpace(output)
+	if text == "" {
+		return liveScenarioResult{
+			Detail:             fmt.Sprintf("message roundtrip completed (%s) without output", completionReason),
+			Duration:           time.Since(start),
+			Usage:              Usage{Tokens: metricTotal},
+			ProviderTranscript: transcript,
+			NormalizedEvents:   normalized,
+			Failure: &FailureReport{
+				Classification: FailureNoOutput,
+				Message:        "provider produced no output events",
+				Expected:       "ok",
+				Actual:         "",
+			},
+			RunStatus: RunStatusFailed,
+		}
+	}
+	if !isTerseOKResponse(text) {
+		return liveScenarioResult{
+			Detail:             fmt.Sprintf("message roundtrip response mismatch after %s: %q", completionReason, text),
+			Duration:           time.Since(start),
+			Usage:              Usage{Tokens: metricTotal},
+			ProviderTranscript: transcript,
+			NormalizedEvents:   normalized,
+			Failure: &FailureReport{
+				Classification: FailureEventNormalization,
+				Message:        "terse response expectation failed",
+				Expected:       "ok",
+				Actual:         text,
+			},
+			RunStatus: RunStatusFailed,
+		}
+	}
+	return liveScenarioResult{
+		Detail:             fmt.Sprintf("message roundtrip ok (%s)", completionReason),
+		Duration:           time.Since(start),
+		Usage:              Usage{Tokens: metricTotal},
+		ProviderTranscript: transcript,
+		NormalizedEvents:   normalized,
+		RunStatus:          RunStatusPassed,
+	}
+}
+
+func eventIndicatesTurnComplete(event domain.Event) (string, bool) {
+	switch event.Type {
+	case domain.EventTypeStatusChange:
+		if status, ok := event.StatusChange(); ok {
+			if status.NewState == domain.SessionStateIdle {
+				if strings.TrimSpace(status.Reason) != "" {
+					return fmt.Sprintf("status idle: %s", strings.TrimSpace(status.Reason)), true
+				}
+				return "status idle", true
+			}
+		}
+	case domain.EventTypeProgress:
+		if progress, ok := event.Progress(); ok && progress.Done {
+			reason := strings.TrimSpace(progress.Channel)
+			if reason == "" {
+				reason = "progress"
+			}
+			return fmt.Sprintf("progress done: %s", reason), true
+		}
+	case domain.EventTypeMetadata:
+		if metadata, ok := event.Metadata(); ok {
+			switch metadata.Key {
+			case "turn_completed", "stop_reason":
+				return fmt.Sprintf("metadata %s", metadata.Key), true
+			}
+		}
+	}
+	return "", false
+}
+
+func classifyLiveProbeError(providerType string, cfg session.Config, err error, contextErr error) (FailureClassification, string, RunStatus) {
+	status := RunStatusFailed
+	classification := classifyFailure(err.Error())
+	message := strings.TrimSpace(err.Error())
+
+	if errors.Is(contextErr, context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+		classification = FailureTimeout
+		status = RunStatusTimedOut
+		if providerUsesCustomBaseURL(providerType, cfg) {
+			classification = FailureTransport
+			status = RunStatusFailed
+			message = fmt.Sprintf("custom base_url %q appears unreachable or unresponsive: %s", customBaseURL(cfg), message)
+		}
+		return classification, message, status
+	}
+
+	if providerUsesCustomBaseURL(providerType, cfg) && classification == FailureTransport {
+		message = fmt.Sprintf("custom base_url %q appears unreachable or misconfigured: %s", customBaseURL(cfg), message)
+	}
+
+	return classification, message, status
+}
+
+func providerUsesCustomBaseURL(providerType string, cfg session.Config) bool {
+	providerType = strings.ToLower(strings.TrimSpace(providerType))
+	if providerType != "openai" && providerType != "codex" {
+		return false
+	}
+	return customBaseURL(cfg) != ""
+}
+
+func customBaseURL(cfg session.Config) string {
+	raw, ok := cfg.Custom["base_url"]
+	if !ok {
+		return ""
+	}
+	baseURL, ok := raw.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(baseURL)
 }
 
 func normalizeLiveEvent(event domain.Event) (json.RawMessage, error) {
@@ -658,7 +934,7 @@ func classifyFailure(message string) FailureClassification {
 		return FailureRateLimit
 	case strings.Contains(msg, "auth"), strings.Contains(msg, "api key"), strings.Contains(msg, "unauthorized"), strings.Contains(msg, "forbidden"):
 		return FailureAuth
-	case strings.Contains(msg, "connection"), strings.Contains(msg, "network"), strings.Contains(msg, "transport"):
+	case strings.Contains(msg, "connection"), strings.Contains(msg, "network"), strings.Contains(msg, "transport"), strings.Contains(msg, "dial tcp"), strings.Contains(msg, "lookup"), strings.Contains(msg, "no such host"), strings.Contains(msg, "connection refused"), strings.Contains(msg, "tls"):
 		return FailureTransport
 	default:
 		return FailureStartup
