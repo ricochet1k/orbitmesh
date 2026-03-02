@@ -114,8 +114,14 @@ func TestLiveConfigFiltering_UsesFetchedConfigs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildProviderMatrix() error = %v", err)
 	}
-	if len(matrix) != 1 || matrix[0].ProviderType != "openai" {
-		t.Fatalf("matrix = %+v, want only openai", matrix)
+	if len(matrix) != 2 {
+		t.Fatalf("matrix len = %d, want 2", len(matrix))
+	}
+	if matrix[0].ProviderType != "openai" || matrix[1].ProviderType != "pty" {
+		t.Fatalf("matrix = %+v, want openai + pty", matrix)
+	}
+	if !matrix[1].Capabilities.Ignored {
+		t.Fatalf("expected pty to be ignored, got %+v", matrix[1].Capabilities)
 	}
 }
 

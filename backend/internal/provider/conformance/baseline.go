@@ -16,8 +16,6 @@ import (
 	"github.com/ricochet1k/orbitmesh/internal/storage"
 )
 
-const excludedProviderType = "pty"
-
 const (
 	liveStartupTimeout   = 8 * time.Second
 	liveRoundtripTimeout = 12 * time.Second
@@ -62,7 +60,10 @@ type Scenario struct {
 	Name                   string `json:"name"`
 	Kind                   string `json:"kind"`
 	Status                 string `json:"status,omitempty"`
+	Reason                 string `json:"reason,omitempty"`
 	Detail                 string `json:"detail,omitempty"`
+	Classification         string `json:"classification,omitempty"`
+	TranscriptPointer      string `json:"transcript_pointer,omitempty"`
 	FirstFailingEventIndex *int   `json:"first_failing_event_index,omitempty"`
 	Expected               string `json:"expected,omitempty"`
 	Actual                 string `json:"actual,omitempty"`
@@ -73,6 +74,7 @@ type ProviderResult struct {
 	Provider   string     `json:"provider"`
 	Lane       Lane       `json:"lane"`
 	Status     string     `json:"status"`
+	Ignored    bool       `json:"ignored,omitempty"`
 	Detail     string     `json:"detail,omitempty"`
 	DurationMS int64      `json:"duration_ms"`
 	Scenarios  []Scenario `json:"scenarios"`
@@ -81,7 +83,10 @@ type ProviderResult struct {
 type Totals struct {
 	Providers int `json:"providers"`
 	Passed    int `json:"passed"`
+	Partial   int `json:"partial"`
+	Blocked   int `json:"blocked_by_config"`
 	Failed    int `json:"failed"`
+	Skipped   int `json:"skipped"`
 }
 
 type Summary struct {
@@ -112,6 +117,7 @@ type replayRunner interface {
 
 type liveScenarioResult struct {
 	Detail             string
+	Reason             string
 	Duration           time.Duration
 	Usage              Usage
 	ProviderTranscript []json.RawMessage
@@ -138,13 +144,14 @@ func NewBaselineRunner(tester providerTester, opts RunOptions) *BaselineRunner {
 type MatrixEntry struct {
 	ProviderType string
 	Config       *storage.ProviderConfig
+	Capabilities ProviderCapabilities
 }
 
 func BuildProviderMatrix(supportedTypes []string, configs []storage.ProviderConfig, selected []string) ([]MatrixEntry, error) {
 	selectedSet := make(map[string]struct{}, len(selected))
 	for _, item := range selected {
 		name := strings.TrimSpace(strings.ToLower(item))
-		if name == "" || name == excludedProviderType {
+		if name == "" {
 			continue
 		}
 		selectedSet[name] = struct{}{}
@@ -168,7 +175,7 @@ func BuildProviderMatrix(supportedTypes []string, configs []storage.ProviderConf
 	known := make(map[string]struct{}, len(supportedTypes))
 	for _, providerType := range supportedTypes {
 		name := strings.ToLower(strings.TrimSpace(providerType))
-		if name == "" || name == excludedProviderType {
+		if name == "" {
 			continue
 		}
 		if _, exists := known[name]; exists {
@@ -197,6 +204,7 @@ func BuildProviderMatrix(supportedTypes []string, configs []storage.ProviderConf
 		matrix = append(matrix, MatrixEntry{
 			ProviderType: providerType,
 			Config:       configByType[providerType],
+			Capabilities: capabilitiesForProvider(providerType),
 		})
 	}
 
@@ -237,9 +245,16 @@ func (r *BaselineRunner) Run(ctx context.Context, configs []storage.ProviderConf
 	}
 	summary.Totals.Providers = len(results)
 	for _, result := range results {
-		if result.Status == "pass" {
+		switch result.Status {
+		case ScenarioStatusPass:
 			summary.Totals.Passed++
-		} else {
+		case ScenarioStatusPartial:
+			summary.Totals.Partial++
+		case ScenarioStatusBlockedByConfig:
+			summary.Totals.Blocked++
+		case ScenarioStatusSkipped:
+			summary.Totals.Skipped++
+		default:
 			summary.Totals.Failed++
 		}
 	}
@@ -251,14 +266,28 @@ func (r *BaselineRunner) runProvider(ctx context.Context, entry MatrixEntry) Pro
 	result := ProviderResult{
 		Provider: entry.ProviderType,
 		Lane:     r.opts.Lane,
-		Status:   "pass",
+		Status:   ScenarioStatusPass,
+	}
+	if entry.Capabilities.Ignored {
+		result.Ignored = true
 	}
 
 	scenarios := baselineScenarios(r.opts.Lane)
 	result.Scenarios = scenarios
+	if entry.Capabilities.Ignored {
+		for i := range result.Scenarios {
+			result.Scenarios[i].Status = ScenarioStatusSkipped
+			result.Scenarios[i].Reason = entry.Capabilities.IgnoredReason
+			result.Scenarios[i].Detail = entry.Capabilities.IgnoredReason
+		}
+		result.Status = ScenarioStatusSkipped
+		result.Detail = entry.Capabilities.IgnoredReason
+		result.DurationMS = time.Since(start).Milliseconds()
+		return result
+	}
 
 	if err := validateScenarioDefinitions(scenarios); err != nil {
-		result.Status = "fail"
+		result.Status = ScenarioStatusFail
 		result.Detail = fmt.Sprintf("invalid scenario definitions: %v", err)
 		result.DurationMS = time.Since(start).Milliseconds()
 		return result
@@ -266,7 +295,7 @@ func (r *BaselineRunner) runProvider(ctx context.Context, entry MatrixEntry) Pro
 
 	if r.opts.Lane == LaneOffline {
 		if r.replay == nil {
-			result.Status = "fail"
+			result.Status = ScenarioStatusFail
 			result.Detail = errNilReplayEngine.Error()
 			result.DurationMS = time.Since(start).Milliseconds()
 			return result
@@ -287,7 +316,7 @@ func (r *BaselineRunner) runProvider(ctx context.Context, entry MatrixEntry) Pro
 			if runErr != nil {
 				scenario.Status = "fail"
 				scenario.Detail = runErr.Error()
-				result.Status = "fail"
+				result.Status = ScenarioStatusFail
 				continue
 			}
 
@@ -301,7 +330,7 @@ func (r *BaselineRunner) runProvider(ctx context.Context, entry MatrixEntry) Pro
 				scenario.FirstFailingEventIndex = replayResult.FirstFailingEventIndex
 				scenario.Expected = string(replayResult.Expected)
 				scenario.Actual = string(replayResult.Actual)
-				result.Status = "fail"
+				result.Status = ScenarioStatusFail
 				runStatus = RunStatusFailed
 				failure = &FailureReport{
 					Classification: FailureEventNormalization,
@@ -342,7 +371,8 @@ func (r *BaselineRunner) runProvider(ctx context.Context, entry MatrixEntry) Pro
 
 		result.Scenarios = scenarios
 		result.Detail = fmt.Sprintf("offline replay passed %d/%d scenarios", passCount, len(scenarios))
-		if result.Status == "fail" {
+		result.Status = classifyProviderStatus(scenarios)
+		if result.Status == ScenarioStatusFail {
 			failedScenario := firstFailedScenarioID(scenarios)
 			if failedScenario != "" {
 				result.Detail = fmt.Sprintf("offline replay passed %d/%d scenarios (first failure: %s)", passCount, len(scenarios), failedScenario)
@@ -354,7 +384,7 @@ func (r *BaselineRunner) runProvider(ctx context.Context, entry MatrixEntry) Pro
 
 	writer, err := NewArtifactWriter(r.opts.ArtifactsDir)
 	if err != nil {
-		result.Status = "fail"
+		result.Status = ScenarioStatusFail
 		result.Detail = fmt.Sprintf("initialize live artifact writer: %v", err)
 		result.DurationMS = time.Since(start).Milliseconds()
 		return result
@@ -365,14 +395,29 @@ func (r *BaselineRunner) runProvider(ctx context.Context, entry MatrixEntry) Pro
 	sessionConfig := sessionConfigFromProviderConfig(entry.ProviderType, entry.Config)
 	for i := range scenarios {
 		scenario := &scenarios[i]
+		requirement := entry.Capabilities.ScenarioRequirements[scenario.ID]
+		if requirement == RequirementUnsupported {
+			scenario.Status = ScenarioStatusSkipped
+			scenario.Reason = "unsupported capability for provider"
+			scenario.Detail = scenario.Reason
+			continue
+		}
+		if entry.Config == nil {
+			scenario.Status = ScenarioStatusBlockedByConfig
+			scenario.Reason = "missing active provider config"
+			scenario.Detail = "no active provider config found from selected source"
+			continue
+		}
 		if err := r.guard.Enforce(totalUsage); err != nil {
-			scenario.Status = "fail"
+			scenario.Status = ScenarioStatusFail
+			scenario.Reason = "budget guard"
 			scenario.Detail = fmt.Sprintf("budget guard blocked %s: %v", scenario.ID, err)
-			result.Status = "fail"
+			result.Status = ScenarioStatusFail
 			continue
 		}
 
 		scenarioConfig, diagnosticsPaths := prepareLiveScenarioConfig(sessionConfig, entry.ProviderType, r.opts.ArtifactsDir, scenario.ID)
+		scenarioConfig = prepareMCPLiveScenarioConfig(scenarioConfig, scenario.ID)
 		liveResult := r.runLiveScenario(ctx, entry.ProviderType, scenarioConfig, scenario.ID)
 		if diagnosticsPaths != nil {
 			detail := diagnosticsPaths.detailString()
@@ -381,16 +426,28 @@ func (r *BaselineRunner) runProvider(ctx context.Context, entry MatrixEntry) Pro
 				liveResult.Failure.Message = joinScenarioDetails(liveResult.Failure.Message, detail)
 			}
 		}
-		scenario.Status = "pass"
+		scenario.Status = ScenarioStatusPass
 		scenario.Detail = liveResult.Detail
+		scenario.Reason = liveResult.Reason
 		runStatus := RunStatusPassed
 		if liveResult.Failure != nil {
-			scenario.Status = "fail"
+			scenario.Classification = string(liveResult.Failure.Classification)
+			if requirement == RequirementOptional {
+				scenario.Status = ScenarioStatusPartial
+				scenario.Reason = "optional scenario failed"
+			} else if liveResult.Failure.Classification == FailureAuth || (scenario.ID == "startup_probe" && startupProbeLikelyConfigBlocked(*liveResult.Failure, liveResult.ProviderTranscript)) {
+				scenario.Status = ScenarioStatusBlockedByConfig
+				scenario.Reason = "provider credentials/config are missing, invalid, or startup is blocked"
+			} else {
+				scenario.Status = ScenarioStatusFail
+			}
 			runStatus = liveResult.RunStatus
 			if scenario.Detail == "" {
 				scenario.Detail = liveResult.Failure.Message
 			}
-			result.Status = "fail"
+			if scenario.Status == ScenarioStatusFail {
+				result.Status = ScenarioStatusFail
+			}
 		}
 
 		paths, writeErr := writer.Write(fmt.Sprintf("live-%d", time.Now().UTC().UnixNano()), ArtifactBundle{
@@ -410,36 +467,67 @@ func (r *BaselineRunner) runProvider(ctx context.Context, entry MatrixEntry) Pro
 			Failure:            liveResult.Failure,
 		})
 		if writeErr != nil {
-			scenario.Status = "fail"
+			scenario.Status = ScenarioStatusFail
+			scenario.Reason = "artifact write failed"
 			scenario.Detail = joinScenarioDetails(scenario.Detail, writeErr.Error())
-			result.Status = "fail"
+			result.Status = ScenarioStatusFail
 		} else {
 			scenario.ArtifactDir = paths.Directory
+			scenario.TranscriptPointer = filepath.Join(paths.Directory, providerTranscriptFile)
 		}
 
 		totalUsage.USD += liveResult.Usage.USD
 		totalUsage.Tokens += liveResult.Usage.Tokens
 		if err := r.guard.Enforce(totalUsage); err != nil {
-			scenario.Status = "fail"
+			scenario.Status = ScenarioStatusFail
+			scenario.Reason = "budget exceeded"
 			scenario.Detail = joinScenarioDetails(scenario.Detail, fmt.Sprintf("budget guard exceeded after %s: %v", scenario.ID, err))
-			result.Status = "fail"
+			result.Status = ScenarioStatusFail
 		}
 
-		if scenario.Status == "pass" {
+		if scenario.Status == ScenarioStatusPass {
 			passCount++
+		}
+
+		if scenario.ID == "startup_probe" && scenario.Status == ScenarioStatusBlockedByConfig {
+			for j := i + 1; j < len(scenarios); j++ {
+				scenarios[j].Status = ScenarioStatusBlockedByConfig
+				scenarios[j].Reason = "startup probe blocked by provider config/environment"
+				scenarios[j].Detail = "startup probe did not complete in time; remaining live scenarios skipped"
+			}
+			break
 		}
 	}
 
 	result.Scenarios = scenarios
 	result.Detail = fmt.Sprintf("live probes passed %d/%d scenarios", passCount, len(scenarios))
-	if result.Status == "fail" {
+	result.Status = classifyProviderStatus(scenarios)
+	if result.Status == ScenarioStatusFail {
 		failedScenario := firstFailedScenarioID(scenarios)
 		if failedScenario != "" {
 			result.Detail = fmt.Sprintf("live probes passed %d/%d scenarios (first failure: %s)", passCount, len(scenarios), failedScenario)
 		}
+	} else if result.Status == ScenarioStatusBlockedByConfig {
+		result.Detail = fmt.Sprintf("live probes blocked by config (%d scenarios)", len(scenarios))
+	} else if result.Status == ScenarioStatusPartial {
+		result.Detail = fmt.Sprintf("live probes partially passed %d/%d scenarios", passCount, len(scenarios))
 	}
 	result.DurationMS = time.Since(start).Milliseconds()
 	return result
+}
+
+func startupProbeLikelyConfigBlocked(report FailureReport, transcript []json.RawMessage) bool {
+	if report.Classification != FailureTimeout {
+		return false
+	}
+	if len(transcript) > 0 {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(report.Message))
+	if msg == "" {
+		return true
+	}
+	return strings.Contains(msg, "deadline") || strings.Contains(msg, "timeout") || strings.Contains(msg, "initialize failed")
 }
 
 func (r *BaselineRunner) runLiveScenario(ctx context.Context, providerType string, cfg session.Config, scenarioID string) liveScenarioResult {
@@ -448,6 +536,14 @@ func (r *BaselineRunner) runLiveScenario(ctx context.Context, providerType strin
 		return r.runLiveStartupProbe(ctx, providerType, cfg)
 	case "message_roundtrip":
 		return r.runLiveMessageRoundtrip(ctx, providerType, cfg)
+	case "reasoning_progress":
+		return r.runLiveReasoningProgress(ctx, providerType, cfg)
+	case "tool_call_flow":
+		return r.runLiveToolCallFlow(ctx, providerType, cfg)
+	case "permission_flow":
+		return r.runLivePermissionFlow(ctx, providerType, cfg)
+	case "mcp_integration":
+		return r.runLiveMCPIntegration(ctx, providerType, cfg)
 	default:
 		return liveScenarioResult{
 			Detail:    fmt.Sprintf("unknown live scenario %q", scenarioID),
@@ -919,6 +1015,38 @@ func normalizeLiveEvent(event domain.Event) (json.RawMessage, error) {
 			payload["new_state"] = status.NewState.String()
 			payload["reason"] = status.Reason
 		}
+	case domain.EventTypeProgress:
+		if progress, ok := event.Progress(); ok {
+			payload["channel"] = progress.Channel
+			payload["content"] = progress.Content
+			payload["is_delta"] = progress.IsDelta
+			payload["done"] = progress.Done
+			payload["status"] = progress.Status
+		}
+	case domain.EventTypeThought:
+		if thought, ok := event.Thought(); ok {
+			payload["content"] = thought.Content
+			payload["is_delta"] = thought.IsDelta
+			payload["message_id"] = thought.MessageID
+		}
+	case domain.EventTypeToolCall:
+		if toolCall, ok := event.ToolCall(); ok {
+			payload["id"] = toolCall.ID
+			payload["name"] = toolCall.Name
+			payload["status"] = toolCall.Status
+			payload["title"] = toolCall.Title
+		}
+	case domain.EventTypeActionRequest:
+		if request, ok := event.ActionRequest(); ok {
+			payload["id"] = request.ID
+			payload["kind"] = request.Kind
+			payload["status"] = request.Status
+			payload["title"] = request.Title
+		}
+	case domain.EventTypeMetadata:
+		if metadata, ok := event.Metadata(); ok {
+			payload["key"] = metadata.Key
+		}
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -985,7 +1113,7 @@ func sessionConfigFromProviderConfig(providerType string, cfg *storage.ProviderC
 		}
 	}
 
-	if providerType == excludedProviderType && len(cfg.Command) > 0 {
+	if providerType == "pty" && len(cfg.Command) > 0 {
 		out.Custom["command"] = cfg.Command[0]
 	}
 
@@ -1010,6 +1138,10 @@ func baselineScenarios(lane Lane) []Scenario {
 		return []Scenario{
 			{ID: "startup_probe", Name: "startup probe", Kind: "live"},
 			{ID: "message_roundtrip", Name: "message roundtrip", Kind: "live"},
+			{ID: "reasoning_progress", Name: "reasoning progress", Kind: "live"},
+			{ID: "tool_call_flow", Name: "tool call flow", Kind: "live"},
+			{ID: "permission_flow", Name: "permission flow", Kind: "live"},
+			{ID: "mcp_integration", Name: "mcp integration", Kind: "live"},
 		}
 	}
 	return []Scenario{
@@ -1100,7 +1232,7 @@ func (p *claudeWSDiagnosticsPaths) detailString() string {
 
 func firstFailedScenarioID(scenarios []Scenario) string {
 	for _, scenario := range scenarios {
-		if scenario.Status == "fail" {
+		if scenario.Status == ScenarioStatusFail {
 			return scenario.ID
 		}
 	}

@@ -119,11 +119,11 @@ func TestBaselineScenarios_LiveIncludesStartupAndRoundtrip(t *testing.T) {
 	t.Parallel()
 
 	scenarios := baselineScenarios(LaneLive)
-	if len(scenarios) != 2 {
-		t.Fatalf("live scenarios len = %d, want 2", len(scenarios))
+	if len(scenarios) != 6 {
+		t.Fatalf("live scenarios len = %d, want 6", len(scenarios))
 	}
-	if scenarios[0].ID != "startup_probe" || scenarios[1].ID != "message_roundtrip" {
-		t.Fatalf("live scenarios = %+v, want startup_probe + message_roundtrip", scenarios)
+	if scenarios[0].ID != "startup_probe" || scenarios[1].ID != "message_roundtrip" || scenarios[5].ID != "mcp_integration" {
+		t.Fatalf("live scenarios = %+v, want startup_probe + message_roundtrip + mcp_integration", scenarios)
 	}
 }
 
@@ -135,22 +135,27 @@ func TestBaselineRunner_LiveRunsStartupAndRoundtrip(t *testing.T) {
 		ArtifactsDir: t.TempDir(),
 	})
 
-	summary, err := runner.Run(context.Background(), nil)
+	summary, err := runner.Run(context.Background(), []storage.ProviderConfig{{Type: "openai", IsActive: true}})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if summary.Totals.Passed != 1 || summary.Totals.Failed != 0 {
-		t.Fatalf("totals = %+v, want 1 pass 0 fail", summary.Totals)
+	if summary.Totals.Partial != 1 || summary.Totals.Failed != 0 {
+		t.Fatalf("totals = %+v, want 1 partial 0 fail", summary.Totals)
 	}
 	if len(summary.Results) != 1 {
 		t.Fatalf("results len = %d, want 1", len(summary.Results))
 	}
-	if len(summary.Results[0].Scenarios) != 2 {
-		t.Fatalf("scenario len = %d, want 2", len(summary.Results[0].Scenarios))
+	if len(summary.Results[0].Scenarios) != 6 {
+		t.Fatalf("scenario len = %d, want 6", len(summary.Results[0].Scenarios))
+	}
+	if summary.Results[0].Status != ScenarioStatusPartial {
+		t.Fatalf("provider status = %s, want partial", summary.Results[0].Status)
 	}
 	for _, scenario := range summary.Results[0].Scenarios {
-		if scenario.Status != "pass" {
-			t.Fatalf("scenario %s status = %s, want pass", scenario.ID, scenario.Status)
+		if scenario.ID == "startup_probe" || scenario.ID == "message_roundtrip" {
+			if scenario.Status != ScenarioStatusPass {
+				t.Fatalf("scenario %s status = %s, want pass", scenario.ID, scenario.Status)
+			}
 		}
 	}
 }
@@ -262,8 +267,8 @@ func TestBaselineRunner_LiveClaudeWSInjectsDiagnosticsPaths(t *testing.T) {
 	if len(tester.testConfigs) != 1 {
 		t.Fatalf("testConfigs len = %d, want 1", len(tester.testConfigs))
 	}
-	if len(tester.createConfigs) != 1 {
-		t.Fatalf("createConfigs len = %d, want 1", len(tester.createConfigs))
+	if len(tester.createConfigs) != 3 {
+		t.Fatalf("createConfigs len = %d, want 3", len(tester.createConfigs))
 	}
 	for _, cfg := range append(tester.testConfigs, tester.createConfigs...) {
 		if enabled, ok := cfg.Custom[claudeWSDiagnosticsEnabledKey].(bool); !ok || !enabled {
@@ -280,10 +285,13 @@ func TestBaselineRunner_LiveClaudeWSInjectsDiagnosticsPaths(t *testing.T) {
 		}
 	}
 
-	if len(summary.Results) != 1 || len(summary.Results[0].Scenarios) != 2 {
+	if len(summary.Results) != 1 || len(summary.Results[0].Scenarios) != 6 {
 		t.Fatalf("unexpected summary shape: %+v", summary.Results)
 	}
 	for _, scenario := range summary.Results[0].Scenarios {
+		if scenario.Status == ScenarioStatusSkipped {
+			continue
+		}
 		if scenario.Detail == "" || !strings.Contains(scenario.Detail, "claude-ws diagnostics transcript=") {
 			t.Fatalf("expected diagnostics detail in scenario %s, got %q", scenario.ID, scenario.Detail)
 		}
