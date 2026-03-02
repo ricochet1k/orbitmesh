@@ -99,18 +99,38 @@ func (s *wsServer) handleHTTP(w http.ResponseWriter, r *http.Request) {
 // wsConn wraps a *websocket.Conn with mutex-guarded writes and structured
 // message reading/writing.
 type wsConn struct {
-	c      *websocket.Conn
-	mu     sync.Mutex // guards writes
-	closed bool
+	c               *websocket.Conn
+	mu              sync.Mutex // guards writes and heartbeat state
+	closed          bool
+	lastPong        time.Time
+	missedPongs     int
+	maxMissedPongs  int
+	readDeadline    time.Duration
+	pongGracePeriod time.Duration
 }
 
 func newWSConn(c *websocket.Conn) *wsConn {
+	now := time.Now()
+	wc := &wsConn{
+		c:               c,
+		lastPong:        now,
+		maxMissedPongs:  2,
+		readDeadline:    30 * time.Second,
+		pongGracePeriod: 5 * time.Second,
+	}
+	_ = c.SetReadDeadline(now.Add(wc.readDeadline))
 	c.SetReadLimit(4 * 1024 * 1024) // 4 MB
 	c.SetPongHandler(func(string) error {
-		_ = c.SetReadDeadline(time.Now().Add(30 * time.Second))
+		now := time.Now()
+		wc.mu.Lock()
+		wc.lastPong = now
+		wc.missedPongs = 0
+		deadline := wc.readDeadline
+		wc.mu.Unlock()
+		_ = c.SetReadDeadline(now.Add(deadline))
 		return nil
 	})
-	return &wsConn{c: c}
+	return wc
 }
 
 // ReadMessage reads the next NDJSON message from the WebSocket.
@@ -126,6 +146,7 @@ func (wc *wsConn) Send(v any) error {
 	if err != nil {
 		return fmt.Errorf("ws marshal: %w", err)
 	}
+	data = append(data, '\n')
 	wc.mu.Lock()
 	defer wc.mu.Unlock()
 	if wc.closed {
@@ -145,7 +166,14 @@ func (wc *wsConn) Close() {
 }
 
 // StartPing sends a WebSocket ping every interval until the context is done.
-func (wc *wsConn) StartPing(ctx context.Context, interval time.Duration) {
+func (wc *wsConn) StartPing(ctx context.Context, interval time.Duration, maxMissedPongs int, onLivenessFailure func(error)) {
+	if maxMissedPongs <= 0 {
+		maxMissedPongs = 2
+	}
+	wc.mu.Lock()
+	wc.maxMissedPongs = maxMissedPongs
+	wc.mu.Unlock()
+
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
@@ -159,7 +187,35 @@ func (wc *wsConn) StartPing(ctx context.Context, interval time.Duration) {
 					wc.mu.Unlock()
 					return
 				}
-				_ = wc.c.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second))
+
+				now := time.Now()
+				if now.Sub(wc.lastPong) > interval+wc.pongGracePeriod {
+					wc.missedPongs++
+				} else {
+					wc.missedPongs = 0
+				}
+
+				if wc.missedPongs > wc.maxMissedPongs {
+					wc.closed = true
+					missed := wc.missedPongs
+					wc.mu.Unlock()
+					_ = wc.c.Close()
+					if onLivenessFailure != nil {
+						onLivenessFailure(fmt.Errorf("missed websocket pong heartbeats (%d)", missed))
+					}
+					return
+				}
+
+				_ = wc.c.SetReadDeadline(now.Add(wc.readDeadline))
+				if err := wc.c.WriteControl(websocket.PingMessage, nil, now.Add(5*time.Second)); err != nil {
+					wc.closed = true
+					wc.mu.Unlock()
+					_ = wc.c.Close()
+					if onLivenessFailure != nil {
+						onLivenessFailure(fmt.Errorf("websocket ping write failed: %w", err))
+					}
+					return
+				}
 				wc.mu.Unlock()
 			}
 		}

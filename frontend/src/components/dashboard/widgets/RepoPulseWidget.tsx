@@ -11,7 +11,7 @@ interface RepoPulseWidgetProps {
 
 export default function RepoPulseWidget(props: RepoPulseWidgetProps): JSX.Element {
   return (
-    <DashboardCard title="Repo Pulse" kicker="Sessions" badge="Live" testId="widget-repo-pulse">
+    <DashboardCard heading="Sessions" testId="widget-repo-pulse">
       <Show when={props.loading} fallback={
         <Show when={props.error} fallback={
           <Show

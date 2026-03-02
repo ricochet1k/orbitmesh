@@ -62,6 +62,7 @@ func NewHandler(executor *service.AgentExecutor, broadcaster *service.EventBroad
 		snapshotter:     realtime.NewSnapshotProvider(executor),
 	}
 	h.dashboard = service.NewDashboardSummaryService(executor, h.gitDir)
+	h.dashboard.SetAutoScanEnabled(true)
 	h.startRealtimeBridge()
 	return h
 }
@@ -94,6 +95,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/sessions/events", h.sseSessionEvents)
 	r.Get("/api/realtime", h.realtimeWebSocket)
 	r.Get("/api/dashboard/summary", h.getDashboardSummary)
+	r.Post("/api/dashboard/codeflow/scan", h.triggerDashboardCodeflowScan)
 	r.Get("/api/sessions/{id}", h.getSession)
 	r.Delete("/api/sessions/{id}", h.stopSession)
 	r.Post("/api/sessions/{id}/input", h.sendSessionInput)

@@ -42,6 +42,9 @@ func buildWSCommandArgs(sdkURL string, config session.Config) ([]string, error) 
 		"--input-format=stream-json",
 		"--verbose", // include stream_event messages for streaming
 	}
+	if claudewsCLICompatMode(config) {
+		args = append(args, "--print", "-p", claudewsCLIPlaceholder(config))
+	}
 
 	if config.Custom == nil {
 		// Still apply first-class tool restrictions before returning.
@@ -253,4 +256,27 @@ func sessionCustomBool(custom map[string]any, key string) bool {
 	}
 	b, ok := v.(bool)
 	return ok && b
+}
+
+func claudewsCLICompatMode(config session.Config) bool {
+	if config.Custom != nil {
+		if v, ok := config.Custom["claudews_cli_compat_mode"].(bool); ok {
+			return v
+		}
+	}
+	return sessionCustomBool(config.SessionCustom, "claudews_cli_compat_mode")
+}
+
+func claudewsCLIPlaceholder(config session.Config) string {
+	if config.Custom != nil {
+		if v, ok := config.Custom["claudews_cli_placeholder"].(string); ok {
+			if trimmed := strings.TrimSpace(v); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	if v := sessionCustomString(config.SessionCustom, "claudews_cli_placeholder"); v != "" {
+		return v
+	}
+	return "placeholder"
 }

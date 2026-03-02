@@ -366,6 +366,7 @@ type CommitDetailResponse struct {
 
 type DashboardSummaryResponse struct {
 	GeneratedAt time.Time                 `json:"generatedAt"`
+	Window      string                    `json:"window"`
 	Pulse       DashboardPulse            `json:"pulse"`
 	Activity    []DashboardActivityItem   `json:"activity"`
 	Actions     []DashboardActionItem     `json:"actions"`
@@ -390,23 +391,57 @@ type DashboardActivityItem struct {
 }
 
 type DashboardActionItem struct {
-	ID        string `json:"id"`
-	Kind      string `json:"kind"`
-	Label     string `json:"label"`
-	Target    string `json:"target,omitempty"`
-	Session   string `json:"session,omitempty"`
-	Score     int    `json:"score,omitempty"`
-	Rationale string `json:"rationale,omitempty"`
+	ID                string    `json:"id"`
+	Kind              string    `json:"kind"`
+	Category          string    `json:"category,omitempty"`
+	Severity          string    `json:"severity,omitempty"`
+	Label             string    `json:"label"`
+	Summary           string    `json:"summary,omitempty"`
+	Details           string    `json:"details,omitempty"`
+	Evidence          []string  `json:"evidence,omitempty"`
+	SuggestedNextStep string    `json:"suggestedNextStep,omitempty"`
+	TargetTitle       string    `json:"targetTitle,omitempty"`
+	SuspensionReason  string    `json:"suspensionReason,omitempty"`
+	Timestamp         time.Time `json:"timestamp,omitempty"`
+	Href              string    `json:"href,omitempty"`
+	Target            string    `json:"target,omitempty"`
+	Session           string    `json:"session,omitempty"`
+	Score             int       `json:"score,omitempty"`
+	Rationale         string    `json:"rationale,omitempty"`
 }
 
 type DashboardCodeflow struct {
+	HasData                bool                              `json:"hasData"`
+	LastScanAt             time.Time                         `json:"lastScanAt,omitempty"`
+	ScanStale              bool                              `json:"scanStale"`
+	AutoScanTriggered      bool                              `json:"autoScanTriggered"`
 	RecentCommits          int                               `json:"recentCommits"`
+	CommitsInWindow        int                               `json:"commitsInWindow"`
 	Commits24h             int                               `json:"commits24h"`
 	ActiveAuthors          int                               `json:"activeAuthors"`
 	OpenFindings           int                               `json:"openFindings"`
 	RecentFindingActivity  int                               `json:"recentFindingActivity"`
+	FindingsBySeverity     map[string]int                    `json:"findingsBySeverity"`
+	NewFindings            int                               `json:"newFindings"`
+	ResolvedFindings       int                               `json:"resolvedFindings"`
+	TopRiskPaths           []DashboardCodeflowRiskPath       `json:"topRiskPaths"`
 	OpenFindingsBySeverity map[string]int                    `json:"openFindingsBySeverity"`
 	RecentFindings         []DashboardCodeflowFindingSummary `json:"recentFindings"`
+	MostComplexFunctions   []DashboardCodeflowComplexItem    `json:"mostComplexFunctions"`
+	MostComplexModules     []DashboardCodeflowComplexItem    `json:"mostComplexModules"`
+	MostComplexTypes       []DashboardCodeflowComplexItem    `json:"mostComplexTypes"`
+}
+
+type DashboardCodeflowComplexItem struct {
+	Name  string `json:"name"`
+	Path  string `json:"path,omitempty"`
+	Score int    `json:"score"`
+}
+
+type DashboardCodeflowRiskPath struct {
+	Path         string `json:"path"`
+	OpenFindings int    `json:"openFindings"`
+	RiskScore    int    `json:"riskScore"`
 }
 
 type DashboardHotspotSummary struct {

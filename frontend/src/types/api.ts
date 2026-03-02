@@ -336,6 +336,7 @@ export interface CommitDetailResponse {
 
 export interface DashboardSummaryResponse {
   generatedAt: string;
+  window?: string;
   pulse: DashboardPulse;
   activity: DashboardActivityItem[];
   actions: DashboardActionItem[];
@@ -362,7 +363,17 @@ export interface DashboardActivityItem {
 export interface DashboardActionItem {
   id: string;
   kind: string;
+  category?: string;
+  severity?: string;
   label: string;
+  summary?: string;
+  details?: string;
+  evidence?: string[];
+  suggestedNextStep?: string;
+  targetTitle?: string;
+  suspensionReason?: string;
+  timestamp?: string;
+  href?: string;
   target?: string;
   session?: string;
   score?: number;
@@ -370,13 +381,37 @@ export interface DashboardActionItem {
 }
 
 export interface DashboardCodeflow {
+  hasData?: boolean;
+  lastScanAt?: string;
+  scanStale?: boolean;
+  autoScanTriggered?: boolean;
   recentCommits: number;
+  commitsInWindow?: number;
   commits24h: number;
   activeAuthors: number;
   openFindings?: number;
   recentFindingActivity?: number;
+  findingsBySeverity?: Record<string, number>;
+  newFindings?: number;
+  resolvedFindings?: number;
+  topRiskPaths?: DashboardCodeflowRiskPath[];
   openFindingsBySeverity?: Record<string, number>;
   recentFindings?: DashboardCodeflowFindingSummary[];
+  mostComplexFunctions?: DashboardCodeflowComplexItem[];
+  mostComplexModules?: DashboardCodeflowComplexItem[];
+  mostComplexTypes?: DashboardCodeflowComplexItem[];
+}
+
+export interface DashboardCodeflowComplexItem {
+  name: string;
+  path?: string;
+  score: number;
+}
+
+export interface DashboardCodeflowRiskPath {
+  path: string;
+  openFindings: number;
+  riskScore: number;
 }
 
 export interface DashboardHotspotSummary {

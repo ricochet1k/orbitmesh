@@ -73,6 +73,7 @@ export const apiClient = {
 
   // Dashboard
   getDashboardSummary: dashboardApi.getDashboardSummary,
+  triggerCodeflowScan: dashboardApi.triggerCodeflowScan,
 
   // Tasks, commits, permissions, extractors
   getPermissions: taskApi.getPermissions,

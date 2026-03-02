@@ -1,6 +1,7 @@
 package claudews
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -75,6 +76,21 @@ type ClaudeWSProvider struct {
 	stderrMu   sync.Mutex
 	stderrTail string
 	stderrDone chan error
+
+	diagnostics *diagnosticsRecorder
+
+	pendingPermMu sync.Mutex
+	pendingPerm   map[string]*pendingPermission
+
+	pendingControlMu sync.Mutex
+	pendingControl   map[string]chan ControlResponsePayload
+}
+
+type pendingPermission struct {
+	cancelMu     sync.Mutex
+	cancelReason string
+	cancel       context.CancelFunc
+	done         bool
 }
 
 const maxStartupStderrTailBytes = 4096
@@ -82,6 +98,12 @@ const maxStartupStderrTailBytes = 4096
 const (
 	defaultNoResponseTimeout = 12 * time.Second
 	minNoResponseTimeout     = 2 * time.Second
+
+	defaultPermissionRequestTimeout = 30 * time.Second
+	minPermissionRequestTimeout     = 100 * time.Millisecond
+
+	defaultInitializeTimeout = 8 * time.Second
+	minInitializeTimeout     = 250 * time.Millisecond
 )
 
 // NewClaudeWSProvider creates a new WebSocket-mode Claude provider.
@@ -98,6 +120,8 @@ func NewClaudeWSProvider(sessionID string, permHandler tools.PermissionHandler) 
 		initReady:      make(chan struct{}),
 		inboundSignal:  make(chan struct{}, 1),
 		stderrDone:     make(chan error, 1),
+		pendingPerm:    make(map[string]*pendingPermission),
+		pendingControl: make(map[string]chan ControlResponsePayload),
 	}
 	return p
 }
@@ -145,6 +169,29 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) (er
 	p.stderrDone = make(chan error, 1)
 	p.mu.Unlock()
 
+	diag, diagErr := newDiagnosticsRecorder(config, p.sessionID)
+	if diagErr != nil {
+		err = fmt.Errorf("initialize claudews diagnostics: %w", diagErr)
+		p.handleFailure(err)
+		return err
+	}
+	p.mu.Lock()
+	p.diagnostics = diag
+	p.mu.Unlock()
+	if diag != nil {
+		paths := diag.Paths()
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "claudews_diagnostics", map[string]any{
+			"transcript_path": paths.Transcript,
+			"stdout_path":     paths.Stdout,
+			"stderr_path":     paths.Stderr,
+		}, nil))
+		p.recordLifecycle("lifecycle.start.begin", map[string]any{
+			"transcript_path": paths.Transcript,
+			"stdout_path":     paths.Stdout,
+			"stderr_path":     paths.Stderr,
+		})
+	}
+
 	defer func() {
 		p.mu.Lock()
 		p.starting = false
@@ -152,6 +199,9 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) (er
 			p.started = true
 		}
 		p.mu.Unlock()
+		if err != nil {
+			p.closeDiagnostics()
+		}
 	}()
 
 	p.state.SetState(session.StateStarting)
@@ -168,6 +218,7 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) (er
 	p.mu.Unlock()
 	srv.Serve(p.ctx)
 	log.Printf("[claudews] Listening on %v", srv.ln.Addr())
+	p.recordLifecycle("lifecycle.ws_server.listening", map[string]any{"addr": srv.ln.Addr().String()})
 
 	// ── 2. Build command arguments ───────────────────────────────────────────
 	args, err := buildWSCommandArgs(srv.Addr(), config)
@@ -186,6 +237,11 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) (er
 	maps.Copy(env, config.Environment)
 
 	log.Printf("[claudews] Starting claude in %q with args %q", config.WorkingDir, args)
+	p.recordLifecycle("lifecycle.process.starting", map[string]any{
+		"command":     resolveClaudeCommand(config),
+		"args":        args,
+		"working_dir": config.WorkingDir,
+	})
 
 	// ── 4. Spawn the CLI process ─────────────────────────────────────────────
 	mgr, err := process.Start(p.ctx, process.Config{
@@ -201,14 +257,20 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) (er
 	p.mu.Lock()
 	p.processMgr = mgr
 	p.mu.Unlock()
+	if processHandle := mgr.Process(); processHandle != nil {
+		p.recordLifecycle("lifecycle.process.started", map[string]any{"pid": processHandle.Pid})
+	}
 
 	// Drain stderr in a goroutine so the process doesn't block.
 	p.wg.Go(p.drainStderr)
+	p.wg.Go(p.drainStdout)
+	p.recordLifecycle("lifecycle.ws_connection.waiting", map[string]any{"timeout_ms": 15000})
 
 	// ── 5. Wait for the CLI to connect (up to 15 s) ───────────────────────────
 	select {
 	case <-p.connReady:
 		// Connection established; state transition happens in handleConnection.
+		p.recordLifecycle("lifecycle.ws_connection.ready", nil)
 	case readErr := <-p.stderrDone:
 		var startupErr error
 		if readErr == nil || errors.Is(readErr, io.EOF) {
@@ -217,22 +279,27 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) (er
 			startupErr = fmt.Errorf("claude CLI stderr closed before WebSocket connection: %w", readErr)
 		}
 		err := p.withRecentStderr(startupErr)
+		p.recordLifecycle("lifecycle.ws_connection.failed", map[string]any{"error": err.Error()})
 		p.handleFailure(err)
 		return err
 	case <-time.After(15 * time.Second):
 		err := p.withRecentStderr(fmt.Errorf("timed out waiting for claude CLI WebSocket connection"))
+		p.recordLifecycle("lifecycle.ws_connection.timeout", map[string]any{"error": err.Error()})
 		p.handleFailure(err)
 		return err
 	case <-ctx.Done():
 		err := fmt.Errorf("context cancelled before claude CLI connected: %w", ctx.Err())
+		p.recordLifecycle("lifecycle.ws_connection.cancelled", map[string]any{"error": err.Error()})
 		p.handleFailure(err)
 		return err
 	case <-p.ctx.Done():
+		p.recordLifecycle("lifecycle.ws_connection.cancelled", map[string]any{"error": "provider context cancelled before connection"})
 		return fmt.Errorf("context cancelled before claude CLI connected")
 	}
 
 	// ── 6. Start the input forwarding goroutine ───────────────────────────────
 	p.wg.Go(p.processInput)
+	p.recordLifecycle("lifecycle.input_forwarder.started", nil)
 
 	p.state.SetState(session.StateRunning)
 	// Already emitted idle->running at startup
@@ -243,34 +310,51 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) (er
 // Stop gracefully shuts down the provider.
 func (p *ClaudeWSProvider) Stop(ctx context.Context) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	if p.state.GetState() == session.StateStopped {
+		p.mu.Unlock()
 		return nil
 	}
-
 	p.state.SetState(session.StateStopping)
 	p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateRunning, domain.SessionStateIdle, "stopping claudews provider", nil))
+	cancel := p.cancel
+	conn := p.wsConn
+	srv := p.wsServer
+	mgr := p.processMgr
+	diag := p.diagnostics
+	p.processMgr = nil
+	p.mu.Unlock()
 
-	if p.cancel != nil {
-		p.cancel()
+	if diag != nil {
+		diag.RecordLifecycle("lifecycle.stop.requested", nil)
 	}
-	if p.wsConn != nil {
-		p.wsConn.Close()
+	if cancel != nil {
+		cancel()
 	}
-	if p.wsServer != nil {
-		p.wsServer.Close()
+	if conn != nil {
+		conn.Close()
 	}
-	if p.processMgr != nil {
-		_ = p.processMgr.Stop(5 * time.Second)
-		p.processMgr = nil
+	if srv != nil {
+		srv.Close()
+	}
+	if mgr != nil {
+		_ = mgr.Stop(5 * time.Second)
 	}
 
 	p.wg.Wait()
 
+	p.mu.Lock()
+	if p.diagnostics == diag {
+		p.diagnostics = nil
+	}
 	p.state.SetState(session.StateStopped)
 	// Already emitted running->idle at stopping
 	p.events.Close()
+	p.mu.Unlock()
+
+	if diag != nil {
+		diag.RecordLifecycle("lifecycle.stop.completed", nil)
+		diag.Close()
+	}
 
 	return nil
 }
@@ -278,22 +362,40 @@ func (p *ClaudeWSProvider) Stop(ctx context.Context) error {
 // Kill immediately terminates the process.
 func (p *ClaudeWSProvider) Kill() error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	cancel := p.cancel
+	conn := p.wsConn
+	mgr := p.processMgr
+	diag := p.diagnostics
+	p.processMgr = nil
+	p.mu.Unlock()
 
-	if p.cancel != nil {
-		p.cancel()
+	if diag != nil {
+		diag.RecordLifecycle("lifecycle.kill.requested", nil)
 	}
-	if p.wsConn != nil {
-		p.wsConn.Close()
+	if cancel != nil {
+		cancel()
 	}
-	if p.processMgr != nil {
-		_ = p.processMgr.Kill()
-		p.processMgr = nil
+	if conn != nil {
+		conn.Close()
+	}
+	if mgr != nil {
+		_ = mgr.Kill()
 	}
 
+	p.mu.Lock()
+	if p.diagnostics == diag {
+		p.diagnostics = nil
+	}
 	p.state.SetState(session.StateStopped)
 	p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateRunning, domain.SessionStateIdle, "claudews provider killed", nil))
 	p.events.Close()
+	p.mu.Unlock()
+
+	if diag != nil {
+		diag.RecordLifecycle("lifecycle.kill.completed", nil)
+		diag.Close()
+	}
+
 	return nil
 }
 
@@ -307,7 +409,7 @@ func (p *ClaudeWSProvider) Interrupt() error {
 	if conn == nil {
 		return ErrNotStarted
 	}
-	return conn.Send(InterruptRequest{
+	return p.sendWS(conn, InterruptRequest{
 		Type:      "control_request",
 		RequestID: uuid.New().String(),
 		Request:   InterruptPayload{Subtype: "interrupt"},
@@ -329,6 +431,7 @@ func (p *ClaudeWSProvider) handleConnection(conn *wsConn) {
 	p.mu.Lock()
 	p.wsConn = conn
 	p.mu.Unlock()
+	p.recordLifecycle("lifecycle.ws_connection.accepted", nil)
 
 	// Signal that the connection is ready (unblocks Start).
 	p.connReadyOnce.Do(func() {
@@ -336,7 +439,11 @@ func (p *ClaudeWSProvider) handleConnection(conn *wsConn) {
 	})
 
 	// Keep the connection alive with periodic pings.
-	conn.StartPing(p.ctx, 10*time.Second)
+	conn.StartPing(p.ctx, 10*time.Second, 2, func(err error) {
+		wrapped := p.withRecentStderr(fmt.Errorf("claudews websocket liveness failure: %w", err))
+		p.recordLifecycle("lifecycle.ws_connection.liveness_failed", map[string]any{"error": wrapped.Error()})
+		p.events.Emit(domain.NewErrorEvent(p.sessionID, wrapped.Error(), "WS_LIVENESS_FAILED", nil))
+	})
 
 	p.wg.Add(1)
 	defer p.wg.Done()
@@ -351,14 +458,17 @@ func (p *ClaudeWSProvider) handleConnection(conn *wsConn) {
 		data, err := conn.ReadMessage()
 		if err != nil {
 			if p.ctx.Err() != nil {
+				p.recordLifecycle("lifecycle.ws_connection.closed", map[string]any{"reason": "provider context cancelled"})
 				return // normal shutdown
 			}
 			wrapped := p.withRecentStderr(fmt.Errorf("claudews websocket read failed: %w", err))
+			p.recordLifecycle("lifecycle.ws_connection.read_error", map[string]any{"error": wrapped.Error()})
 			p.handleFailure(wrapped)
 			p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateRunning, domain.SessionStateIdle, "claudews websocket disconnected", nil))
 			if p.cancel != nil {
 				p.cancel()
 			}
+			p.closeDiagnostics()
 			p.events.Close()
 			return
 		}
@@ -367,12 +477,24 @@ func (p *ClaudeWSProvider) handleConnection(conn *wsConn) {
 			continue
 		}
 
-		p.dispatchMessage(data)
+		p.dispatchFrame(data)
+	}
+}
+
+func (p *ClaudeWSProvider) dispatchFrame(data []byte) {
+	lines := bytes.Split(data, []byte{'\n'})
+	for _, line := range lines {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		p.dispatchMessage(line)
 	}
 }
 
 // dispatchMessage routes an incoming WebSocket message to the appropriate handler.
 func (p *ClaudeWSProvider) dispatchMessage(data []byte) {
+	p.recordWSInbound(data)
 	select {
 	case p.inboundSignal <- struct{}{}:
 	default:
@@ -395,6 +517,10 @@ func (p *ClaudeWSProvider) dispatchMessage(data []byte) {
 		p.handleResultMsg(rm)
 	case "control_request":
 		p.handleControlRequest(rm)
+	case "control_response":
+		p.handleControlResponse(rm)
+	case "control_cancel_request":
+		p.handleControlCancelRequest(rm)
 	case "tool_progress":
 		p.handleToolProgress(rm)
 	case "tool_use_summary":
@@ -635,6 +761,26 @@ func (p *ClaudeWSProvider) handleResultMsg(rm RawMessage) {
 		return
 	}
 
+	stopReason := ""
+	if msg.StopReason != nil {
+		stopReason = strings.TrimSpace(*msg.StopReason)
+	}
+	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "turn_completed", map[string]any{
+		"subtype":         msg.Subtype,
+		"is_error":        msg.IsError,
+		"num_turns":       msg.NumTurns,
+		"stop_reason":     stopReason,
+		"duration_ms":     msg.DurationMS,
+		"duration_api_ms": msg.DurationAPIMS,
+		"total_cost_usd":  msg.TotalCostUSD,
+		"errors":          msg.Errors,
+	}, rm.Raw))
+	p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
+		Channel: "turn_completion",
+		Done:    true,
+		Content: msg.Subtype,
+	}, rm.Raw))
+
 	// Emit final token metrics.
 	if msg.Usage.InputTokens > 0 || msg.Usage.OutputTokens > 0 {
 		p.emitEvent(domain.NewMetricEvent(p.sessionID, msg.Usage.InputTokens, msg.Usage.OutputTokens, 0, rm.Raw), rm.Raw)
@@ -652,14 +798,15 @@ func (p *ClaudeWSProvider) handleResultMsg(rm RawMessage) {
 		p.emitEvent(domain.NewOutputEvent(p.sessionID, msg.Result, rm.Raw), rm.Raw)
 	}
 
-	if msg.StopReason != nil && *msg.StopReason != "" {
-		p.events.Emit(domain.NewSystemMessageEvent(p.sessionID, fmt.Sprintf("Claude stop reason: %s", *msg.StopReason)))
+	if stopReason != "" {
+		p.events.Emit(domain.NewSystemMessageEvent(p.sessionID, fmt.Sprintf("Claude stop reason: %s", stopReason)))
 	}
 }
 
 func (p *ClaudeWSProvider) handleControlRequest(rm RawMessage) {
 	var req ControlRequest
 	if err := json.Unmarshal(rm.Raw, &req); err != nil {
+		p.events.Emit(domain.NewErrorEvent(p.sessionID, "failed to parse control_request", "WS_PARSE_ERROR", rm.Raw))
 		return
 	}
 
@@ -668,20 +815,66 @@ func (p *ClaudeWSProvider) handleControlRequest(rm RawMessage) {
 		Subtype string `json:"subtype"`
 	}
 	if err := json.Unmarshal(req.Request, &inner); err != nil {
+		_ = p.sendControlError(req.RequestID, "failed to parse control_request subtype")
+		return
+	}
+	if strings.TrimSpace(inner.Subtype) == "" {
+		_ = p.sendControlError(req.RequestID, "control_request subtype is required")
 		return
 	}
 
 	switch inner.Subtype {
 	case "can_use_tool":
 		p.handleCanUseTool(req, rm.Raw)
+	case "hook_callback":
+		p.handleHookCallback(req, rm.Raw)
 	default:
-		// Unknown control subtype — emit as metadata, send empty success.
-		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "unknown_control_request", map[string]any{
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "unsupported_control_request", map[string]any{
 			"subtype":    inner.Subtype,
 			"request_id": req.RequestID,
 		}, rm.Raw))
-		_ = p.sendControlSuccess(req.RequestID, nil)
+		_ = p.sendControlError(req.RequestID, fmt.Sprintf("unsupported control_request subtype %q", inner.Subtype))
 	}
+}
+
+func (p *ClaudeWSProvider) handleHookCallback(req ControlRequest, raw []byte) {
+	var hookReq HookCallbackRequest
+	if err := json.Unmarshal(req.Request, &hookReq); err != nil {
+		_ = p.sendControlError(req.RequestID, "failed to parse hook_callback request")
+		return
+	}
+
+	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "hook_callback_request", map[string]any{
+		"request_id":  req.RequestID,
+		"callback_id": hookReq.CallbackID,
+		"tool_use_id": hookReq.ToolUseID,
+	}, raw))
+
+	_ = p.sendControlError(req.RequestID, "hook_callback is not supported by this claudews provider")
+}
+
+func (p *ClaudeWSProvider) handleControlResponse(rm RawMessage) {
+	var resp ControlResponse
+	if err := json.Unmarshal(rm.Raw, &resp); err != nil {
+		p.events.Emit(domain.NewErrorEvent(p.sessionID, "failed to parse control_response", "WS_PARSE_ERROR", rm.Raw))
+		return
+	}
+	if resp.Response.RequestID == "" {
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "unexpected_control_response", map[string]any{
+			"reason": "missing request_id",
+		}, rm.Raw))
+		return
+	}
+
+	if p.resolvePendingControlResponse(resp.Response.RequestID, resp.Response) {
+		return
+	}
+
+	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "unexpected_control_response", map[string]any{
+		"request_id": resp.Response.RequestID,
+		"subtype":    resp.Response.Subtype,
+		"error":      resp.Response.Error,
+	}, rm.Raw))
 }
 
 func (p *ClaudeWSProvider) handleCanUseTool(req ControlRequest, raw []byte) {
@@ -705,38 +898,101 @@ func (p *ClaudeWSProvider) handleCanUseTool(req ControlRequest, raw []byte) {
 		handler = tools.AutoApprovePermissionHandler{}
 	}
 
-	decision, err := handler.RequestPermission(p.ctx, tools.PermissionRequest{
-		ToolCallID:  toolReq.ToolUseID,
-		ToolName:    toolReq.ToolName,
-		Input:       toolReq.Input,
-		Description: toolReq.Description,
-	})
+	timeout := p.permissionRequestTimeout()
+	permCtx, cancel := context.WithTimeout(p.ctx, timeout)
+	pending := &pendingPermission{cancel: cancel}
+	p.setPendingPermission(req.RequestID, pending)
 
-	if err != nil || !decision.Granted {
-		reason := decision.Reason
-		if reason == "" {
-			if err != nil {
-				reason = err.Error()
-			} else {
-				reason = "denied by policy"
+	p.wg.Go(func() {
+		defer cancel()
+
+		decisionCh := make(chan struct {
+			decision tools.PermissionDecision
+			err      error
+		}, 1)
+
+		go func() {
+			decision, err := handler.RequestPermission(permCtx, tools.PermissionRequest{
+				ToolCallID:  toolReq.ToolUseID,
+				ToolName:    toolReq.ToolName,
+				Input:       toolReq.Input,
+				Description: toolReq.Description,
+			})
+			decisionCh <- struct {
+				decision tools.PermissionDecision
+				err      error
+			}{decision: decision, err: err}
+		}()
+
+		select {
+		case result := <-decisionCh:
+			if !p.completePendingPermission(req.RequestID, pending) {
+				return
 			}
+
+			if result.err != nil || !result.decision.Granted {
+				reason := result.decision.Reason
+				if reason == "" {
+					if result.err != nil {
+						reason = result.err.Error()
+					} else {
+						reason = "denied by policy"
+					}
+				}
+				_ = p.sendWS(p.wsConn, DenyResponse(req.RequestID, reason))
+				p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+					ID:     req.RequestID,
+					Name:   toolReq.ToolName,
+					Status: "permission_denied",
+					Title:  reason,
+				}, raw))
+				return
+			}
+
+			_ = p.sendWS(p.wsConn, AllowResponse(req.RequestID, toolReq.Input))
+			p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+				ID:     req.RequestID,
+				Name:   toolReq.ToolName,
+				Status: "permission_granted",
+				Title:  "tool permission granted",
+			}, raw))
+
+		case <-permCtx.Done():
+			if !p.completePendingPermission(req.RequestID, pending) {
+				return
+			}
+			reason := p.permissionCancelReason(pending)
+			if reason == "" {
+				if errors.Is(permCtx.Err(), context.DeadlineExceeded) {
+					reason = "permission request timed out"
+				} else {
+					reason = "permission request cancelled"
+				}
+			}
+			_ = p.sendWS(p.wsConn, DenyResponse(req.RequestID, reason))
+			p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+				ID:     req.RequestID,
+				Name:   toolReq.ToolName,
+				Status: "permission_denied",
+				Title:  reason,
+			}, raw))
 		}
-		_ = p.wsConn.Send(DenyResponse(req.RequestID, reason))
-		p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
-			ID:     req.RequestID,
-			Name:   toolReq.ToolName,
-			Status: "permission_denied",
-			Title:  reason,
-		}, raw))
-	} else {
-		updatedInput := toolReq.Input
-		_ = p.wsConn.Send(AllowResponse(req.RequestID, updatedInput))
-		p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
-			ID:     req.RequestID,
-			Name:   toolReq.ToolName,
-			Status: "permission_granted",
-			Title:  "tool permission granted",
-		}, raw))
+	})
+}
+
+func (p *ClaudeWSProvider) handleControlCancelRequest(rm RawMessage) {
+	var msg ControlCancelRequest
+	if err := json.Unmarshal(rm.Raw, &msg); err != nil {
+		return
+	}
+	if msg.RequestID == "" {
+		return
+	}
+
+	if !p.cancelPendingPermission(msg.RequestID, "permission request cancelled by client") {
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "control_cancel_request_unknown", map[string]any{
+			"request_id": msg.RequestID,
+		}, rm.Raw))
 	}
 }
 
@@ -766,14 +1022,32 @@ func (p *ClaudeWSProvider) handleToolUseSummary(rm RawMessage) {
 }
 
 func (p *ClaudeWSProvider) handleAuthStatus(rm RawMessage) {
-	var v struct {
-		IsAuthenticating bool     `json:"isAuthenticating"`
-		Output           []string `json:"output"`
-		Error            string   `json:"error,omitempty"`
-	}
+	var v AuthStatusMessage
 	if err := json.Unmarshal(rm.Raw, &v); err != nil {
 		return
 	}
+
+	output := make([]string, 0, len(v.Output))
+	for _, line := range v.Output {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		output = append(output, line)
+		p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
+			Channel:  "auth_status",
+			StreamID: "claudews_auth",
+			Content:  line,
+			Status:   "running",
+		}, rm.Raw))
+	}
+
+	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "auth_status", map[string]any{
+		"is_authenticating": v.IsAuthenticating,
+		"output":            output,
+		"error":             v.Error,
+	}, rm.Raw))
+
 	if v.IsAuthenticating {
 		p.events.Emit(domain.NewSystemMessageEvent(p.sessionID, "Claude authentication in progress"))
 	}
@@ -784,6 +1058,7 @@ func (p *ClaudeWSProvider) handleAuthStatus(rm RawMessage) {
 
 // processInput reads from the input buffer and sends user messages over WS.
 func (p *ClaudeWSProvider) processInput() {
+	firstUserMessage := true
 	for {
 		select {
 		case <-p.ctx.Done():
@@ -798,16 +1073,23 @@ func (p *ClaudeWSProvider) processInput() {
 				p.events.Emit(domain.NewErrorEvent(p.sessionID, "claudews websocket is not connected", "WS_NOT_CONNECTED", nil))
 				continue
 			}
-			msg := any(NewUserMessage(input, sid))
-			if sid == "" {
-				msg = map[string]any{
-					"type": "user",
-					"message": map[string]any{
-						"role":    "user",
-						"content": input,
-					},
-					"parent_tool_use_id": nil,
+
+			if firstUserMessage {
+				if err := p.sendInitializeIfConfigured(conn); err != nil {
+					wrapped := fmt.Errorf("claudews initialize failed before first user message: %w", err)
+					p.recordLifecycle("lifecycle.initialize.failed", map[string]any{"error": wrapped.Error()})
+					p.events.Emit(domain.NewErrorEvent(p.sessionID, wrapped.Error(), "CLAUDEWS_INITIALIZE_FAILED", nil))
+					p.handleFailure(wrapped)
+					if p.cancel != nil {
+						p.cancel()
+					}
+					return
 				}
+				firstUserMessage = false
+			}
+
+			msg := NewUserMessage(input, sid)
+			if sid == "" {
 				p.events.Emit(domain.NewMetadataEvent(p.sessionID, "session_id_pending", map[string]any{
 					"note": "sending prompt before system/init provided session_id",
 				}, nil))
@@ -821,7 +1103,7 @@ func (p *ClaudeWSProvider) processInput() {
 				}
 			}
 
-			if err := conn.Send(msg); err != nil {
+			if err := p.sendWS(conn, msg); err != nil {
 				p.events.Emit(domain.NewErrorEvent(p.sessionID, err.Error(), "WS_SEND_ERROR", nil))
 				return
 			}
@@ -839,10 +1121,78 @@ func (p *ClaudeWSProvider) processInput() {
 					<-wait.C
 				}
 			case <-wait.C:
+				p.recordLifecycle("lifecycle.ws_response.timeout", map[string]any{"timeout": timeout.String()})
 				p.events.Emit(domain.NewErrorEvent(p.sessionID, fmt.Sprintf("no claudews response received within %s after prompt send", timeout.Round(time.Second)), "WS_NO_RESPONSE", nil))
 			}
 		}
 	}
+}
+
+func (p *ClaudeWSProvider) permissionRequestTimeout() time.Duration {
+	raw, ok := p.config.Custom["claudews_permission_timeout_ms"]
+	if !ok {
+		return defaultPermissionRequestTimeout
+	}
+
+	ms := 0
+	switch v := raw.(type) {
+	case int:
+		ms = v
+	case int32:
+		ms = int(v)
+	case int64:
+		ms = int(v)
+	case float64:
+		ms = int(v)
+	}
+	if ms <= 0 {
+		return defaultPermissionRequestTimeout
+	}
+
+	timeout := time.Duration(ms) * time.Millisecond
+	if timeout < minPermissionRequestTimeout {
+		return minPermissionRequestTimeout
+	}
+	return timeout
+}
+
+func (p *ClaudeWSProvider) setPendingPermission(requestID string, pending *pendingPermission) {
+	p.pendingPermMu.Lock()
+	defer p.pendingPermMu.Unlock()
+	p.pendingPerm[requestID] = pending
+}
+
+func (p *ClaudeWSProvider) completePendingPermission(requestID string, pending *pendingPermission) bool {
+	p.pendingPermMu.Lock()
+	defer p.pendingPermMu.Unlock()
+	current, ok := p.pendingPerm[requestID]
+	if !ok || current != pending || current.done {
+		return false
+	}
+	current.done = true
+	delete(p.pendingPerm, requestID)
+	return true
+}
+
+func (p *ClaudeWSProvider) cancelPendingPermission(requestID, reason string) bool {
+	p.pendingPermMu.Lock()
+	pending, ok := p.pendingPerm[requestID]
+	p.pendingPermMu.Unlock()
+	if !ok {
+		return false
+	}
+
+	pending.cancelMu.Lock()
+	pending.cancelReason = reason
+	pending.cancelMu.Unlock()
+	pending.cancel()
+	return true
+}
+
+func (p *ClaudeWSProvider) permissionCancelReason(pending *pendingPermission) string {
+	pending.cancelMu.Lock()
+	defer pending.cancelMu.Unlock()
+	return pending.cancelReason
 }
 
 func (p *ClaudeWSProvider) noResponseTimeout() time.Duration {
@@ -873,6 +1223,222 @@ func (p *ClaudeWSProvider) noResponseTimeout() time.Duration {
 	return timeout
 }
 
+func (p *ClaudeWSProvider) sendInitializeIfConfigured(conn *wsConn) error {
+	payload, enabled, err := p.initializePayload()
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return nil
+	}
+
+	requestID := uuid.New().String()
+	request := map[string]any{"subtype": "initialize"}
+	for k, v := range payload {
+		if strings.EqualFold(k, "subtype") {
+			continue
+		}
+		request[k] = v
+	}
+
+	timeout := p.initializeTimeout()
+	p.recordLifecycle("lifecycle.initialize.requested", map[string]any{
+		"request_id": requestID,
+		"timeout":    timeout.String(),
+	})
+
+	resp, err := p.sendControlRequestAwaitResponse(conn, requestID, request, timeout)
+	if err != nil {
+		return err
+	}
+
+	if resp.Subtype == "error" {
+		message := strings.TrimSpace(resp.Error)
+		if message == "" {
+			message = "initialize rejected by claude CLI"
+		}
+		return fmt.Errorf("initialize rejected: %s", message)
+	}
+	if resp.Subtype != "success" {
+		return fmt.Errorf("initialize returned unsupported control_response subtype %q", resp.Subtype)
+	}
+
+	p.recordLifecycle("lifecycle.initialize.completed", map[string]any{
+		"request_id": requestID,
+	})
+	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "initialize_completed", map[string]any{
+		"request_id": requestID,
+		"subtype":    resp.Subtype,
+		"response":   resp.Response,
+	}, nil))
+	return nil
+}
+
+func (p *ClaudeWSProvider) initializePayload() (map[string]any, bool, error) {
+	if payload, enabled, err := decodeInitializePayload(p.config.Custom); enabled || err != nil {
+		return payload, enabled, err
+	}
+	return decodeInitializePayload(p.config.SessionCustom)
+}
+
+func decodeInitializePayload(src map[string]any) (map[string]any, bool, error) {
+	if src == nil {
+		return nil, false, nil
+	}
+
+	for _, key := range []string{"claudews_initialize", "claudews_initialize_request"} {
+		raw, ok := src[key]
+		if !ok {
+			continue
+		}
+
+		switch v := raw.(type) {
+		case bool:
+			if !v {
+				return nil, false, nil
+			}
+			return map[string]any{}, true, nil
+		case map[string]any:
+			return maps.Clone(v), true, nil
+		case string:
+			trimmed := strings.TrimSpace(v)
+			if trimmed == "" {
+				return map[string]any{}, true, nil
+			}
+			var payload map[string]any
+			if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+				return nil, false, fmt.Errorf("invalid %s JSON payload: %w", key, err)
+			}
+			return payload, true, nil
+		default:
+			return nil, false, fmt.Errorf("%s must be bool, JSON string, or object", key)
+		}
+	}
+
+	return nil, false, nil
+}
+
+func (p *ClaudeWSProvider) initializeTimeout() time.Duration {
+	raw, ok := p.config.Custom["claudews_initialize_timeout_ms"]
+	if !ok {
+		return defaultInitializeTimeout
+	}
+
+	ms := 0
+	switch v := raw.(type) {
+	case int:
+		ms = v
+	case int32:
+		ms = int(v)
+	case int64:
+		ms = int(v)
+	case float64:
+		ms = int(v)
+	}
+	if ms <= 0 {
+		return defaultInitializeTimeout
+	}
+
+	timeout := time.Duration(ms) * time.Millisecond
+	if timeout < minInitializeTimeout {
+		return minInitializeTimeout
+	}
+	return timeout
+}
+
+func (p *ClaudeWSProvider) sendControlRequestAwaitResponse(conn *wsConn, requestID string, request any, timeout time.Duration) (ControlResponsePayload, error) {
+	responseCh := make(chan ControlResponsePayload, 1)
+	p.registerPendingControlResponse(requestID, responseCh)
+	defer p.unregisterPendingControlResponse(requestID)
+
+	if err := p.sendWS(conn, OutboundControlRequest{
+		Type:      "control_request",
+		RequestID: requestID,
+		Request:   request,
+	}); err != nil {
+		return ControlResponsePayload{}, fmt.Errorf("send control_request %s failed: %w", requestID, err)
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case resp := <-responseCh:
+		return resp, nil
+	case <-timer.C:
+		return ControlResponsePayload{}, fmt.Errorf("timed out waiting for control_response to request %s after %s", requestID, timeout.Round(time.Millisecond))
+	case <-p.ctx.Done():
+		return ControlResponsePayload{}, fmt.Errorf("control_response wait cancelled for request %s: %w", requestID, p.ctx.Err())
+	}
+}
+
+func (p *ClaudeWSProvider) registerPendingControlResponse(requestID string, ch chan ControlResponsePayload) {
+	p.pendingControlMu.Lock()
+	defer p.pendingControlMu.Unlock()
+	p.pendingControl[requestID] = ch
+}
+
+func (p *ClaudeWSProvider) unregisterPendingControlResponse(requestID string) {
+	p.pendingControlMu.Lock()
+	defer p.pendingControlMu.Unlock()
+	delete(p.pendingControl, requestID)
+}
+
+func (p *ClaudeWSProvider) resolvePendingControlResponse(requestID string, payload ControlResponsePayload) bool {
+	p.pendingControlMu.Lock()
+	ch, ok := p.pendingControl[requestID]
+	if ok {
+		delete(p.pendingControl, requestID)
+	}
+	p.pendingControlMu.Unlock()
+	if !ok {
+		return false
+	}
+
+	select {
+	case ch <- payload:
+	default:
+	}
+	return true
+}
+
+func (p *ClaudeWSProvider) drainStdout() {
+	if p.processMgr == nil || p.processMgr.Stdout() == nil {
+		return
+	}
+
+	buf := make([]byte, 4096)
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		default:
+		}
+		n, err := p.processMgr.Stdout().Read(buf)
+		if n > 0 {
+			p.handleStdoutChunk(string(buf[:n]))
+		}
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				p.recordLifecycle("lifecycle.process.stdout_read_error", map[string]any{"error": err.Error()})
+			}
+			return
+		}
+	}
+}
+
+func (p *ClaudeWSProvider) handleStdoutChunk(chunk string) {
+	if chunk == "" {
+		return
+	}
+	if diag := p.diagnosticsRecorder(); diag != nil {
+		diag.RecordStdout(chunk)
+	}
+	if p.runtimeStdioDebugEnabled() {
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "stdout", map[string]any{"stdout": chunk}, nil))
+	}
+}
+
 // drainStderr reads and emits stderr lines from the subprocess.
 func (p *ClaudeWSProvider) drainStderr() {
 	doneCh := p.stderrDone
@@ -893,15 +1459,12 @@ func (p *ClaudeWSProvider) drainStderr() {
 		}
 		n, err := p.processMgr.Stderr().Read(buf)
 		if n > 0 {
-			chunk := string(buf[:n])
-			p.appendStderr(chunk)
-			if msg, ok := extractStderrError(chunk); ok {
-				p.events.Emit(domain.NewErrorEvent(p.sessionID, msg, "STDERR", nil))
-			} else {
-				p.events.Emit(domain.NewMetadataEvent(p.sessionID, "stderr", map[string]any{"stderr": chunk}, nil))
-			}
+			p.handleStderrChunk(string(buf[:n]))
 		}
 		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				p.recordLifecycle("lifecycle.process.stderr_read_error", map[string]any{"error": err.Error()})
+			}
 			select {
 			case doneCh <- err:
 			default:
@@ -909,6 +1472,29 @@ func (p *ClaudeWSProvider) drainStderr() {
 			return
 		}
 	}
+}
+
+func (p *ClaudeWSProvider) handleStderrChunk(chunk string) {
+	if chunk == "" {
+		return
+	}
+	p.appendStderr(chunk)
+	if diag := p.diagnosticsRecorder(); diag != nil {
+		diag.RecordStderr(chunk)
+	}
+	if msg, ok := extractStderrError(chunk); ok {
+		p.events.Emit(domain.NewErrorEvent(p.sessionID, msg, "STDERR", nil))
+		return
+	}
+	if p.runtimeStdioDebugEnabled() {
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "stderr", map[string]any{"stderr": chunk}, nil))
+	}
+}
+
+func (p *ClaudeWSProvider) runtimeStdioDebugEnabled() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return customBool(p.config.Custom, "debug")
 }
 
 func extractStderrError(chunk string) (string, bool) {
@@ -1002,7 +1588,7 @@ func (p *ClaudeWSProvider) emitEvent(event domain.Event, raw []byte) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func (p *ClaudeWSProvider) sendControlSuccess(requestID string, response map[string]any) error {
-	return p.wsConn.Send(ControlResponse{
+	return p.sendWS(p.wsConn, ControlResponse{
 		Type: "control_response",
 		Response: ControlResponsePayload{
 			Subtype:   "success",
@@ -1013,7 +1599,7 @@ func (p *ClaudeWSProvider) sendControlSuccess(requestID string, response map[str
 }
 
 func (p *ClaudeWSProvider) sendControlError(requestID, errMsg string) error {
-	return p.wsConn.Send(ControlResponse{
+	return p.sendWS(p.wsConn, ControlResponse{
 		Type: "control_response",
 		Response: ControlResponsePayload{
 			Subtype:   "error",
@@ -1025,6 +1611,7 @@ func (p *ClaudeWSProvider) sendControlError(requestID, errMsg string) error {
 
 // handleFailure records a circuit-breaker failure and sets error state.
 func (p *ClaudeWSProvider) handleFailure(err error) {
+	p.recordLifecycle("lifecycle.failure", map[string]any{"error": err.Error()})
 	if p.circuitBreaker.RecordFailure() {
 		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "circuit_breaker_cooldown", map[string]any{
 			"cooldown_duration": p.circuitBreaker.CooldownRemaining().String(),
@@ -1032,6 +1619,50 @@ func (p *ClaudeWSProvider) handleFailure(err error) {
 	}
 	p.state.SetError(err)
 	p.events.Emit(domain.NewErrorEvent(p.sessionID, err.Error(), "CLAUDEWS_FAILURE", nil))
+}
+
+func (p *ClaudeWSProvider) diagnosticsRecorder() *diagnosticsRecorder {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.diagnostics
+}
+
+func (p *ClaudeWSProvider) recordLifecycle(kind string, payload any) {
+	if diag := p.diagnosticsRecorder(); diag != nil {
+		diag.RecordLifecycle(kind, payload)
+	}
+}
+
+func (p *ClaudeWSProvider) recordWSInbound(payload []byte) {
+	if diag := p.diagnosticsRecorder(); diag != nil {
+		diag.RecordWSInbound(payload)
+	}
+}
+
+func (p *ClaudeWSProvider) sendWS(conn *wsConn, message any) error {
+	if conn == nil {
+		return fmt.Errorf("ws connection is nil")
+	}
+	if diag := p.diagnosticsRecorder(); diag != nil {
+		if data, err := json.Marshal(message); err == nil {
+			diag.RecordWSOutbound(data)
+		}
+	}
+	return conn.Send(message)
+}
+
+func (p *ClaudeWSProvider) closeDiagnostics() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.closeDiagnosticsLocked()
+}
+
+func (p *ClaudeWSProvider) closeDiagnosticsLocked() {
+	diag := p.diagnostics
+	p.diagnostics = nil
+	if diag != nil {
+		diag.Close()
+	}
 }
 
 // Suspend captures the ClaudeWS provider state for persistence (minimal stub).

@@ -91,6 +91,32 @@ func TestBuildWSCommandArgs_DoesNotInjectPrintPrompt(t *testing.T) {
 	}
 }
 
+func TestBuildWSCommandArgs_CompatModeInjectsPrintPlaceholder(t *testing.T) {
+	args, err := buildWSCommandArgs("ws://127.0.0.1:9999", session.Config{
+		Custom: map[string]any{
+			"claudews_cli_compat_mode": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildWSCommandArgs() unexpected error: %v", err)
+	}
+
+	hasPrint := false
+	hasPlaceholder := false
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--print" {
+			hasPrint = true
+		}
+		if i+1 < len(args) && args[i] == "-p" && args[i+1] == "placeholder" {
+			hasPlaceholder = true
+		}
+	}
+
+	if !hasPrint || !hasPlaceholder {
+		t.Fatalf("expected compat flags (--print and -p placeholder), got %v", args)
+	}
+}
+
 func TestResolveClaudeCommand(t *testing.T) {
 	t.Run("prefers claudews_command", func(t *testing.T) {
 		cfg := session.Config{Custom: map[string]any{

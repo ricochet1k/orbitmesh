@@ -23,6 +23,12 @@ const (
 	liveRoundtripTimeout = 12 * time.Second
 	liveRoundtripIdleGap = 1200 * time.Millisecond
 	liveRoundtripPrompt  = "Reply with exactly: ok"
+
+	claudeWSDiagnosticsEnabledKey    = "claudews_diagnostics_enabled"
+	claudeWSDiagnosticsDirKey        = "claudews_diagnostics_dir"
+	claudeWSDiagnosticsTranscriptKey = "claudews_diagnostics_transcript_path"
+	claudeWSDiagnosticsStdoutKey     = "claudews_diagnostics_stdout_path"
+	claudeWSDiagnosticsStderrKey     = "claudews_diagnostics_stderr_path"
 )
 
 type Lane string
@@ -112,6 +118,12 @@ type liveScenarioResult struct {
 	NormalizedEvents   []json.RawMessage
 	Failure            *FailureReport
 	RunStatus          RunStatus
+}
+
+type claudeWSDiagnosticsPaths struct {
+	Transcript string
+	Stdout     string
+	Stderr     string
 }
 
 func NewBaselineRunner(tester providerTester, opts RunOptions) *BaselineRunner {
@@ -360,7 +372,15 @@ func (r *BaselineRunner) runProvider(ctx context.Context, entry MatrixEntry) Pro
 			continue
 		}
 
-		liveResult := r.runLiveScenario(ctx, entry.ProviderType, sessionConfig, scenario.ID)
+		scenarioConfig, diagnosticsPaths := prepareLiveScenarioConfig(sessionConfig, entry.ProviderType, r.opts.ArtifactsDir, scenario.ID)
+		liveResult := r.runLiveScenario(ctx, entry.ProviderType, scenarioConfig, scenario.ID)
+		if diagnosticsPaths != nil {
+			detail := diagnosticsPaths.detailString()
+			liveResult.Detail = joinScenarioDetails(liveResult.Detail, detail)
+			if liveResult.Failure != nil {
+				liveResult.Failure.Message = joinScenarioDetails(liveResult.Failure.Message, detail)
+			}
+		}
 		scenario.Status = "pass"
 		scenario.Detail = liveResult.Detail
 		runStatus := RunStatusPassed
@@ -1040,6 +1060,42 @@ func joinScenarioDetails(parts ...string) string {
 		out = append(out, part)
 	}
 	return strings.Join(out, "; ")
+}
+
+func prepareLiveScenarioConfig(base session.Config, providerType, artifactsDir, scenarioID string) (session.Config, *claudeWSDiagnosticsPaths) {
+	cfg := base
+	if !strings.EqualFold(strings.TrimSpace(providerType), "claude-ws") {
+		return cfg, nil
+	}
+
+	custom := make(map[string]any, len(base.Custom)+5)
+	for k, v := range base.Custom {
+		custom[k] = v
+	}
+
+	runID := fmt.Sprintf("diag-%d", time.Now().UTC().UnixNano())
+	diagDir := filepath.Join(artifactsDir, "claude-ws-diagnostics", sanitizePathPart(providerType), sanitizePathPart(scenarioID), runID)
+	paths := &claudeWSDiagnosticsPaths{
+		Transcript: filepath.Join(diagDir, "ws_transcript.ndjson"),
+		Stdout:     filepath.Join(diagDir, "stdout.ndjson"),
+		Stderr:     filepath.Join(diagDir, "stderr.ndjson"),
+	}
+
+	custom[claudeWSDiagnosticsEnabledKey] = true
+	custom[claudeWSDiagnosticsDirKey] = diagDir
+	custom[claudeWSDiagnosticsTranscriptKey] = paths.Transcript
+	custom[claudeWSDiagnosticsStdoutKey] = paths.Stdout
+	custom[claudeWSDiagnosticsStderrKey] = paths.Stderr
+	cfg.Custom = custom
+
+	return cfg, paths
+}
+
+func (p *claudeWSDiagnosticsPaths) detailString() string {
+	if p == nil {
+		return ""
+	}
+	return fmt.Sprintf("claude-ws diagnostics transcript=%s stdout=%s stderr=%s", p.Transcript, p.Stdout, p.Stderr)
 }
 
 func firstFailedScenarioID(scenarios []Scenario) string {

@@ -138,6 +138,16 @@ type ToolProgressMessage struct {
 	SessionID          string  `json:"session_id"`
 }
 
+// AuthStatusMessage reports progress during CLI authentication.
+type AuthStatusMessage struct {
+	Type             string   `json:"type"` // "auth_status"
+	IsAuthenticating bool     `json:"isAuthenticating"`
+	Output           []string `json:"output"`
+	Error            string   `json:"error,omitempty"`
+	UUID             string   `json:"uuid"`
+	SessionID        string   `json:"session_id"`
+}
+
 // ── Control protocol ─────────────────────────────────────────────────────────
 
 // ControlRequest is sent from the CLI when it needs a permission decision or
@@ -148,6 +158,13 @@ type ControlRequest struct {
 	Request   json.RawMessage `json:"request"` // discriminated by "subtype"
 }
 
+// OutboundControlRequest is sent from the server to the CLI.
+type OutboundControlRequest struct {
+	Type      string `json:"type"` // "control_request"
+	RequestID string `json:"request_id"`
+	Request   any    `json:"request"`
+}
+
 // CanUseToolRequest is the payload for subtype "can_use_tool".
 type CanUseToolRequest struct {
 	Subtype     string         `json:"subtype"` // "can_use_tool"
@@ -155,6 +172,14 @@ type CanUseToolRequest struct {
 	Input       map[string]any `json:"input"`
 	ToolUseID   string         `json:"tool_use_id"`
 	Description string         `json:"description,omitempty"`
+}
+
+// HookCallbackRequest is the payload for subtype "hook_callback".
+type HookCallbackRequest struct {
+	Subtype    string         `json:"subtype"` // "hook_callback"
+	CallbackID string         `json:"callback_id"`
+	Input      map[string]any `json:"input,omitempty"`
+	ToolUseID  string         `json:"tool_use_id,omitempty"`
 }
 
 // ControlResponse is sent from the server back to the CLI.
@@ -168,6 +193,12 @@ type ControlResponsePayload struct {
 	RequestID string         `json:"request_id"`
 	Response  map[string]any `json:"response,omitempty"`
 	Error     string         `json:"error,omitempty"`
+}
+
+// ControlCancelRequest requests cancellation for a pending control_request.
+type ControlCancelRequest struct {
+	Type      string `json:"type"` // "control_cancel_request"
+	RequestID string `json:"request_id"`
 }
 
 // ToolPermissionBehavior is the allow/deny decision for can_use_tool.

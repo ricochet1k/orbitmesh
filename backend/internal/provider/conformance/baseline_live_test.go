@@ -3,11 +3,13 @@ package conformance
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
 	"github.com/ricochet1k/orbitmesh/internal/session"
+	"github.com/ricochet1k/orbitmesh/internal/storage"
 )
 
 type liveTesterStub struct {
@@ -23,6 +25,31 @@ func (s liveTesterStub) TestConfig(context.Context, string, session.Config) erro
 }
 
 func (s liveTesterStub) CreateSession(string, string, session.Config) (session.Session, error) {
+	if s.session != nil {
+		return s.session, nil
+	}
+	return liveSessionStub{}, nil
+}
+
+type liveTesterCapture struct {
+	session         session.Session
+	testConfigs     []session.Config
+	createConfigs   []session.Config
+	createSessionID []string
+}
+
+func (s *liveTesterCapture) SupportedTypes() []string {
+	return []string{"claude-ws"}
+}
+
+func (s *liveTesterCapture) TestConfig(_ context.Context, _ string, config session.Config) error {
+	s.testConfigs = append(s.testConfigs, config)
+	return nil
+}
+
+func (s *liveTesterCapture) CreateSession(_ string, sessionID string, config session.Config) (session.Session, error) {
+	s.createSessionID = append(s.createSessionID, sessionID)
+	s.createConfigs = append(s.createConfigs, config)
 	if s.session != nil {
 		return s.session, nil
 	}
@@ -216,5 +243,49 @@ func TestRunLiveMessageRoundtrip_OpenAICustomBaseURLTimeoutClassifiedTransport(t
 	}
 	if result.RunStatus != RunStatusFailed {
 		t.Fatalf("run status = %s, want failed", result.RunStatus)
+	}
+}
+
+func TestBaselineRunner_LiveClaudeWSInjectsDiagnosticsPaths(t *testing.T) {
+	t.Parallel()
+
+	tester := &liveTesterCapture{session: liveSessionStub{}}
+	runner := NewBaselineRunner(tester, RunOptions{
+		Lane:         LaneLive,
+		ArtifactsDir: t.TempDir(),
+	})
+
+	summary, err := runner.Run(context.Background(), []storage.ProviderConfig{{Type: "claude-ws", IsActive: true}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(tester.testConfigs) != 1 {
+		t.Fatalf("testConfigs len = %d, want 1", len(tester.testConfigs))
+	}
+	if len(tester.createConfigs) != 1 {
+		t.Fatalf("createConfigs len = %d, want 1", len(tester.createConfigs))
+	}
+	for _, cfg := range append(tester.testConfigs, tester.createConfigs...) {
+		if enabled, ok := cfg.Custom[claudeWSDiagnosticsEnabledKey].(bool); !ok || !enabled {
+			t.Fatalf("expected diagnostics enabled in config custom, got %+v", cfg.Custom)
+		}
+		if _, ok := cfg.Custom[claudeWSDiagnosticsTranscriptKey].(string); !ok {
+			t.Fatalf("expected transcript path in config custom, got %+v", cfg.Custom)
+		}
+		if _, ok := cfg.Custom[claudeWSDiagnosticsStdoutKey].(string); !ok {
+			t.Fatalf("expected stdout path in config custom, got %+v", cfg.Custom)
+		}
+		if _, ok := cfg.Custom[claudeWSDiagnosticsStderrKey].(string); !ok {
+			t.Fatalf("expected stderr path in config custom, got %+v", cfg.Custom)
+		}
+	}
+
+	if len(summary.Results) != 1 || len(summary.Results[0].Scenarios) != 2 {
+		t.Fatalf("unexpected summary shape: %+v", summary.Results)
+	}
+	for _, scenario := range summary.Results[0].Scenarios {
+		if scenario.Detail == "" || !strings.Contains(scenario.Detail, "claude-ws diagnostics transcript=") {
+			t.Fatalf("expected diagnostics detail in scenario %s, got %q", scenario.ID, scenario.Detail)
+		}
 	}
 }

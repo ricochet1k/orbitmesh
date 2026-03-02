@@ -3,6 +3,9 @@ package claudews
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -21,7 +24,7 @@ func TestHandleResultMsg_EmitsOutputNotPlan(t *testing.T) {
 	events := p.events.Events()
 	seenOutput := false
 	seenPlan := false
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 8; i++ {
 		select {
 		case ev := <-events:
 			switch ev.Type {
@@ -114,6 +117,168 @@ func TestExtractStderrError(t *testing.T) {
 	})
 }
 
+func TestHandleAuthStatus_EmitsProgressAndMetadata(t *testing.T) {
+	p := NewClaudeWSProvider("s1", nil)
+	rm := RawMessage{Raw: []byte(`{"type":"auth_status","isAuthenticating":true,"output":["Open https://example.com/auth","   ","Enter code 1234"],"uuid":"u1","session_id":"s1"}`)}
+
+	p.handleAuthStatus(rm)
+
+	events := drainEvents(p.events.Events())
+	if len(events) == 0 {
+		t.Fatal("expected auth status events")
+	}
+
+	var progressLines []string
+	seenSystem := false
+	seenMetadata := false
+	for _, ev := range events {
+		switch ev.Type {
+		case domain.EventTypeProgress:
+			data, ok := ev.Progress()
+			if !ok {
+				continue
+			}
+			if data.Channel == "auth_status" {
+				progressLines = append(progressLines, data.Content)
+			}
+		case domain.EventTypeSystemMessage:
+			msg, ok := ev.SystemMessage()
+			if ok && strings.Contains(msg.Content, "authentication in progress") {
+				seenSystem = true
+			}
+		case domain.EventTypeMetadata:
+			meta, ok := ev.Metadata()
+			if !ok || meta.Key != "auth_status" {
+				continue
+			}
+			payload, _ := meta.Value.(map[string]any)
+			if payload["is_authenticating"] != true {
+				t.Fatalf("expected is_authenticating=true, got %+v", payload)
+			}
+			output, _ := payload["output"].([]string)
+			if !reflect.DeepEqual(output, []string{"Open https://example.com/auth", "Enter code 1234"}) {
+				t.Fatalf("unexpected auth output payload: %+v", payload)
+			}
+			seenMetadata = true
+		}
+	}
+
+	if !seenSystem {
+		t.Fatal("expected authentication progress system message")
+	}
+	if !seenMetadata {
+		t.Fatal("expected auth_status metadata event")
+	}
+	if !reflect.DeepEqual(progressLines, []string{"Open https://example.com/auth", "Enter code 1234"}) {
+		t.Fatalf("unexpected auth progress lines: %+v", progressLines)
+	}
+}
+
+func TestHandleStdoutChunk_DebugGatedAndDiagnosticsCaptured(t *testing.T) {
+	t.Run("no debug runtime event but diagnostics written", func(t *testing.T) {
+		tmp := t.TempDir()
+		stdoutPath := filepath.Join(tmp, "stdout.ndjson")
+
+		cfg := session.Config{Custom: map[string]any{customStdoutPathKey: stdoutPath}}
+		diag, err := newDiagnosticsRecorder(cfg, "s1")
+		if err != nil {
+			t.Fatalf("new diagnostics recorder: %v", err)
+		}
+
+		p := NewClaudeWSProvider("s1", nil)
+		p.diagnostics = diag
+		p.handleStdoutChunk("hello stdout")
+		diag.Close()
+
+		if containsMetadataEventKey(drainEvents(p.events.Events()), "stdout") {
+			t.Fatal("did not expect stdout metadata event when debug is disabled")
+		}
+
+		data, err := os.ReadFile(stdoutPath)
+		if err != nil {
+			t.Fatalf("read stdout diagnostics: %v", err)
+		}
+		if !strings.Contains(string(data), "hello stdout") {
+			t.Fatalf("expected stdout diagnostics to contain payload, got %q", string(data))
+		}
+	})
+
+	t.Run("debug emits runtime stdout metadata", func(t *testing.T) {
+		p := NewClaudeWSProvider("s1", nil)
+		p.config = session.Config{Custom: map[string]any{"debug": true}}
+		p.handleStdoutChunk("hello stdout")
+
+		if !containsMetadataEventKey(drainEvents(p.events.Events()), "stdout") {
+			t.Fatal("expected stdout metadata event when debug is enabled")
+		}
+	})
+}
+
+func TestHandleStderrChunk_DebugGatedAndErrorsStillEmit(t *testing.T) {
+	t.Run("no debug runtime event but diagnostics written", func(t *testing.T) {
+		tmp := t.TempDir()
+		stderrPath := filepath.Join(tmp, "stderr.ndjson")
+
+		cfg := session.Config{Custom: map[string]any{customStderrPathKey: stderrPath}}
+		diag, err := newDiagnosticsRecorder(cfg, "s1")
+		if err != nil {
+			t.Fatalf("new diagnostics recorder: %v", err)
+		}
+
+		p := NewClaudeWSProvider("s1", nil)
+		p.diagnostics = diag
+		p.handleStderrChunk("warning: retrying")
+		diag.Close()
+
+		events := drainEvents(p.events.Events())
+		if containsMetadataEventKey(events, "stderr") {
+			t.Fatal("did not expect stderr metadata event when debug is disabled")
+		}
+
+		data, err := os.ReadFile(stderrPath)
+		if err != nil {
+			t.Fatalf("read stderr diagnostics: %v", err)
+		}
+		if !strings.Contains(string(data), "warning: retrying") {
+			t.Fatalf("expected stderr diagnostics to contain payload, got %q", string(data))
+		}
+	})
+
+	t.Run("debug emits runtime stderr metadata", func(t *testing.T) {
+		p := NewClaudeWSProvider("s1", nil)
+		p.config = session.Config{Custom: map[string]any{"debug": true}}
+		p.handleStderrChunk("warning: retrying")
+
+		if !containsMetadataEventKey(drainEvents(p.events.Events()), "stderr") {
+			t.Fatal("expected stderr metadata event when debug is enabled")
+		}
+	})
+
+	t.Run("error still emitted without debug", func(t *testing.T) {
+		p := NewClaudeWSProvider("s1", nil)
+		p.handleStderrChunk("Error: invalid auth token")
+
+		events := drainEvents(p.events.Events())
+		found := false
+		for _, ev := range events {
+			if ev.Type != domain.EventTypeError {
+				continue
+			}
+			data, ok := ev.Error()
+			if !ok || data.Code != "STDERR" {
+				continue
+			}
+			if !strings.Contains(data.Message, "invalid auth token") {
+				t.Fatalf("unexpected stderr error message: %q", data.Message)
+			}
+			found = true
+		}
+		if !found {
+			t.Fatal("expected stderr error event even when debug is disabled")
+		}
+	})
+}
+
 func TestSendInput_QueueTimeoutEmitsErrorEvent(t *testing.T) {
 	p := NewClaudeWSProvider("s1", nil)
 	p.started = true
@@ -164,4 +329,29 @@ func TestNoResponseTimeout_DefaultsAndOverrides(t *testing.T) {
 	if got := p.noResponseTimeout(); got != minNoResponseTimeout {
 		t.Fatalf("minimum timeout clamp = %v, want %v", got, minNoResponseTimeout)
 	}
+}
+
+func drainEvents(events <-chan domain.Event) []domain.Event {
+	collected := []domain.Event{}
+	for {
+		select {
+		case ev := <-events:
+			collected = append(collected, ev)
+		default:
+			return collected
+		}
+	}
+}
+
+func containsMetadataEventKey(events []domain.Event, key string) bool {
+	for _, ev := range events {
+		if ev.Type != domain.EventTypeMetadata {
+			continue
+		}
+		meta, ok := ev.Metadata()
+		if ok && meta.Key == key {
+			return true
+		}
+	}
+	return false
 }

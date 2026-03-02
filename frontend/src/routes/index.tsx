@@ -1,9 +1,12 @@
 import { createFileRoute, useNavigate } from "@tanstack/solid-router";
-import { createMemo, createResource } from "solid-js";
+import { createMemo, createResource, createSignal } from "solid-js";
 import { apiClient } from "../api/client";
 import {
   ActionCenterWidget,
-  CodeflowSnapshotWidget,
+  CodeflowComplexityWidget,
+  CodeflowFindingsSeverityWidget,
+  CodeflowRecentFindingsWidget,
+  CodeflowTopRiskPathsWidget,
   DashboardPageShell,
   HotspotsWidget,
   RecentActivityWidget,
@@ -20,8 +23,43 @@ interface DashboardProps {
 }
 
 function normalizeSummary(summary?: DashboardSummaryResponse): DashboardSummaryResponse {
+  const normalizedCodeflow = {
+    hasData: summary?.codeflow?.hasData ?? false,
+    lastScanAt: summary?.codeflow?.lastScanAt,
+    scanStale: summary?.codeflow?.scanStale ?? false,
+    autoScanTriggered: summary?.codeflow?.autoScanTriggered ?? false,
+    recentCommits: summary?.codeflow?.recentCommits ?? 0,
+    commitsInWindow: summary?.codeflow?.commitsInWindow ?? 0,
+    commits24h: summary?.codeflow?.commits24h ?? 0,
+    activeAuthors: summary?.codeflow?.activeAuthors ?? 0,
+    openFindings: summary?.codeflow?.openFindings ?? 0,
+    recentFindingActivity: summary?.codeflow?.recentFindingActivity ?? 0,
+    findingsBySeverity: summary?.codeflow?.findingsBySeverity ?? {},
+    newFindings: summary?.codeflow?.newFindings ?? 0,
+    resolvedFindings: summary?.codeflow?.resolvedFindings ?? 0,
+    topRiskPaths: (summary?.codeflow?.topRiskPaths ?? []).map((path, index) => ({
+      path: path?.path ?? `unknown-path-${index + 1}`,
+      openFindings: path?.openFindings ?? 0,
+      riskScore: path?.riskScore ?? 0,
+    })),
+    openFindingsBySeverity: summary?.codeflow?.openFindingsBySeverity ?? {},
+    recentFindings: (summary?.codeflow?.recentFindings ?? []).map((finding, index) => ({
+      id: finding?.id ?? `finding-${index + 1}`,
+      severity: finding?.severity ?? "unknown",
+      message: finding?.message ?? "Finding details unavailable",
+      fileId: finding?.fileId,
+      line: finding?.line,
+      status: finding?.status,
+      scanEpoch: finding?.scanEpoch,
+    })),
+    mostComplexFunctions: summary?.codeflow?.mostComplexFunctions ?? [],
+    mostComplexModules: summary?.codeflow?.mostComplexModules ?? [],
+    mostComplexTypes: summary?.codeflow?.mostComplexTypes ?? [],
+  };
+
   return {
     generatedAt: summary?.generatedAt ?? "",
+    window: summary?.window,
     pulse: summary?.pulse ?? {
       sessionsTotal: 0,
       sessionsRunning: 0,
@@ -30,32 +68,32 @@ function normalizeSummary(summary?: DashboardSummaryResponse): DashboardSummaryR
       sessionsOther: 0,
     },
     activity: summary?.activity ?? [],
-    actions: summary?.actions ?? [],
-    codeflow: summary?.codeflow ?? {
-      recentCommits: 0,
-      commits24h: 0,
-      activeAuthors: 0,
-      openFindings: 0,
-      recentFindingActivity: 0,
-      openFindingsBySeverity: {},
-      recentFindings: [],
-    },
+    actions: (summary?.actions ?? []).map((action, index) => ({
+      ...action,
+      id: action?.id ?? `action-${index + 1}`,
+      kind: action?.kind ?? "action",
+      label: action?.label ?? "Review recommendation",
+      evidence: action?.evidence ?? [],
+      timestamp: action?.timestamp,
+      targetTitle: action?.targetTitle,
+      suspensionReason: action?.suspensionReason,
+    })),
+    codeflow: normalizedCodeflow,
     hotspots: (summary?.hotspots ?? []).map((hotspot) => ({
       ...hotspot,
+      path: hotspot.path ?? "unknown-path",
+      touches: hotspot.touches ?? 0,
+      churn: hotspot.churn ?? 0,
       findings: hotspot.findings ?? 0,
     })),
   };
 }
 
-function formatGeneratedAt(timestamp: string): string {
-  const parsed = Date.parse(timestamp);
-  if (Number.isNaN(parsed)) return "Waiting for snapshot";
-  return new Date(parsed).toLocaleTimeString();
-}
-
 export default function Dashboard(props: DashboardProps = {}) {
   const navigate = useNavigate();
-  const [summary, { refetch }] = createResource(apiClient.getDashboardSummary);
+  const [window, setWindow] = createSignal<"24h" | "7d">("7d");
+  const [scanPending, setScanPending] = createSignal(false);
+  const [summary, { refetch }] = createResource(window, apiClient.getDashboardSummary);
 
   const summaryData = createMemo(() => normalizeSummary(summary()));
   const loading = () => summary.loading;
@@ -69,31 +107,39 @@ export default function Dashboard(props: DashboardProps = {}) {
     navigate({ to: path });
   };
 
+  const triggerScan = async () => {
+    setScanPending(true);
+    try {
+      await apiClient.triggerCodeflowScan();
+    } finally {
+      setScanPending(false);
+      refetch();
+    }
+  };
+
   return (
     <DashboardPageShell
-      kicker="Dashboard v2"
-      title="Operational Dashboard"
-      subtitle="Track repository momentum, runtime activity, and intervention cues in one composable workspace."
-      metrics={[
-        { label: "Sessions", value: String(summaryData().pulse.sessionsTotal) },
-        { label: "Updated", value: formatGeneratedAt(summaryData().generatedAt) },
-      ]}
-      actions={
-        <button type="button" class="btn btn-secondary" onClick={() => refetch()}>
-          Refresh
-        </button>
+      toolbar={
+        <div class="dashboard-compact-toolbar">
+          <div class="dashboard-window-toggle" role="group" aria-label="Dashboard window">
+            <button type="button" class={`btn ${window() === "24h" ? "btn-primary" : "btn-secondary"}`} onClick={() => setWindow("24h")}>24h</button>
+            <button type="button" class={`btn ${window() === "7d" ? "btn-primary" : "btn-secondary"}`} onClick={() => setWindow("7d")}>7d</button>
+          </div>
+          <button type="button" class="btn btn-secondary" onClick={triggerScan} disabled={scanPending()}>
+            {scanPending() ? "Scanning..." : "Scan CodeFlow"}
+          </button>
+          <button type="button" class="btn btn-secondary" onClick={() => refetch()}>Refresh</button>
+        </div>
       }
     >
       <RepoPulseWidget pulse={summaryData().pulse} loading={loading()} error={error()} />
+      <ActionCenterWidget actions={summaryData().actions} loading={loading()} error={error()} onNavigate={navigateTo} />
       <RecentActivityWidget items={summaryData().activity} loading={loading()} error={error()} />
-      <ActionCenterWidget
-        actions={summaryData().actions}
-        loading={loading()}
-        error={error()}
-        onNavigate={navigateTo}
-      />
-      <CodeflowSnapshotWidget snapshot={summaryData().codeflow} loading={loading()} error={error()} />
-      <HotspotsWidget hotspots={summaryData().hotspots} loading={loading()} error={error()} />
+      <CodeflowFindingsSeverityWidget codeflow={summaryData().codeflow} loading={loading()} error={error()} />
+      <CodeflowRecentFindingsWidget codeflow={summaryData().codeflow} loading={loading()} error={error()} onNavigate={navigateTo} />
+      <CodeflowTopRiskPathsWidget codeflow={summaryData().codeflow} loading={loading()} error={error()} onNavigate={navigateTo} />
+      <CodeflowComplexityWidget codeflow={summaryData().codeflow} loading={loading()} error={error()} onNavigate={navigateTo} />
+      <HotspotsWidget hotspots={summaryData().hotspots} loading={loading()} error={error()} onNavigate={navigateTo} />
     </DashboardPageShell>
   );
 }
