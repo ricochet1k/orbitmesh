@@ -246,7 +246,13 @@ describe("AgentDock", () => {
       expect(input.value).toBe("");
     });
 
-    expect(apiClient.sendMessage).toHaveBeenCalledWith("session-1", "hello", undefined);
+    expect(apiClient.sendMessage).toHaveBeenCalledWith(
+      "session-1",
+      "hello",
+      expect.objectContaining({
+        allowedTools: ["list_ui_components", "dispatch_ui_action", "multi_edit_ui"],
+      }),
+    );
   });
 
   it("creates a dock session before sending when empty", async () => {
@@ -280,7 +286,9 @@ describe("AgentDock", () => {
       expect(apiClient.sendMessage).toHaveBeenCalledWith(
         "dock-session-1",
         "hello",
-        undefined,
+        expect.objectContaining({
+          allowedTools: ["list_ui_components", "dispatch_ui_action", "multi_edit_ui"],
+        }),
       );
     });
   });

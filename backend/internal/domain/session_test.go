@@ -242,6 +242,27 @@ func TestSessionMessagesAppendOutputDeltaToMessage(t *testing.T) {
 	}
 }
 
+func TestSessionMessagesAppendDeltaToMessage_Thought(t *testing.T) {
+	sm := NewSessionMessages("test-id")
+
+	sm.AppendDeltaToMessage(MessageKindThought, "reasoning-1", "Assessing ")
+	sm.AppendDeltaToMessage(MessageKindThought, "reasoning-1", "next steps")
+
+	msgs := sm.GetMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 thought message, got %d", len(msgs))
+	}
+	if msgs[0].Kind != MessageKindThought {
+		t.Fatalf("expected kind %q, got %q", MessageKindThought, msgs[0].Kind)
+	}
+	if msgs[0].ID != "reasoning-1" {
+		t.Fatalf("expected thought ID reasoning-1, got %q", msgs[0].ID)
+	}
+	if msgs[0].Contents != "Assessing next steps" {
+		t.Fatalf("expected merged thought content, got %q", msgs[0].Contents)
+	}
+}
+
 func TestSessionMessagesAppendErrorMessage(t *testing.T) {
 	sm := NewSessionMessages("test-id")
 

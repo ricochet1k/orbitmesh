@@ -427,19 +427,26 @@ func (sm *SessionMessages) AppendMessageRaw(kind MessageKind, contents string, r
 // AppendOutputDelta appends streaming text to the last output message if one
 // exists, or creates a new output message.
 func (sm *SessionMessages) AppendOutputDelta(delta string) {
-	sm.AppendOutputDeltaToMessage("", delta)
+	sm.AppendDeltaToMessage(MessageKindOutput, "", delta)
 }
 
 // AppendOutputDeltaToMessage appends streaming text to a specific output message
 // when messageID is provided; otherwise it appends to the latest output message.
 func (sm *SessionMessages) AppendOutputDeltaToMessage(messageID, delta string) {
+	sm.AppendDeltaToMessage(MessageKindOutput, messageID, delta)
+}
+
+// AppendDeltaToMessage appends streaming text to a specific message kind.
+// When messageID is provided, it targets that message; otherwise it appends to
+// the most recent message of the same kind.
+func (sm *SessionMessages) AppendDeltaToMessage(kind MessageKind, messageID, delta string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	if messageID != "" {
 		for i := len(sm.Messages) - 1; i >= 0; i-- {
 			if sm.Messages[i].ID == messageID {
-				if sm.Messages[i].Kind == MessageKindOutput {
+				if sm.Messages[i].Kind == kind {
 					sm.Messages[i].Contents += delta
 					return
 				}
@@ -448,19 +455,19 @@ func (sm *SessionMessages) AppendOutputDeltaToMessage(messageID, delta string) {
 		}
 		sm.Messages = append(sm.Messages, Message{
 			ID:        messageID,
-			Kind:      MessageKindOutput,
+			Kind:      kind,
 			Contents:  delta,
 			Timestamp: time.Now(),
 		})
 		return
 	}
 
-	if n := len(sm.Messages); n > 0 && sm.Messages[n-1].Kind == MessageKindOutput {
+	if n := len(sm.Messages); n > 0 && sm.Messages[n-1].Kind == kind {
 		sm.Messages[n-1].Contents += delta
 	} else {
 		sm.Messages = append(sm.Messages, Message{
-			ID:        fmt.Sprintf("%s_%d", MessageKindOutput, time.Now().UnixNano()),
-			Kind:      MessageKindOutput,
+			ID:        fmt.Sprintf("%s_%d", kind, time.Now().UnixNano()),
+			Kind:      kind,
 			Contents:  delta,
 			Timestamp: time.Now(),
 		})

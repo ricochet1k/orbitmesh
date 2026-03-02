@@ -15,6 +15,7 @@ import { clearDockSessionId, dockSessionId } from "../state/agentDock"
 import { TIMEOUTS } from "../constants/timeouts"
 import { useSessionData } from "../hooks/useSessionData"
 import { useSessionActions } from "../hooks/useSessionActions"
+import { useSessionSendOptions } from "../hooks/useSessionSendOptions"
 import { useAgentDockSession } from "../hooks/useAgentDockSession"
 import { useAgentDockMcp } from "../hooks/useAgentDockMcp"
 import SessionTranscript from "./SessionTranscript"
@@ -46,9 +47,6 @@ export default function AgentDock(props: AgentDockProps) {
   const [composerError, setComposerError] = createSignal<string | null>(null)
   const [composerPending, setComposerPending] = createSignal<string | null>(null)
   const [sessionStateOverride, setSessionStateOverride] = createSignal<SessionState | null>(null)
-  const [selectedProviderId, setSelectedProviderId] = createSignal<string | null>(null)
-  const [selectedAgentId, setSelectedAgentId] = createSignal<string | null>(null)
-  const [selectedModel, setSelectedModel] = createSignal<string>("")
 
   let transcriptContainerRef: HTMLDivElement | undefined
 
@@ -61,6 +59,23 @@ export default function AgentDock(props: AgentDockProps) {
     session()?.session_kind === "dock" || (!props.sessionId && Boolean(dockSessionId()))
 
   useAgentDockMcp(sessionId, isDockSession)
+
+  const sendOptionsState = useSessionSendOptions({
+    session,
+    providers: () => providers()?.providers ?? [],
+    agents: () => agents()?.agents ?? [],
+    includeDockUITools: true,
+  })
+  const providerList = sendOptionsState.providerList
+  const agentList = sendOptionsState.agentList
+  const selectedProvider = sendOptionsState.selectedProvider
+  const selectedProviderId = sendOptionsState.selectedProviderId
+  const setSelectedProviderId = sendOptionsState.setSelectedProviderId
+  const selectedAgentId = sendOptionsState.selectedAgentId
+  const setSelectedAgentId = sendOptionsState.setSelectedAgentId
+  const selectedModel = sendOptionsState.selectedModel
+  const setSelectedModel = sendOptionsState.setSelectedModel
+  const modelOptions = sendOptionsState.modelOptions
 
   const canManage = () => permissions()?.can_initiate_bulk_actions ?? false
   const hasSession = () => Boolean(sessionId())
@@ -199,13 +214,7 @@ export default function AgentDock(props: AgentDockProps) {
         activeSessionId = await ensureDockSessionId(pid ? { providerId: pid } : {})
       }
       if (!activeSessionId) throw new Error("Unable to start dock session.")
-      const providerId = selectedProvider()?.id
-      const agentId = selectedAgentId() ?? undefined
-      const model = selectedModel().trim() || undefined
-      const sendOptions =
-        providerId || agentId || model
-          ? { providerId, agentId, model }
-          : undefined
+      const sendOptions = sendOptionsState.buildSendOptions()
       await apiClient.sendMessage(activeSessionId!, text, sendOptions)
       setLastAction({ label: "Input", detail: text.slice(0, 80) })
     } catch (err) {
@@ -246,63 +255,6 @@ export default function AgentDock(props: AgentDockProps) {
     }
     navigate({ to: `/sessions/${id}` })
   }
-
-  const providerList = () => providers()?.providers ?? []
-  const agentList = () => agents()?.agents ?? []
-  const selectedProvider = () => {
-    const pid = selectedProviderId()
-    if (!pid) return providerList()[0] ?? null
-    return providerList().find((p) => p.id === pid) ?? providerList()[0] ?? null
-  }
-
-  const selectedAgent = () => {
-    const aid = selectedAgentId()
-    if (!aid) return null
-    return agentList().find((a) => a.id === aid) ?? null
-  }
-
-  const selectedAgentDefaultModel = createMemo(() => {
-    const value = selectedAgent()?.custom?.["model"]
-    return typeof value === "string" ? value : ""
-  })
-
-  const selectedProviderDefaultModel = createMemo(() => {
-    const value = selectedProvider()?.custom?.["model"]
-    return typeof value === "string" ? value : ""
-  })
-
-  const modelOptions = createMemo(() => {
-    const set = new Set<string>()
-    const fromAgent = selectedAgentDefaultModel().trim()
-    if (fromAgent) set.add(fromAgent)
-    const fromProvider = selectedProviderDefaultModel().trim()
-    if (fromProvider) set.add(fromProvider)
-    providerList().forEach((provider) => {
-      const value = provider.custom?.["model"]
-      if (typeof value === "string" && value.trim()) set.add(value.trim())
-    })
-    if (selectedModel().trim()) set.add(selectedModel().trim())
-    return Array.from(set)
-  })
-
-  createEffect(() => {
-    if (selectedAgentId() !== null) return
-    const sessionAgentId = session()?.agent_id
-    if (sessionAgentId) setSelectedAgentId(sessionAgentId)
-  })
-
-  createEffect(() => {
-    if (selectedModel().trim()) return
-    const fromAgent = selectedAgentDefaultModel().trim()
-    if (fromAgent) {
-      setSelectedModel(fromAgent)
-      return
-    }
-    const fromProvider = selectedProviderDefaultModel().trim()
-    if (fromProvider) {
-      setSelectedModel(fromProvider)
-    }
-  })
 
   return (
     <div

@@ -46,6 +46,19 @@ task dev
 
 If you don't have Overmind installed, use `task dev:manual` for manual commands.
 
+## CodeFlow MVP CLI
+
+Run the prototype CLI from the backend module:
+
+```bash
+cd backend
+go run ./cmd/codeflow-mvp scan ./internal/codeflowmvp/testdata
+go run ./cmd/codeflow-mvp findings --format json
+go run ./cmd/codeflow-mvp findings --format markdown
+go run ./cmd/codeflow-mvp query "MATCH (n) RETURN n LIMIT 5"
+go run ./cmd/codeflow-mvp explain-impact ":sample.helper"
+```
+
 ## Interface Views
 
 - Task Tree: `http://localhost:3000/tasks/tree` for hierarchical task status and filtering.

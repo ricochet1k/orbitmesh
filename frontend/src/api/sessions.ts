@@ -189,7 +189,14 @@ export async function sendSessionInput(id: string, input: string): Promise<void>
 export async function sendMessage(
   id: string,
   content: string,
-  options?: { providerId?: string; providerType?: string; agentId?: string; model?: string },
+  options?: {
+    providerId?: string
+    providerType?: string
+    agentId?: string
+    model?: string
+    allowedTools?: string[]
+    disallowedTools?: string[]
+  },
 ): Promise<void> {
   const payload = {
     content,
@@ -197,6 +204,8 @@ export async function sendMessage(
     provider_type: options?.providerType,
     agent_id: options?.agentId,
     model: options?.model,
+    allowed_tools: options?.allowedTools,
+    disallowed_tools: options?.disallowedTools,
   };
   const resp = await fetch(`${BASE_URL}/sessions/${id}/messages`, {
     method: "POST",

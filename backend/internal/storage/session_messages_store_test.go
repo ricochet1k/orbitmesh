@@ -221,6 +221,45 @@ func TestSessionMessagesLogStore_DeltaTargetRewritesMatchingEntry(t *testing.T) 
 	}
 }
 
+func TestSessionMessagesLogStore_GenericDeltaRewritesMatchingKind(t *testing.T) {
+	dir := t.TempDir()
+	store := NewSessionMessagesLogStore(dir)
+	sessionID := "test-session-generic-delta-rewrite"
+	ts := time.Now().UTC()
+
+	first, err := store.Append(sessionID, MessageLogRecord{
+		Timestamp:  ts,
+		Projection: MessageProjectionAppend,
+		Kind:       domain.MessageKindThought,
+		Contents:   "Assessing",
+	})
+	if err != nil {
+		t.Fatalf("append thought: %v", err)
+	}
+
+	_, err = store.Append(sessionID, MessageLogRecord{
+		Timestamp:       ts.Add(time.Second),
+		Projection:      MessageProjectionAppendDelta,
+		Kind:            domain.MessageKindThought,
+		Contents:        " next steps",
+		TargetMessageID: "log_" + strconv.FormatInt(first.Seq, 10),
+	})
+	if err != nil {
+		t.Fatalf("append thought delta: %v", err)
+	}
+
+	records := readLogRecordsFromDisk(t, dir, sessionID)
+	if len(records) != 1 {
+		t.Fatalf("expected a single rewritten thought entry, got %d", len(records))
+	}
+	if records[0].Contents != "Assessing next steps" {
+		t.Fatalf("expected merged thought contents, got %q", records[0].Contents)
+	}
+	if records[0].Projection == MessageProjectionAppendDelta {
+		t.Fatalf("generic delta projection should not be persisted after rewrite")
+	}
+}
+
 func TestSessionMessagesLogStore_LoadNonexistent(t *testing.T) {
 	dir := t.TempDir()
 	store := NewSessionMessagesLogStore(dir)
@@ -429,6 +468,27 @@ func TestRebuildSessionMessages_OutputDeltaTargetNotFoundCreatesNew(t *testing.T
 	}
 	if msgs[0].Contents != "orphan" {
 		t.Errorf("Contents: want %q, got %q", "orphan", msgs[0].Contents)
+	}
+}
+
+func TestRebuildSessionMessages_GenericDeltaMerge(t *testing.T) {
+	ts := time.Now().UTC()
+	records := []MessageLogRecord{
+		{Seq: 1, Timestamp: ts, Projection: MessageProjectionAppend, Kind: domain.MessageKindThought, Contents: "Assessing"},
+		{Seq: 2, Timestamp: ts.Add(time.Second), Projection: MessageProjectionAppendDelta, Kind: domain.MessageKindThought, Contents: " next steps"},
+	}
+
+	sm := RebuildSessionMessages("sess-generic-delta", records)
+
+	msgs := sm.GetMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 merged thought message, got %d: %+v", len(msgs), msgs)
+	}
+	if msgs[0].Kind != domain.MessageKindThought {
+		t.Fatalf("expected thought kind, got %q", msgs[0].Kind)
+	}
+	if msgs[0].Contents != "Assessing next steps" {
+		t.Fatalf("expected merged thought content, got %q", msgs[0].Contents)
 	}
 }
 

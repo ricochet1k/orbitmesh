@@ -2,6 +2,7 @@ package service
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
@@ -22,11 +23,31 @@ func (e *AgentExecutor) DeriveSessionState(id string) (domain.SessionState, erro
 	if err != nil {
 		return domain.SessionStateIdle, err
 	}
-	if latestAttempt != nil && (latestAttempt.WaitKind != "" || latestAttempt.TerminalReason == "interrupted") {
+	if latestAttempt != nil && attemptLooksSuspended(latestAttempt) {
 		return domain.SessionStateSuspended, nil
 	}
 
 	return domain.SessionStateIdle, nil
+}
+
+func attemptLooksSuspended(attempt *storage.RunAttemptMetadata) bool {
+	if attempt == nil {
+		return false
+	}
+	if strings.TrimSpace(attempt.WaitKind) != "" {
+		return true
+	}
+	if strings.TrimSpace(attempt.WaitRef) != "" {
+		return true
+	}
+	if strings.TrimSpace(attempt.ResumeTokenID) != "" {
+		return true
+	}
+	// Legacy fallback for older metadata that may not have wait fields populated.
+	if strings.Contains(strings.ToLower(attempt.InterruptionReason), "waiting for tool") {
+		return true
+	}
+	return false
 }
 
 func (e *AgentExecutor) hasLiveRun(id string) bool {

@@ -10,6 +10,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/gzuidhof/tygo v0.2.21
 	github.com/modelcontextprotocol/go-sdk v1.2.0
+	github.com/odvcencio/gotreesitter v0.6.0
 	github.com/openai/openai-go/v3 v3.22.0
 	github.com/ricochet1k/monty-wasm-go v0.0.0-20260226020500-9b07ce139173
 	github.com/ricochet1k/termemu v0.0.0-20260209182826-78fb158143ff
@@ -48,6 +49,7 @@ require (
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mstrYoda/goraphdb v0.0.0-20260220134623-29cb0f5efd8e // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
@@ -58,7 +60,10 @@ require (
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
+	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
+	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
+	go.etcd.io/bbolt v1.4.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.65.0 // indirect
 	go.opentelemetry.io/otel v1.40.0 // indirect

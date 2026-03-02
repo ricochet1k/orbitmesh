@@ -25,6 +25,7 @@ type MessageProjection string
 const (
 	MessageProjectionAppend      MessageProjection = "append"
 	MessageProjectionAppendRaw   MessageProjection = "append_raw"
+	MessageProjectionAppendDelta MessageProjection = "append_delta"
 	MessageProjectionOutputDelta MessageProjection = "append_output_delta"
 )
 
@@ -119,7 +120,7 @@ func (s *JSONLLogStorage) Append(id string, record MessageLogRecord) (MessageLog
 		return MessageLogRecord{}, err
 	}
 
-	if record.Projection == MessageProjectionOutputDelta {
+	if record.Projection == MessageProjectionOutputDelta || record.Projection == MessageProjectionAppendDelta {
 		merged, handled, err := s.tryApplyDeltaLocked(id, idx, record)
 		if err != nil {
 			return MessageLogRecord{}, err
@@ -334,7 +335,7 @@ func (s *JSONLLogStorage) streamIndexLocked(id string) (*streamIndex, error) {
 }
 
 func (s *JSONLLogStorage) tryApplyDeltaLocked(id string, idx *streamIndex, delta MessageLogRecord) (MessageLogRecord, bool, error) {
-	lineIdx, scannedBackwards := findDeltaTargetLine(idx, delta.TargetMessageID)
+	lineIdx, scannedBackwards := findDeltaTargetLine(idx, delta.TargetMessageID, delta.Kind)
 	if lineIdx < 0 {
 		return MessageLogRecord{}, false, nil
 	}
@@ -422,13 +423,13 @@ func (s *JSONLLogStorage) tryApplyDeltaLocked(id string, idx *streamIndex, delta
 	return merged, true, nil
 }
 
-func findDeltaTargetLine(idx *streamIndex, targetID string) (int, bool) {
+func findDeltaTargetLine(idx *streamIndex, targetID string, kind domain.MessageKind) (int, bool) {
 	if idx == nil || len(idx.lines) == 0 {
 		return -1, false
 	}
 
 	last := len(idx.lines) - 1
-	if rec := idx.lines[last].record; rec != nil && rec.Kind == domain.MessageKindOutput && rec.Projection != MessageProjectionOutputDelta {
+	if rec := idx.lines[last].record; rec != nil && rec.Kind == kind && rec.Projection != MessageProjectionOutputDelta && rec.Projection != MessageProjectionAppendDelta {
 		if targetID == "" || recordMessageID(*rec) == targetID {
 			return last, false
 		}
@@ -436,7 +437,7 @@ func findDeltaTargetLine(idx *streamIndex, targetID string) (int, bool) {
 
 	for i := last - 1; i >= 0; i-- {
 		rec := idx.lines[i].record
-		if rec == nil || rec.Kind != domain.MessageKindOutput || rec.Projection == MessageProjectionOutputDelta {
+		if rec == nil || rec.Kind != kind || rec.Projection == MessageProjectionOutputDelta || rec.Projection == MessageProjectionAppendDelta {
 			continue
 		}
 		if targetID == "" || recordMessageID(*rec) == targetID {

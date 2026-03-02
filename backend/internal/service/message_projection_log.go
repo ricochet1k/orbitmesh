@@ -30,11 +30,23 @@ func (e *AgentExecutor) appendSessionMessageRaw(session *domain.Session, kind do
 }
 
 func (e *AgentExecutor) appendOutputDelta(session *domain.Session, delta string, raw json.RawMessage, at time.Time) {
-	e.appendToMessageLog(session.ID, storage.MessageProjectionOutputDelta, domain.MessageKindOutput, delta, raw, at, "")
+	e.appendMessageDelta(session, domain.MessageKindOutput, "", delta, raw, at)
 }
 
 func (e *AgentExecutor) appendOutputDeltaToMessage(session *domain.Session, messageID string, delta string, raw json.RawMessage, at time.Time) {
-	e.appendToMessageLog(session.ID, storage.MessageProjectionOutputDelta, domain.MessageKindOutput, delta, raw, at, messageID)
+	e.appendMessageDelta(session, domain.MessageKindOutput, messageID, delta, raw, at)
+}
+
+func (e *AgentExecutor) appendThoughtDeltaToMessage(session *domain.Session, messageID string, delta string, raw json.RawMessage, at time.Time) {
+	e.appendMessageDelta(session, domain.MessageKindThought, messageID, delta, raw, at)
+}
+
+func (e *AgentExecutor) appendMessageDelta(session *domain.Session, kind domain.MessageKind, messageID string, delta string, raw json.RawMessage, at time.Time) {
+	projection := storage.MessageProjectionAppendDelta
+	if kind == domain.MessageKindOutput {
+		projection = storage.MessageProjectionOutputDelta
+	}
+	e.appendToMessageLog(session.ID, projection, kind, delta, raw, at, messageID)
 }
 
 func (e *AgentExecutor) appendToMessageLog(sessionID string, projection storage.MessageProjection, kind domain.MessageKind, contents string, raw json.RawMessage, at time.Time, messageID string) {

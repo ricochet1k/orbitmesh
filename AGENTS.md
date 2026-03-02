@@ -83,6 +83,8 @@ When touching lifecycle/drain code, treat these as required expectations:
 
 - Keep `AGENTS.md` current: add clarifications or corrections anytime instructions evolve or additional guidance is needed for future agents.
 - Keep `TESTING.md` aligned with the intended testing strategy and test layout as tooling and practices evolve.
+- Treat persisted session state as advisory; runtime-active state should be derived from live run presence and run-attempt metadata.
+- Error messages returned to users must include actionable root-cause context (what failed and why), not only generic wrappers.
 
 ## Tooling Addendum
 

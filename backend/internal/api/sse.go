@@ -264,7 +264,7 @@ func convertEventData(e domain.Event) any {
 			Output: d.Output,
 		}
 	case domain.ThoughtData:
-		return apiTypes.ThoughtData{Content: d.Content}
+		return apiTypes.ThoughtData{Content: d.Content, IsDelta: d.IsDelta, MessageID: d.MessageID}
 	case domain.UserMessageData:
 		return apiTypes.UserMessageData{Content: d.Content}
 	case domain.SystemMessageData:
@@ -275,6 +275,33 @@ func convertEventData(e domain.Event) any {
 			steps[i] = apiTypes.PlanStep{ID: s.ID, Description: s.Description, Status: s.Status}
 		}
 		return apiTypes.PlanData{Description: d.Description, Steps: steps}
+	case domain.ProgressData:
+		return apiTypes.ProgressData{
+			Channel:  d.Channel,
+			StreamID: d.StreamID,
+			Content:  d.Content,
+			IsDelta:  d.IsDelta,
+			Done:     d.Done,
+			Status:   d.Status,
+		}
+	case domain.ResourceUsageData:
+		return apiTypes.ResourceUsageData{Scope: d.Scope, Data: d.Data}
+	case domain.ActionRequestData:
+		return apiTypes.ActionRequestData{
+			ID:      d.ID,
+			Kind:    d.Kind,
+			Title:   d.Title,
+			Status:  d.Status,
+			Payload: d.Payload,
+		}
+	case domain.ArtifactUpdateData:
+		return apiTypes.ArtifactUpdateData{
+			ID:      d.ID,
+			Kind:    d.Kind,
+			Title:   d.Title,
+			IsDelta: d.IsDelta,
+			Payload: d.Payload,
+		}
 	default:
 		return d
 	}

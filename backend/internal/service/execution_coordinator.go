@@ -15,6 +15,12 @@ import (
 	"github.com/ricochet1k/orbitmesh/internal/toolcall"
 )
 
+const (
+	eventInactivityWarnAfter  = 4 * time.Minute
+	eventInactivityFailAfter  = 9 * time.Minute
+	eventInactivityCheckEvery = 30 * time.Second
+)
+
 func (e *AgentExecutor) handleEvents(ctx context.Context, sc *sessionContext, run *session.Run, events <-chan domain.Event) {
 	defer close(run.EventsDone)
 	defer func() {
@@ -29,8 +35,12 @@ func (e *AgentExecutor) handleEvents(ctx context.Context, sc *sessionContext, ru
 
 	checkpointTicker := time.NewTicker(e.checkpointInterval)
 	defer checkpointTicker.Stop()
+	inactivityTicker := time.NewTicker(eventInactivityCheckEvery)
+	defer inactivityTicker.Stop()
 
 	var checkpointMu sync.Mutex
+	lastEventAt := time.Now()
+	stallWarned := false
 
 	// pendingToolCalls accumulates "running" tool call events within a single
 	// provider turn. Parallel tool calls from one model response arrive as
@@ -42,6 +52,23 @@ func (e *AgentExecutor) handleEvents(ctx context.Context, sc *sessionContext, ru
 		select {
 		case <-ctx.Done():
 			return
+		case <-inactivityTicker.C:
+			idleFor := time.Since(lastEventAt)
+			if !stallWarned && idleFor >= eventInactivityWarnAfter {
+				stallWarned = true
+				e.emitSynthesized(sc.session, domain.NewSystemMessageEvent(sc.session.ID, fmt.Sprintf("No provider activity for %s; still waiting for response", idleFor.Round(time.Second))))
+			}
+			if idleFor >= eventInactivityFailAfter {
+				reason := fmt.Sprintf("provider stalled: no activity for %s", idleFor.Round(time.Second))
+				e.emitSynthesized(sc.session, domain.NewErrorEvent(sc.session.ID, reason, "PROVIDER_STALLED", nil))
+				e.finalizeRunAttempt(sc, "failed", reason)
+				run.SetError(errors.New(reason))
+				if err := run.Session.Kill(); err != nil {
+					log.Printf("failed to kill stalled provider for session %s: %v", sc.session.ID, err)
+				}
+				e.transitionWithSave(sc, domain.SessionStateIdle, reason)
+				return
+			}
 		case <-checkpointTicker.C:
 			if checkpointMu.TryLock() {
 				e.checkpointSession(sc)
@@ -55,6 +82,11 @@ func (e *AgentExecutor) handleEvents(ctx context.Context, sc *sessionContext, ru
 				}
 				return
 			}
+			if stallWarned {
+				e.emitSynthesized(sc.session, domain.NewSystemMessageEvent(sc.session.ID, "Provider activity resumed"))
+				stallWarned = false
+			}
+			lastEventAt = time.Now()
 			e.broadcaster.Broadcast(event)
 			e.updateSessionFromEvent(sc, event, &pendingToolCalls)
 		}

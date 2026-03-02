@@ -3,6 +3,7 @@ package codex
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -389,8 +390,87 @@ func (p *CodexProvider) handleNotification(method string, params json.RawMessage
 			p.events.Emit(domain.NewDeltaOutputEventForMessage(p.sessionID, itemID, text, raw))
 		}
 
+	case "codex/event/agent_reasoning_delta", "codex/event/reasoning_content_delta", "item/reasoning/summaryTextDelta":
+		text, itemID := extractReasoningDelta(method, params)
+		if text != "" {
+			p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
+				Channel:  "reasoning",
+				StreamID: itemID,
+				Content:  text,
+				IsDelta:  true,
+			}, raw))
+		}
+
+	case "codex/event/agent_reasoning":
+		if text := extractAgentReasoningText(params); text != "" {
+			p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
+				Channel: "reasoning",
+				Content: text,
+				Done:    true,
+			}, raw))
+		}
+
+	case "codex/event/exec_command_begin":
+		if call, ok := parseExecCommandBegin(params); ok {
+			p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+				ID:     call.ID,
+				Name:   "command/exec",
+				Status: "running",
+				Title:  call.Title,
+				Input:  call.Input,
+			}, raw))
+		}
+
+	case "codex/event/exec_command_end":
+		if call, ok := parseExecCommandEnd(params); ok {
+			p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+				ID:     call.ID,
+				Name:   "command/exec",
+				Status: "completed",
+				Title:  call.Title,
+				Input:  call.Input,
+				Output: call.Output,
+			}, raw))
+		}
+
+	case "codex/event/exec_command_output_delta":
+		if chunk, callID, ok := parseExecOutputDelta(params); ok {
+			p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
+				Channel:  "tool_output",
+				StreamID: callID,
+				Content:  chunk,
+				IsDelta:  true,
+			}, raw))
+		}
+
+	case "item/commandExecution/outputDelta":
+		if chunk, callID, ok := parseItemCommandOutputDelta(params); ok {
+			p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
+				Channel:  "tool_output",
+				StreamID: callID,
+				Content:  chunk,
+				IsDelta:  true,
+			}, raw))
+		}
+
+	case "codex/event/token_count", "thread/tokenUsage/updated", "account/rateLimits/updated":
+		if usage := parseResourceUsage(method, params); usage != nil {
+			p.events.Emit(domain.NewResourceUsageEvent(p.sessionID, *usage, raw))
+		}
+
+	case "item/fileChange/requestApproval", "codex/event/apply_patch_approval_request":
+		if req, artifact := parseActionRequest(method, params); req != nil {
+			p.events.Emit(domain.NewActionRequestEvent(p.sessionID, *req, raw))
+			if artifact != nil {
+				p.events.Emit(domain.NewArtifactUpdateEvent(p.sessionID, *artifact, raw))
+			}
+		}
+
 	case "item/started", "item/completed":
 		p.handleItemNotification(method, params, raw)
+
+	case "codex/event/item_started", "codex/event/item_completed":
+		p.handleCodexEventItemNotification(method, params, raw)
 
 	case "turn/plan/updated":
 		if plan := parsePlanUpdate(params); plan != nil {
@@ -430,9 +510,10 @@ func (p *CodexProvider) handleItemNotification(method string, params json.RawMes
 
 	itemType := asString(item["type"])
 	itemID := asString(item["id"])
+	normalizedItemType := strings.ToLower(strings.TrimSpace(itemType))
 
-	switch itemType {
-	case "agentMessage":
+	switch normalizedItemType {
+	case "agentmessage":
 		if method != "item/completed" {
 			return
 		}
@@ -457,7 +538,12 @@ func (p *CodexProvider) handleItemNotification(method string, params json.RawMes
 			content = asString(item["summary"])
 		}
 		if content != "" {
-			p.events.Emit(domain.NewThoughtEvent(p.sessionID, content, raw))
+			p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
+				Channel:  "reasoning",
+				StreamID: itemID,
+				Content:  content,
+				Done:     method == "item/completed",
+			}, raw))
 		}
 
 	case "plan":
@@ -471,7 +557,7 @@ func (p *CodexProvider) handleItemNotification(method string, params json.RawMes
 			p.events.Emit(domain.NewPlanEvent(p.sessionID, domain.PlanData{Description: text}, raw))
 		}
 
-	case "commandExecution":
+	case "commandexecution":
 		status := "running"
 		if method == "item/completed" {
 			status = "completed"
@@ -500,6 +586,31 @@ func (p *CodexProvider) handleItemNotification(method string, params json.RawMes
 			"item":  item,
 		}, raw))
 	}
+}
+
+func (p *CodexProvider) handleCodexEventItemNotification(method string, params json.RawMessage, raw json.RawMessage) {
+	phase := "item/started"
+	if method == "codex/event/item_completed" {
+		phase = "item/completed"
+	}
+
+	var payload struct {
+		Msg struct {
+			Item map[string]any `json:"item"`
+		} `json:"msg"`
+	}
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return
+	}
+	if payload.Msg.Item == nil {
+		return
+	}
+
+	wrapped, err := json.Marshal(map[string]any{"item": payload.Msg.Item})
+	if err != nil {
+		return
+	}
+	p.handleItemNotification(phase, wrapped, raw)
 }
 
 func (p *CodexProvider) sendRequest(method string, params any, timeout time.Duration) (json.RawMessage, error) {
@@ -752,6 +863,204 @@ func extractAgentMessageText(item map[string]any) string {
 		}
 	}
 	return ""
+}
+
+func extractReasoningDelta(method string, params json.RawMessage) (text string, itemID string) {
+	var payload map[string]any
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return "", ""
+	}
+
+	if strings.HasPrefix(method, "codex/event/") {
+		if msg, ok := payload["msg"].(map[string]any); ok {
+			if id := asString(msg["item_id"]); id != "" {
+				itemID = id
+			}
+			if d := asString(msg["delta"]); d != "" {
+				return d, itemID
+			}
+		}
+	}
+
+	if id := asString(payload["itemId"]); id != "" {
+		itemID = id
+	}
+	if d := asString(payload["delta"]); d != "" {
+		return d, itemID
+	}
+
+	return "", itemID
+}
+
+func extractAgentReasoningText(params json.RawMessage) string {
+	var payload struct {
+		Msg struct {
+			Text string `json:"text"`
+		} `json:"msg"`
+	}
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.Msg.Text)
+}
+
+type execCommandEvent struct {
+	ID     string
+	Title  string
+	Input  any
+	Output any
+}
+
+func parseExecCommandBegin(params json.RawMessage) (execCommandEvent, bool) {
+	var payload struct {
+		Msg struct {
+			CallID  string   `json:"call_id"`
+			Command []string `json:"command"`
+		} `json:"msg"`
+	}
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return execCommandEvent{}, false
+	}
+	if payload.Msg.CallID == "" {
+		return execCommandEvent{}, false
+	}
+	title := "command"
+	if len(payload.Msg.Command) > 0 {
+		title = strings.Join(payload.Msg.Command, " ")
+	}
+	return execCommandEvent{ID: payload.Msg.CallID, Title: title, Input: payload.Msg.Command}, true
+}
+
+func parseExecCommandEnd(params json.RawMessage) (execCommandEvent, bool) {
+	var payload struct {
+		Msg struct {
+			CallID           string   `json:"call_id"`
+			Command          []string `json:"command"`
+			AggregatedOutput string   `json:"aggregated_output"`
+			ExitCode         *int     `json:"exit_code"`
+			Duration         *struct {
+				Secs  int64 `json:"secs"`
+				Nanos int64 `json:"nanos"`
+			} `json:"duration"`
+		} `json:"msg"`
+	}
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return execCommandEvent{}, false
+	}
+	if payload.Msg.CallID == "" {
+		return execCommandEvent{}, false
+	}
+	title := "command"
+	if len(payload.Msg.Command) > 0 {
+		title = strings.Join(payload.Msg.Command, " ")
+	}
+	out := map[string]any{
+		"aggregated_output": payload.Msg.AggregatedOutput,
+	}
+	if payload.Msg.ExitCode != nil {
+		out["exit_code"] = *payload.Msg.ExitCode
+	}
+	if payload.Msg.Duration != nil {
+		out["duration_secs"] = payload.Msg.Duration.Secs
+		out["duration_nanos"] = payload.Msg.Duration.Nanos
+	}
+	return execCommandEvent{ID: payload.Msg.CallID, Title: title, Input: payload.Msg.Command, Output: out}, true
+}
+
+func parseExecOutputDelta(params json.RawMessage) (chunk string, callID string, ok bool) {
+	var payload struct {
+		Msg struct {
+			CallID string `json:"call_id"`
+			Chunk  string `json:"chunk"`
+		} `json:"msg"`
+	}
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return "", "", false
+	}
+	if payload.Msg.CallID == "" || payload.Msg.Chunk == "" {
+		return "", "", false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(payload.Msg.Chunk)
+	if err != nil {
+		return payload.Msg.Chunk, payload.Msg.CallID, true
+	}
+	return string(decoded), payload.Msg.CallID, true
+}
+
+func parseItemCommandOutputDelta(params json.RawMessage) (chunk string, callID string, ok bool) {
+	var payload struct {
+		Delta  string `json:"delta"`
+		ItemID string `json:"itemId"`
+	}
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return "", "", false
+	}
+	if payload.ItemID == "" || payload.Delta == "" {
+		return "", "", false
+	}
+	return payload.Delta, payload.ItemID, true
+}
+
+func parseResourceUsage(method string, params json.RawMessage) *domain.ResourceUsageData {
+	var value any
+	if err := json.Unmarshal(params, &value); err != nil {
+		return nil
+	}
+	data := &domain.ResourceUsageData{Data: value}
+	switch method {
+	case "codex/event/token_count":
+		data.Scope = "turn"
+	case "thread/tokenUsage/updated":
+		data.Scope = "thread"
+	case "account/rateLimits/updated":
+		data.Scope = "account"
+	default:
+		data.Scope = "provider"
+	}
+	return data
+}
+
+func parseActionRequest(method string, params json.RawMessage) (*domain.ActionRequestData, *domain.ArtifactUpdateData) {
+	var value map[string]any
+	if err := json.Unmarshal(params, &value); err != nil {
+		return nil, nil
+	}
+
+	request := &domain.ActionRequestData{Status: "pending"}
+	artifact := &domain.ArtifactUpdateData{}
+
+	switch method {
+	case "item/fileChange/requestApproval":
+		request.Kind = "approval"
+		request.ID = asString(value["itemId"])
+		request.Title = "File change approval requested"
+		request.Payload = value
+		artifact = nil
+	case "codex/event/apply_patch_approval_request":
+		msg, _ := value["msg"].(map[string]any)
+		request.Kind = "approval"
+		request.ID = asString(msg["call_id"])
+		request.Title = "Patch apply approval requested"
+		request.Payload = msg
+
+		artifact = &domain.ArtifactUpdateData{
+			ID:      asString(msg["call_id"]),
+			Kind:    "file_change",
+			Title:   "Proposed patch",
+			Payload: msg["changes"],
+		}
+	default:
+		request.Kind = "request"
+		request.Payload = value
+	}
+
+	if strings.TrimSpace(request.ID) == "" {
+		request.ID = fmt.Sprintf("action_%d", time.Now().UnixNano())
+	}
+	if strings.TrimSpace(request.Title) == "" {
+		request.Title = "Action required"
+	}
+	return request, artifact
 }
 
 func parsePlanUpdate(params json.RawMessage) *domain.PlanData {

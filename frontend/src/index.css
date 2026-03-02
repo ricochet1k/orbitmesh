@@ -2258,6 +2258,82 @@ tbody tr:hover {
   border-style: dashed;
 }
 
+.transcript-item.transcript-kind-progress {
+  border-color: rgba(217, 119, 6, 0.25);
+  background: rgba(217, 119, 6, 0.08);
+}
+
+.transcript-item.transcript-kind-resource_usage {
+  border-color: rgba(2, 132, 199, 0.24);
+  background: rgba(2, 132, 199, 0.07);
+}
+
+.transcript-item.transcript-kind-action_request {
+  border-color: rgba(220, 38, 38, 0.24);
+  background: rgba(220, 38, 38, 0.08);
+}
+
+.transcript-item.transcript-kind-artifact_update {
+  border-color: rgba(79, 70, 229, 0.24);
+  background: rgba(79, 70, 229, 0.08);
+}
+
+.transcript-rich-card {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.transcript-rich-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.transcript-rich-chip {
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.12rem 0.4rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.1);
+  color: var(--ink-2);
+}
+
+.transcript-rich-chip-done {
+  background: rgba(15, 118, 110, 0.16);
+  color: #0f766e;
+}
+
+.transcript-rich-subtle {
+  font-size: 0.72rem;
+  color: var(--ink-3);
+}
+
+.transcript-rich-card details {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: var(--radius-2);
+  padding: 0.4rem 0.5rem;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.transcript-rich-card summary {
+  cursor: pointer;
+  font-size: 0.72rem;
+  color: var(--ink-3);
+}
+
+.transcript-rich-json {
+  margin: 0.4rem 0 0;
+  max-height: 14rem;
+  overflow: auto;
+  border-radius: var(--radius-2);
+  background: rgba(15, 23, 42, 0.9);
+  color: #dbeafe;
+  padding: 0.5rem;
+  font-size: 0.7rem;
+}
+
 /* Open/final status badge */
 .transcript-status {
   font-size: 0.6rem;

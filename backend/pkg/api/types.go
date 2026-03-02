@@ -41,11 +41,13 @@ type SessionInputRequest struct {
 }
 
 type SendMessageRequest struct {
-	Content      string `json:"content"`
-	ProviderID   string `json:"provider_id,omitempty"`
-	ProviderType string `json:"provider_type,omitempty"`
-	AgentID      string `json:"agent_id,omitempty"`
-	Model        string `json:"model,omitempty"`
+	Content         string   `json:"content"`
+	ProviderID      string   `json:"provider_id,omitempty"`
+	ProviderType    string   `json:"provider_type,omitempty"`
+	AgentID         string   `json:"agent_id,omitempty"`
+	Model           string   `json:"model,omitempty"`
+	AllowedTools    []string `json:"allowed_tools,omitempty"`
+	DisallowedTools []string `json:"disallowed_tools,omitempty"`
 }
 
 type ResumeSessionRequest struct {
@@ -125,18 +127,24 @@ type SessionStatusResponse struct {
 
 type EventType string
 
+// NOTE: Keep these values and payload types aligned with
+// docs/session-event-types.md.
 const (
-	EventTypeStatusChange  EventType = "status_change"
-	EventTypeSessionState  EventType = "session_state"
-	EventTypeOutput        EventType = "output"
-	EventTypeMetric        EventType = "metric"
-	EventTypeError         EventType = "error"
-	EventTypeMetadata      EventType = "metadata"
-	EventTypeToolCall      EventType = "tool_call"
-	EventTypeThought       EventType = "thought"
-	EventTypePlan          EventType = "plan"
-	EventTypeUserMessage   EventType = "user_message"
-	EventTypeSystemMessage EventType = "system_message"
+	EventTypeStatusChange   EventType = "status_change"
+	EventTypeSessionState   EventType = "session_state"
+	EventTypeOutput         EventType = "output"
+	EventTypeMetric         EventType = "metric"
+	EventTypeError          EventType = "error"
+	EventTypeMetadata       EventType = "metadata"
+	EventTypeToolCall       EventType = "tool_call"
+	EventTypeThought        EventType = "thought"
+	EventTypePlan           EventType = "plan"
+	EventTypeUserMessage    EventType = "user_message"
+	EventTypeSystemMessage  EventType = "system_message"
+	EventTypeProgress       EventType = "progress"
+	EventTypeResourceUsage  EventType = "resource_usage"
+	EventTypeActionRequest  EventType = "action_request"
+	EventTypeArtifactUpdate EventType = "artifact_update"
 )
 
 type Event struct {
@@ -203,7 +211,39 @@ type ToolCallData struct {
 }
 
 type ThoughtData struct {
-	Content string `json:"content"`
+	Content   string `json:"content"`
+	IsDelta   bool   `json:"is_delta,omitempty"`
+	MessageID string `json:"message_id,omitempty"`
+}
+
+type ProgressData struct {
+	Channel  string `json:"channel,omitempty"`
+	StreamID string `json:"stream_id,omitempty"`
+	Content  string `json:"content,omitempty"`
+	IsDelta  bool   `json:"is_delta,omitempty"`
+	Done     bool   `json:"done,omitempty"`
+	Status   string `json:"status,omitempty"`
+}
+
+type ResourceUsageData struct {
+	Scope string `json:"scope,omitempty"`
+	Data  any    `json:"data,omitempty"`
+}
+
+type ActionRequestData struct {
+	ID      string `json:"id,omitempty"`
+	Kind    string `json:"kind,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Status  string `json:"status,omitempty"`
+	Payload any    `json:"payload,omitempty"`
+}
+
+type ArtifactUpdateData struct {
+	ID      string `json:"id,omitempty"`
+	Kind    string `json:"kind,omitempty"`
+	Title   string `json:"title,omitempty"`
+	IsDelta bool   `json:"is_delta,omitempty"`
+	Payload any    `json:"payload,omitempty"`
 }
 
 type PlanStep struct {

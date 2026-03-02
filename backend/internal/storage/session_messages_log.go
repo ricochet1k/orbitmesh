@@ -28,37 +28,8 @@ func rebuildMessagesFromExportedRecords(records []MessageLogRecord) []domain.Mes
 	messages := make([]domain.Message, 0, len(records))
 
 	for _, rec := range records {
-		if rec.Projection == MessageProjectionOutputDelta {
-			if rec.TargetMessageID != "" {
-				// Try to merge into the specific target message.
-				merged := false
-				for i := len(messages) - 1; i >= 0; i-- {
-					if messages[i].ID == rec.TargetMessageID {
-						if messages[i].Kind == domain.MessageKindOutput {
-							messages[i].Contents += rec.Contents
-							merged = true
-						}
-						break
-					}
-				}
-				if merged {
-					continue
-				}
-				// Target not found — create a new output message with that ID.
-				messages = append(messages, domain.Message{
-					ID:        rec.TargetMessageID,
-					Kind:      domain.MessageKindOutput,
-					Contents:  rec.Contents,
-					Timestamp: rec.Timestamp,
-					Raw:       rec.Raw,
-				})
-				continue
-			}
-
-			// No target — merge into the last output message or create a new one.
-			n := len(messages)
-			if n > 0 && messages[n-1].Kind == domain.MessageKindOutput {
-				messages[n-1].Contents += rec.Contents
+		if rec.Projection == MessageProjectionOutputDelta || rec.Projection == MessageProjectionAppendDelta {
+			if applyDeltaRecord(&messages, rec) {
 				continue
 			}
 		}
@@ -73,6 +44,41 @@ func rebuildMessagesFromExportedRecords(records []MessageLogRecord) []domain.Mes
 	}
 
 	return messages
+}
+
+func applyDeltaRecord(messages *[]domain.Message, rec MessageLogRecord) bool {
+	targetKind := rec.Kind
+	if rec.Projection == MessageProjectionOutputDelta {
+		targetKind = domain.MessageKindOutput
+	}
+
+	if rec.TargetMessageID != "" {
+		for i := len(*messages) - 1; i >= 0; i-- {
+			if (*messages)[i].ID == rec.TargetMessageID {
+				if (*messages)[i].Kind == targetKind {
+					(*messages)[i].Contents += rec.Contents
+					return true
+				}
+				break
+			}
+		}
+		*messages = append(*messages, domain.Message{
+			ID:        rec.TargetMessageID,
+			Kind:      targetKind,
+			Contents:  rec.Contents,
+			Timestamp: rec.Timestamp,
+			Raw:       rec.Raw,
+		})
+		return true
+	}
+
+	n := len(*messages)
+	if n > 0 && (*messages)[n-1].Kind == targetKind {
+		(*messages)[n-1].Contents += rec.Contents
+		return true
+	}
+
+	return false
 }
 
 func messageIDForRecord(rec MessageLogRecord) string {

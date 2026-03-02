@@ -634,6 +634,26 @@ func TestConvertEventData_AllTypes(t *testing.T) {
 			event: domain.NewUserMessageEvent("s1", "hello"),
 			want:  apiTypes.EventTypeUserMessage,
 		},
+		{
+			name:  "progress",
+			event: domain.NewProgressEvent("s1", domain.ProgressData{Channel: "reasoning", Content: "hi", IsDelta: true}, nil),
+			want:  apiTypes.EventTypeProgress,
+		},
+		{
+			name:  "resource_usage",
+			event: domain.NewResourceUsageEvent("s1", domain.ResourceUsageData{Scope: "thread", Data: map[string]any{"tokens": 10}}, nil),
+			want:  apiTypes.EventTypeResourceUsage,
+		},
+		{
+			name:  "action_request",
+			event: domain.NewActionRequestEvent("s1", domain.ActionRequestData{ID: "a1", Kind: "approval", Title: "Need approval"}, nil),
+			want:  apiTypes.EventTypeActionRequest,
+		},
+		{
+			name:  "artifact_update",
+			event: domain.NewArtifactUpdateEvent("s1", domain.ArtifactUpdateData{ID: "f1", Kind: "file_change", Title: "patch"}, nil),
+			want:  apiTypes.EventTypeArtifactUpdate,
+		},
 	}
 
 	for _, tt := range tests {

@@ -87,4 +87,67 @@ describe("SessionTranscript", () => {
     expect(inspector.textContent).toContain('"id": "m1"')
     expect(inspector.textContent).toContain('"kind": "tool_call"')
   })
+
+  it("renders rich cards for provider-agnostic event kinds", () => {
+    renderTranscript([
+      {
+        id: "progress-1",
+        type: "system",
+        kind: "progress",
+        timestamp: "2026-02-05T12:00:00Z",
+        content: "Assessing next step",
+        payload: {
+          channel: "reasoning",
+          stream_id: "reasoning-1",
+          is_delta: true,
+          done: false,
+        },
+      },
+      {
+        id: "usage-1",
+        type: "system",
+        kind: "resource_usage",
+        timestamp: "2026-02-05T12:00:01Z",
+        content: "usage",
+        payload: {
+          scope: "thread",
+          data: { input_tokens: 100, output_tokens: 20 },
+        },
+      },
+      {
+        id: "action-1",
+        type: "system",
+        kind: "action_request",
+        timestamp: "2026-02-05T12:00:02Z",
+        content: "approval needed",
+        payload: {
+          id: "req_1",
+          kind: "approval",
+          status: "pending",
+          title: "Approve patch",
+          payload: { files: ["a.txt"] },
+        },
+      },
+      {
+        id: "artifact-1",
+        type: "system",
+        kind: "artifact_update",
+        timestamp: "2026-02-05T12:00:03Z",
+        content: "artifact",
+        payload: {
+          id: "art_1",
+          kind: "file_change",
+          title: "Patch preview",
+          payload: { changes: 1 },
+        },
+      },
+    ])
+
+    expect(screen.getByTestId("rich-progress-card")).toBeDefined()
+    expect(screen.getByTestId("rich-resource-usage-card")).toBeDefined()
+    expect(screen.getByTestId("rich-action-request-card")).toBeDefined()
+    expect(screen.getByTestId("rich-artifact-update-card")).toBeDefined()
+    expect(screen.getByText("reasoning")).toBeDefined()
+    expect(screen.getByText("Approve patch")).toBeDefined()
+  })
 })

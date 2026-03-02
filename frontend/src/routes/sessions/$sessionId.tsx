@@ -8,6 +8,7 @@ import { isTestEnv } from '../../utils/env'
 import { TIMEOUTS } from '../../constants/timeouts'
 import { useSessionActions } from '../../hooks/useSessionActions'
 import { useSessionData } from '../../hooks/useSessionData'
+import { useSessionSendOptions } from '../../hooks/useSessionSendOptions'
 import OverflowMenu from '../../components/OverflowMenu'
 import SessionMetrics from '../../components/SessionMetrics'
 import SessionTranscript from '../../components/SessionTranscript'
@@ -46,9 +47,6 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   const [actionNotice, setActionNotice] = createSignal<{ tone: "error" | "success"; message: string } | null>(null)
   const [composerError, setComposerError] = createSignal<string | null>(null)
   const [composerPending, setComposerPending] = createSignal<string | null>(null)
-  const [selectedProviderId, setSelectedProviderId] = createSignal<string | null>(null)
-  const [selectedAgentId, setSelectedAgentId] = createSignal<string | null>(null)
-  const [selectedModel, setSelectedModel] = createSignal<string>("")
   let transcriptRef: HTMLDivElement | undefined
 
   // canInspect: null while permissions are loading, then boolean
@@ -88,50 +86,27 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     streamState() ?? session()?.state ?? "idle"
   )
 
-  // Once the session HTTP refetch resolves, clear the optimistic override so we
-  // track the authoritative state. Use on() with defer so this only runs when
-  // session() actually changes, not on initial render.
-  createEffect(on(session, () => {
+  // Clear optimistic stream state only when switching sessions to avoid UI flicker.
+  createEffect(on(sessionId, () => {
     setStreamState(null)
   }, { defer: true }))
 
   const providerType = () => session()?.provider_type ?? ""
-  const providerList = () => providers()?.providers ?? []
-  const agentList = () => agents()?.agents ?? []
-
-  const selectedProvider = createMemo(() => {
-    const providerId = selectedProviderId()
-    if (!providerId) return providerList()[0] ?? null
-    return providerList().find((provider) => provider.id === providerId) ?? providerList()[0] ?? null
+  const sendOptionsState = useSessionSendOptions({
+    session,
+    providers: () => providers()?.providers ?? [],
+    agents: () => agents()?.agents ?? [],
   })
-
-  const selectedAgent = createMemo(() => {
-    const agentId = selectedAgentId()
-    if (!agentId) return null
-    return agentList().find((agent) => agent.id === agentId) ?? null
-  })
-
-  const selectedAgentDefaultModel = createMemo(() => {
-    const value = selectedAgent()?.custom?.["model"]
-    return typeof value === "string" ? value : ""
-  })
-  const selectedProviderDefaultModel = createMemo(() => {
-    const value = selectedProvider()?.custom?.["model"]
-    return typeof value === "string" ? value : ""
-  })
-  const modelOptions = createMemo(() => {
-    const set = new Set<string>()
-    const fromAgent = selectedAgentDefaultModel().trim()
-    if (fromAgent) set.add(fromAgent)
-    const fromProvider = selectedProviderDefaultModel().trim()
-    if (fromProvider) set.add(fromProvider)
-    providerList().forEach((provider) => {
-      const value = provider.custom?.["model"]
-      if (typeof value === "string" && value.trim()) set.add(value.trim())
-    })
-    if (selectedModel().trim()) set.add(selectedModel().trim())
-    return Array.from(set)
-  })
+  const providerList = sendOptionsState.providerList
+  const agentList = sendOptionsState.agentList
+  const selectedProvider = sendOptionsState.selectedProvider
+  const selectedProviderId = sendOptionsState.selectedProviderId
+  const setSelectedProviderId = sendOptionsState.setSelectedProviderId
+  const selectedAgentId = sendOptionsState.selectedAgentId
+  const setSelectedAgentId = sendOptionsState.setSelectedAgentId
+  const selectedModel = sendOptionsState.selectedModel
+  const setSelectedModel = sendOptionsState.setSelectedModel
+  const modelOptions = sendOptionsState.modelOptions
 
   const canManage = () => permissions()?.can_initiate_bulk_actions ?? false
 
@@ -150,36 +125,6 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     if (!transcriptRef) return
     transcriptRef.scrollTop = transcriptRef.scrollHeight
   }
-
-  // Initialise selectedProviderId from session/provider list.
-  // Runs only once when session or providerList first provides a value;
-  // guarded so user overrides are not clobbered.
-  createEffect(on(
-    () => ({ preferred: session()?.preferred_provider_id, first: providerList()[0]?.id }),
-    ({ preferred, first }) => {
-      if (selectedProviderId() !== null) return
-      if (preferred) { setSelectedProviderId(preferred); return }
-      if (first) setSelectedProviderId(first)
-    },
-  ))
-
-  // Initialise selectedAgentId from session.agent_id.
-  createEffect(on(
-    () => session()?.agent_id,
-    (agentId) => {
-      if (selectedAgentId() !== null) return
-      if (agentId) setSelectedAgentId(agentId)
-    },
-  ))
-
-  // Initialise selectedModel from agent/provider defaults.
-  createEffect(on(
-    () => selectedAgentDefaultModel() || selectedProviderDefaultModel(),
-    (defaultModel) => {
-      if (selectedModel().trim()) return
-      if (defaultModel) setSelectedModel(defaultModel)
-    },
-  ))
 
   // Auto-scroll when messages update.
   createEffect(() => {
@@ -211,13 +156,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     setComposerError(null)
     setComposerPending("send")
     try {
-      const providerId = selectedProvider()?.id
-      const agentId = selectedAgentId() ?? undefined
-      const model = selectedModel().trim() || undefined
-      const sendOptions =
-        providerId || agentId || model
-          ? { providerId, agentId, model }
-          : undefined
+      const sendOptions = sendOptionsState.buildSendOptions()
       await apiClient.sendMessage(sessionId(), text, sendOptions)
     } catch (err) {
       setComposerError(err instanceof Error ? err.message : "Failed to send message")
@@ -352,11 +291,11 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
               <div class="session-viewer-menu-section">
                 <label class="session-viewer-menu-label">Agent</label>
                 <select
-                  class="session-viewer-menu-select"
-                  value={selectedAgentId() ?? ""}
-                  onChange={(e) => setSelectedAgentId(e.currentTarget.value || null)}
-                  disabled={agents.loading || agentList().length === 0}
-                >
+                    class="session-viewer-menu-select"
+                    value={selectedAgentId() ?? ""}
+                    onChange={(e) => setSelectedAgentId(e.currentTarget.value || null)}
+                    disabled={agents.loading || agentList().length === 0}
+                  >
                   <option value="">Session default</option>
                   <For each={agentList()}>
                     {(agent) => <option value={agent.id}>{agent.name}</option>}
@@ -368,11 +307,11 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
               <div class="session-viewer-menu-section">
                 <label class="session-viewer-menu-label">Model</label>
                 <select
-                  class="session-viewer-menu-select"
-                  value={selectedModel()}
-                  onChange={(e) => setSelectedModel(e.currentTarget.value)}
-                  disabled={modelOptions().length === 0}
-                >
+                    class="session-viewer-menu-select"
+                    value={selectedModel()}
+                    onChange={(e) => setSelectedModel(e.currentTarget.value)}
+                    disabled={modelOptions().length === 0}
+                  >
                   <option value="">Session/provider default</option>
                   <For each={modelOptions()}>
                     {(model) => <option value={model}>{model}</option>}

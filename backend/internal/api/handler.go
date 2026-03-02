@@ -398,8 +398,8 @@ func (h *Handler) sendSessionMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var allowedTools []string
-	var disallowedTools []string
+	allowedTools := append([]string(nil), req.AllowedTools...)
+	disallowedTools := append([]string(nil), req.DisallowedTools...)
 
 	if agentID != "" {
 		if h.agentStorage == nil {
@@ -418,8 +418,12 @@ func (h *Handler) sendSessionMessage(w http.ResponseWriter, r *http.Request) {
 			}
 			custom[k] = v
 		}
-		allowedTools = cfg.AllowedTools
-		disallowedTools = cfg.DisallowedTools
+		if len(allowedTools) == 0 {
+			allowedTools = cfg.AllowedTools
+		}
+		if len(disallowedTools) == 0 {
+			disallowedTools = cfg.DisallowedTools
+		}
 	}
 
 	// Explicit per-request model wins over everything.
@@ -444,7 +448,7 @@ func (h *Handler) sendSessionMessage(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "session not found", err.Error())
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to send message", err.Error())
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to send message: %v", err), err.Error())
 		return
 	}
 

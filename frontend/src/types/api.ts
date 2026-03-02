@@ -134,6 +134,38 @@ export interface ToolCallData {
 
 export interface ThoughtData {
   content: string;
+  is_delta?: boolean;
+  message_id?: string;
+}
+
+export interface ProgressData {
+  channel?: string;
+  stream_id?: string;
+  content?: string;
+  is_delta?: boolean;
+  done?: boolean;
+  status?: string;
+}
+
+export interface ResourceUsageData {
+  scope?: string;
+  data?: unknown;
+}
+
+export interface ActionRequestData {
+  id?: string;
+  kind?: string;
+  title?: string;
+  status?: string;
+  payload?: unknown;
+}
+
+export interface ArtifactUpdateData {
+  id?: string;
+  kind?: string;
+  title?: string;
+  is_delta?: boolean;
+  payload?: unknown;
 }
 
 export interface PlanStep {
@@ -163,6 +195,7 @@ export interface SessionStateStreamEvent {
 }
 
 // Discriminated union — exhaustive switch on `.type` is now type-safe.
+// Keep in sync with docs/session-event-types.md.
 export type SSEEvent =
   | { event_id: number; type: "status_change"; timestamp: string; session_id: string; data: StatusChangeData; raw?: unknown }
   | { event_id: number; type: "output";        timestamp: string; session_id: string; data: OutputData; raw?: unknown }
@@ -173,6 +206,10 @@ export type SSEEvent =
   | { event_id: number; type: "thought";        timestamp: string; session_id: string; data: ThoughtData; raw?: unknown }
   | { event_id: number; type: "plan";           timestamp: string; session_id: string; data: PlanData; raw?: unknown }
   | { event_id: number; type: "user_message";   timestamp: string; session_id: string; data: UserMessageData; raw?: unknown }
+  | { event_id: number; type: "progress";       timestamp: string; session_id: string; data: ProgressData; raw?: unknown }
+  | { event_id: number; type: "resource_usage"; timestamp: string; session_id: string; data: ResourceUsageData; raw?: unknown }
+  | { event_id: number; type: "action_request"; timestamp: string; session_id: string; data: ActionRequestData; raw?: unknown }
+  | { event_id: number; type: "artifact_update"; timestamp: string; session_id: string; data: ArtifactUpdateData; raw?: unknown }
 
 export type SSEEventType = SSEEvent["type"]
 
@@ -495,6 +532,8 @@ export interface TranscriptMessage {
   type: TranscriptMessageType;
   timestamp: string;
   content: string;
+  /** Optional structured event payload for rich transcript rendering. */
+  payload?: unknown;
   raw?: unknown;
   /** Activity entry identifier (used in SessionViewer for merge dedup) */
   entryId?: string;

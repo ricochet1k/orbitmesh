@@ -670,6 +670,128 @@ describe("useSessionData", () => {
     expect(byId.get("activity:entry-error")?.type).toBe("error")
   })
 
+  it("streams status_change events into transcript and status callback", async () => {
+    let data: ReturnType<typeof useSessionData> | undefined
+    const onStatusChange = vi.fn()
+
+    createRoot((d) => {
+      dispose = d
+      const [sessionId] = createSignal("session-1")
+      const [canInspect] = createSignal<boolean | null>(false)
+      data = useSessionData({
+        sessionId,
+        canInspect,
+        eventsUrl: () => `/events/session-1`,
+        streamOptions: noPreflightOpts,
+        onStatusChange,
+      })
+    })
+
+    await vi.waitFor(() => expect(mockEventSources.length).toBeGreaterThan(0))
+    const source = mockEventSources[0]
+
+    source.emit("status_change", {
+      type: "status_change",
+      event_id: 10,
+      timestamp: "2026-02-05T12:01:00Z",
+      session_id: "session-1",
+      data: {
+        old_state: "running",
+        new_state: "idle",
+        reason: "Run cancelled by user",
+      },
+    })
+
+    await vi.waitFor(() => {
+      expect(onStatusChange).toHaveBeenCalledWith("idle")
+      expect(data!.messages().some((m) => m.content === "Run cancelled by user")).toBe(true)
+    })
+  })
+
+  it("renders stderr metadata as a plain transcript message", async () => {
+    let data: ReturnType<typeof useSessionData> | undefined
+
+    createRoot((d) => {
+      dispose = d
+      const [sessionId] = createSignal("session-1")
+      const [canInspect] = createSignal<boolean | null>(false)
+      data = useSessionData({
+        sessionId,
+        canInspect,
+        eventsUrl: () => `/events/session-1`,
+        streamOptions: noPreflightOpts,
+      })
+    })
+
+    await vi.waitFor(() => expect(mockEventSources.length).toBeGreaterThan(0))
+    const source = mockEventSources[0]
+
+    source.emit("metadata", {
+      type: "metadata",
+      event_id: 11,
+      timestamp: "2026-02-05T12:01:00Z",
+      session_id: "session-1",
+      data: {
+        key: "stderr",
+        value: { stderr: "websocket: close 1006 (abnormal closure): unexpected EOF" },
+      },
+    })
+
+    await vi.waitFor(() => {
+      expect(data!.messages().some((m) => m.content.includes("stderr: websocket: close 1006"))).toBe(true)
+    })
+  })
+
+  it("merges progress deltas by stream id", async () => {
+    let data: ReturnType<typeof useSessionData> | undefined
+
+    createRoot((d) => {
+      dispose = d
+      const [sessionId] = createSignal("session-1")
+      const [canInspect] = createSignal<boolean | null>(false)
+      data = useSessionData({
+        sessionId,
+        canInspect,
+        eventsUrl: () => `/events/session-1`,
+        streamOptions: noPreflightOpts,
+      })
+    })
+
+    await vi.waitFor(() => expect(mockEventSources.length).toBeGreaterThan(0))
+    const source = mockEventSources[0]
+
+    source.emit("progress", {
+      type: "progress",
+      event_id: 12,
+      timestamp: "2026-02-05T12:01:00Z",
+      session_id: "session-1",
+      data: {
+        channel: "reasoning",
+        stream_id: "reasoning-1",
+        content: "Assessing",
+        is_delta: true,
+      },
+    })
+    source.emit("progress", {
+      type: "progress",
+      event_id: 13,
+      timestamp: "2026-02-05T12:01:01Z",
+      session_id: "session-1",
+      data: {
+        channel: "reasoning",
+        stream_id: "reasoning-1",
+        content: " next steps",
+        is_delta: true,
+      },
+    })
+
+    await vi.waitFor(() => {
+      const progress = data!.messages().find((m) => m.kind === "progress")
+      expect(progress?.content).toBe("Assessing next steps")
+      expect((progress?.payload as { channel?: string } | undefined)?.channel).toBe("reasoning")
+    })
+  })
+
   // ── filter & autoScroll ───────────────────────────────────────────────────
 
   it("filteredMessages reflects the filter term", async () => {

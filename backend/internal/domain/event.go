@@ -7,6 +7,8 @@ import (
 
 type EventType int
 
+// NOTE: Keep this enum and payload shapes aligned with
+// docs/session-event-types.md.
 const (
 	EventTypeStatusChange EventType = iota
 	EventTypeOutput
@@ -18,6 +20,10 @@ const (
 	EventTypePlan          // Agent execution plans
 	EventTypeUserMessage   // User-originated message sent to start a run
 	EventTypeSystemMessage // System-generated message (cancel, resume, etc.)
+	EventTypeProgress      // Provider-agnostic streaming progress updates
+	EventTypeResourceUsage // Usage/rate-limit/resource state updates
+	EventTypeActionRequest // Human action/approval request
+	EventTypeArtifactUpdate
 )
 
 func (t EventType) String() string {
@@ -42,6 +48,14 @@ func (t EventType) String() string {
 		return "user_message"
 	case EventTypeSystemMessage:
 		return "system_message"
+	case EventTypeProgress:
+		return "progress"
+	case EventTypeResourceUsage:
+		return "resource_usage"
+	case EventTypeActionRequest:
+		return "action_request"
+	case EventTypeArtifactUpdate:
+		return "artifact_update"
 	default:
 		return "unknown"
 	}
@@ -103,6 +117,26 @@ func (e Event) Plan() (PlanData, bool) {
 	return d, ok
 }
 
+func (e Event) Progress() (ProgressData, bool) {
+	d, ok := e.Data.(ProgressData)
+	return d, ok
+}
+
+func (e Event) ResourceUsage() (ResourceUsageData, bool) {
+	d, ok := e.Data.(ResourceUsageData)
+	return d, ok
+}
+
+func (e Event) ActionRequest() (ActionRequestData, bool) {
+	d, ok := e.Data.(ActionRequestData)
+	return d, ok
+}
+
+func (e Event) ArtifactUpdate() (ArtifactUpdateData, bool) {
+	d, ok := e.Data.(ArtifactUpdateData)
+	return d, ok
+}
+
 func NewStatusChangeEvent(sessionID string, oldState, newState SessionState, reason string, raw json.RawMessage) Event {
 	return Event{
 		Type:      EventTypeStatusChange,
@@ -153,6 +187,11 @@ type ToolCallData struct {
 
 type ThoughtData struct {
 	Content string
+	// IsDelta indicates this thought chunk should be appended to an existing
+	// thought message instead of creating a standalone message.
+	IsDelta bool
+	// MessageID optionally identifies which thought message this delta belongs to.
+	MessageID string
 }
 
 type PlanData struct {
@@ -164,6 +203,36 @@ type PlanStep struct {
 	ID          string
 	Description string
 	Status      string
+}
+
+type ProgressData struct {
+	Channel  string
+	StreamID string
+	Content  string
+	IsDelta  bool
+	Done     bool
+	Status   string
+}
+
+type ResourceUsageData struct {
+	Scope string
+	Data  any
+}
+
+type ActionRequestData struct {
+	ID      string
+	Kind    string
+	Title   string
+	Status  string
+	Payload any
+}
+
+type ArtifactUpdateData struct {
+	ID      string
+	Kind    string
+	Title   string
+	IsDelta bool
+	Payload any
 }
 
 func NewOutputEvent(sessionID, content string, raw json.RawMessage) Event {
@@ -249,13 +318,74 @@ func NewThoughtEvent(sessionID, content string, raw json.RawMessage) Event {
 		Timestamp: time.Now(),
 		SessionID: sessionID,
 		Raw:       raw,
-		Data:      ThoughtData{Content: content},
+		Data:      ThoughtData{Content: content, IsDelta: false},
+	}
+}
+
+// NewDeltaThoughtEvent creates a thought event marked as a delta.
+func NewDeltaThoughtEvent(sessionID, content string, raw json.RawMessage) Event {
+	return NewDeltaThoughtEventForMessage(sessionID, "", content, raw)
+}
+
+// NewDeltaThoughtEventForMessage creates a thought delta that can optionally
+// target a specific thought message ID.
+func NewDeltaThoughtEventForMessage(sessionID, messageID, content string, raw json.RawMessage) Event {
+	return Event{
+		Type:      EventTypeThought,
+		Timestamp: time.Now(),
+		SessionID: sessionID,
+		Raw:       raw,
+		Data: ThoughtData{
+			Content:   content,
+			IsDelta:   true,
+			MessageID: messageID,
+		},
 	}
 }
 
 func NewPlanEvent(sessionID string, data PlanData, raw json.RawMessage) Event {
 	return Event{
 		Type:      EventTypePlan,
+		Timestamp: time.Now(),
+		SessionID: sessionID,
+		Raw:       raw,
+		Data:      data,
+	}
+}
+
+func NewProgressEvent(sessionID string, data ProgressData, raw json.RawMessage) Event {
+	return Event{
+		Type:      EventTypeProgress,
+		Timestamp: time.Now(),
+		SessionID: sessionID,
+		Raw:       raw,
+		Data:      data,
+	}
+}
+
+func NewResourceUsageEvent(sessionID string, data ResourceUsageData, raw json.RawMessage) Event {
+	return Event{
+		Type:      EventTypeResourceUsage,
+		Timestamp: time.Now(),
+		SessionID: sessionID,
+		Raw:       raw,
+		Data:      data,
+	}
+}
+
+func NewActionRequestEvent(sessionID string, data ActionRequestData, raw json.RawMessage) Event {
+	return Event{
+		Type:      EventTypeActionRequest,
+		Timestamp: time.Now(),
+		SessionID: sessionID,
+		Raw:       raw,
+		Data:      data,
+	}
+}
+
+func NewArtifactUpdateEvent(sessionID string, data ArtifactUpdateData, raw json.RawMessage) Event {
+	return Event{
+		Type:      EventTypeArtifactUpdate,
 		Timestamp: time.Now(),
 		SessionID: sessionID,
 		Raw:       raw,

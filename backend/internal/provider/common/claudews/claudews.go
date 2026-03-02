@@ -334,7 +334,13 @@ func (p *ClaudeWSProvider) handleConnection(conn *wsConn) {
 			if p.ctx.Err() != nil {
 				return // normal shutdown
 			}
-			p.events.Emit(domain.NewErrorEvent(p.sessionID, err.Error(), "WS_READ_ERROR", nil))
+			wrapped := p.withRecentStderr(fmt.Errorf("claudews websocket read failed: %w", err))
+			p.handleFailure(wrapped)
+			p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateRunning, domain.SessionStateIdle, "claudews websocket disconnected", nil))
+			if p.cancel != nil {
+				p.cancel()
+			}
+			p.events.Close()
 			return
 		}
 

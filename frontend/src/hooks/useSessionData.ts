@@ -67,6 +67,7 @@ export interface SessionData {
 // ── Stream event types ────────────────────────────────────────────────────────
 
 const STREAM_EVENT_TYPES = [
+  "status_change",
   "output",
   "metric",
   "error",
@@ -74,6 +75,11 @@ const STREAM_EVENT_TYPES = [
   "thought",
   "tool_call",
   "plan",
+  "user_message",
+  "progress",
+  "resource_usage",
+  "action_request",
+  "artifact_update",
 ] as const
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
@@ -160,6 +166,21 @@ export function useSessionData({
         : `event:${payload.timestamp}:${suffix}`
 
     switch (payload.type) {
+      case "status_change": {
+        const { old_state, new_state, reason } = payload.data
+        onStatusChange?.((new_state as SessionState) ?? "idle")
+        pushMessage({
+          id: stableId("status_change"),
+          type: "system",
+          kind: "status_change",
+          timestamp: payload.timestamp,
+          content: reason
+            ? reason
+            : `Session state changed: ${old_state ?? "unknown"} -> ${new_state ?? "unknown"}`,
+          raw: payload.raw,
+        })
+        break
+      }
       case "output": {
         const { content, is_delta } = payload.data
         if (!content) break
@@ -227,6 +248,22 @@ export function useSessionData({
       }
       case "metadata": {
         const { key, value } = payload.data
+        if (key === "stderr" || key === "provider_stderr") {
+          const line = typeof value === "string"
+            ? value
+            : (value && typeof value === "object" && typeof (value as { stderr?: unknown }).stderr === "string")
+              ? (value as { stderr: string }).stderr
+              : JSON.stringify(value)
+          pushMessage({
+            id: stableId("provider_stderr"),
+            type: "system",
+            kind: "provider_stderr",
+            timestamp: payload.timestamp,
+            content: `stderr: ${line}`,
+            raw: payload.raw,
+          })
+          break
+        }
         pushMessage({
           id: stableId("metadata"),
           type: "system",
@@ -238,13 +275,46 @@ export function useSessionData({
         break
       }
       case "thought": {
+        const thoughtId = payload.data.message_id?.trim() || stableId("thought")
+        if (payload.data.is_delta) {
+          setMessages((prev) => {
+            const idx = prev.findIndex((msg) => msg.id === thoughtId)
+            if (idx >= 0) {
+              const existing = prev[idx]
+              const updated: TranscriptMessage = {
+                ...existing,
+                type: "system",
+                kind: "thought",
+                timestamp: payload.timestamp,
+                content: `${existing.content}${payload.data.content}`,
+                open: true,
+                raw: payload.raw,
+              }
+              return [...prev.slice(0, idx), updated, ...prev.slice(idx + 1)]
+            }
+            return [
+              ...prev,
+              {
+                id: thoughtId,
+                type: "system",
+                kind: "thought",
+                timestamp: payload.timestamp,
+                content: payload.data.content,
+                open: true,
+                raw: payload.raw,
+              },
+            ]
+          })
+          break
+        }
         mergeMessages(
           [{
-            id: stableId("thought"),
+            id: thoughtId,
             type: "system",
             kind: "thought",
             timestamp: payload.timestamp,
             content: payload.data.content,
+            open: false,
             raw: payload.raw,
           }],
           { sort: false },
@@ -330,6 +400,89 @@ export function useSessionData({
           kind: "user",
           timestamp: payload.timestamp,
           content,
+          raw: payload.raw,
+        })
+        break
+      }
+      case "progress": {
+        const streamID = payload.data.stream_id?.trim() || stableId("progress")
+        const channel = payload.data.channel?.trim() || "progress"
+        const content = payload.data.content ?? ""
+        const msgId = `progress:${channel}:${streamID}`
+        if (payload.data.is_delta) {
+          setMessages((prev) => {
+            const idx = prev.findIndex((msg) => msg.id === msgId)
+            if (idx >= 0) {
+              const existing = prev[idx]
+              const updated: TranscriptMessage = {
+                ...existing,
+                timestamp: payload.timestamp,
+                content: `${existing.content}${content}`,
+                open: !payload.data.done,
+                payload: payload.data,
+                raw: payload.raw,
+              }
+              return [...prev.slice(0, idx), updated, ...prev.slice(idx + 1)]
+            }
+            return [...prev, {
+              id: msgId,
+              type: "system",
+              kind: "progress",
+              timestamp: payload.timestamp,
+              content,
+              open: !payload.data.done,
+              payload: payload.data,
+              raw: payload.raw,
+            }]
+          })
+          break
+        }
+        mergeMessages([
+          {
+            id: msgId,
+            type: "system",
+            kind: "progress",
+            timestamp: payload.timestamp,
+            content,
+            open: !payload.data.done,
+            payload: payload.data,
+            raw: payload.raw,
+          },
+        ], { sort: false })
+        break
+      }
+      case "resource_usage": {
+        pushMessage({
+          id: stableId("resource_usage"),
+          type: "system",
+          kind: "resource_usage",
+          timestamp: payload.timestamp,
+          content: `Resource usage${payload.data.scope ? ` (${payload.data.scope})` : ""}: ${JSON.stringify(payload.data.data ?? {})}`,
+          payload: payload.data,
+          raw: payload.raw,
+        })
+        break
+      }
+      case "action_request": {
+        pushMessage({
+          id: stableId("action_request"),
+          type: "system",
+          kind: "action_request",
+          timestamp: payload.timestamp,
+          content: `Action required${payload.data.kind ? ` (${payload.data.kind})` : ""}: ${payload.data.title ?? payload.data.id ?? "request"}`,
+          payload: payload.data,
+          raw: payload.raw,
+        })
+        break
+      }
+      case "artifact_update": {
+        pushMessage({
+          id: stableId("artifact_update"),
+          type: "system",
+          kind: "artifact_update",
+          timestamp: payload.timestamp,
+          content: `Artifact update${payload.data.kind ? ` (${payload.data.kind})` : ""}: ${payload.data.title ?? payload.data.id ?? "artifact"}`,
+          payload: payload.data,
           raw: payload.raw,
         })
         break
@@ -491,7 +644,9 @@ export function useSessionData({
         const stateEvent = message.payload as SessionStateEvent
         if (stateEvent.session_id !== id) return
         onStatusChange?.(stateEvent.derived_state as SessionState)
-        onSessionRefetchNeeded?.()
+        if (stateEvent.derived_state !== "running") {
+          onSessionRefetchNeeded?.()
+        }
       })
       closeStream = () => {
         unsubscribeTopic()
@@ -677,6 +832,7 @@ function toTranscriptFromSessionMessage(message: SessionActivitySnapshot["messag
     kind,
     timestamp: message.timestamp,
     content: message.contents,
+    payload: undefined,
     raw: (message as { raw?: unknown }).raw,
   }
 }
@@ -692,6 +848,7 @@ function toActivityMessage(entry: ActivityEntry): TranscriptMessage {
     type: mapActivityKindToType(kind),
     timestamp: entry.ts,
     content: formatActivityContent(entry),
+    payload: entry.data,
     raw: entry.data?.raw,
   }
 }

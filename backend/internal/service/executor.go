@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -490,7 +491,15 @@ func (e *AgentExecutor) SendMessageWithOptions(ctx context.Context, id string, c
 		sess = sc.session
 	}
 
-	state := sess.GetState()
+	state, deriveErr := e.DeriveSessionState(id)
+	if deriveErr != nil {
+		state = sess.GetState()
+	} else if state == domain.SessionStateIdle && sess.GetState() == domain.SessionStateSuspended {
+		// Respect only live in-memory suspension context; persisted session state is advisory.
+		if sess.GetSuspensionContext() != nil {
+			state = domain.SessionStateSuspended
+		}
+	}
 
 	// Handle based on session state
 	switch state {
@@ -502,17 +511,53 @@ func (e *AgentExecutor) SendMessageWithOptions(ctx context.Context, id string, c
 		return e.startRunWithMessage(ctx, id, sess, content, options)
 
 	case domain.SessionStateRunning:
-		// Session is running - reject with conflict error
-		return sess, fmt.Errorf("cannot send message to running session - session is currently running")
+		return sess, fmt.Errorf("cannot send message to running session: %s", e.describeSessionBlocker(id, domain.SessionStateRunning))
 
 	case domain.SessionStateSuspended:
-		// For suspended sessions, queue the message for delivery after suspension resolves
-		// For now, we'll return an error as queueing requires additional infrastructure
-		return sess, fmt.Errorf("cannot send message to suspended session - session is waiting for a response")
+		return sess, fmt.Errorf("cannot send message to suspended session: %s", e.describeSessionBlocker(id, domain.SessionStateSuspended))
 
 	default:
 		return sess, fmt.Errorf("invalid session state: %v", state)
 	}
+}
+
+func (e *AgentExecutor) describeSessionBlocker(sessionID string, state domain.SessionState) string {
+	e.mu.RLock()
+	sc, ok := e.sessions[sessionID]
+	e.mu.RUnlock()
+
+	parts := make([]string, 0, 4)
+	if ok && sc != nil {
+		if run := sc.getRun(); run != nil {
+			runState := run.GetState().String()
+			if runErr := run.GetError(); runErr != nil {
+				parts = append(parts, fmt.Sprintf("active run state=%s error=%v", runState, runErr))
+			} else {
+				parts = append(parts, fmt.Sprintf("active run state=%s", runState))
+			}
+		}
+	}
+
+	if attempt, err := e.latestPersistedAttempt(sessionID); err == nil && attempt != nil {
+		if attempt.WaitKind != "" {
+			if attempt.WaitRef != "" {
+				parts = append(parts, fmt.Sprintf("waiting on %s (%s)", attempt.WaitKind, attempt.WaitRef))
+			} else {
+				parts = append(parts, fmt.Sprintf("waiting on %s", attempt.WaitKind))
+			}
+		}
+		if attempt.InterruptionReason != "" {
+			parts = append(parts, fmt.Sprintf("interruption=%s", attempt.InterruptionReason))
+		}
+		if attempt.TerminalReason != "" {
+			parts = append(parts, fmt.Sprintf("terminal=%s", attempt.TerminalReason))
+		}
+	}
+
+	if len(parts) == 0 {
+		return state.String()
+	}
+	return strings.Join(parts, "; ")
 }
 
 func (e *AgentExecutor) BeginDrain(ctx context.Context) {

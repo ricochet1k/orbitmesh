@@ -1195,7 +1195,7 @@ func TestSendMessage_RunningSession_Error(t *testing.T) {
 
 	var errResp apiTypes.ErrorResponse
 	_ = json.Unmarshal(w.Body.Bytes(), &errResp)
-	if errResp.Error != "failed to send message" {
+	if !strings.Contains(errResp.Error, "failed to send message:") {
 		t.Errorf("Error = %q", errResp.Error)
 	}
 }

@@ -8,6 +8,10 @@ const STREAM_EVENT_TYPES = [
   "metric",
   "error",
   "metadata",
+  "progress",
+  "resource_usage",
+  "action_request",
+  "artifact_update",
   "activity_entry",
 ] as const
 

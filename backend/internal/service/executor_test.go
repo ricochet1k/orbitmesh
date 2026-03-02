@@ -1784,6 +1784,7 @@ func TestAgentExecutor_SendMessage_SuspendedSession_Error(t *testing.T) {
 	// Create a suspended session
 	suspSess := domain.NewSession("susp-test", "mock", "/tmp/susp")
 	suspSess.State = domain.SessionStateSuspended
+	suspSess.SetSuspensionContext(&session.SuspensionContext{Reason: "waiting for tool result"})
 	_ = store.Save(suspSess)
 
 	// Try to send message to suspended session (should error for now)

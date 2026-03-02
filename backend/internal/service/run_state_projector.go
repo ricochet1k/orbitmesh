@@ -26,7 +26,11 @@ func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.
 			e.appendSessionMessageRaw(sc.session, domain.MessageKindOutput, data.Content, event.Raw, event.Timestamp)
 		}
 	case domain.ThoughtData:
-		e.appendSessionMessageRaw(sc.session, domain.MessageKindThought, data.Content, event.Raw, event.Timestamp)
+		if data.IsDelta {
+			e.appendThoughtDeltaToMessage(sc.session, data.MessageID, data.Content, event.Raw, event.Timestamp)
+		} else {
+			e.appendSessionMessageRaw(sc.session, domain.MessageKindThought, data.Content, event.Raw, event.Timestamp)
+		}
 	case domain.ErrorData:
 		e.appendSessionMessageRaw(sc.session, domain.MessageKindError, data.Message, event.Raw, event.Timestamp)
 	case domain.ToolCallData:
@@ -139,6 +143,22 @@ func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.
 			content = fmt.Sprintf("%s\n%s", data.Description, strings.Join(steps, "\n"))
 		}
 		e.appendSessionMessageRaw(sc.session, domain.MessageKindPlan, content, event.Raw, event.Timestamp)
+	case domain.ProgressData:
+		streamMessageID := ""
+		if id := strings.TrimSpace(data.StreamID); id != "" {
+			streamMessageID = "progress:" + id
+		}
+		if data.IsDelta {
+			e.appendMessageDelta(sc.session, domain.MessageKindSystem, streamMessageID, data.Content, event.Raw, event.Timestamp)
+			break
+		}
+		e.appendSessionMessageRaw(sc.session, domain.MessageKindSystem, formatProgressContent(data), event.Raw, event.Timestamp)
+	case domain.ResourceUsageData:
+		e.appendSessionMessageRaw(sc.session, domain.MessageKindMetric, formatResourceUsageContent(data), event.Raw, event.Timestamp)
+	case domain.ActionRequestData:
+		e.appendSessionMessageRaw(sc.session, domain.MessageKindSystem, formatActionRequestContent(data), event.Raw, event.Timestamp)
+	case domain.ArtifactUpdateData:
+		e.appendSessionMessageRaw(sc.session, domain.MessageKindSystem, formatArtifactUpdateContent(data), event.Raw, event.Timestamp)
 	}
 
 	if e.storage != nil {
@@ -193,4 +213,57 @@ func formatMetadataContent(data domain.MetadataData) string {
 		}
 		return fmt.Sprintf("%s: %s", data.Key, string(b))
 	}
+}
+
+func formatProgressContent(data domain.ProgressData) string {
+	content := strings.TrimSpace(data.Content)
+	channel := strings.TrimSpace(data.Channel)
+	if channel == "" {
+		return content
+	}
+	if content == "" {
+		return fmt.Sprintf("%s update", channel)
+	}
+	return fmt.Sprintf("%s: %s", channel, content)
+}
+
+func formatResourceUsageContent(data domain.ResourceUsageData) string {
+	encoded := "{}"
+	if data.Data != nil {
+		if b, err := json.Marshal(data.Data); err == nil {
+			encoded = string(b)
+		}
+	}
+	if strings.TrimSpace(data.Scope) == "" {
+		return fmt.Sprintf("usage: %s", encoded)
+	}
+	return fmt.Sprintf("usage(%s): %s", data.Scope, encoded)
+}
+
+func formatActionRequestContent(data domain.ActionRequestData) string {
+	title := strings.TrimSpace(data.Title)
+	if title == "" {
+		title = strings.TrimSpace(data.ID)
+	}
+	if title == "" {
+		title = "request"
+	}
+	if strings.TrimSpace(data.Kind) == "" {
+		return fmt.Sprintf("action_request: %s", title)
+	}
+	return fmt.Sprintf("action_request(%s): %s", data.Kind, title)
+}
+
+func formatArtifactUpdateContent(data domain.ArtifactUpdateData) string {
+	title := strings.TrimSpace(data.Title)
+	if title == "" {
+		title = strings.TrimSpace(data.ID)
+	}
+	if title == "" {
+		title = "artifact"
+	}
+	if strings.TrimSpace(data.Kind) == "" {
+		return fmt.Sprintf("artifact_update: %s", title)
+	}
+	return fmt.Sprintf("artifact_update(%s): %s", data.Kind, title)
 }

@@ -148,6 +148,141 @@ func TestHandleItemNotification_CommandExecutionIncludesOutput(t *testing.T) {
 	}
 }
 
+func TestHandleNotification_AgentReasoningDelta_EmitsProgressDelta(t *testing.T) {
+	p := NewCodexProvider("sess_reasoning_delta", Config{})
+	params := json.RawMessage(`{
+	  "conversationId": "thread_1",
+	  "id": "turn_1",
+	  "msg": {
+	    "type": "agent_reasoning_delta",
+	    "delta": "Assessing",
+	    "item_id": "reasoning_1"
+	  }
+	}`)
+
+	p.handleNotification("codex/event/agent_reasoning_delta", params, nil)
+
+	e := <-p.events.Events()
+	if e.Type != domain.EventTypeProgress {
+		t.Fatalf("expected progress event, got %v", e.Type)
+	}
+	progress, ok := e.Progress()
+	if !ok {
+		t.Fatalf("expected progress payload")
+	}
+	if !progress.IsDelta {
+		t.Fatalf("expected progress delta flag")
+	}
+	if progress.StreamID != "reasoning_1" {
+		t.Fatalf("expected stream id reasoning_1, got %q", progress.StreamID)
+	}
+	if progress.Channel != "reasoning" {
+		t.Fatalf("expected reasoning channel, got %q", progress.Channel)
+	}
+	if progress.Content != "Assessing" {
+		t.Fatalf("expected progress content Assessing, got %q", progress.Content)
+	}
+}
+
+func TestHandleNotification_ExecCommandEnd_EmitsToolCallCompleted(t *testing.T) {
+	p := NewCodexProvider("sess_exec_end", Config{})
+	params := json.RawMessage(`{
+	  "conversationId": "thread_1",
+	  "id": "turn_1",
+	  "msg": {
+	    "type": "exec_command_end",
+	    "call_id": "call_123",
+	    "command": ["/bin/zsh", "-lc", "roam understand"],
+	    "aggregated_output": "ok",
+	    "exit_code": 0,
+	    "duration": {"secs": 1, "nanos": 42}
+	  }
+	}`)
+
+	p.handleNotification("codex/event/exec_command_end", params, nil)
+
+	e := <-p.events.Events()
+	if e.Type != domain.EventTypeToolCall {
+		t.Fatalf("expected tool_call event, got %v", e.Type)
+	}
+	tc, ok := e.ToolCall()
+	if !ok {
+		t.Fatalf("expected tool_call payload")
+	}
+	if tc.ID != "call_123" {
+		t.Fatalf("expected call id call_123, got %q", tc.ID)
+	}
+	if tc.Status != "completed" {
+		t.Fatalf("expected completed status, got %q", tc.Status)
+	}
+	out, ok := tc.Output.(map[string]any)
+	if !ok {
+		t.Fatalf("expected output map, got %T", tc.Output)
+	}
+	if out["aggregated_output"] != "ok" {
+		t.Fatalf("expected aggregated_output ok, got %#v", out["aggregated_output"])
+	}
+}
+
+func TestHandleNotification_ExecCommandOutputDelta_EmitsProgress(t *testing.T) {
+	p := NewCodexProvider("sess_exec_delta", Config{})
+	params := json.RawMessage(`{
+	  "conversationId": "thread_1",
+	  "id": "turn_1",
+	  "msg": {
+	    "type": "exec_command_output_delta",
+	    "call_id": "call_abc",
+	    "chunk": "aGVsbG8K"
+	  }
+	}`)
+
+	p.handleNotification("codex/event/exec_command_output_delta", params, nil)
+
+	e := <-p.events.Events()
+	if e.Type != domain.EventTypeProgress {
+		t.Fatalf("expected progress event, got %v", e.Type)
+	}
+	progress, ok := e.Progress()
+	if !ok {
+		t.Fatalf("expected progress payload")
+	}
+	if progress.StreamID != "call_abc" {
+		t.Fatalf("expected stream id call_abc, got %q", progress.StreamID)
+	}
+	if progress.Channel != "tool_output" {
+		t.Fatalf("expected tool_output channel, got %q", progress.Channel)
+	}
+	if progress.Content != "hello\n" {
+		t.Fatalf("expected decoded output hello\\n, got %q", progress.Content)
+	}
+}
+
+func TestHandleNotification_ApplyPatchApproval_EmitsActionAndArtifact(t *testing.T) {
+	p := NewCodexProvider("sess_approval", Config{})
+	params := json.RawMessage(`{
+	  "conversationId": "thread_1",
+	  "id": "turn_1",
+	  "msg": {
+	    "type": "apply_patch_approval_request",
+	    "call_id": "call_patch_1",
+	    "changes": {
+	      "/tmp/file.txt": {"type": "update", "unified_diff": "@@ -1 +1 @@"}
+	    }
+	  }
+	}`)
+
+	p.handleNotification("codex/event/apply_patch_approval_request", params, nil)
+
+	e1 := <-p.events.Events()
+	if e1.Type != domain.EventTypeActionRequest {
+		t.Fatalf("expected first event action_request, got %v", e1.Type)
+	}
+	e2 := <-p.events.Events()
+	if e2.Type != domain.EventTypeArtifactUpdate {
+		t.Fatalf("expected second event artifact_update, got %v", e2.Type)
+	}
+}
+
 func TestProvider_TestConfig_RealCodexInitialize(t *testing.T) {
 	if _, err := exec.LookPath("codex"); err != nil {
 		t.Skip("codex CLI not found")
