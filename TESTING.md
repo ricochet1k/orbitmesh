@@ -25,11 +25,13 @@ It is intentionally forward-looking and describes how tests should be structured
 3) Integration tests (service-level)
 - Purpose: validate backend handlers and service wiring with real dependencies where feasible.
 - Scope: handler/transport + service + storage, using real storage where practical.
+- Include provider conformance harness coverage (`docs/provider-conformance.md`) for provider adapter contracts via offline replay and targeted live probes.
 
 4) End-to-end (E2E) tests
 - Purpose: validate user workflows across frontend and backend with real networking.
 - Scope: minimal critical paths (auth/session lifecycle/task workflow/streaming).
 - Requirements: start backend + frontend, use realistic seed data.
+- Provider conformance checks complement E2E by validating cross-provider event/tool fidelity outside UI workflow coverage.
 
 ## Layout and Conventions
 
@@ -74,6 +76,7 @@ Drain/deferred replay behavior is part of the reliability contract and must stay
   - request/response details or relevant IDs
   - expected vs. actual values
   - captured logs or screenshots where applicable
+- Provider conformance failures should attach harness artifacts (`manifest.json`, `normalized.ndjson`, `raw.ndjson`, `assertions.json`) and use the taxonomy in `docs/provider-conformance.md` for consistent triage.
 
 ## E2E Execution Model
 

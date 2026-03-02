@@ -19,14 +19,6 @@ import (
 	"github.com/ricochet1k/orbitmesh/internal/api"
 	"github.com/ricochet1k/orbitmesh/internal/entity"
 	"github.com/ricochet1k/orbitmesh/internal/mcpws"
-	"github.com/ricochet1k/orbitmesh/internal/provider"
-	"github.com/ricochet1k/orbitmesh/internal/provider/common/acp"
-	"github.com/ricochet1k/orbitmesh/internal/provider/common/claude"
-	"github.com/ricochet1k/orbitmesh/internal/provider/common/claudews"
-	codexProvider "github.com/ricochet1k/orbitmesh/internal/provider/common/codex"
-	openaiProvider "github.com/ricochet1k/orbitmesh/internal/provider/common/openai"
-	"github.com/ricochet1k/orbitmesh/internal/provider/native"
-	ptyProvider "github.com/ricochet1k/orbitmesh/internal/provider/pty"
 	"github.com/ricochet1k/orbitmesh/internal/service"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
@@ -130,6 +122,9 @@ func main() {
 	if maybeRunMCPBridge() {
 		return
 	}
+	if maybeRunProviderCheck() {
+		return
+	}
 
 	if err := tools.RegisterDefaultTools(tools.Global()); err != nil {
 		log.Fatalf("tools register defaults: %v", err)
@@ -146,14 +141,7 @@ func main() {
 	projectStorage := storage.NewProjectStorage(baseDir)
 	mcpConfigStore := storage.NewMCPGatewayConfigStorage(baseDir)
 
-	factory := provider.NewDefaultFactory()
-	factory.Register("adk", native.NewADKProvider())
-	factory.Register("pty", ptyProvider.NewPTYProviderFactory())
-	factory.Register("claude", claude.NewClaudeProvider())
-	factory.Register("claude-ws", claudews.NewClaudeWSProviderFactory())
-	factory.Register("codex", codexProvider.NewProvider(codexProvider.Config{}))
-	factory.Register("acp", acp.NewProvider(acp.Config{}))
-	factory.Register("openai", openaiProvider.NewProvider(openaiProvider.Config{}))
+	factory := buildDefaultProviderFactory()
 
 	broadcaster := service.NewEventBroadcaster(100)
 
