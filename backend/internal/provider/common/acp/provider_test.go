@@ -1,7 +1,10 @@
 package acp
 
 import (
+	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/session"
 )
@@ -52,5 +55,23 @@ func TestCreateSession(t *testing.T) {
 
 	if acpSession.sessionID != "test-session" {
 		t.Errorf("expected session ID 'test-session', got %q", acpSession.sessionID)
+	}
+}
+
+func TestProvider_TestConfig_NonACPCommandFailsInitialize(t *testing.T) {
+	p := NewProvider(Config{
+		Command: "/bin/sh",
+		Args:    []string{"-c", "echo not-acp"},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	err := p.TestConfig(ctx, session.Config{})
+	if err == nil {
+		t.Fatal("expected initialize failure for non-ACP command")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "initialize") {
+		t.Fatalf("expected initialize context in error, got: %v", err)
 	}
 }

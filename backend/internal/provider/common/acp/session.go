@@ -30,8 +30,18 @@ var (
 
 const (
 	acpPromptTimeout = 8 * time.Second
-	acpStartTimeout  = 6 * time.Second
+	acpStartTimeout  = 12 * time.Second
 )
+
+func withACPStartTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, hasDeadline := ctx.Deadline(); hasDeadline {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, acpStartTimeout)
+}
 
 // Session implements session.Session for ACP-compatible agents.
 type Session struct {
@@ -124,15 +134,8 @@ func (s *Session) start(ctx context.Context, config session.Config) error {
 	if s.started {
 		return ErrAlreadyStarted
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	startCtx := ctx
-	if deadline, hasDeadline := ctx.Deadline(); !hasDeadline || time.Until(deadline) > acpStartTimeout {
-		var cancel context.CancelFunc
-		startCtx, cancel = context.WithTimeout(ctx, acpStartTimeout)
-		defer cancel()
-	}
+	startCtx, cancel := withACPStartTimeout(ctx)
+	defer cancel()
 
 	// Update config if provided
 	if config.ProviderType != "" {

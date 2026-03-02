@@ -61,18 +61,19 @@ func (p *Provider) TestConfig(ctx context.Context, config session.Config) error 
 		return fmt.Errorf("acp command not found: %w", err)
 	}
 
-	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	probeCtx, cancel := context.WithTimeout(ctx, acpInitializeTimeout+2*time.Second)
 	defer cancel()
 
-	mgr, err := process.Start(probeCtx, process.Config{
+	pool := newRuntimePool(30 * time.Second)
+	runtime, err := pool.acquire(probeCtx, process.Config{
 		Command:     command,
 		Args:        args,
 		WorkingDir:  workingDir,
 		Environment: environment,
 	})
 	if err != nil {
-		return fmt.Errorf("ACP agent failed to start: %w", err)
+		return fmt.Errorf("ACP agent failed to initialize: %w", err)
 	}
-	_ = mgr.Stop(500 * time.Millisecond)
+	_ = runtime.shutdown()
 	return nil
 }

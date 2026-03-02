@@ -79,6 +79,11 @@ type ClaudeWSProvider struct {
 
 const maxStartupStderrTailBytes = 4096
 
+const (
+	defaultNoResponseTimeout = 12 * time.Second
+	minNoResponseTimeout     = 2 * time.Second
+)
+
 // NewClaudeWSProvider creates a new WebSocket-mode Claude provider.
 // permHandler may be nil (auto-allow all tools).
 func NewClaudeWSProvider(sessionID string, permHandler tools.PermissionHandler) *ClaudeWSProvider {
@@ -821,7 +826,8 @@ func (p *ClaudeWSProvider) processInput() {
 				return
 			}
 
-			wait := time.NewTimer(6 * time.Second)
+			timeout := p.noResponseTimeout()
+			wait := time.NewTimer(timeout)
 			select {
 			case <-p.ctx.Done():
 				if !wait.Stop() {
@@ -833,10 +839,38 @@ func (p *ClaudeWSProvider) processInput() {
 					<-wait.C
 				}
 			case <-wait.C:
-				p.events.Emit(domain.NewErrorEvent(p.sessionID, "no claudews response received within 6s after prompt send", "WS_NO_RESPONSE", nil))
+				p.events.Emit(domain.NewErrorEvent(p.sessionID, fmt.Sprintf("no claudews response received within %s after prompt send", timeout.Round(time.Second)), "WS_NO_RESPONSE", nil))
 			}
 		}
 	}
+}
+
+func (p *ClaudeWSProvider) noResponseTimeout() time.Duration {
+	raw, ok := p.config.Custom["claudews_no_response_timeout_ms"]
+	if !ok {
+		return defaultNoResponseTimeout
+	}
+
+	ms := 0
+	switch v := raw.(type) {
+	case int:
+		ms = v
+	case int32:
+		ms = int(v)
+	case int64:
+		ms = int(v)
+	case float64:
+		ms = int(v)
+	}
+	if ms <= 0 {
+		return defaultNoResponseTimeout
+	}
+
+	timeout := time.Duration(ms) * time.Millisecond
+	if timeout < minNoResponseTimeout {
+		return minNoResponseTimeout
+	}
+	return timeout
 }
 
 // drainStderr reads and emits stderr lines from the subprocess.

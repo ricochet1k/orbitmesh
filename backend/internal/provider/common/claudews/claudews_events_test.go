@@ -148,3 +148,20 @@ func TestSendInput_QueueTimeoutEmitsErrorEvent(t *testing.T) {
 		t.Fatal("expected SendInput failure event")
 	}
 }
+
+func TestNoResponseTimeout_DefaultsAndOverrides(t *testing.T) {
+	p := NewClaudeWSProvider("s1", nil)
+	if got := p.noResponseTimeout(); got != defaultNoResponseTimeout {
+		t.Fatalf("default timeout = %v, want %v", got, defaultNoResponseTimeout)
+	}
+
+	p.config = session.Config{Custom: map[string]any{"claudews_no_response_timeout_ms": 15000}}
+	if got := p.noResponseTimeout(); got != 15*time.Second {
+		t.Fatalf("custom timeout = %v, want 15s", got)
+	}
+
+	p.config = session.Config{Custom: map[string]any{"claudews_no_response_timeout_ms": 500}}
+	if got := p.noResponseTimeout(); got != minNoResponseTimeout {
+		t.Fatalf("minimum timeout clamp = %v, want %v", got, minNoResponseTimeout)
+	}
+}
