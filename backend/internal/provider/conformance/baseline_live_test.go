@@ -119,11 +119,11 @@ func TestBaselineScenarios_LiveIncludesStartupAndRoundtrip(t *testing.T) {
 	t.Parallel()
 
 	scenarios := baselineScenarios(LaneLive)
-	if len(scenarios) != 6 {
-		t.Fatalf("live scenarios len = %d, want 6", len(scenarios))
+	if len(scenarios) != 7 {
+		t.Fatalf("live scenarios len = %d, want 7", len(scenarios))
 	}
-	if scenarios[0].ID != "startup_probe" || scenarios[1].ID != "message_roundtrip" || scenarios[5].ID != "mcp_integration" {
-		t.Fatalf("live scenarios = %+v, want startup_probe + message_roundtrip + mcp_integration", scenarios)
+	if scenarios[0].ID != "startup_probe" || scenarios[1].ID != "message_roundtrip" || scenarios[6].ID != "turn_reentry" {
+		t.Fatalf("live scenarios = %+v, want startup_probe + message_roundtrip + turn_reentry", scenarios)
 	}
 }
 
@@ -145,14 +145,14 @@ func TestBaselineRunner_LiveRunsStartupAndRoundtrip(t *testing.T) {
 	if len(summary.Results) != 1 {
 		t.Fatalf("results len = %d, want 1", len(summary.Results))
 	}
-	if len(summary.Results[0].Scenarios) != 6 {
-		t.Fatalf("scenario len = %d, want 6", len(summary.Results[0].Scenarios))
+	if len(summary.Results[0].Scenarios) != 7 {
+		t.Fatalf("scenario len = %d, want 7", len(summary.Results[0].Scenarios))
 	}
 	if summary.Results[0].Status != ScenarioStatusPartial {
 		t.Fatalf("provider status = %s, want partial", summary.Results[0].Status)
 	}
 	for _, scenario := range summary.Results[0].Scenarios {
-		if scenario.ID == "startup_probe" || scenario.ID == "message_roundtrip" {
+		if scenario.ID == "startup_probe" || scenario.ID == "message_roundtrip" || scenario.ID == "turn_reentry" {
 			if scenario.Status != ScenarioStatusPass {
 				t.Fatalf("scenario %s status = %s, want pass", scenario.ID, scenario.Status)
 			}
@@ -180,7 +180,7 @@ func TestRunLiveMessageRoundtrip_PassesWithoutChannelCloseWhenTurnCompletes(t *t
 	}
 }
 
-func TestRunLiveMessageRoundtrip_PassesWhenExpectedOutputGoesIdle(t *testing.T) {
+func TestRunLiveTurnReentry_FailsWithoutCompletionSignal(t *testing.T) {
 	t.Parallel()
 
 	runner := NewBaselineRunner(liveTesterStub{session: liveSessionIdleOnly{}}, RunOptions{
@@ -191,12 +191,12 @@ func TestRunLiveMessageRoundtrip_PassesWhenExpectedOutputGoesIdle(t *testing.T) 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	result := runner.runLiveMessageRoundtrip(ctx, "claude", session.Config{ProviderType: "claude"})
-	if result.Failure != nil {
-		t.Fatalf("runLiveMessageRoundtrip() failure = %+v, want nil", result.Failure)
+	result := runner.runLiveTurnReentry(ctx, "claude", session.Config{ProviderType: "claude"})
+	if result.Failure == nil {
+		t.Fatal("expected failure when turn completion signal is missing")
 	}
-	if result.RunStatus != RunStatusPassed {
-		t.Fatalf("run status = %s, want passed", result.RunStatus)
+	if result.Failure.Classification != FailureTimeout {
+		t.Fatalf("failure class = %s, want timeout", result.Failure.Classification)
 	}
 }
 
@@ -267,8 +267,8 @@ func TestBaselineRunner_LiveClaudeWSInjectsDiagnosticsPaths(t *testing.T) {
 	if len(tester.testConfigs) != 1 {
 		t.Fatalf("testConfigs len = %d, want 1", len(tester.testConfigs))
 	}
-	if len(tester.createConfigs) != 3 {
-		t.Fatalf("createConfigs len = %d, want 3", len(tester.createConfigs))
+	if len(tester.createConfigs) != 4 {
+		t.Fatalf("createConfigs len = %d, want 4", len(tester.createConfigs))
 	}
 	for _, cfg := range append(tester.testConfigs, tester.createConfigs...) {
 		if enabled, ok := cfg.Custom[claudeWSDiagnosticsEnabledKey].(bool); !ok || !enabled {
@@ -285,7 +285,7 @@ func TestBaselineRunner_LiveClaudeWSInjectsDiagnosticsPaths(t *testing.T) {
 		}
 	}
 
-	if len(summary.Results) != 1 || len(summary.Results[0].Scenarios) != 6 {
+	if len(summary.Results) != 1 || len(summary.Results[0].Scenarios) != 7 {
 		t.Fatalf("unexpected summary shape: %+v", summary.Results)
 	}
 	for _, scenario := range summary.Results[0].Scenarios {

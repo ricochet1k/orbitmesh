@@ -35,6 +35,8 @@ type ClaudeCodeProvider struct {
 	state     *native.ProviderState
 	events    *native.EventAdapter
 	config    session.Config
+	turnSeq   int64
+	turnOpen  int64
 
 	processMgr     *process.Manager
 	inputBuffer    *buffer.InputBuffer
@@ -44,6 +46,7 @@ type ClaudeCodeProvider struct {
 	cancel          context.CancelFunc
 	wg              sync.WaitGroup
 	lastMessageTime time.Time
+	stopReason      string
 
 	started bool
 }
@@ -74,7 +77,62 @@ func (p *ClaudeCodeProvider) SendInput(ctx context.Context, config session.Confi
 	if err := p.inputBuffer.Send(ctx, input); err != nil {
 		return nil, err
 	}
+
+	turnID := p.markTurnStarted()
+	p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateIdle, domain.SessionStateRunning, fmt.Sprintf("turn %d started", turnID), nil))
 	return p.events.Events(), nil
+}
+
+func (p *ClaudeCodeProvider) markTurnStarted() int64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.turnSeq++
+	p.turnOpen++
+	p.stopReason = ""
+	return p.turnSeq
+}
+
+func (p *ClaudeCodeProvider) noteStopReason(reason string) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return
+	}
+	p.mu.Lock()
+	p.stopReason = reason
+	p.mu.Unlock()
+}
+
+func (p *ClaudeCodeProvider) emitTurnCompleted(raw []byte) {
+	p.mu.Lock()
+	if p.turnOpen == 0 {
+		p.mu.Unlock()
+		return
+	}
+	p.turnOpen--
+	turnID := p.turnSeq - p.turnOpen
+	stopReason := p.stopReason
+	p.stopReason = ""
+	p.mu.Unlock()
+
+	payload := map[string]any{"turn": turnID}
+	if stopReason != "" {
+		payload["stop_reason"] = stopReason
+	}
+	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "turn_completed", payload, raw))
+	p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
+		Channel:  "turn_completion",
+		StreamID: fmt.Sprintf("turn-%d", turnID),
+		Done:     true,
+		Status:   "done",
+		Content:  stopReason,
+	}, raw))
+
+	reason := "turn completed"
+	if stopReason != "" {
+		reason = fmt.Sprintf("turn completed: %s", stopReason)
+	}
+	p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateRunning, domain.SessionStateIdle, reason, raw))
 }
 
 // start initializes the Claude process with streaming JSON I/O.
@@ -350,8 +408,12 @@ func (p *ClaudeCodeProvider) emitEvent(event domain.Event) {
 // updateStateFromMessage updates provider state based on Claude message.
 func (p *ClaudeCodeProvider) updateStateFromMessage(msg Message) {
 	switch msg.Type {
+	case MessageTypeMessageDelta:
+		if stopReason, ok := msg.GetString("delta", "stop_reason"); ok {
+			p.noteStopReason(stopReason)
+		}
 	case MessageTypeMessageStop:
-		// Message completed - could transition to a completion state if needed
+		p.emitTurnCompleted(msg.Raw())
 	case MessageTypeError:
 		if errMsg, ok := msg.Data["error"].(map[string]any); ok {
 			if message, ok := errMsg["message"].(string); ok {

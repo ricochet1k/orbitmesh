@@ -331,6 +331,80 @@ func TestNoResponseTimeout_DefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+func TestDispatchMessage_AssistantThinkingEmitsThoughtAndProgress(t *testing.T) {
+	p := NewClaudeWSProvider("s1", nil)
+	p.dispatchMessage([]byte(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"I should verify this first."}]}}`))
+
+	events := drainEvents(p.events.Events())
+	seenThought := false
+	seenProgress := false
+	for _, ev := range events {
+		switch ev.Type {
+		case domain.EventTypeThought:
+			thought, ok := ev.Thought()
+			if ok && strings.Contains(thought.Content, "verify") {
+				seenThought = true
+			}
+		case domain.EventTypeProgress:
+			progress, ok := ev.Progress()
+			if ok && progress.Channel == "reasoning" {
+				seenProgress = true
+			}
+		}
+	}
+
+	if !seenThought {
+		t.Fatal("expected thought event from assistant thinking block")
+	}
+	if !seenProgress {
+		t.Fatal("expected reasoning progress event from assistant thinking block")
+	}
+}
+
+func TestDispatchMessage_ToolLifecycleAndCompletionSingleTurn(t *testing.T) {
+	p := NewClaudeWSProvider("s1", nil)
+	p.turnSeq = 1
+
+	p.dispatchMessage([]byte(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"echo ok"}}]}}`))
+	p.dispatchMessage([]byte(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok","is_error":false}]}}`))
+	p.dispatchMessage([]byte(`{"type":"result","subtype":"success","is_error":false,"result":"ok","duration_ms":1,"duration_api_ms":1,"num_turns":1,"total_cost_usd":0,"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":2}}`))
+
+	events := drainEvents(p.events.Events())
+	seenStarted := false
+	seenCompleted := false
+	seenTurnCompleted := false
+	for _, ev := range events {
+		switch ev.Type {
+		case domain.EventTypeToolCall:
+			data, ok := ev.ToolCall()
+			if !ok || data.ID != "toolu_1" {
+				continue
+			}
+			if data.Status == "started" {
+				seenStarted = true
+			}
+			if data.Status == "completed" {
+				seenCompleted = true
+			}
+		case domain.EventTypeMetadata:
+			metadata, ok := ev.Metadata()
+			if ok && metadata.Key == "turn_completed" {
+				seenTurnCompleted = true
+			}
+		}
+	}
+
+	if !seenStarted {
+		t.Fatal("expected tool_call started event")
+	}
+	if !seenCompleted {
+		t.Fatal("expected tool_call completed event")
+	}
+	if !seenTurnCompleted {
+		t.Fatal("expected turn_completed metadata event")
+	}
+}
+
 func drainEvents(events <-chan domain.Event) []domain.Event {
 	collected := []domain.Event{}
 	for {

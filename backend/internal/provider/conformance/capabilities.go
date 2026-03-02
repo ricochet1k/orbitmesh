@@ -32,6 +32,7 @@ func capabilitiesForProvider(providerType string) ProviderCapabilities {
 		ScenarioRequirements: map[string]ScenarioRequirement{
 			"startup_probe":      RequirementRequired,
 			"message_roundtrip":  RequirementRequired,
+			"turn_reentry":       RequirementRequired,
 			"reasoning_progress": RequirementOptional,
 			"tool_call_flow":     RequirementOptional,
 			"permission_flow":    RequirementOptional,

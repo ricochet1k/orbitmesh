@@ -47,6 +47,7 @@ type ClaudeWSProvider struct {
 	state     *native.ProviderState
 	events    *native.EventAdapter
 	config    session.Config
+	turnSeq   int
 
 	processMgr     *process.Manager
 	inputBuffer    *buffer.InputBuffer
@@ -165,6 +166,8 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) (er
 	p.initReady = make(chan struct{})
 	p.initReadyOnce = sync.Once{}
 	p.inboundSignal = make(chan struct{}, 1)
+	p.claudeSessionID = ""
+	p.turnSeq = 0
 	p.stderrTail = ""
 	p.stderrDone = make(chan error, 1)
 	p.mu.Unlock()
@@ -511,6 +514,8 @@ func (p *ClaudeWSProvider) dispatchMessage(data []byte) {
 		p.handleSystemMsg(rm)
 	case "assistant":
 		p.handleAssistantMsg(rm)
+	case "user":
+		p.handleUserMsg(rm)
 	case "stream_event":
 		p.handleStreamEvent(rm)
 	case "result":
@@ -525,6 +530,10 @@ func (p *ClaudeWSProvider) dispatchMessage(data []byte) {
 		p.handleToolProgress(rm)
 	case "tool_use_summary":
 		p.handleToolUseSummary(rm)
+	case "streamlined_text":
+		p.handleStreamlinedText(rm)
+	case "streamlined_tool_use_summary":
+		p.handleStreamlinedToolUseSummary(rm)
 	case "auth_status":
 		p.handleAuthStatus(rm)
 	case "keep_alive":
@@ -645,7 +654,108 @@ func (p *ClaudeWSProvider) handleAssistantMsg(rm RawMessage) {
 		}
 	}
 
+	if content, ok := inner["content"].([]any); ok {
+		for _, item := range content {
+			block, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+
+			blockType, _ := block["type"].(string)
+			switch blockType {
+			case "tool_use":
+				input := block["input"]
+				id, _ := block["id"].(string)
+				name, _ := block["name"].(string)
+				p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+					ID:     id,
+					Name:   name,
+					Status: "started",
+					Input:  input,
+				}, rm.Raw))
+			case "thinking":
+				thinking, _ := block["thinking"].(string)
+				thinking = strings.TrimSpace(thinking)
+				if thinking == "" {
+					continue
+				}
+				p.events.Emit(domain.NewThoughtEvent(p.sessionID, thinking, rm.Raw))
+				p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
+					Channel:  "reasoning",
+					StreamID: "claudews_reasoning",
+					Content:  thinking,
+					Status:   "running",
+				}, rm.Raw))
+			case "text":
+				text, _ := block["text"].(string)
+				text = strings.TrimSpace(text)
+				if text == "" {
+					continue
+				}
+				p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
+					Channel:  "assistant",
+					StreamID: "claudews_assistant",
+					Content:  text,
+					Status:   "running",
+				}, rm.Raw))
+			}
+		}
+	}
+
 	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "assistant_snapshot", metadata, rm.Raw))
+}
+
+func (p *ClaudeWSProvider) handleUserMsg(rm RawMessage) {
+	var payload map[string]any
+	if err := json.Unmarshal(rm.Raw, &payload); err != nil {
+		return
+	}
+
+	message, ok := payload["message"].(map[string]any)
+	if !ok {
+		return
+	}
+
+	role, _ := message["role"].(string)
+	if role != "user" {
+		return
+	}
+
+	content, ok := message["content"].([]any)
+	if !ok {
+		return
+	}
+
+	emitted := false
+	for _, item := range content {
+		itemMap, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		itemType, _ := itemMap["type"].(string)
+		if itemType != "tool_result" {
+			continue
+		}
+
+		toolUseID, _ := itemMap["tool_use_id"].(string)
+		output, _ := itemMap["content"].(string)
+		isError, _ := itemMap["is_error"].(bool)
+		status := "completed"
+		if isError {
+			status = "failed"
+		}
+
+		p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+			ID:     toolUseID,
+			Status: status,
+			Output: output,
+		}, rm.Raw))
+		emitted = true
+	}
+
+	if emitted {
+		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "tool_result", map[string]any{"role": "user"}, rm.Raw))
+	}
 }
 
 func (p *ClaudeWSProvider) handleStreamEvent(rm RawMessage) {
@@ -732,7 +842,7 @@ func (p *ClaudeWSProvider) dispatchInnerStreamEvent(eventType string, data map[s
 		}
 		if delta, ok := data["delta"].(map[string]any); ok {
 			if reason, ok := delta["stop_reason"].(string); ok {
-				p.events.Emit(domain.NewMetadataEvent(p.sessionID, "stop_reason", map[string]any{"reason": reason}, raw))
+				p.events.Emit(domain.NewMetadataEvent(p.sessionID, "stream_stop_reason", map[string]any{"reason": reason}, raw))
 			}
 		}
 
@@ -765,21 +875,10 @@ func (p *ClaudeWSProvider) handleResultMsg(rm RawMessage) {
 	if msg.StopReason != nil {
 		stopReason = strings.TrimSpace(*msg.StopReason)
 	}
-	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "turn_completed", map[string]any{
-		"subtype":         msg.Subtype,
-		"is_error":        msg.IsError,
-		"num_turns":       msg.NumTurns,
-		"stop_reason":     stopReason,
-		"duration_ms":     msg.DurationMS,
-		"duration_api_ms": msg.DurationAPIMS,
-		"total_cost_usd":  msg.TotalCostUSD,
-		"errors":          msg.Errors,
-	}, rm.Raw))
-	p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
-		Channel: "turn_completion",
-		Done:    true,
-		Content: msg.Subtype,
-	}, rm.Raw))
+
+	p.mu.RLock()
+	turnIndex := p.turnSeq
+	p.mu.RUnlock()
 
 	// Emit final token metrics.
 	if msg.Usage.InputTokens > 0 || msg.Usage.OutputTokens > 0 {
@@ -797,10 +896,40 @@ func (p *ClaudeWSProvider) handleResultMsg(rm RawMessage) {
 	if msg.Result != "" {
 		p.emitEvent(domain.NewOutputEvent(p.sessionID, msg.Result, rm.Raw), rm.Raw)
 	}
+	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "stop_reason", map[string]any{
+		"reason":  stopReason,
+		"present": msg.StopReason != nil,
+	}, rm.Raw))
 
 	if stopReason != "" {
 		p.events.Emit(domain.NewSystemMessageEvent(p.sessionID, fmt.Sprintf("Claude stop reason: %s", stopReason)))
 	}
+
+	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "turn_completed", map[string]any{
+		"turn_index":      turnIndex,
+		"subtype":         msg.Subtype,
+		"is_error":        msg.IsError,
+		"num_turns":       msg.NumTurns,
+		"stop_reason":     stopReason,
+		"duration_ms":     msg.DurationMS,
+		"duration_api_ms": msg.DurationAPIMS,
+		"total_cost_usd":  msg.TotalCostUSD,
+		"errors":          msg.Errors,
+	}, rm.Raw))
+
+	p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
+		Channel:  "turn_completion",
+		StreamID: fmt.Sprintf("turn-%d", turnIndex),
+		Done:     true,
+		Status:   "done",
+		Content:  stopReason,
+	}, rm.Raw))
+
+	reason := "turn completed"
+	if stopReason != "" {
+		reason = fmt.Sprintf("turn completed: %s", stopReason)
+	}
+	p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateRunning, domain.SessionStateIdle, reason, rm.Raw))
 }
 
 func (p *ClaudeWSProvider) handleControlRequest(rm RawMessage) {
@@ -1017,8 +1146,48 @@ func (p *ClaudeWSProvider) handleToolUseSummary(rm RawMessage) {
 		return
 	}
 	if v.Summary != "" {
-		p.events.Emit(domain.NewThoughtEvent(p.sessionID, v.Summary, nil))
+		p.events.Emit(domain.NewThoughtEvent(p.sessionID, v.Summary, rm.Raw))
+		p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
+			Channel:  "reasoning",
+			StreamID: "claudews_reasoning",
+			Content:  v.Summary,
+			Status:   "running",
+		}, rm.Raw))
 	}
+}
+
+func (p *ClaudeWSProvider) handleStreamlinedText(rm RawMessage) {
+	var v struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(rm.Raw, &v); err != nil {
+		return
+	}
+	v.Text = strings.TrimSpace(v.Text)
+	if v.Text == "" {
+		return
+	}
+	p.emitEvent(domain.NewDeltaOutputEvent(p.sessionID, v.Text, rm.Raw), rm.Raw)
+}
+
+func (p *ClaudeWSProvider) handleStreamlinedToolUseSummary(rm RawMessage) {
+	var v struct {
+		ToolSummary string `json:"tool_summary"`
+	}
+	if err := json.Unmarshal(rm.Raw, &v); err != nil {
+		return
+	}
+	v.ToolSummary = strings.TrimSpace(v.ToolSummary)
+	if v.ToolSummary == "" {
+		return
+	}
+	p.events.Emit(domain.NewThoughtEvent(p.sessionID, v.ToolSummary, rm.Raw))
+	p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
+		Channel:  "reasoning",
+		StreamID: "claudews_reasoning",
+		Content:  v.ToolSummary,
+		Status:   "running",
+	}, rm.Raw))
 }
 
 func (p *ClaudeWSProvider) handleAuthStatus(rm RawMessage) {
@@ -1064,6 +1233,12 @@ func (p *ClaudeWSProvider) processInput() {
 		case <-p.ctx.Done():
 			return
 		case input := <-p.inputBuffer.Receive():
+			isFirstTurn := firstUserMessage
+			p.mu.Lock()
+			p.turnSeq++
+			turnIndex := p.turnSeq
+			p.mu.Unlock()
+
 			p.mu.RLock()
 			conn := p.wsConn
 			sid := p.claudeSessionID
@@ -1074,7 +1249,7 @@ func (p *ClaudeWSProvider) processInput() {
 				continue
 			}
 
-			if firstUserMessage {
+			if isFirstTurn {
 				if err := p.sendInitializeIfConfigured(conn); err != nil {
 					wrapped := fmt.Errorf("claudews initialize failed before first user message: %w", err)
 					p.recordLifecycle("lifecycle.initialize.failed", map[string]any{"error": wrapped.Error()})
@@ -1088,10 +1263,35 @@ func (p *ClaudeWSProvider) processInput() {
 				firstUserMessage = false
 			}
 
+			if !isFirstTurn && sid == "" {
+				wait := p.initializeTimeout()
+				select {
+				case <-p.initReady:
+					p.mu.RLock()
+					sid = p.claudeSessionID
+					p.mu.RUnlock()
+				case <-time.After(wait):
+					p.events.Emit(domain.NewMetadataEvent(p.sessionID, "session_id_pending", map[string]any{
+						"note":       "system/init session_id still pending before follow-up prompt",
+						"turn_index": turnIndex,
+					}, nil))
+				case <-p.ctx.Done():
+					return
+				}
+			}
+
+			p.events.Emit(domain.NewMetadataEvent(p.sessionID, "turn_started", map[string]any{
+				"turn_index":       turnIndex,
+				"session_id":       sid,
+				"has_session_id":   sid != "",
+				"input_char_count": len(input),
+			}, nil))
+
 			msg := NewUserMessage(input, sid)
 			if sid == "" {
 				p.events.Emit(domain.NewMetadataEvent(p.sessionID, "session_id_pending", map[string]any{
-					"note": "sending prompt before system/init provided session_id",
+					"note":       "sending prompt before system/init provided session_id",
+					"turn_index": turnIndex,
 				}, nil))
 			}
 			drained := false

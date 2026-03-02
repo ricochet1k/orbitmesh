@@ -163,24 +163,32 @@ func TestWSConn_StartPingDetectsDeadConnection(t *testing.T) {
 	}
 }
 
-func TestHandleResultMsg_EmitsTurnCompletionMetadataAndProgress(t *testing.T) {
+func TestHandleResultMsg_EmitsTurnCompletionMetadataAfterOutput(t *testing.T) {
 	p := NewClaudeWSProvider("s1", nil)
+	p.turnSeq = 2
 	rm := RawMessage{Raw: []byte(`{"type":"result","subtype":"success","is_error":false,"result":"done","duration_ms":12.5,"duration_api_ms":9.1,"num_turns":2,"total_cost_usd":0.01,"stop_reason":"end_turn","usage":{"input_tokens":4,"output_tokens":5}}`)}
 
 	p.handleResultMsg(rm)
 
 	events := p.events.Events()
 	seenCompletion := false
-	seenProgress := false
+	seenOutput := false
+	seenCompletionProgress := false
+	seenIdleStatus := false
 	deadline := time.After(500 * time.Millisecond)
-	for !(seenCompletion && seenProgress) {
+	for !seenCompletion {
 		select {
 		case ev := <-events:
 			switch ev.Type {
+			case domain.EventTypeOutput:
+				seenOutput = true
 			case domain.EventTypeMetadata:
 				meta, ok := ev.Metadata()
 				if !ok || meta.Key != "turn_completed" {
 					continue
+				}
+				if !seenOutput {
+					t.Fatal("expected output event before turn_completed metadata")
 				}
 				payload, _ := meta.Value.(map[string]any)
 				if payload["subtype"] != "success" || payload["is_error"] != false {
@@ -193,17 +201,115 @@ func TestHandleResultMsg_EmitsTurnCompletionMetadataAndProgress(t *testing.T) {
 				if payload["stop_reason"] != "end_turn" {
 					t.Fatalf("expected stop_reason=end_turn, got %+v", payload)
 				}
+				if payload["turn_index"] != 2 {
+					t.Fatalf("expected turn_index=2, got %+v", payload)
+				}
 				seenCompletion = true
 			case domain.EventTypeProgress:
 				progress, ok := ev.Progress()
 				if ok && progress.Done && progress.Channel == "turn_completion" {
-					seenProgress = true
+					seenCompletionProgress = true
+				}
+			case domain.EventTypeStatusChange:
+				status, ok := ev.StatusChange()
+				if ok && status.NewState == domain.SessionStateIdle {
+					seenIdleStatus = true
 				}
 			}
 		case <-deadline:
-			t.Fatalf("timed out waiting for turn completion events (completion=%v progress=%v)", seenCompletion, seenProgress)
+			t.Fatalf("timed out waiting for turn completion metadata (completion=%v output=%v)", seenCompletion, seenOutput)
 		}
 	}
+	for _, ev := range drainEvents(events) {
+		switch ev.Type {
+		case domain.EventTypeProgress:
+			progress, ok := ev.Progress()
+			if ok && progress.Done && progress.Channel == "turn_completion" {
+				seenCompletionProgress = true
+			}
+		case domain.EventTypeStatusChange:
+			status, ok := ev.StatusChange()
+			if ok && status.NewState == domain.SessionStateIdle {
+				seenIdleStatus = true
+			}
+		}
+	}
+	if !seenCompletionProgress {
+		t.Fatal("expected progress done completion marker")
+	}
+	if !seenIdleStatus {
+		t.Fatal("expected running->idle status change on turn completion")
+	}
+}
+
+func TestProcessInput_TwoTurnReentryUsesSessionIDAfterInit(t *testing.T) {
+	wc, outbound, cleanup := newTestWSConn(t)
+	defer cleanup()
+
+	p := NewClaudeWSProvider("s1", nil)
+	p.ctx, p.cancel = context.WithCancel(context.Background())
+	p.wsConn = wc
+	p.inputBuffer = buffer.NewInputBuffer(2)
+	p.config = session.Config{Custom: map[string]any{"claudews_no_response_timeout_ms": 2000}}
+
+	go p.processInput()
+
+	if err := p.inputBuffer.Send(context.Background(), "first"); err != nil {
+		t.Fatalf("queue first input: %v", err)
+	}
+	first := decodeJSONMap(t, <-outbound)
+	if first["type"] != "user" {
+		t.Fatalf("expected first outbound message to be user, got %v", first["type"])
+	}
+	if first["session_id"] != "" {
+		t.Fatalf("expected first turn to send empty session_id, got %+v", first["session_id"])
+	}
+
+	p.dispatchMessage([]byte(`{"type":"system","subtype":"init","session_id":"cli-session-1","cwd":"/tmp","model":"claude","claude_code_version":"1","permissionMode":"default","apiKeySource":"test","tools":[],"mcp_servers":[]}`))
+	p.dispatchMessage([]byte(`{"type":"result","subtype":"success","is_error":false,"result":"ok","duration_ms":1,"duration_api_ms":1,"num_turns":1,"total_cost_usd":0,"usage":{"input_tokens":1,"output_tokens":1}}`))
+
+	if err := p.inputBuffer.Send(context.Background(), "second"); err != nil {
+		t.Fatalf("queue second input: %v", err)
+	}
+	second := decodeJSONMap(t, <-outbound)
+	if second["type"] != "user" {
+		t.Fatalf("expected second outbound message to be user, got %v", second["type"])
+	}
+	if second["session_id"] != "cli-session-1" {
+		t.Fatalf("expected second turn to use initialized session_id, got %+v", second["session_id"])
+	}
+
+	p.dispatchMessage([]byte(`{"type":"result","subtype":"success","is_error":false,"result":"ok","duration_ms":1,"duration_api_ms":1,"num_turns":2,"total_cost_usd":0,"usage":{"input_tokens":1,"output_tokens":1}}`))
+	p.cancel()
+}
+
+func TestProcessInput_FirstTurnDoesNotWaitForInitSessionID(t *testing.T) {
+	wc, outbound, cleanup := newTestWSConn(t)
+	defer cleanup()
+
+	p := NewClaudeWSProvider("s1", nil)
+	p.ctx, p.cancel = context.WithCancel(context.Background())
+	p.wsConn = wc
+	p.inputBuffer = buffer.NewInputBuffer(1)
+	p.config = session.Config{Custom: map[string]any{"claudews_initialize_timeout_ms": 5000}}
+
+	go p.processInput()
+
+	if err := p.inputBuffer.Send(context.Background(), "hello"); err != nil {
+		t.Fatalf("queue input: %v", err)
+	}
+
+	select {
+	case msg := <-outbound:
+		payload := decodeJSONMap(t, msg)
+		if payload["type"] != "user" {
+			t.Fatalf("expected outbound user message, got %v", payload["type"])
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("expected first turn to send promptly without waiting for init")
+	}
+
+	p.cancel()
 }
 
 func decodeJSONMap(t *testing.T, msg []byte) map[string]any {

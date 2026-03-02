@@ -29,6 +29,9 @@ func TestCapabilitiesForProvider_RequirementOverrides(t *testing.T) {
 	if claudeWS.ScenarioRequirements["mcp_integration"] != RequirementUnsupported {
 		t.Fatalf("claude-ws mcp requirement = %s, want unsupported", claudeWS.ScenarioRequirements["mcp_integration"])
 	}
+	if claudeWS.ScenarioRequirements["turn_reentry"] != RequirementRequired {
+		t.Fatalf("claude-ws turn_reentry requirement = %s, want required", claudeWS.ScenarioRequirements["turn_reentry"])
+	}
 
 	openai := capabilitiesForProvider("openai")
 	if openai.ScenarioRequirements["permission_flow"] != RequirementUnsupported {

@@ -18,6 +18,7 @@ const (
 	liveReasoningPrompt = "Think briefly and stream progress, then reply exactly: ok"
 	liveToolPrompt      = "Use one tool once, then reply exactly: ok"
 	liveMCPPrompt       = "Call tool orbitmesh_providercheck_echo with text=ok, then reply exactly: ok"
+	liveReentryPrompt   = "Reply with exactly: ok"
 )
 
 type liveProbeCapture struct {
@@ -32,6 +33,94 @@ type liveProbeCapture struct {
 	MetadataKeys       []string
 	ProgressCount      int
 	ThoughtCount       int
+}
+
+func (r *BaselineRunner) runLiveTurnReentry(ctx context.Context, providerType string, cfg session.Config) liveScenarioResult {
+	start := time.Now()
+	runCtx, cancel := context.WithTimeout(ctx, 2*liveRoundtripTimeout)
+	defer cancel()
+
+	runID := fmt.Sprintf("providercheck-%s-%d", providerType, time.Now().UTC().UnixNano())
+	sess, err := r.tester.CreateSession(providerType, runID, cfg)
+	if err != nil {
+		classification, message, status := classifyLiveProbeError(providerType, cfg, err, runCtx.Err())
+		return liveScenarioResult{
+			Detail:    fmt.Sprintf("turn reentry startup failed: %v", err),
+			Duration:  time.Since(start),
+			Failure:   &FailureReport{Classification: classification, Message: message},
+			RunStatus: status,
+		}
+	}
+	defer func() {
+		_ = stopSessionWithGuard(sess, 2*time.Second)
+	}()
+
+	firstTurn, firstFailure := r.captureSessionTurn(runCtx, providerType, cfg, sess, liveReentryPrompt)
+	if firstFailure != nil {
+		return *firstFailure
+	}
+	if !isTerseOKResponse(firstTurn.Output) && !hasTerminalOKToken(firstTurn.Output) {
+		return liveScenarioResult{
+			Detail:             fmt.Sprintf("turn reentry first turn response mismatch: %q", strings.TrimSpace(firstTurn.Output)),
+			Duration:           time.Since(start),
+			Usage:              firstTurn.Usage,
+			ProviderTranscript: firstTurn.ProviderTranscript,
+			NormalizedEvents:   firstTurn.NormalizedEvents,
+			Failure: &FailureReport{
+				Classification: FailureEventNormalization,
+				Message:        "first turn did not produce terse ok response",
+				Expected:       "ok",
+				Actual:         strings.TrimSpace(firstTurn.Output),
+			},
+			RunStatus: RunStatusFailed,
+		}
+	}
+
+	secondTurn, secondFailure := r.captureSessionTurn(runCtx, providerType, cfg, sess, liveReentryPrompt)
+	if secondFailure != nil {
+		transcript := append(append([]json.RawMessage{}, firstTurn.ProviderTranscript...), secondFailure.ProviderTranscript...)
+		normalized := append(append([]json.RawMessage{}, firstTurn.NormalizedEvents...), secondFailure.NormalizedEvents...)
+		usage := Usage{Tokens: firstTurn.Usage.Tokens + secondFailure.Usage.Tokens, USD: firstTurn.Usage.USD + secondFailure.Usage.USD}
+		secondFailure.ProviderTranscript = transcript
+		secondFailure.NormalizedEvents = normalized
+		secondFailure.Usage = usage
+		if secondFailure.Failure != nil {
+			secondFailure.Failure.Message = joinScenarioDetails("second turn failed after first turn completed", secondFailure.Failure.Message)
+		}
+		return *secondFailure
+	}
+
+	if !isTerseOKResponse(secondTurn.Output) && !hasTerminalOKToken(secondTurn.Output) {
+		transcript := append(append([]json.RawMessage{}, firstTurn.ProviderTranscript...), secondTurn.ProviderTranscript...)
+		normalized := append(append([]json.RawMessage{}, firstTurn.NormalizedEvents...), secondTurn.NormalizedEvents...)
+		usage := Usage{Tokens: firstTurn.Usage.Tokens + secondTurn.Usage.Tokens, USD: firstTurn.Usage.USD + secondTurn.Usage.USD}
+		return liveScenarioResult{
+			Detail:             fmt.Sprintf("turn reentry second turn response mismatch: %q", strings.TrimSpace(secondTurn.Output)),
+			Duration:           time.Since(start),
+			Usage:              usage,
+			ProviderTranscript: transcript,
+			NormalizedEvents:   normalized,
+			Failure: &FailureReport{
+				Classification: FailureEventNormalization,
+				Message:        "second turn did not produce terse ok response",
+				Expected:       "ok",
+				Actual:         strings.TrimSpace(secondTurn.Output),
+			},
+			RunStatus: RunStatusFailed,
+		}
+	}
+
+	transcript := append(append([]json.RawMessage{}, firstTurn.ProviderTranscript...), secondTurn.ProviderTranscript...)
+	normalized := append(append([]json.RawMessage{}, firstTurn.NormalizedEvents...), secondTurn.NormalizedEvents...)
+	usage := Usage{Tokens: firstTurn.Usage.Tokens + secondTurn.Usage.Tokens, USD: firstTurn.Usage.USD + secondTurn.Usage.USD}
+	return liveScenarioResult{
+		Detail:             fmt.Sprintf("turn reentry ok (first=%s second=%s)", firstTurn.CompletionReason, secondTurn.CompletionReason),
+		Duration:           time.Since(start),
+		Usage:              usage,
+		ProviderTranscript: transcript,
+		NormalizedEvents:   normalized,
+		RunStatus:          RunStatusPassed,
+	}
 }
 
 func (r *BaselineRunner) runLiveReasoningProgress(ctx context.Context, providerType string, cfg session.Config) liveScenarioResult {
@@ -349,6 +438,131 @@ func (r *BaselineRunner) captureLiveProbe(ctx context.Context, providerType stri
 			if reason, complete := eventIndicatesTurnComplete(event); complete {
 				completionReason = reason
 				resetIdle()
+			}
+		}
+	}
+}
+
+func (r *BaselineRunner) captureSessionTurn(ctx context.Context, providerType string, cfg session.Config, sess session.Session, prompt string) (liveProbeCapture, *liveScenarioResult) {
+	start := time.Now()
+	type sendInputResult struct {
+		events <-chan domain.Event
+		err    error
+	}
+	resultCh := make(chan sendInputResult, 1)
+	go func() {
+		events, err := sess.SendInput(ctx, cfg, prompt)
+		resultCh <- sendInputResult{events: events, err: err}
+	}()
+
+	var sendResult sendInputResult
+	select {
+	case <-ctx.Done():
+		classification, message, status := classifyLiveProbeError(providerType, cfg, ctx.Err(), ctx.Err())
+		return liveProbeCapture{}, &liveScenarioResult{
+			Detail:    "turn send timed out",
+			Duration:  time.Since(start),
+			Failure:   &FailureReport{Classification: classification, Message: message},
+			RunStatus: status,
+		}
+	case sendResult = <-resultCh:
+	}
+
+	if sendResult.err != nil {
+		classification, message, status := classifyLiveProbeError(providerType, cfg, sendResult.err, ctx.Err())
+		return liveProbeCapture{}, &liveScenarioResult{
+			Detail:    fmt.Sprintf("turn send failed: %v", sendResult.err),
+			Duration:  time.Since(start),
+			Failure:   &FailureReport{Classification: classification, Message: message},
+			RunStatus: status,
+		}
+	}
+
+	probe := liveProbeCapture{
+		ProviderTranscript: make([]json.RawMessage, 0, 16),
+		NormalizedEvents:   make([]json.RawMessage, 0, 16),
+		MetadataKeys:       make([]string, 0, 4),
+	}
+	output := strings.Builder{}
+	metricTotal := int64(0)
+	turnCompleteReason := ""
+
+	for {
+		select {
+		case <-ctx.Done():
+			classification, message, status := classifyLiveProbeError(providerType, cfg, ctx.Err(), ctx.Err())
+			if output.String() != "" {
+				message = joinScenarioDetails(message, "turn emitted output but never completed")
+			}
+			return liveProbeCapture{}, &liveScenarioResult{
+				Detail:             "turn timed out waiting for completion",
+				Duration:           time.Since(start),
+				Usage:              Usage{Tokens: metricTotal},
+				ProviderTranscript: probe.ProviderTranscript,
+				NormalizedEvents:   probe.NormalizedEvents,
+				Failure:            &FailureReport{Classification: classification, Message: message},
+				RunStatus:          status,
+			}
+		case event, ok := <-sendResult.events:
+			if !ok {
+				probe.Output = output.String()
+				probe.Duration = time.Since(start)
+				probe.Usage = Usage{Tokens: metricTotal}
+				if turnCompleteReason == "" {
+					turnCompleteReason = "channel closed"
+				}
+				probe.CompletionReason = turnCompleteReason
+				return probe, nil
+			}
+
+			if event.Type == domain.EventTypeMetric {
+				if metric, ok := event.Metric(); ok {
+					total := metric.TokensIn + metric.TokensOut
+					if total > metricTotal {
+						metricTotal = total
+					}
+				}
+			}
+			if event.Type == domain.EventTypeOutput {
+				if outData, ok := event.Output(); ok {
+					output.WriteString(outData.Content)
+				}
+			}
+			if event.Type == domain.EventTypeMetadata {
+				if metadata, ok := event.Metadata(); ok {
+					probe.MetadataKeys = append(probe.MetadataKeys, strings.ToLower(strings.TrimSpace(metadata.Key)))
+				}
+			}
+			if event.Type == domain.EventTypeError {
+				if errData, ok := event.Error(); ok {
+					classification, message, _ := classifyLiveProbeError(providerType, cfg, errors.New(errData.Message), ctx.Err())
+					return liveProbeCapture{}, &liveScenarioResult{
+						Detail:             fmt.Sprintf("turn error event: %s", errData.Message),
+						Duration:           time.Since(start),
+						Usage:              Usage{Tokens: metricTotal},
+						ProviderTranscript: probe.ProviderTranscript,
+						NormalizedEvents:   probe.NormalizedEvents,
+						Failure:            &FailureReport{Classification: classification, Message: message},
+						RunStatus:          RunStatusFailed,
+					}
+				}
+			}
+
+			normalizedEvent, normalizeErr := normalizeLiveEvent(event)
+			if normalizeErr == nil {
+				probe.NormalizedEvents = append(probe.NormalizedEvents, normalizedEvent)
+			}
+			probe.ProviderTranscript = append(probe.ProviderTranscript, extractProviderFrame(event, normalizedEvent))
+
+			if reason, complete := eventIndicatesTurnComplete(event); complete {
+				turnCompleteReason = reason
+				if isTerseOKResponse(strings.TrimSpace(output.String())) || hasTerminalOKToken(output.String()) {
+					probe.Output = output.String()
+					probe.Duration = time.Since(start)
+					probe.Usage = Usage{Tokens: metricTotal}
+					probe.CompletionReason = turnCompleteReason
+					return probe, nil
+				}
 			}
 		}
 	}

@@ -544,6 +544,8 @@ func (r *BaselineRunner) runLiveScenario(ctx context.Context, providerType strin
 		return r.runLivePermissionFlow(ctx, providerType, cfg)
 	case "mcp_integration":
 		return r.runLiveMCPIntegration(ctx, providerType, cfg)
+	case "turn_reentry":
+		return r.runLiveTurnReentry(ctx, providerType, cfg)
 	default:
 		return liveScenarioResult{
 			Detail:    fmt.Sprintf("unknown live scenario %q", scenarioID),
@@ -1142,6 +1144,7 @@ func baselineScenarios(lane Lane) []Scenario {
 			{ID: "tool_call_flow", Name: "tool call flow", Kind: "live"},
 			{ID: "permission_flow", Name: "permission flow", Kind: "live"},
 			{ID: "mcp_integration", Name: "mcp integration", Kind: "live"},
+			{ID: "turn_reentry", Name: "turn reentry", Kind: "live"},
 		}
 	}
 	return []Scenario{

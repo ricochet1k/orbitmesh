@@ -89,7 +89,32 @@ func (e *AgentExecutor) handleEvents(ctx context.Context, sc *sessionContext, ru
 			lastEventAt = time.Now()
 			e.broadcaster.Broadcast(event)
 			e.updateSessionFromEvent(sc, event, &pendingToolCalls)
+			if isTurnCompletionEvent(event) {
+				if len(pendingToolCalls) > 0 {
+					e.flushPendingToolCalls(ctx, sc, pendingToolCalls)
+				}
+				return
+			}
 		}
+	}
+}
+
+func isTurnCompletionEvent(event domain.Event) bool {
+	switch event.Type {
+	case domain.EventTypeMetadata:
+		data, ok := event.Metadata()
+		return ok && data.Key == "turn_completed"
+	case domain.EventTypeProgress:
+		data, ok := event.Progress()
+		if !ok {
+			return false
+		}
+		if !data.Done {
+			return false
+		}
+		return data.Channel == "turn_completion"
+	default:
+		return false
 	}
 }
 

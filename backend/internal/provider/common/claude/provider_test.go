@@ -3,6 +3,7 @@ package claude
 import (
 	"context"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,83 @@ import (
 	"github.com/ricochet1k/orbitmesh/internal/domain"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 )
+
+func readEventWithTimeout(t *testing.T, events <-chan domain.Event) domain.Event {
+	t.Helper()
+
+	select {
+	case event := <-events:
+		return event
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for provider event")
+	}
+
+	return domain.Event{}
+}
+
+func expectStatusReasonContains(t *testing.T, event domain.Event, needle string) {
+	t.Helper()
+
+	if event.Type != domain.EventTypeStatusChange {
+		t.Fatalf("event type = %v, want status_change", event.Type)
+	}
+	status, ok := event.StatusChange()
+	if !ok {
+		t.Fatal("expected status_change payload")
+	}
+	if !strings.Contains(status.Reason, needle) {
+		t.Fatalf("status reason = %q, want substring %q", status.Reason, needle)
+	}
+}
+
+func expectTurnCompletedEvent(t *testing.T, event domain.Event, turn int64, stopReason string) {
+	t.Helper()
+
+	if event.Type != domain.EventTypeMetadata {
+		t.Fatalf("event type = %v, want metadata", event.Type)
+	}
+	meta, ok := event.Metadata()
+	if !ok {
+		t.Fatal("expected metadata payload")
+	}
+	if meta.Key != "turn_completed" {
+		t.Fatalf("metadata key = %q, want turn_completed", meta.Key)
+	}
+	payload, ok := meta.Value.(map[string]any)
+	if !ok {
+		t.Fatalf("metadata payload type = %T, want map", meta.Value)
+	}
+	gotTurn, ok := payload["turn"].(int64)
+	if !ok || gotTurn != turn {
+		t.Fatalf("turn_completed turn = %v, want %d", payload["turn"], turn)
+	}
+	if stopReason != "" {
+		if payload["stop_reason"] != stopReason {
+			t.Fatalf("turn_completed stop_reason = %v, want %q", payload["stop_reason"], stopReason)
+		}
+	}
+}
+
+func expectDoneProgressEvent(t *testing.T, event domain.Event, turn int64) {
+	t.Helper()
+
+	if event.Type != domain.EventTypeProgress {
+		t.Fatalf("event type = %v, want progress", event.Type)
+	}
+	progress, ok := event.Progress()
+	if !ok {
+		t.Fatal("expected progress payload")
+	}
+	if !progress.Done {
+		t.Fatal("expected progress done=true")
+	}
+	if progress.Channel != "turn_completion" {
+		t.Fatalf("progress channel = %q, want turn_completion", progress.Channel)
+	}
+	if progress.StreamID != "turn-"+strconv.FormatInt(turn, 10) {
+		t.Fatalf("progress stream_id = %q, want turn-%d", progress.StreamID, turn)
+	}
+}
 
 func TestProvider_TestConfig_RealClaudeInitialize(t *testing.T) {
 	command := resolveClaudeCommand(session.Config{})
@@ -250,4 +328,41 @@ func TestClaudeCodeProvider_HandleFailure(t *testing.T) {
 	if status.Error == nil {
 		t.Error("After failure: error should be set")
 	}
+}
+
+func TestClaudeCodeProvider_TurnCompletionSignalsAcrossTwoTurns(t *testing.T) {
+	provider := NewClaudeCodeProvider("test-session")
+	provider.started = true
+	events := provider.events.Events()
+
+	if _, err := provider.SendInput(context.Background(), session.Config{}, "first"); err != nil {
+		t.Fatalf("first SendInput() error = %v", err)
+	}
+	start1 := readEventWithTimeout(t, events)
+	expectStatusReasonContains(t, start1, "turn 1 started")
+
+	provider.updateStateFromMessage(Message{Type: MessageTypeMessageDelta, Data: map[string]any{"delta": map[string]any{"stop_reason": "end_turn"}}})
+	provider.updateStateFromMessage(Message{Type: MessageTypeMessageStop})
+
+	turn1Meta := readEventWithTimeout(t, events)
+	expectTurnCompletedEvent(t, turn1Meta, 1, "end_turn")
+	turn1Progress := readEventWithTimeout(t, events)
+	expectDoneProgressEvent(t, turn1Progress, 1)
+	turn1Idle := readEventWithTimeout(t, events)
+	expectStatusReasonContains(t, turn1Idle, "turn completed")
+
+	if _, err := provider.SendInput(context.Background(), session.Config{}, "second"); err != nil {
+		t.Fatalf("second SendInput() error = %v", err)
+	}
+	start2 := readEventWithTimeout(t, events)
+	expectStatusReasonContains(t, start2, "turn 2 started")
+
+	provider.updateStateFromMessage(Message{Type: MessageTypeMessageStop})
+
+	turn2Meta := readEventWithTimeout(t, events)
+	expectTurnCompletedEvent(t, turn2Meta, 2, "")
+	turn2Progress := readEventWithTimeout(t, events)
+	expectDoneProgressEvent(t, turn2Progress, 2)
+	turn2Idle := readEventWithTimeout(t, events)
+	expectStatusReasonContains(t, turn2Idle, "turn completed")
 }

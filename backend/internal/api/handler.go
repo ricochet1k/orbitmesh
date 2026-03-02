@@ -609,16 +609,19 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 			config.Custom = map[string]any{}
 		}
 		config.Custom["mcp_config"] = dockMCPConfig(id)
-	} else if len(req.MCPServers) > 0 {
-		config.MCPServers = make([]session.MCPServerConfig, len(req.MCPServers))
-		for i, s := range req.MCPServers {
-			config.MCPServers[i] = session.MCPServerConfig{
-				Name:    s.Name,
-				Command: s.Command,
-				Args:    s.Args,
-				Env:     s.Env,
+	} else {
+		if len(req.MCPServers) > 0 {
+			config.MCPServers = make([]session.MCPServerConfig, len(req.MCPServers))
+			for i, s := range req.MCPServers {
+				config.MCPServers[i] = session.MCPServerConfig{
+					Name:    s.Name,
+					Command: s.Command,
+					Args:    s.Args,
+					Env:     s.Env,
+				}
 			}
 		}
+		injectOrbitmeshMCP(id, &config)
 	}
 
 	session, err := h.executor.CreateSession(r.Context(), id, config)
@@ -904,6 +907,60 @@ func dockMCPConfig(sessionID string) map[string]any {
 				"args":    []string{"mcp-bridge", "--session-id", sessionID},
 			},
 		},
+	}
+}
+
+// injectOrbitmeshMCP appends the built-in OrbitMesh MCP server to config so that
+// all non-dock sessions have access to OrbitMesh tools. It is idempotent: if a
+// server named "orbitmesh" is already present it does nothing.
+//
+// In addition to MCPServers (consumed by ADK and similar SDK-based providers) it
+// also merges the entry into Custom["mcp_config"] for claude/claude-ws providers
+// that build --mcp-config CLI arguments from that key.
+func injectOrbitmeshMCP(sessionID string, config *session.Config) {
+	for _, srv := range config.MCPServers {
+		if srv.Name == "orbitmesh" {
+			return
+		}
+	}
+	config.MCPServers = append(config.MCPServers, session.MCPServerConfig{
+		Name:    "orbitmesh",
+		Command: "orbitmesh",
+		Args:    []string{"mcp-bridge", "--session-id", sessionID},
+	})
+	if config.Custom == nil {
+		config.Custom = map[string]any{}
+	}
+	config.Custom["mcp_config"] = mergeOrbitmeshMCPConfig(sessionID, config.Custom["mcp_config"])
+}
+
+// mergeOrbitmeshMCPConfig returns an updated mcp_config value that includes the
+// orbitmesh server entry. It understands the map[string]any form used by
+// dockMCPConfig and the []any / string forms that agents or users may supply.
+func mergeOrbitmeshMCPConfig(sessionID string, existing any) any {
+	entry := map[string]any{
+		"command": "orbitmesh",
+		"args":    []string{"mcp-bridge", "--session-id", sessionID},
+	}
+	switch v := existing.(type) {
+	case nil:
+		return map[string]any{
+			"mcpServers": map[string]any{"orbitmesh": entry},
+		}
+	case map[string]any:
+		servers, _ := v["mcpServers"].(map[string]any)
+		if servers == nil {
+			servers = map[string]any{}
+		}
+		servers["orbitmesh"] = entry
+		v["mcpServers"] = servers
+		return v
+	default:
+		// Existing value is a JSON string, file path, or list form — append a
+		// new map entry so parseMCPConfig receives both configs.
+		return []any{existing, map[string]any{
+			"mcpServers": map[string]any{"orbitmesh": entry},
+		}}
 	}
 }
 

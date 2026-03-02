@@ -1776,6 +1776,58 @@ func TestAgentExecutor_SendMessage_IdleSession_OK(t *testing.T) {
 	}
 }
 
+func TestAgentExecutor_SendMessage_TransitionsToIdleAfterTurnCompletion(t *testing.T) {
+	prov := newMockProvider()
+	executor, _ := createTestExecutor(prov)
+	defer executor.Shutdown(context.Background())
+
+	config := session.Config{
+		ProviderType: "mock",
+		WorkingDir:   "/tmp/test",
+	}
+
+	if _, err := executor.StartSession(context.Background(), "turn-complete", config); err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	if _, err := executor.SendMessage(context.Background(), "turn-complete", "hello", "", ""); err != nil {
+		t.Fatalf("failed to send first message: %v", err)
+	}
+
+	runningDeadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(runningDeadline) {
+		sess, err := executor.GetSession("turn-complete")
+		if err == nil && sess.GetState() == domain.SessionStateRunning {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	prov.SendEvent(domain.NewOutputEvent("turn-complete", "ok", nil))
+	prov.SendEvent(domain.NewMetadataEvent("turn-complete", "turn_completed", map[string]any{"subtype": "success"}, nil))
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		sess, err := executor.GetSession("turn-complete")
+		if err == nil && sess.GetState() == domain.SessionStateIdle {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	sess, err := executor.GetSession("turn-complete")
+	if err != nil {
+		t.Fatalf("failed to get session: %v", err)
+	}
+	if sess.GetState() != domain.SessionStateIdle {
+		t.Fatalf("session state = %s, want idle", sess.GetState())
+	}
+
+	if _, err := executor.SendMessage(context.Background(), "turn-complete", "second", "", ""); err != nil {
+		t.Fatalf("expected second message to be accepted after completion, got: %v", err)
+	}
+}
+
 func TestAgentExecutor_SendMessage_SuspendedSession_Error(t *testing.T) {
 	prov := newMockProvider()
 	executor, store := createTestExecutor(prov)
