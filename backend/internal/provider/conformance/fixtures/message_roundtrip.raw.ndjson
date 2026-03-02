@@ -1,0 +1,4 @@
+{"type":"message_start","message_id":"msg-1","role":"assistant"}
+{"type":"message_delta","message_id":"msg-1","text":"Hello"}
+{"type":"message_delta","message_id":"msg-1","text":" world"}
+{"type":"message_end","message_id":"msg-1","stop_reason":"end_turn"}

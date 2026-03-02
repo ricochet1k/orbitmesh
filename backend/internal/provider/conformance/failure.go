@@ -18,6 +18,7 @@ const (
 	FailureMCP                FailureClassification = "mcp"
 	FailureTimeout            FailureClassification = "timeout"
 	FailureRateLimit          FailureClassification = "rate_limit"
+	FailureNoOutput           FailureClassification = "no_output"
 )
 
 type FailureReport struct {

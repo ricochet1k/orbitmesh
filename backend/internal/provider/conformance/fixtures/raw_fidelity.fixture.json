@@ -1,0 +1,7 @@
+{
+  "id": "raw_fidelity",
+  "name": "raw fidelity",
+  "kind": "offline",
+  "raw_frames_file": "raw_fidelity.raw.ndjson",
+  "expected_normalized_file": "raw_fidelity.expected.ndjson"
+}

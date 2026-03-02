@@ -1,0 +1,7 @@
+{
+  "id": "reasoning_progress",
+  "name": "reasoning progress",
+  "kind": "offline",
+  "raw_frames_file": "reasoning_progress.raw.ndjson",
+  "expected_normalized_file": "reasoning_progress.expected.ndjson"
+}

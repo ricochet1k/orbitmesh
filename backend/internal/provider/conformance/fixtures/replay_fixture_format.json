@@ -1,0 +1,10 @@
+{
+  "description": "Offline replay fixture format",
+  "schema": {
+    "id": "scenario id matching baseline scenario definition",
+    "name": "human-readable scenario name",
+    "kind": "offline",
+    "raw_frames_file": "NDJSON file with provider-agnostic raw frames",
+    "expected_normalized_file": "NDJSON file with expected normalized events"
+  }
+}

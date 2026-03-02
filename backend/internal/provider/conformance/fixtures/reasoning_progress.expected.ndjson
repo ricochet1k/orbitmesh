@@ -1,0 +1,4 @@
+{"event":"reasoning_start","id":"r-1"}
+{"event":"reasoning_delta","id":"r-1","text":"considering options"}
+{"event":"reasoning_delta","id":"r-1","text":"selecting best path"}
+{"event":"reasoning_end","id":"r-1","summary":"selected path A"}

@@ -3,6 +3,7 @@ package conformance
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,11 +11,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ricochet1k/orbitmesh/internal/domain"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
 )
 
 const excludedProviderType = "pty"
+
+const (
+	liveStartupTimeout   = 8 * time.Second
+	liveRoundtripTimeout = 12 * time.Second
+	liveRoundtripPrompt  = "Reply with exactly: ok"
+)
 
 type Lane string
 
@@ -43,9 +51,15 @@ type RunOptions struct {
 }
 
 type Scenario struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Kind string `json:"kind"`
+	ID                     string `json:"id"`
+	Name                   string `json:"name"`
+	Kind                   string `json:"kind"`
+	Status                 string `json:"status,omitempty"`
+	Detail                 string `json:"detail,omitempty"`
+	FirstFailingEventIndex *int   `json:"first_failing_event_index,omitempty"`
+	Expected               string `json:"expected,omitempty"`
+	Actual                 string `json:"actual,omitempty"`
+	ArtifactDir            string `json:"artifact_dir,omitempty"`
 }
 
 type ProviderResult struct {
@@ -75,12 +89,28 @@ type Summary struct {
 type providerTester interface {
 	SupportedTypes() []string
 	TestConfig(ctx context.Context, providerType string, config session.Config) error
+	CreateSession(providerType, sessionID string, config session.Config) (session.Session, error)
 }
 
 type BaselineRunner struct {
 	tester providerTester
 	opts   RunOptions
 	guard  BudgetGuard
+	replay replayRunner
+}
+
+type replayRunner interface {
+	Run(scenarioID string) (ReplayResult, error)
+}
+
+type liveScenarioResult struct {
+	Detail             string
+	Duration           time.Duration
+	Usage              Usage
+	ProviderTranscript []json.RawMessage
+	NormalizedEvents   []json.RawMessage
+	Failure            *FailureReport
+	RunStatus          RunStatus
 }
 
 func NewBaselineRunner(tester providerTester, opts RunOptions) *BaselineRunner {
@@ -88,6 +118,7 @@ func NewBaselineRunner(tester providerTester, opts RunOptions) *BaselineRunner {
 		tester: tester,
 		opts:   opts,
 		guard:  BudgetGuard{MaxUSD: opts.MaxUSD, MaxTokens: opts.MaxTokens},
+		replay: NewReplayEngine(),
 	}
 }
 
@@ -221,28 +252,417 @@ func (r *BaselineRunner) runProvider(ctx context.Context, entry MatrixEntry) Pro
 	}
 
 	if r.opts.Lane == LaneOffline {
-		result.Detail = fmt.Sprintf("validated %d scenarios (dry-run)", len(scenarios))
+		if r.replay == nil {
+			result.Status = "fail"
+			result.Detail = errNilReplayEngine.Error()
+			result.DurationMS = time.Since(start).Milliseconds()
+			return result
+		}
+
+		writer, err := NewArtifactWriter(r.opts.ArtifactsDir)
+		if err != nil {
+			result.Status = "fail"
+			result.Detail = fmt.Sprintf("initialize offline artifact writer: %v", err)
+			result.DurationMS = time.Since(start).Milliseconds()
+			return result
+		}
+
+		passCount := 0
+		for i := range scenarios {
+			scenario := &scenarios[i]
+			replayResult, runErr := r.replay.Run(scenario.ID)
+			if runErr != nil {
+				scenario.Status = "fail"
+				scenario.Detail = runErr.Error()
+				result.Status = "fail"
+				continue
+			}
+
+			scenario.Status = "pass"
+			scenario.Detail = replayResult.Detail
+			runStatus := RunStatusPassed
+			var failure *FailureReport
+			if !replayResult.Passed {
+				scenario.Status = "fail"
+				scenario.Detail = replayResult.Detail
+				scenario.FirstFailingEventIndex = replayResult.FirstFailingEventIndex
+				scenario.Expected = string(replayResult.Expected)
+				scenario.Actual = string(replayResult.Actual)
+				result.Status = "fail"
+				runStatus = RunStatusFailed
+				failure = &FailureReport{
+					Classification: FailureEventNormalization,
+					Message:        fmt.Sprintf("scenario %s replay assertion mismatch", scenario.ID),
+					Expected:       string(replayResult.Expected),
+					Actual:         string(replayResult.Actual),
+				}
+				if replayResult.FirstFailingEventIndex != nil {
+					failure.Message = fmt.Sprintf("scenario %s replay assertion mismatch at event index %d", scenario.ID, *replayResult.FirstFailingEventIndex)
+				}
+			}
+
+			runID := fmt.Sprintf("offline-%d", time.Now().UTC().UnixNano())
+			paths, writeErr := writer.Write(runID, ArtifactBundle{
+				Metadata: RunMetadata{
+					Provider: entry.ProviderType,
+					Scenario: scenario.ID,
+					Model:    "offline-replay",
+					Duration: replayResult.Duration,
+					Status:   runStatus,
+				},
+				ProviderTranscript: replayResult.RawFrames,
+				NormalizedEvents:   replayResult.ActualEvents,
+				Failure:            failure,
+			})
+			if writeErr != nil {
+				scenario.Status = "fail"
+				scenario.Detail = joinScenarioDetails(scenario.Detail, writeErr.Error())
+				result.Status = "fail"
+			} else {
+				scenario.ArtifactDir = paths.Directory
+			}
+
+			if scenario.Status == "pass" {
+				passCount++
+			}
+		}
+
+		result.Scenarios = scenarios
+		result.Detail = fmt.Sprintf("offline replay passed %d/%d scenarios", passCount, len(scenarios))
+		if result.Status == "fail" {
+			failedScenario := firstFailedScenarioID(scenarios)
+			if failedScenario != "" {
+				result.Detail = fmt.Sprintf("offline replay passed %d/%d scenarios (first failure: %s)", passCount, len(scenarios), failedScenario)
+			}
+		}
 		result.DurationMS = time.Since(start).Milliseconds()
 		return result
 	}
 
-	if err := r.guard.Enforce(Usage{}); err != nil {
-		result.Status = "fail"
-		result.Detail = fmt.Sprintf("budget guard blocked probe: %v", err)
-		result.DurationMS = time.Since(start).Milliseconds()
-		return result
-	}
-
-	err := r.tester.TestConfig(ctx, entry.ProviderType, sessionConfigFromProviderConfig(entry.ProviderType, entry.Config))
+	writer, err := NewArtifactWriter(r.opts.ArtifactsDir)
 	if err != nil {
 		result.Status = "fail"
-		result.Detail = err.Error()
-	} else {
-		result.Detail = "startup probe ok"
+		result.Detail = fmt.Sprintf("initialize live artifact writer: %v", err)
+		result.DurationMS = time.Since(start).Milliseconds()
+		return result
 	}
 
+	totalUsage := Usage{}
+	passCount := 0
+	sessionConfig := sessionConfigFromProviderConfig(entry.ProviderType, entry.Config)
+	for i := range scenarios {
+		scenario := &scenarios[i]
+		if err := r.guard.Enforce(totalUsage); err != nil {
+			scenario.Status = "fail"
+			scenario.Detail = fmt.Sprintf("budget guard blocked %s: %v", scenario.ID, err)
+			result.Status = "fail"
+			continue
+		}
+
+		liveResult := r.runLiveScenario(ctx, entry.ProviderType, sessionConfig, scenario.ID)
+		scenario.Status = "pass"
+		scenario.Detail = liveResult.Detail
+		runStatus := RunStatusPassed
+		if liveResult.Failure != nil {
+			scenario.Status = "fail"
+			runStatus = liveResult.RunStatus
+			if scenario.Detail == "" {
+				scenario.Detail = liveResult.Failure.Message
+			}
+			result.Status = "fail"
+		}
+
+		paths, writeErr := writer.Write(fmt.Sprintf("live-%d", time.Now().UTC().UnixNano()), ArtifactBundle{
+			Metadata: RunMetadata{
+				Provider: entry.ProviderType,
+				Scenario: scenario.ID,
+				Model:    "live-probe",
+				Duration: liveResult.Duration,
+				Tokens: TokenCounters{
+					Prompt: liveResult.Usage.Tokens,
+					Total:  liveResult.Usage.Tokens,
+				},
+				Status: runStatus,
+			},
+			ProviderTranscript: liveResult.ProviderTranscript,
+			NormalizedEvents:   liveResult.NormalizedEvents,
+			Failure:            liveResult.Failure,
+		})
+		if writeErr != nil {
+			scenario.Status = "fail"
+			scenario.Detail = joinScenarioDetails(scenario.Detail, writeErr.Error())
+			result.Status = "fail"
+		} else {
+			scenario.ArtifactDir = paths.Directory
+		}
+
+		totalUsage.USD += liveResult.Usage.USD
+		totalUsage.Tokens += liveResult.Usage.Tokens
+		if err := r.guard.Enforce(totalUsage); err != nil {
+			scenario.Status = "fail"
+			scenario.Detail = joinScenarioDetails(scenario.Detail, fmt.Sprintf("budget guard exceeded after %s: %v", scenario.ID, err))
+			result.Status = "fail"
+		}
+
+		if scenario.Status == "pass" {
+			passCount++
+		}
+	}
+
+	result.Scenarios = scenarios
+	result.Detail = fmt.Sprintf("live probes passed %d/%d scenarios", passCount, len(scenarios))
+	if result.Status == "fail" {
+		failedScenario := firstFailedScenarioID(scenarios)
+		if failedScenario != "" {
+			result.Detail = fmt.Sprintf("live probes passed %d/%d scenarios (first failure: %s)", passCount, len(scenarios), failedScenario)
+		}
+	}
 	result.DurationMS = time.Since(start).Milliseconds()
 	return result
+}
+
+func (r *BaselineRunner) runLiveScenario(ctx context.Context, providerType string, cfg session.Config, scenarioID string) liveScenarioResult {
+	switch scenarioID {
+	case "startup_probe":
+		return r.runLiveStartupProbe(ctx, providerType, cfg)
+	case "message_roundtrip":
+		return r.runLiveMessageRoundtrip(ctx, providerType, cfg)
+	default:
+		return liveScenarioResult{
+			Detail:    fmt.Sprintf("unknown live scenario %q", scenarioID),
+			Failure:   &FailureReport{Classification: FailureStartup, Message: fmt.Sprintf("unknown scenario %q", scenarioID)},
+			RunStatus: RunStatusFailed,
+		}
+	}
+}
+
+func (r *BaselineRunner) runLiveStartupProbe(ctx context.Context, providerType string, cfg session.Config) liveScenarioResult {
+	start := time.Now()
+	probeCtx, cancel := context.WithTimeout(ctx, liveStartupTimeout)
+	defer cancel()
+
+	err := r.tester.TestConfig(probeCtx, providerType, cfg)
+	if err != nil {
+		classification := classifyFailure(err.Error())
+		status := RunStatusFailed
+		if errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
+			classification = FailureTimeout
+			status = RunStatusTimedOut
+		}
+		return liveScenarioResult{
+			Detail:    fmt.Sprintf("startup probe failed: %v", err),
+			Duration:  time.Since(start),
+			Failure:   &FailureReport{Classification: classification, Message: err.Error()},
+			RunStatus: status,
+		}
+	}
+
+	return liveScenarioResult{
+		Detail:    "startup probe ok",
+		Duration:  time.Since(start),
+		RunStatus: RunStatusPassed,
+	}
+}
+
+func (r *BaselineRunner) runLiveMessageRoundtrip(ctx context.Context, providerType string, cfg session.Config) liveScenarioResult {
+	start := time.Now()
+	runCtx, cancel := context.WithTimeout(ctx, liveRoundtripTimeout)
+	defer cancel()
+
+	runID := fmt.Sprintf("providercheck-%s-%d", providerType, time.Now().UTC().UnixNano())
+	sess, err := r.tester.CreateSession(providerType, runID, cfg)
+	if err != nil {
+		return liveScenarioResult{
+			Detail:    fmt.Sprintf("message roundtrip startup failed: %v", err),
+			Duration:  time.Since(start),
+			Failure:   &FailureReport{Classification: FailureStartup, Message: err.Error()},
+			RunStatus: RunStatusFailed,
+		}
+	}
+	defer func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer stopCancel()
+		_ = sess.Stop(stopCtx)
+	}()
+
+	events, err := sess.SendInput(runCtx, cfg, liveRoundtripPrompt)
+	if err != nil {
+		return liveScenarioResult{
+			Detail:    fmt.Sprintf("message roundtrip send failed: %v", err),
+			Duration:  time.Since(start),
+			Failure:   &FailureReport{Classification: FailureStartup, Message: err.Error()},
+			RunStatus: RunStatusFailed,
+		}
+	}
+
+	transcript := make([]json.RawMessage, 0, 8)
+	normalized := make([]json.RawMessage, 0, 8)
+	output := strings.Builder{}
+	metricTotal := int64(0)
+	for {
+		select {
+		case <-runCtx.Done():
+			return liveScenarioResult{
+				Detail:             "message roundtrip timed out",
+				Duration:           time.Since(start),
+				Usage:              Usage{Tokens: metricTotal},
+				ProviderTranscript: transcript,
+				NormalizedEvents:   normalized,
+				Failure: &FailureReport{
+					Classification: FailureTimeout,
+					Message:        runCtx.Err().Error(),
+				},
+				RunStatus: RunStatusTimedOut,
+			}
+		case event, ok := <-events:
+			if !ok {
+				text := strings.TrimSpace(output.String())
+				if text == "" {
+					return liveScenarioResult{
+						Detail:             "message roundtrip closed without output",
+						Duration:           time.Since(start),
+						Usage:              Usage{Tokens: metricTotal},
+						ProviderTranscript: transcript,
+						NormalizedEvents:   normalized,
+						Failure: &FailureReport{
+							Classification: FailureNoOutput,
+							Message:        "provider produced no output events",
+							Expected:       "ok",
+							Actual:         "",
+						},
+						RunStatus: RunStatusFailed,
+					}
+				}
+				if !isTerseOKResponse(text) {
+					return liveScenarioResult{
+						Detail:             fmt.Sprintf("message roundtrip response mismatch: %q", text),
+						Duration:           time.Since(start),
+						Usage:              Usage{Tokens: metricTotal},
+						ProviderTranscript: transcript,
+						NormalizedEvents:   normalized,
+						Failure: &FailureReport{
+							Classification: FailureEventNormalization,
+							Message:        "terse response expectation failed",
+							Expected:       "ok",
+							Actual:         text,
+						},
+						RunStatus: RunStatusFailed,
+					}
+				}
+				return liveScenarioResult{
+					Detail:             "message roundtrip ok",
+					Duration:           time.Since(start),
+					Usage:              Usage{Tokens: metricTotal},
+					ProviderTranscript: transcript,
+					NormalizedEvents:   normalized,
+					RunStatus:          RunStatusPassed,
+				}
+			}
+
+			if event.Type == domain.EventTypeMetric {
+				if m, ok := event.Metric(); ok {
+					total := m.TokensIn + m.TokensOut
+					if total > metricTotal {
+						metricTotal = total
+					}
+				}
+			}
+			if event.Type == domain.EventTypeOutput {
+				if outData, ok := event.Output(); ok {
+					output.WriteString(outData.Content)
+				}
+			}
+			if event.Type == domain.EventTypeError {
+				if errData, ok := event.Error(); ok {
+					return liveScenarioResult{
+						Detail:             fmt.Sprintf("message roundtrip error event: %s", errData.Message),
+						Duration:           time.Since(start),
+						Usage:              Usage{Tokens: metricTotal},
+						ProviderTranscript: transcript,
+						NormalizedEvents:   normalized,
+						Failure: &FailureReport{
+							Classification: classifyFailure(errData.Message),
+							Message:        errData.Message,
+						},
+						RunStatus: RunStatusFailed,
+					}
+				}
+			}
+
+			normalizedEvent, normalizeErr := normalizeLiveEvent(event)
+			if normalizeErr == nil {
+				normalized = append(normalized, normalizedEvent)
+			}
+			transcript = append(transcript, extractProviderFrame(event, normalizedEvent))
+		}
+	}
+}
+
+func normalizeLiveEvent(event domain.Event) (json.RawMessage, error) {
+	payload := map[string]any{"event": event.Type.String()}
+	switch event.Type {
+	case domain.EventTypeOutput:
+		if out, ok := event.Output(); ok {
+			payload["content"] = out.Content
+			payload["is_delta"] = out.IsDelta
+		}
+	case domain.EventTypeMetric:
+		if metric, ok := event.Metric(); ok {
+			payload["tokens_in"] = metric.TokensIn
+			payload["tokens_out"] = metric.TokensOut
+			payload["request_count"] = metric.RequestCount
+		}
+	case domain.EventTypeError:
+		if errData, ok := event.Error(); ok {
+			payload["message"] = errData.Message
+			payload["code"] = errData.Code
+		}
+	case domain.EventTypeStatusChange:
+		if status, ok := event.StatusChange(); ok {
+			payload["old_state"] = status.OldState.String()
+			payload["new_state"] = status.NewState.String()
+			payload["reason"] = status.Reason
+		}
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(encoded), nil
+}
+
+func extractProviderFrame(event domain.Event, normalized json.RawMessage) json.RawMessage {
+	raw := strings.TrimSpace(string(event.Raw))
+	if raw != "" && json.Valid([]byte(raw)) {
+		return json.RawMessage(raw)
+	}
+	if len(normalized) > 0 {
+		return normalized
+	}
+	fallback, _ := json.Marshal(map[string]any{"event": event.Type.String()})
+	return json.RawMessage(fallback)
+}
+
+func isTerseOKResponse(output string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(output))
+	normalized = strings.Trim(normalized, ".!`\"' ")
+	return normalized == "ok"
+}
+
+func classifyFailure(message string) FailureClassification {
+	msg := strings.ToLower(strings.TrimSpace(message))
+	switch {
+	case strings.Contains(msg, "timeout"), strings.Contains(msg, "deadline"):
+		return FailureTimeout
+	case strings.Contains(msg, "rate"), strings.Contains(msg, "429"):
+		return FailureRateLimit
+	case strings.Contains(msg, "auth"), strings.Contains(msg, "api key"), strings.Contains(msg, "unauthorized"), strings.Contains(msg, "forbidden"):
+		return FailureAuth
+	case strings.Contains(msg, "connection"), strings.Contains(msg, "network"), strings.Contains(msg, "transport"):
+		return FailureTransport
+	default:
+		return FailureStartup
+	}
 }
 
 func sessionConfigFromProviderConfig(providerType string, cfg *storage.ProviderConfig) session.Config {
@@ -291,9 +711,17 @@ func apiKeyEnvVar(providerType string) string {
 
 func baselineScenarios(lane Lane) []Scenario {
 	if lane == LaneLive {
-		return []Scenario{{ID: "startup-probe", Name: "startup probe", Kind: "live"}}
+		return []Scenario{
+			{ID: "startup_probe", Name: "startup probe", Kind: "live"},
+			{ID: "message_roundtrip", Name: "message roundtrip", Kind: "live"},
+		}
 	}
-	return []Scenario{{ID: "definitions", Name: "validate definitions", Kind: "offline"}}
+	return []Scenario{
+		{ID: "message_roundtrip", Name: "message roundtrip", Kind: "offline"},
+		{ID: "reasoning_progress", Name: "reasoning progress", Kind: "offline"},
+		{ID: "tool_call_flow", Name: "tool call flow", Kind: "offline"},
+		{ID: "raw_fidelity", Name: "raw fidelity", Kind: "offline"},
+	}
 }
 
 func validateScenarioDefinitions(scenarios []Scenario) error {
@@ -320,12 +748,31 @@ func validateScenarioDefinitions(scenarios []Scenario) error {
 
 func writeArtifact(artifactsDir string, result ProviderResult) error {
 	path := filepath.Join(artifactsDir, fmt.Sprintf("%s.json", result.Provider))
-	payload, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal artifact for %s: %w", result.Provider, err)
-	}
-	if err := os.WriteFile(path, payload, 0o600); err != nil {
+	if err := writeJSONFile(path, result); err != nil {
 		return fmt.Errorf("write artifact for %s: %w", result.Provider, err)
 	}
 	return nil
 }
+
+func joinScenarioDetails(parts ...string) string {
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		out = append(out, part)
+	}
+	return strings.Join(out, "; ")
+}
+
+func firstFailedScenarioID(scenarios []Scenario) string {
+	for _, scenario := range scenarios {
+		if scenario.Status == "fail" {
+			return scenario.ID
+		}
+	}
+	return ""
+}
+
+var errNilReplayEngine = errors.New("replay engine is nil")

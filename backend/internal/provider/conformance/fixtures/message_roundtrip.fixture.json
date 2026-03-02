@@ -1,0 +1,7 @@
+{
+  "id": "message_roundtrip",
+  "name": "message roundtrip",
+  "kind": "offline",
+  "raw_frames_file": "message_roundtrip.raw.ndjson",
+  "expected_normalized_file": "message_roundtrip.expected.ndjson"
+}

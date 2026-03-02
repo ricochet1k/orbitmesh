@@ -1,0 +1,2 @@
+{"type":"provider_raw","payload":{"bytes":"abc123","channel":"debug"}}
+{"type":"provider_raw","payload":{"bytes":"def456","channel":"debug"},"sequence":2}

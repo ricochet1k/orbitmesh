@@ -1,0 +1,3 @@
+{"type":"tool_call","call_id":"call-1","name":"lookup_weather","arguments":{"city":"Seattle","unit":"celsius"}}
+{"type":"tool_result","call_id":"call-1","output":{"temperature":11,"condition":"rain"}}
+{"type":"message_delta","message_id":"msg-2","text":"It is 11C and rainy."}

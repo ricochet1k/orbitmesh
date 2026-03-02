@@ -1,0 +1,7 @@
+{
+  "id": "tool_call_flow",
+  "name": "tool call flow",
+  "kind": "offline",
+  "raw_frames_file": "tool_call_flow.raw.ndjson",
+  "expected_normalized_file": "tool_call_flow.expected.ndjson"
+}
