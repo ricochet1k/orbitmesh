@@ -1,168 +1,99 @@
-import { createFileRoute, useNavigate } from '@tanstack/solid-router'
-import { createResource, createSignal, createMemo, Show } from 'solid-js'
-import { apiClient } from '../api/client'
-import AgentGraph from '../graph/AgentGraph'
-import { buildUnifiedGraph } from '../graph/graphData'
-import type { GraphNode } from '../graph/types'
-import { useSessionStore } from '../state/sessions'
-import SessionsTable from '../components/SessionsTable'
+import { createFileRoute, useNavigate } from "@tanstack/solid-router";
+import { createMemo, createResource } from "solid-js";
+import { apiClient } from "../api/client";
+import {
+  ActionCenterWidget,
+  CodeflowSnapshotWidget,
+  DashboardPageShell,
+  HotspotsWidget,
+  RecentActivityWidget,
+  RepoPulseWidget,
+} from "../components/dashboard";
+import type { DashboardSummaryResponse } from "../types/api";
 
-export const Route = createFileRoute('/')({
+export const Route = createFileRoute("/")({
   component: Dashboard,
-})
+});
 
 interface DashboardProps {
-  onNavigate?: (path: string) => void
+  onNavigate?: (path: string) => void;
+}
+
+function normalizeSummary(summary?: DashboardSummaryResponse): DashboardSummaryResponse {
+  return {
+    generatedAt: summary?.generatedAt ?? "",
+    pulse: summary?.pulse ?? {
+      sessionsTotal: 0,
+      sessionsRunning: 0,
+      sessionsIdle: 0,
+      sessionsSuspended: 0,
+      sessionsOther: 0,
+    },
+    activity: summary?.activity ?? [],
+    actions: summary?.actions ?? [],
+    codeflow: summary?.codeflow ?? {
+      recentCommits: 0,
+      commits24h: 0,
+      activeAuthors: 0,
+      openFindings: 0,
+      recentFindingActivity: 0,
+      openFindingsBySeverity: {},
+      recentFindings: [],
+    },
+    hotspots: (summary?.hotspots ?? []).map((hotspot) => ({
+      ...hotspot,
+      findings: hotspot.findings ?? 0,
+    })),
+  };
+}
+
+function formatGeneratedAt(timestamp: string): string {
+  const parsed = Date.parse(timestamp);
+  if (Number.isNaN(parsed)) return "Waiting for snapshot";
+  return new Date(parsed).toLocaleTimeString();
 }
 
 export default function Dashboard(props: DashboardProps = {}) {
-  const navigate = useNavigate()
-  const { sessions, hasLoaded } = useSessionStore()
-  const [permissions] = createResource(apiClient.getPermissions)
-  const [taskTree] = createResource(apiClient.getTaskTree)
-  const [commitList] = createResource(() => apiClient.listCommits(30))
-  const [pendingAction, setPendingAction] = createSignal<{ id: string; action: string } | null>(null)
+  const navigate = useNavigate();
+  const [summary, { refetch }] = createResource(apiClient.getDashboardSummary);
 
-  const sessionList = () => sessions()
-  const activeCount = () => sessionList().length
-  const countByState = (state: string) => sessionList().filter((item) => item.state === state).length
-  const canInspect = () => permissions()?.can_inspect_sessions ?? false
-  const canManage = () => permissions()?.can_initiate_bulk_actions ?? false
+  const summaryData = createMemo(() => normalizeSummary(summary()));
+  const loading = () => summary.loading;
+  const error = () => summary.error;
 
   const navigateTo = (path: string) => {
     if (props.onNavigate) {
-      props.onNavigate(path)
-      return
+      props.onNavigate(path);
+      return;
     }
-    navigate({ to: path })
-  }
-
-  const runBulkAction = async (sessionId: string, action: "pause" | "resume" | "stop") => {
-    const label = action === "stop" ? "stop" : action
-    const confirmText =
-      action === "stop"
-        ? "Stop this session immediately? This ends the session and cannot be undone."
-        : `Confirm ${label} for this session?`
-    if (!window.confirm(confirmText)) return
-
-    setPendingAction({ id: sessionId, action })
-    try {
-      if (action === "pause") await apiClient.pauseSession(sessionId)
-      if (action === "resume") await apiClient.resumeSession(sessionId)
-      if (action === "stop") await apiClient.stopSession(sessionId)
-    } catch {
-      // Errors are handled in the destination session view.
-    } finally {
-      setPendingAction(null)
-    }
-  }
-
-  const graphData = createMemo(() => {
-    const tasks = taskTree()?.tasks ?? []
-    const commits = commitList()?.commits ?? []
-    if (tasks.length === 0 && commits.length === 0) return null
-    return buildUnifiedGraph(tasks, commits)
-  })
-
-  const handleGraphSelect = (node: GraphNode) => {
-    if (node.type === "task") {
-      navigateTo(`/tasks?task=${node.id}`)
-      return
-    }
-    if (node.type === "commit") {
-      navigateTo(`/history/commits?commit=${node.id}`)
-      return
-    }
-    if (node.id === "task-root") {
-      navigateTo("/tasks")
-      return
-    }
-    if (node.id === "commit-root") {
-      navigateTo("/history/commits")
-    }
-  }
+    navigate({ to: path });
+  };
 
   return (
-    <div class="dashboard ds-page" data-testid="dashboard-view">
-      <header class="view-header ds-page-header">
-        <div class="header-meta stats-bubbles ds-metrics">
-          <div class="meta-card stat-bubble ds-metric" data-testid="dashboard-meta-role">
-            <p>Active role</p>
-            <Show when={!permissions.loading} fallback={<span>Loading...</span>}>
-              <strong>{permissions()?.role}</strong>
-            </Show>
-          </div>
-          <div class="meta-card stat-bubble ds-metric" data-testid="dashboard-meta-active-sessions">
-            <p>Active sessions</p>
-            <Show when={hasLoaded()} fallback={<span>Loading...</span>}>
-              <strong>{activeCount()}</strong>
-            </Show>
-          </div>
-        </div>
-      </header>
-
-      <main class="dashboard-layout ds-layout">
-        <section class="overview-panel content-block ds-panel">
-          <div class="panel-header ds-panel-header">
-            <div>
-              <p class="panel-kicker ds-kicker">Operational overview</p>
-              <h2>System pulse</h2>
-            </div>
-            <span class="panel-pill ds-pill">Live</span>
-          </div>
-          <div class="overview-grid">
-            <div class="overview-card" data-testid="dashboard-overview-sessions">
-              <p>Sessions in motion</p>
-              <Show when={hasLoaded()} fallback={<span>Calculating...</span>}>
-                <strong>{activeCount()}</strong>
-                <span>{countByState("running")} running</span>
-              </Show>
-            </div>
-            <div class="overview-card" data-testid="dashboard-overview-paused">
-              <p>Paused or starting</p>
-              <Show when={hasLoaded()} fallback={<span>Calculating...</span>}>
-                <strong>{countByState("paused") + countByState("starting")}</strong>
-                <span>{countByState("starting")} starting</span>
-              </Show>
-            </div>
-            <div class="overview-card" data-testid="dashboard-overview-attention">
-              <p>Attention needed</p>
-              <Show when={hasLoaded()} fallback={<span>Calculating...</span>}>
-                <strong>{countByState("error")}</strong>
-                <span>{countByState("stopped")} stopped</span>
-              </Show>
-            </div>
-          </div>
-        </section>
-
-        <SessionsTable
-          sessions={sessionList}
-          hasLoaded={hasLoaded}
-          canInspect={canInspect}
-          canManage={canManage}
-          pendingAction={pendingAction}
-          onInspect={(id) => navigateTo(`/sessions/${id}`)}
-          onAction={runBulkAction}
-          onNavigateToTasks={() => navigateTo("/tasks")}
-        />
-
-        <section class="graph-view content-block ds-panel">
-          <div class="panel-header ds-panel-header">
-            <div>
-              <p class="panel-kicker ds-kicker">System topology</p>
-              <h2>System Graph</h2>
-            </div>
-            <span class="panel-pill neutral ds-pill ds-pill-neutral">Monitoring</span>
-          </div>
-          <div id="graph-container">
-            <AgentGraph
-              nodes={graphData()?.nodes}
-              links={graphData()?.links}
-              onSelect={handleGraphSelect}
-            />
-          </div>
-        </section>
-      </main>
-    </div>
-  )
+    <DashboardPageShell
+      kicker="Dashboard v2"
+      title="Operational Dashboard"
+      subtitle="Track repository momentum, runtime activity, and intervention cues in one composable workspace."
+      metrics={[
+        { label: "Sessions", value: String(summaryData().pulse.sessionsTotal) },
+        { label: "Updated", value: formatGeneratedAt(summaryData().generatedAt) },
+      ]}
+      actions={
+        <button type="button" class="btn btn-secondary" onClick={() => refetch()}>
+          Refresh
+        </button>
+      }
+    >
+      <RepoPulseWidget pulse={summaryData().pulse} loading={loading()} error={error()} />
+      <RecentActivityWidget items={summaryData().activity} loading={loading()} error={error()} />
+      <ActionCenterWidget
+        actions={summaryData().actions}
+        loading={loading()}
+        error={error()}
+        onNavigate={navigateTo}
+      />
+      <CodeflowSnapshotWidget snapshot={summaryData().codeflow} loading={loading()} error={error()} />
+      <HotspotsWidget hotspots={summaryData().hotspots} loading={loading()} error={error()} />
+    </DashboardPageShell>
+  );
 }

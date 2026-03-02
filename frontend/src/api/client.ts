@@ -8,6 +8,7 @@ import * as agentApi from "./agents";
 import * as taskApi from "./tasks";
 import * as projectApi from "./projects";
 import * as fileApi from "./files";
+import * as dashboardApi from "./dashboard";
 
 /**
  * Unified API client. All methods are grouped by domain in separate modules
@@ -69,6 +70,9 @@ export const apiClient = {
   listFiles: fileApi.listFiles,
   readFile: fileApi.readFile,
   writeFile: fileApi.writeFile,
+
+  // Dashboard
+  getDashboardSummary: dashboardApi.getDashboardSummary,
 
   // Tasks, commits, permissions, extractors
   getPermissions: taskApi.getPermissions,

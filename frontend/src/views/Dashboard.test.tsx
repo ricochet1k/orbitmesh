@@ -1,185 +1,151 @@
-import { render, screen, fireEvent } from "@solidjs/testing-library";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { fireEvent, render, screen } from "@solidjs/testing-library";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import Dashboard from "./Dashboard";
 import { apiClient } from "../api/client";
-import { resetSessionStore } from "../state/sessions";
-import {
-  defaultPermissions,
-  makeSession,
-  restrictedPermissions,
-} from "../test/fixtures";
 
 const mockNavigate = vi.fn();
 
 vi.mock("@tanstack/solid-router", () => ({
   createFileRoute: () => () => ({}),
   useNavigate: () => mockNavigate,
-  Link: (props: any) => (
-    <a href={props.to} class={props.class} target={props.target} rel={props.rel}>
-      {props.children}
-    </a>
-  ),
 }));
-
 
 vi.mock("../api/client", () => ({
   apiClient: {
-    listSessions: vi.fn(),
-    getCachedSessions: vi.fn(),
-    getPermissions: vi.fn(),
-    getTaskTree: vi.fn(),
-    listCommits: vi.fn(),
-    pauseSession: vi.fn(),
-    resumeSession: vi.fn(),
-    stopSession: vi.fn(),
-  }
+    getDashboardSummary: vi.fn(),
+  },
 }));
 
-describe("Dashboard", () => {
+const sampleSummary = {
+  generatedAt: "2026-03-01T12:00:00Z",
+  pulse: {
+    sessionsTotal: 4,
+    sessionsRunning: 2,
+    sessionsIdle: 1,
+    sessionsSuspended: 1,
+    sessionsOther: 0,
+  },
+  activity: [
+    {
+      id: "evt-1",
+      kind: "session",
+      title: "Session paused",
+      detail: "session-42 moved to idle",
+      timestamp: "2026-03-01T11:59:00Z",
+    },
+  ],
+  actions: [
+    {
+      id: "act-1",
+      kind: "session_attention",
+      label: "Inspect session-42",
+      target: "/sessions/session-42",
+      score: 78,
+      rationale: "Session is suspended and needs manual resume",
+    },
+  ],
+  codeflow: {
+    recentCommits: 8,
+    commits24h: 3,
+    activeAuthors: 2,
+    openFindings: 5,
+    recentFindingActivity: 2,
+    openFindingsBySeverity: {
+      high: 2,
+      medium: 3,
+    },
+    recentFindings: [
+      {
+        id: "finding-1",
+        severity: "high",
+        message: "Dangerous call detected",
+        fileId: "frontend/src/routes/index.tsx",
+      },
+    ],
+  },
+  hotspots: [
+    {
+      path: "frontend/src/routes/index.tsx",
+      touches: 3,
+      churn: 122,
+      findings: 2,
+    },
+  ],
+};
+
+describe("Dashboard route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (apiClient.getCachedSessions as any).mockReturnValue(undefined);
-    (apiClient.getPermissions as any).mockResolvedValue(defaultPermissions);
-    (apiClient.getTaskTree as any).mockResolvedValue({ tasks: [] });
-    (apiClient.listCommits as any).mockResolvedValue({ commits: [] });
-    resetSessionStore();
+    (apiClient.getDashboardSummary as any).mockResolvedValue(sampleSummary);
   });
 
-  it("renders loading state initially", async () => {
-    (apiClient.listSessions as any).mockReturnValue(new Promise(() => {}));
-    const { container } = render(() => <Dashboard />);
-    // Check for skeleton loader instead of loading text
-    expect(container.querySelector(".skeleton-table-container")).toBeDefined();
+  it("renders the v2 dashboard widget shell", async () => {
+    render(() => <Dashboard />);
+
+    expect(await screen.findByText("Repo Pulse")).toBeDefined();
+    expect(screen.getByText("Recent Activity")).toBeDefined();
+    expect(screen.getByText("Action Center")).toBeDefined();
+    expect(screen.getByText("CodeFlow Snapshot")).toBeDefined();
+    expect(screen.getByText("Hotspots")).toBeDefined();
+
+    expect(await screen.findByText("Session paused")).toBeDefined();
+    expect(screen.getByText("frontend/src/routes/index.tsx")).toBeDefined();
+    expect(screen.getByText(/score 78/i)).toBeDefined();
+    expect(screen.getByText(/high: 2/i)).toBeDefined();
+    expect(screen.getByText("Dangerous call detected")).toBeDefined();
+    expect(screen.getByText(/2 findings/i)).toBeDefined();
   });
 
-   it("renders sessions list when loaded", async () => {
-     const mockSessions = {
-       sessions: [
-         makeSession({ id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" }),
-       ],
-     };
-     (apiClient.listSessions as any).mockResolvedValue(mockSessions);
-
-     render(() => <Dashboard />);
-
-     const idCell = await screen.findByText(/session-/);
-     expect(idCell).toBeDefined();
-     expect(screen.getByText("native")).toBeDefined();
-     expect(screen.getByText("running")).toBeDefined();
-     expect(screen.getByText("T1")).toBeDefined();
-      expect(screen.getByText("Inspect")).toBeDefined();
+  it("shows action-center empty state when there are no actions", async () => {
+    (apiClient.getDashboardSummary as any).mockResolvedValue({
+      ...sampleSummary,
+      actions: [],
     });
-
-   it("renders empty list when no sessions", async () => {
-     (apiClient.listSessions as any).mockResolvedValue({ sessions: [] });
-     render(() => <Dashboard />);
-     // Look for empty state instead of table headers
-     await screen.findByText("No active sessions");
-     expect(screen.queryByText("ID")).toBeNull();
-   });
-
-    it("shows bulk action buttons when permissions allow", async () => {
-     (apiClient.listSessions as any).mockResolvedValue({
-       sessions: [
-         makeSession({ id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" }),
-       ],
-     });
-      (apiClient.getPermissions as any).mockResolvedValue(defaultPermissions);
-
-      render(() => <Dashboard />);
-
-      expect(await screen.findByText("Pause")).toBeDefined();
-      expect(screen.getByText("Resume")).toBeDefined();
-      expect(screen.getByText("Stop")).toBeDefined();
-    });
-
-   it("skips bulk actions when confirmation is declined", async () => {
-     (apiClient.getPermissions as any).mockResolvedValue({
-       ...defaultPermissions,
-       can_initiate_bulk_actions: true,
-     });
-     (apiClient.listSessions as any).mockResolvedValue({
-       sessions: [
-         makeSession({ id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" }),
-      ],
-    });
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
 
     render(() => <Dashboard />);
 
-    const pauseButton = await screen.findByText("Pause");
-    fireEvent.click(pauseButton);
-
-    expect(confirmSpy).toHaveBeenCalled();
-    expect(apiClient.pauseSession).not.toHaveBeenCalled();
-
-    confirmSpy.mockRestore();
+    expect(await screen.findByText("No queued actions")).toBeDefined();
   });
 
-    it("allows bulk actions even if they may fail (errors handled at action time)", async () => {
-     (apiClient.getPermissions as any).mockResolvedValue({
-       ...defaultPermissions,
-       can_initiate_bulk_actions: true,
-     });
-    (apiClient.listSessions as any).mockResolvedValue({
-       sessions: [
-        makeSession({ id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" }),
+  it("navigates when an action-center item is opened", async () => {
+    const onNavigate = vi.fn();
+
+    render(() => <Dashboard onNavigate={onNavigate} />);
+
+    const openButtons = await screen.findAllByText("Open");
+    fireEvent.click(openButtons[0]);
+    expect(onNavigate).toHaveBeenCalledWith("/sessions/session-42");
+  });
+
+  it("renders safely when enriched dashboard fields are missing", async () => {
+    (apiClient.getDashboardSummary as any).mockResolvedValue({
+      ...sampleSummary,
+      actions: [
+        {
+          id: "act-2",
+          kind: "session_attention",
+          label: "Inspect session-43",
+          target: "/sessions/session-43",
+        },
+      ],
+      codeflow: {
+        recentCommits: 1,
+        commits24h: 1,
+        activeAuthors: 1,
+      },
+      hotspots: [
+        {
+          path: "backend/internal/service/dashboard_summary.go",
+          touches: 1,
+          churn: 4,
+        },
       ],
     });
-     (apiClient.pauseSession as any).mockRejectedValue(new Error("csrf token mismatch"));
-     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
 
-     render(() => <Dashboard />);
+    render(() => <Dashboard />);
 
-     const pauseButton = await screen.findByText("Pause");
-     // Dashboard does not display action notices; SessionViewer handles that instead
-     fireEvent.click(pauseButton);
-     
-     // Confirm was called to proceed with the action
-     expect(confirmSpy).toHaveBeenCalled();
-     // pauseSession was attempted
-     expect(apiClient.pauseSession).toHaveBeenCalledWith("session-123456789");
-      
-      confirmSpy.mockRestore();
-    });
-
-    it("shows permission restriction tooltips for disabled inspect button", async () => {
-      (apiClient.listSessions as any).mockResolvedValue({
-        sessions: [
-          makeSession({ id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" }),
-        ],
-      });
-      (apiClient.getPermissions as any).mockResolvedValue(restrictedPermissions);
-
-      render(() => <Dashboard />);
-
-      const inspectButton = await screen.findByText("Inspect") as HTMLButtonElement;
-      expect(inspectButton.disabled).toBe(true);
-      expect(inspectButton.getAttribute("title")).toBe("Session inspection is not permitted for your role.");
-    });
-
-    it("shows permission restriction tooltips for disabled bulk action buttons", async () => {
-      (apiClient.listSessions as any).mockResolvedValue({
-        sessions: [
-          makeSession({ id: "session-123456789", provider_type: "native", state: "running", current_task: "T1" }),
-        ],
-      });
-      (apiClient.getPermissions as any).mockResolvedValue(restrictedPermissions);
-
-      render(() => <Dashboard />);
-
-      // Find the parent div for bulk actions when canManage() is false
-      const bulkActionsDiv = await screen.findByTitle("Bulk actions are not permitted for your role.");
-
-      // Assert that the parent div has the correct title
-      expect(bulkActionsDiv).toBeDefined();
-
-      // Also assert that the individual buttons inside are disabled
-      const pauseButton = screen.getByText("Pause") as HTMLButtonElement;
-      expect(pauseButton.disabled).toBe(true);
-      const resumeButton = screen.getByText("Resume") as HTMLButtonElement;
-      expect(resumeButton.disabled).toBe(true);
-      const stopButton = screen.getByText("Stop") as HTMLButtonElement;
-      expect(stopButton.disabled).toBe(true);
-    });
+    expect(await screen.findByText(/score 0/i)).toBeDefined();
+    expect(screen.getByText(/No open findings/i)).toBeDefined();
+    expect(screen.getByText(/0 findings/i)).toBeDefined();
+  });
 });

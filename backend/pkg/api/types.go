@@ -364,6 +364,68 @@ type CommitDetailResponse struct {
 	Commit CommitDetail `json:"commit"`
 }
 
+type DashboardSummaryResponse struct {
+	GeneratedAt time.Time                 `json:"generatedAt"`
+	Pulse       DashboardPulse            `json:"pulse"`
+	Activity    []DashboardActivityItem   `json:"activity"`
+	Actions     []DashboardActionItem     `json:"actions"`
+	Codeflow    DashboardCodeflow         `json:"codeflow"`
+	Hotspots    []DashboardHotspotSummary `json:"hotspots"`
+}
+
+type DashboardPulse struct {
+	SessionsTotal     int `json:"sessionsTotal"`
+	SessionsRunning   int `json:"sessionsRunning"`
+	SessionsIdle      int `json:"sessionsIdle"`
+	SessionsSuspended int `json:"sessionsSuspended"`
+	SessionsOther     int `json:"sessionsOther"`
+}
+
+type DashboardActivityItem struct {
+	ID        string    `json:"id"`
+	Kind      string    `json:"kind"`
+	Title     string    `json:"title"`
+	Detail    string    `json:"detail,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+type DashboardActionItem struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	Label     string `json:"label"`
+	Target    string `json:"target,omitempty"`
+	Session   string `json:"session,omitempty"`
+	Score     int    `json:"score,omitempty"`
+	Rationale string `json:"rationale,omitempty"`
+}
+
+type DashboardCodeflow struct {
+	RecentCommits          int                               `json:"recentCommits"`
+	Commits24h             int                               `json:"commits24h"`
+	ActiveAuthors          int                               `json:"activeAuthors"`
+	OpenFindings           int                               `json:"openFindings"`
+	RecentFindingActivity  int                               `json:"recentFindingActivity"`
+	OpenFindingsBySeverity map[string]int                    `json:"openFindingsBySeverity"`
+	RecentFindings         []DashboardCodeflowFindingSummary `json:"recentFindings"`
+}
+
+type DashboardHotspotSummary struct {
+	Path     string `json:"path"`
+	Touches  int    `json:"touches"`
+	Churn    int    `json:"churn"`
+	Findings int    `json:"findings,omitempty"`
+}
+
+type DashboardCodeflowFindingSummary struct {
+	ID        string    `json:"id"`
+	Severity  string    `json:"severity"`
+	Message   string    `json:"message"`
+	FileID    string    `json:"fileId,omitempty"`
+	Line      int       `json:"line,omitempty"`
+	Status    string    `json:"status,omitempty"`
+	ScanEpoch time.Time `json:"scanEpoch,omitempty"`
+}
+
 type ExtractorConfig struct {
 	Version  int                `json:"version"`
 	Profiles []ExtractorProfile `json:"profiles"`

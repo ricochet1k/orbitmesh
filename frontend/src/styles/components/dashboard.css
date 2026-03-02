@@ -1,0 +1,146 @@
+.dashboard-v2-grid {
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+
+.dashboard-widget-card {
+  display: grid;
+  gap: var(--space-3);
+  min-height: 210px;
+}
+
+.dashboard-widget-header h2 {
+  margin-top: var(--space-1);
+}
+
+.dashboard-v2-header-right {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: end;
+}
+
+.dashboard-v2-metric {
+  min-width: 130px;
+}
+
+.dashboard-widget-loading,
+.dashboard-widget-empty,
+.dashboard-widget-error {
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  background: color-mix(in srgb, var(--color-surface-1) 45%, transparent);
+}
+
+.dashboard-widget-error {
+  border-color: color-mix(in srgb, var(--color-error) 35%, var(--color-border));
+  display: grid;
+  gap: var(--space-3);
+}
+
+.dashboard-widget-empty h3 {
+  margin: 0;
+  font-size: var(--font-size-md);
+}
+
+.dashboard-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.dashboard-stat-tile {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+  background: var(--color-surface-0);
+  display: grid;
+  gap: var(--space-1);
+}
+
+.dashboard-stat-tile span {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.dashboard-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.dashboard-list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-0);
+  padding: var(--space-3);
+}
+
+.dashboard-list-title {
+  margin: 0;
+  font-weight: var(--font-weight-semibold);
+}
+
+.dashboard-list-meta {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  text-align: right;
+}
+
+.dashboard-hotspot-path {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+#widget-repo-pulse,
+[data-testid="widget-repo-pulse"] {
+  grid-column: span 4;
+}
+
+[data-testid="widget-recent-activity"] {
+  grid-column: span 8;
+}
+
+[data-testid="widget-action-center"] {
+  grid-column: span 6;
+}
+
+[data-testid="widget-codeflow-snapshot"] {
+  grid-column: span 3;
+}
+
+[data-testid="widget-hotspots"] {
+  grid-column: span 3;
+}
+
+@media (max-width: 1024px) {
+  .dashboard-v2-header-right {
+    justify-items: start;
+  }
+
+  .dashboard-v2-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-v2-grid > * {
+    grid-column: auto !important;
+  }
+
+  .dashboard-stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-list-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .dashboard-list-meta {
+    text-align: left;
+  }
+}

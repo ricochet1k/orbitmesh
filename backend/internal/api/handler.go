@@ -45,6 +45,7 @@ type Handler struct {
 	dockBridge      *DockBridge
 	realtimeHub     *realtime.Hub
 	snapshotter     *realtime.SnapshotProvider
+	dashboard       *service.DashboardSummaryService
 }
 
 // NewHandler creates a Handler backed by the given executor and broadcaster.
@@ -60,6 +61,7 @@ func NewHandler(executor *service.AgentExecutor, broadcaster *service.EventBroad
 		realtimeHub:     realtime.NewHub(),
 		snapshotter:     realtime.NewSnapshotProvider(executor),
 	}
+	h.dashboard = service.NewDashboardSummaryService(executor, h.gitDir)
 	h.startRealtimeBridge()
 	return h
 }
@@ -91,6 +93,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Post("/api/sessions", h.createSession)
 	r.Get("/api/sessions/events", h.sseSessionEvents)
 	r.Get("/api/realtime", h.realtimeWebSocket)
+	r.Get("/api/dashboard/summary", h.getDashboardSummary)
 	r.Get("/api/sessions/{id}", h.getSession)
 	r.Delete("/api/sessions/{id}", h.stopSession)
 	r.Post("/api/sessions/{id}/input", h.sendSessionInput)

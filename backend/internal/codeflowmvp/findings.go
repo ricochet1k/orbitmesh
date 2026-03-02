@@ -25,6 +25,7 @@ type StoredFinding struct {
 	RuleID      string  `json:"rule_id"`
 	Severity    string  `json:"severity"`
 	Message     string  `json:"message"`
+	ScanEpoch   string  `json:"scan_epoch,omitempty"`
 	FileID      string  `json:"file_id,omitempty"`
 	FunctionID  string  `json:"function_id,omitempty"`
 	FactID      string  `json:"fact_id,omitempty"`
@@ -171,6 +172,7 @@ func storedFindingFromNode(node *graphdb.Node) StoredFinding {
 		RuleID:      node.GetString("rule_id"),
 		Severity:    node.GetString("severity"),
 		Message:     node.GetString("message"),
+		ScanEpoch:   node.GetString("scan_epoch"),
 		FileID:      node.GetString("file_id"),
 		FunctionID:  node.GetString("function_id"),
 		FactID:      node.GetString("fact_id"),

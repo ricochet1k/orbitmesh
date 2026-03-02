@@ -334,6 +334,68 @@ export interface CommitDetailResponse {
   commit: CommitDetail;
 }
 
+export interface DashboardSummaryResponse {
+  generatedAt: string;
+  pulse: DashboardPulse;
+  activity: DashboardActivityItem[];
+  actions: DashboardActionItem[];
+  codeflow: DashboardCodeflow;
+  hotspots: DashboardHotspotSummary[];
+}
+
+export interface DashboardPulse {
+  sessionsTotal: number;
+  sessionsRunning: number;
+  sessionsIdle: number;
+  sessionsSuspended: number;
+  sessionsOther: number;
+}
+
+export interface DashboardActivityItem {
+  id: string;
+  kind: string;
+  title: string;
+  detail?: string;
+  timestamp: string;
+}
+
+export interface DashboardActionItem {
+  id: string;
+  kind: string;
+  label: string;
+  target?: string;
+  session?: string;
+  score?: number;
+  rationale?: string;
+}
+
+export interface DashboardCodeflow {
+  recentCommits: number;
+  commits24h: number;
+  activeAuthors: number;
+  openFindings?: number;
+  recentFindingActivity?: number;
+  openFindingsBySeverity?: Record<string, number>;
+  recentFindings?: DashboardCodeflowFindingSummary[];
+}
+
+export interface DashboardHotspotSummary {
+  path: string;
+  touches: number;
+  churn: number;
+  findings?: number;
+}
+
+export interface DashboardCodeflowFindingSummary {
+  id: string;
+  severity: string;
+  message: string;
+  fileId?: string;
+  line?: number;
+  status?: string;
+  scanEpoch?: string;
+}
+
 export interface ExtractorConfig {
   version: number;
   profiles: ExtractorProfile[];

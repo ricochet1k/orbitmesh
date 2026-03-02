@@ -15,6 +15,7 @@
 @import "./styles/components/skeleton.css";
 @import "./styles/components/mcp.css";
 @import "./styles/components/file-viewer.css";
+@import "./styles/components/dashboard.css";
 @import "./styles/system.css";
 
 /* Animation & motion primitives */
