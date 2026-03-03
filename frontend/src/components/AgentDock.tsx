@@ -37,6 +37,7 @@ export default function AgentDock(props: AgentDockProps) {
   )
   const [permissions] = createResource(apiClient.getPermissions)
   const [providers] = createResource(apiClient.listProviders)
+  const [providerInsights] = createResource(apiClient.getProviderUsageInsights)
   const [agents] = createResource(apiClient.listAgents)
 
   const [dockError, setDockError] = createSignal<string | null>(null)
@@ -59,23 +60,6 @@ export default function AgentDock(props: AgentDockProps) {
     session()?.session_kind === "dock" || (!props.sessionId && Boolean(dockSessionId()))
 
   useAgentDockMcp(sessionId, isDockSession)
-
-  const sendOptionsState = useSessionSendOptions({
-    session,
-    providers: () => providers()?.providers ?? [],
-    agents: () => agents()?.agents ?? [],
-    includeDockUITools: true,
-  })
-  const providerList = sendOptionsState.providerList
-  const agentList = sendOptionsState.agentList
-  const selectedProvider = sendOptionsState.selectedProvider
-  const selectedProviderId = sendOptionsState.selectedProviderId
-  const setSelectedProviderId = sendOptionsState.setSelectedProviderId
-  const selectedAgentId = sendOptionsState.selectedAgentId
-  const setSelectedAgentId = sendOptionsState.setSelectedAgentId
-  const selectedModel = sendOptionsState.selectedModel
-  const setSelectedModel = sendOptionsState.setSelectedModel
-  const modelOptions = sendOptionsState.modelOptions
 
   const canManage = () => permissions()?.can_initiate_bulk_actions ?? false
   const hasSession = () => Boolean(sessionId())
@@ -100,6 +84,25 @@ export default function AgentDock(props: AgentDockProps) {
     onStatusChange: (state) => setSessionStateOverride(state),
     onSessionRefetchNeeded: () => void refetchSession(),
   })
+
+  const sendOptionsState = useSessionSendOptions({
+    session,
+    providers: () => providers()?.providers ?? [],
+    agents: () => agents()?.agents ?? [],
+    providerInsights: () => providerInsights()?.providers ?? [],
+    sessionIntel: data.sessionIntel,
+    includeDockUITools: true,
+  })
+  const providerList = sendOptionsState.providerList
+  const agentList = sendOptionsState.agentList
+  const selectedProvider = sendOptionsState.selectedProvider
+  const selectedProviderId = sendOptionsState.selectedProviderId
+  const setSelectedProviderId = sendOptionsState.setSelectedProviderId
+  const selectedAgentId = sendOptionsState.selectedAgentId
+  const setSelectedAgentId = sendOptionsState.setSelectedAgentId
+  const selectedModel = sendOptionsState.selectedModel
+  const setSelectedModel = sendOptionsState.setSelectedModel
+  const modelOptions = sendOptionsState.modelOptions
 
   // Update lastAction from the most recent SSE event
   createEffect(() => {
@@ -323,13 +326,18 @@ export default function AgentDock(props: AgentDockProps) {
                   class="agent-dock-menu-select"
                   value={selectedModel()}
                   onChange={(e) => setSelectedModel(e.currentTarget.value)}
-                  disabled={modelOptions().length === 0}
                 >
                   <option value="">Session/provider default</option>
                   <For each={modelOptions()}>
                     {(model) => <option value={model}>{model}</option>}
                   </For>
                 </select>
+                <input
+                  class="agent-dock-menu-select"
+                  value={selectedModel()}
+                  onInput={(e) => setSelectedModel(e.currentTarget.value)}
+                  placeholder="Custom model override"
+                />
               </div>
               <div class="agent-dock-menu-divider" />
 
@@ -410,6 +418,7 @@ export default function AgentDock(props: AgentDockProps) {
             <div class="agent-dock-transcript-area">
               <SessionTranscript
                 messages={data.filteredMessages}
+                latestTodoWrite={data.latestTodoWrite}
                 filter={data.filter}
                 setFilter={data.setFilter}
                 autoScroll={data.autoScroll}

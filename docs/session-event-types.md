@@ -58,6 +58,8 @@ If you add/change event types, update all three files and this document in the s
 - `resource_usage`
   - Provider-agnostic usage/rate/cost updates.
   - Fields: `scope`, `data`.
+  - Canonical scopes: `turn`, `thread`, `session`, `models`, `capabilities`, `account`, `provider`, `global`.
+  - Routed into session/provider usage stats (not appended as transcript messages).
 
 - `action_request`
   - Provider-agnostic request for human intervention/approval.

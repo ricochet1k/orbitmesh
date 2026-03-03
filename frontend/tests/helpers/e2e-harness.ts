@@ -1,5 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import { createWriteStream, promises as fs } from "node:fs"
+import net from "node:net"
 import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -25,6 +26,28 @@ function resolvePaths() {
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function allocateFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer()
+    server.once("error", reject)
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address()
+      if (!address || typeof address === "string") {
+        server.close(() => reject(new Error("failed to allocate free port")))
+        return
+      }
+      const { port } = address
+      server.close((error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolve(port)
+      })
+    })
+  })
 }
 
 async function waitForUrl(url: string, timeoutMs: number) {
@@ -123,21 +146,89 @@ async function buildGoBinary(
   return outPath
 }
 
+async function writeExecutableScript(scriptPath: string, source: string): Promise<void> {
+  await fs.writeFile(scriptPath, source, { mode: 0o755 })
+  await fs.chmod(scriptPath, 0o755)
+}
+
+async function buildAcpEchoWrapperCommands(
+  acpEchoBin: string,
+  outDir: string,
+): Promise<{
+  acp: string
+  claude: string
+  claudeWs: string
+  codex: string
+}> {
+  const acpWrapper = path.join(outDir, "acp-echo-acp.sh")
+  const claudeWrapper = path.join(outDir, "acp-echo-claude.sh")
+  const claudeWsWrapper = path.join(outDir, "acp-echo-claudews.sh")
+  const codexWrapper = path.join(outDir, "acp-echo-codex.sh")
+
+  const commonPrefix = `#!/bin/sh\nset -eu\nBIN=\"${acpEchoBin}\"\n`
+  const commonFlags = `if [ -n \"${"${ACP_ECHO_CONTROL_ADDR:-}"}\" ]; then\n  set -- \"$@\" --control-addr \"${"$ACP_ECHO_CONTROL_ADDR"}\"\nfi\nif [ -n \"${"${ACP_ECHO_TRANSCRIPT_PATH:-}"}\" ]; then\n  set -- \"$@\" --transcript-path \"${"$ACP_ECHO_TRANSCRIPT_PATH"}\"\nfi\n`
+
+  await writeExecutableScript(
+    acpWrapper,
+    `${commonPrefix}${commonFlags}exec \"$BIN\" --mode acp \"$@\"\n`,
+  )
+
+  await writeExecutableScript(
+    claudeWrapper,
+    `${commonPrefix}${commonFlags}exec \"$BIN\" --mode claude-stdio \"$@\"\n`,
+  )
+
+  await writeExecutableScript(
+    claudeWsWrapper,
+    `${commonPrefix}sdk_url=\"\"\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --sdk-url)\n      shift\n      if [ \"$#\" -gt 0 ]; then\n        sdk_url=\"$1\"\n      fi\n      ;;
+  esac\n  shift || true\ndone\nif [ -z \"$sdk_url\" ]; then\n  echo \"acp-echo-claudews wrapper: missing --sdk-url\" >&2\n  exit 2\nfi\nset -- --sdk-url \"$sdk_url\"\n${commonFlags}exec \"$BIN\" --mode claudews \"$@\"\n`,
+  )
+
+  await writeExecutableScript(
+    codexWrapper,
+    `${commonPrefix}${commonFlags}exec \"$BIN\" --mode codex-app-server \"$@\"\n`,
+  )
+
+  return {
+    acp: acpWrapper,
+    claude: claudeWrapper,
+    claudeWs: claudeWsWrapper,
+    codex: codexWrapper,
+  }
+}
+
 export default async function globalSetup() {
   const { frontendDir, repoRoot, backendDir } = resolvePaths()
   // reservePort reads from process.env if already set (e.g. from the config
   // file loading first), otherwise allocates a fresh free port and writes it
   // back to process.env so both config and harness agree on the same value.
   const backendPort = reservePort("E2E_BACKEND_PORT", 8090)
+  const mcpGatewayPort = await allocateFreePort()
+  process.env.E2E_MCP_GATEWAY_PORT = String(mcpGatewayPort)
   const frontendPort = reservePort("E2E_FRONTEND_PORT", 4174)
   const logDir = path.join(frontendDir, "test-results", "e2e-logs")
 
   await fs.mkdir(logDir, { recursive: true })
   const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "orbitmesh-e2e-"))
 
+  // Force an ephemeral MCP gateway config inside the ephemeral base dir so
+  // tests never contend with or depend on a developer's normal OrbitMesh
+  // instance/default gateway port.
+  await fs.writeFile(
+    path.join(stateDir, "mcp_gateway.json"),
+    JSON.stringify({ host: "127.0.0.1", port: mcpGatewayPort }, null, 2),
+    "utf-8",
+  )
+
   // Build helper binaries used by e2e tests and expose paths as env vars.
   const acpEchoBin = await buildGoBinary("acp-echo", backendDir, stateDir)
+  const acpEchoCommands = await buildAcpEchoWrapperCommands(acpEchoBin, stateDir)
   process.env.ACP_ECHO_BIN = acpEchoBin
+  process.env.E2E_ACP_ECHO_BIN = acpEchoBin
+  process.env.E2E_ACP_ECHO_CMD_ACP = acpEchoCommands.acp
+  process.env.E2E_ACP_ECHO_CMD_CLAUDE = acpEchoCommands.claude
+  process.env.E2E_ACP_ECHO_CMD_CLAUDE_WS = acpEchoCommands.claudeWs
+  process.env.E2E_ACP_ECHO_CMD_CODEX = acpEchoCommands.codex
 
   // Expose the backend URL so test helpers can make direct HTTP requests
   // (bypassing the browser's connection-per-origin limit).
@@ -190,6 +281,7 @@ export default async function globalSetup() {
         env: {
           ...process.env,
           E2E_FRONTEND_PORT: String(frontendPort),
+          VITE_API_PROXY_TARGET: process.env.E2E_BACKEND_URL,
         },
         logPath: frontendLog,
       },

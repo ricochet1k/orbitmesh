@@ -14,6 +14,20 @@ This document defines the provider conformance harness for OrbitMesh.
 - Explicitly out of scope: `pty` provider (terminal emulation behavior differs and is tracked separately).
 - Focus: provider behavior at OrbitMesh event and tool boundaries, not model quality.
 
+## Provider Boundary Policy
+
+To keep OrbitMesh provider-agnostic outside adapter layers, provider-specific code must remain isolated.
+
+- Allowed:
+  - `backend/internal/provider/**`
+  - provider settings UI in `frontend/src/routes/settings/providers/**`
+  - provider-specific tests
+- Not allowed:
+  - provider-specific keys/conditionals/protocol handling in generic backend layers (for example `backend/internal/service/**`)
+  - provider-specific rendering or parsing in generic frontend transcript/session components
+- Exception: `pty` is intentionally excluded from this boundary policy.
+- Integration rule: when provider-specific wire data needs to cross boundaries, adapters must translate it into provider-agnostic domain events or session usage/state mutations first.
+
 ## Provider Matrix
 
 | Provider | Offline replay lane | Live probe lane | In conformance scope |

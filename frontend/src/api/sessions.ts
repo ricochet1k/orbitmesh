@@ -4,6 +4,7 @@ import type {
   SessionListResponse,
   SessionStatusResponse,
   SessionInputRequest,
+  SessionActionResponseRequest,
   ActivityHistoryResponse,
   DockMcpRequest,
   DockMcpResponse,
@@ -182,6 +183,18 @@ export async function sendSessionInput(id: string, input: string): Promise<void>
     method: "POST",
     headers: withCSRFHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
+  });
+  if (!resp.ok) throw new Error(await readErrorMessage(resp));
+}
+
+export async function respondSessionAction(
+  id: string,
+  response: SessionActionResponseRequest,
+): Promise<void> {
+  const resp = await fetch(`${BASE_URL}/sessions/${id}/actions/respond`, {
+    method: "POST",
+    headers: withCSRFHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(response),
   });
   if (!resp.ok) throw new Error(await readErrorMessage(resp));
 }

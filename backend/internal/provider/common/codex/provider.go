@@ -199,3 +199,115 @@ func writeJSONLine(w interface{ Write([]byte) (int, error) }, v any) error {
 	_, err = w.Write(append(b, '\n'))
 	return err
 }
+
+// DiscoverModels attempts to list models via codex app-server model/list.
+// Returns discovered models (if available) and the source used.
+func DiscoverModels(ctx context.Context, staticCfg Config, config session.Config) ([]string, string, error) {
+	discoverCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+	defer cancel()
+
+	cmd, args := buildCodexCommand(staticCfg, config)
+	env := mergeEnvironment(staticCfg.Environment, config.Environment)
+	workingDir := config.WorkingDir
+	if workingDir == "" {
+		workingDir = staticCfg.WorkingDir
+	}
+
+	if !supportsAppServer(discoverCtx, cmd, env, workingDir) {
+		return nil, "fallback", fmt.Errorf("app-server mode unavailable")
+	}
+
+	mgr, err := process.Start(discoverCtx, process.Config{
+		Command:     cmd,
+		Args:        args,
+		WorkingDir:  workingDir,
+		Environment: env,
+	})
+	if err != nil {
+		return nil, "fallback", err
+	}
+	defer mgr.Kill()
+
+	if err := probeAppServerInitialize(discoverCtx, mgr); err != nil {
+		return nil, "fallback", err
+	}
+
+	if err := writeJSONLine(mgr.Stdin(), map[string]any{"method": "model/list", "id": int64(2), "params": map[string]any{}}); err != nil {
+		return nil, "fallback", err
+	}
+
+	scanner := bufio.NewScanner(mgr.Stdout())
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 2*1024*1024)
+
+	timeout := time.NewTimer(2 * time.Second)
+	defer timeout.Stop()
+	for {
+		select {
+		case <-discoverCtx.Done():
+			return nil, "fallback", discoverCtx.Err()
+		case <-timeout.C:
+			return nil, "fallback", fmt.Errorf("model/list timed out")
+		default:
+		}
+		if !scanner.Scan() {
+			if err := scanner.Err(); err != nil {
+				return nil, "fallback", err
+			}
+			return nil, "fallback", fmt.Errorf("codex exited before model/list response")
+		}
+		line := scanner.Bytes()
+		var resp rpcMessage
+		if err := json.Unmarshal(line, &resp); err != nil {
+			continue
+		}
+		if resp.ID == nil || *resp.ID != 2 {
+			continue
+		}
+		if resp.Error != nil {
+			return nil, "fallback", fmt.Errorf("model/list: %s", resp.Error.Message)
+		}
+		models := parseModelListResult(resp.Result)
+		if len(models) == 0 {
+			return nil, "fallback", fmt.Errorf("model/list returned no models")
+		}
+		return models, "protocol:model/list", nil
+	}
+}
+
+func parseModelListResult(result json.RawMessage) []string {
+	if len(result) == 0 {
+		return nil
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(result, &payload); err != nil {
+		return nil
+	}
+	candidates := []any{payload["models"], payload["availableModels"], payload["items"], payload["data"]}
+	for _, candidate := range candidates {
+		list, ok := candidate.([]any)
+		if !ok {
+			continue
+		}
+		out := make([]string, 0, len(list))
+		for _, item := range list {
+			switch v := item.(type) {
+			case string:
+				if strings.TrimSpace(v) != "" {
+					out = append(out, strings.TrimSpace(v))
+				}
+			case map[string]any:
+				for _, key := range []string{"id", "model", "name"} {
+					if s, ok := v[key].(string); ok && strings.TrimSpace(s) != "" {
+						out = append(out, strings.TrimSpace(s))
+						break
+					}
+				}
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	return nil
+}

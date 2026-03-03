@@ -515,6 +515,67 @@ select:focus {
 }
 
 /* ========================================
+   DARK MODE OVERRIDES
+   ======================================== */
+
+/* Select arrow: SVG data URIs can't use CSS variables, so override in dark mode.
+   Repeat the positioning properties too so the cascade is unambiguous. */
+:root[data-theme="dark"] select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%2394a3b8' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-2) center;
+  background-size: 12px;
+}
+
+:root[data-theme="dark"] select:focus {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%2360a5fa' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-2) center;
+  background-size: 12px;
+}
+
+/* Error/success state backgrounds need more visibility in dark mode */
+:root[data-theme="dark"] .form-group.error input,
+:root[data-theme="dark"] .form-group.error textarea,
+:root[data-theme="dark"] .form-group.error select {
+  background-color: rgba(185, 28, 28, 0.08);
+}
+
+:root[data-theme="dark"] .form-group.success input,
+:root[data-theme="dark"] .form-group.success textarea,
+:root[data-theme="dark"] .form-group.success select {
+  background-color: rgba(15, 118, 110, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%2394a3b8' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right var(--space-2) center;
+    background-size: 12px;
+  }
+
+  :root:not([data-theme="light"]) select:focus {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%2360a5fa' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right var(--space-2) center;
+    background-size: 12px;
+  }
+
+  :root:not([data-theme="light"]) .form-group.error input,
+  :root:not([data-theme="light"]) .form-group.error textarea,
+  :root:not([data-theme="light"]) .form-group.error select {
+    background-color: rgba(185, 28, 28, 0.08);
+  }
+
+  :root:not([data-theme="light"]) .form-group.success input,
+  :root:not([data-theme="light"]) .form-group.success textarea,
+  :root:not([data-theme="light"]) .form-group.success select {
+    background-color: rgba(15, 118, 110, 0.08);
+  }
+}
+
+/* ========================================
    REDUCED MOTION
    ======================================== */
 

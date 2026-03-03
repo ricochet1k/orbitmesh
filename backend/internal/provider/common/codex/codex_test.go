@@ -260,6 +260,26 @@ func TestHandleNotification_ExecCommandOutputDelta_EmitsProgress(t *testing.T) {
 	}
 }
 
+func TestParseResourceUsage_AccountRateLimitIncludesMetadata(t *testing.T) {
+	raw := json.RawMessage(`{"limits":[{"name":"requests","remaining":42,"resetAt":"2026-03-02T12:00:00Z"}],"retry_after_seconds":15}`)
+	usage := parseResourceUsage("account/rateLimits/updated", raw)
+	if usage == nil {
+		t.Fatal("expected usage payload")
+	}
+	if usage.Scope != "account" {
+		t.Fatalf("scope = %q, want account", usage.Scope)
+	}
+	if usage.Metadata["source"] != "account/rateLimits/updated" {
+		t.Fatalf("source metadata = %#v", usage.Metadata["source"])
+	}
+	if usage.Metadata["limits"] == nil {
+		t.Fatalf("expected limits metadata, got %#v", usage.Metadata)
+	}
+	if usage.Metadata["retry_after_seconds"] != float64(15) {
+		t.Fatalf("retry_after_seconds = %#v", usage.Metadata["retry_after_seconds"])
+	}
+}
+
 func TestHandleNotification_ApplyPatchApproval_EmitsActionAndArtifact(t *testing.T) {
 	p := NewCodexProvider("sess_approval", Config{})
 	params := json.RawMessage(`{
@@ -283,6 +303,48 @@ func TestHandleNotification_ApplyPatchApproval_EmitsActionAndArtifact(t *testing
 	e2 := <-p.events.Events()
 	if e2.Type != domain.EventTypeArtifactUpdate {
 		t.Fatalf("expected second event artifact_update, got %v", e2.Type)
+	}
+	action, ok := e1.ActionRequest()
+	if !ok {
+		t.Fatal("expected action request payload")
+	}
+	payload, ok := action.Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map payload, got %T", action.Payload)
+	}
+	rawDecisions, ok := payload["decisions"].([]map[string]string)
+	if !ok {
+		t.Fatalf("expected typed decisions slice, got %T", payload["decisions"])
+	}
+	if len(rawDecisions) != 2 || rawDecisions[0]["value"] != "approve" || rawDecisions[1]["value"] != "deny" {
+		t.Fatalf("unexpected decisions payload: %#v", rawDecisions)
+	}
+}
+
+func TestParseCommandExecutionApprovalRequest_MapsDecisionOptions(t *testing.T) {
+	req := parseCommandExecutionApprovalRequest(json.RawMessage(`{
+	  "itemId": "exec_123",
+	  "availableDecisions": [
+	    {"value": "approve_once", "label": "Approve once"},
+	    {"value": "deny", "label": "Deny"}
+	  ]
+	}`))
+	if req == nil {
+		t.Fatal("expected action request")
+	}
+	payload, ok := req.Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map payload, got %T", req.Payload)
+	}
+	decisions, ok := payload["decisions"].([]map[string]string)
+	if !ok {
+		t.Fatalf("expected decisions slice, got %T", payload["decisions"])
+	}
+	if len(decisions) != 2 {
+		t.Fatalf("expected 2 decisions, got %d", len(decisions))
+	}
+	if decisions[0]["value"] != "approve_once" || decisions[0]["label"] != "Approve once" {
+		t.Fatalf("unexpected first decision: %#v", decisions[0])
 	}
 }
 

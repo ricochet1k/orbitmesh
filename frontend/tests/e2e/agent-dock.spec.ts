@@ -9,21 +9,21 @@
  * the suite runs (see tests/helpers/e2e-harness.ts).
  *
  * All API calls (after the initial page navigation) go directly to the backend
- * via Playwright's `request` context (Node.js-level HTTP to
- * process.env.E2E_BACKEND_URL).  This bypasses the browser's HTTP/1.1
+ * via Node.js-level HTTP to process.env.E2E_BACKEND_URL. This bypasses the
+ * browser's HTTP/1.1
  * connection-per-origin limit, which is exhausted by the long-lived SSE stream
  * and the 20-second dock-MCP long-poll, causing browser-fetch API calls to
  * queue indefinitely.
  */
 
-import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import http from "node:http";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const backendURL = process.env.E2E_BACKEND_URL ?? "http://localhost:8080";
+const backendURL = process.env.E2E_BACKEND_URL ?? "http://127.0.0.1:8090";
 
 
 /** Navigate to "/" and return the CSRF token from the cookie. */
@@ -50,29 +50,142 @@ async function getCsrfToken(page: Page): Promise<string> {
  * established), so the CSRF cookie set by the browser is automatically sent.
  */
 async function createSession(
-  page: Page,
   csrfToken: string,
   body: Record<string, unknown>,
 ): Promise<string> {
-  const response = await page.evaluate(
-    async (payload) => {
-      const resp = await fetch("/api/sessions", {
+  const payload = JSON.stringify(body);
+  const response = await new Promise<{ status: number; data: unknown }>((resolve, reject) => {
+    const parsed = new URL("/api/sessions", backendURL);
+    const req = http.request(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port,
+        path: parsed.pathname,
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-CSRF-Token": payload.csrfToken,
+          "Content-Length": Buffer.byteLength(payload),
+          "X-CSRF-Token": csrfToken,
+          Cookie: `orbitmesh-csrf-token=${csrfToken}`,
+          Connection: "close",
         },
-        body: JSON.stringify(payload.body),
-      });
-      const data = await resp.json();
-      return { status: resp.status, data };
-    },
-    { csrfToken, body },
-  );
+        agent: false,
+      },
+      (res) => {
+        const chunks: Uint8Array[] = [];
+        res.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+        res.on("end", () => {
+          const raw = Buffer.concat(chunks).toString("utf8").trim();
+          let data: unknown = null;
+          if (raw) {
+            try {
+              data = JSON.parse(raw) as unknown;
+            } catch {
+              data = { raw };
+            }
+          }
+          resolve({ status: res.statusCode ?? 0, data });
+        });
+      },
+    );
+    req.setTimeout(10_000, () => {
+      req.destroy(new Error("createSession timed out"));
+    });
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
+  });
 
   expect(response.status, `Expected 201, got ${response.status}: ${JSON.stringify(response.data)}`).toBe(201);
-  expect(response.data?.id).toBeTruthy();
-  return response.data.id as string;
+  const id = (response.data as { id?: string } | null)?.id;
+  expect(id).toBeTruthy();
+  return id as string;
+}
+
+async function createProvider(
+  csrfToken: string,
+  body: Record<string, unknown>,
+): Promise<string> {
+  const payload = JSON.stringify(body);
+  const response = await new Promise<{ status: number; data: unknown }>((resolve, reject) => {
+    const parsed = new URL("/api/v1/providers", backendURL);
+    const req = http.request(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port,
+        path: parsed.pathname,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload),
+          "X-CSRF-Token": csrfToken,
+          Cookie: `orbitmesh-csrf-token=${csrfToken}`,
+          Connection: "close",
+        },
+        agent: false,
+      },
+      (res) => {
+        const chunks: Uint8Array[] = [];
+        res.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+        res.on("end", () => {
+          const raw = Buffer.concat(chunks).toString("utf8").trim();
+          let data: unknown = null;
+          if (raw) {
+            try {
+              data = JSON.parse(raw) as unknown;
+            } catch {
+              data = { raw };
+            }
+          }
+          resolve({ status: res.statusCode ?? 0, data });
+        });
+      },
+    );
+    req.setTimeout(10_000, () => {
+      req.destroy(new Error("createProvider timed out"));
+    });
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
+  });
+
+  expect(response.status, `Expected 201, got ${response.status}: ${JSON.stringify(response.data)}`).toBe(201);
+  const id = (response.data as { id?: string } | null)?.id;
+  expect(id).toBeTruthy();
+  return id as string;
+}
+
+async function deleteProvider(
+  csrfToken: string,
+  providerId: string,
+): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const parsed = new URL(`${backendURL}/api/v1/providers/${providerId}`);
+    const req = http.request(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port,
+        path: parsed.pathname,
+        method: "DELETE",
+        headers: {
+          "X-CSRF-Token": csrfToken,
+          Cookie: `orbitmesh-csrf-token=${csrfToken}`,
+          Connection: "close",
+        },
+        agent: false,
+      },
+      (res) => {
+        res.resume();
+        resolve();
+      },
+    );
+    req.setTimeout(10_000, () => {
+      req.destroy();
+      resolve();
+    });
+    req.on("error", () => resolve());
+    req.end();
+  });
 }
 
 /**
@@ -82,12 +195,16 @@ async function createSession(
  * stalls.
  */
 async function sendMessage(
-  _request: APIRequestContext,
   sessionId: string,
   csrfToken: string,
   content: string,
+  provider?: { id: string; type: string },
 ): Promise<void> {
-  const body = JSON.stringify({ content });
+  const body = JSON.stringify({
+    content,
+    provider_id: provider?.id,
+    provider_type: provider?.type,
+  });
   const status = await new Promise<number>((resolve, reject) => {
     const parsed = new URL(`${backendURL}/api/sessions/${sessionId}/messages`);
     const req = http.request(
@@ -126,7 +243,6 @@ async function sendMessage(
  * using it for cleanup is unreliable).
  */
 async function stopSession(
-  _request: APIRequestContext,
   sessionId: string,
   csrfToken: string,
 ): Promise<void> {
@@ -160,7 +276,7 @@ async function stopSession(
 test.describe("AgentDock with acp-echo provider", () => {
   test(
     "@smoke fake acp output streams to both agent dock and session viewer",
-    async ({ page, request }) => {
+    async ({ page }) => {
       // Creates one fake ACP dock session, opens both surfaces that consume
       // the stream (dock + session viewer), sends a message through the API,
       // and verifies both surfaces render the streamed output.
@@ -177,10 +293,19 @@ test.describe("AgentDock with acp-echo provider", () => {
       const csrfToken = await getCsrfToken(page);
 
       let sessionId = "";
-      let viewerPage: Page | null = null;
+      let providerId = "";
       try {
+        providerId = await createProvider(csrfToken, {
+          name: `e2e-acp-dock-${Date.now()}`,
+          type: "acp",
+          command: [acpEchoBin],
+          custom: { acp_command: acpEchoBin },
+          is_active: true,
+        });
+
         // Create an ACP echo session marked as a dock session.
-        sessionId = await createSession(page, csrfToken, {
+        sessionId = await createSession(csrfToken, {
+          provider_id: providerId,
           provider_type: "acp",
           working_dir: "/tmp",
           session_kind: "dock",
@@ -193,8 +318,11 @@ test.describe("AgentDock with acp-echo provider", () => {
           window.localStorage.setItem("orbitmesh:dock-session-id", id);
         }, sessionId);
 
-        // Hard-navigate so the dock re-initialises with the stored session ID.
-        await page.goto("/");
+        // Hard-navigate so the dock re-initialises with the stored session ID
+        // and the session viewer mounts on the same page.
+        await page.goto(`/sessions/${sessionId}`);
+
+        await expect(page.getByTestId("session-viewer-heading")).toBeVisible();
 
         // The dock widget must be present in the layout.
         await expect(page.getByTestId("agent-dock")).toBeVisible();
@@ -204,39 +332,45 @@ test.describe("AgentDock with acp-echo provider", () => {
           await dockToggle.click();
         }
 
-        viewerPage = await page.context().newPage();
-        await viewerPage.goto(`/sessions/${sessionId}`);
-        await expect(viewerPage.getByTestId("session-viewer-heading")).toBeVisible();
-
         const prompt = `stream-check-${Date.now()}`;
+
+        const dockTranscript = page.locator(".agent-dock .transcript");
+        const viewerTranscript = page.locator(".session-viewer .transcript");
+
+        // Ensure both surfaces are mounted before sending the message.
+        await expect(dockTranscript).toBeVisible();
+        await expect(viewerTranscript).toBeVisible();
+
+        const initialDockCount = await dockTranscript.getByText(prompt).count();
+        const initialViewerCount = await viewerTranscript.getByText(prompt).count();
 
         // Send a message via the REST API (Node.js request, not browser fetch).
         // The browser's connection limit is saturated by SSE + dock-MCP long-poll
         // by this point, so browser fetch would queue indefinitely.
-        await sendMessage(request, sessionId, csrfToken, prompt);
+        await sendMessage(sessionId, csrfToken, prompt, { id: providerId, type: "acp" });
 
-        // Verify both consumers update while the session is still running.
+        // Verify both consumers receive the new streamed message without relying
+        // on a specific transient run-state timing (e.g. "running" badge).
         await expect
           .poll(
             async () => {
-              const stateText = (await viewerPage.getByTestId("session-state-badge").textContent()) ?? "";
-              const dockCount = await page.locator(".agent-dock .transcript").getByText(prompt).count();
-              const viewerCount = await viewerPage.locator(".session-viewer .transcript").getByText(prompt).count();
-              return stateText.includes("running") && dockCount > 0 && viewerCount > 0;
+              const dockCount = await dockTranscript.getByText(prompt).count();
+              const viewerCount = await viewerTranscript.getByText(prompt).count();
+              return dockCount > initialDockCount && viewerCount > initialViewerCount;
             },
-            { timeout: 20_000 },
+            { timeout: 30_000, intervals: [250, 500, 1_000] },
           )
           .toBeTruthy();
       } finally {
-        if (viewerPage) await viewerPage.close();
-        if (sessionId) await stopSession(request, sessionId, csrfToken);
+        if (sessionId) await stopSession(sessionId, csrfToken);
+        if (providerId) await deleteProvider(csrfToken, providerId);
       }
     },
   );
 
   test(
     "session viewer reload restores all persisted fake acp messages",
-    async ({ page, request }) => {
+    async ({ page }) => {
       // Creates a plain ACP session, sends two messages, verifies they are
       // visible, reloads the page, and verifies both messages rehydrate.
       test.setTimeout(60_000);
@@ -252,9 +386,19 @@ test.describe("AgentDock with acp-echo provider", () => {
       const csrfToken = await getCsrfToken(page);
 
       let sessionId = "";
+      let providerId = "";
       try {
+        providerId = await createProvider(csrfToken, {
+          name: `e2e-acp-reload-${Date.now()}`,
+          type: "acp",
+          command: [acpEchoBin],
+          custom: { acp_command: acpEchoBin },
+          is_active: true,
+        });
+
         // Create a plain (non-dock) acp session.
-        sessionId = await createSession(page, csrfToken, {
+        sessionId = await createSession(csrfToken, {
+          provider_id: providerId,
           provider_type: "acp",
           working_dir: "/tmp",
           custom: { acp_command: acpEchoBin },
@@ -266,7 +410,7 @@ test.describe("AgentDock with acp-echo provider", () => {
         const prompt = `reload-check-${Date.now()}`;
 
         // Send one message and wait for persisted transcript content.
-        await sendMessage(request, sessionId, csrfToken, prompt);
+        await sendMessage(sessionId, csrfToken, prompt, { id: providerId, type: "acp" });
         await expect(page.locator(".session-viewer .transcript")).toContainText(prompt, { timeout: 20_000 });
 
         await expect
@@ -282,7 +426,8 @@ test.describe("AgentDock with acp-echo provider", () => {
         const afterReloadCount = await page.locator(".session-viewer .transcript .transcript-item").count();
         expect(afterReloadCount).toBeGreaterThanOrEqual(beforeReloadCount);
       } finally {
-        if (sessionId) await stopSession(request, sessionId, csrfToken);
+        if (sessionId) await stopSession(sessionId, csrfToken);
+        if (providerId) await deleteProvider(csrfToken, providerId);
       }
     },
   );

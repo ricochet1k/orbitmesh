@@ -29,6 +29,7 @@ export const apiClient = {
   resumeSession: sessionApi.resumeSession,
   cancelSession: sessionApi.cancelSession,
   sendSessionInput: sessionApi.sendSessionInput,
+  respondSessionAction: sessionApi.respondSessionAction,
   sendMessage: sessionApi.sendMessage,
   getEventsUrl: sessionApi.getEventsUrl,
   getGlobalSessionEventsUrl: sessionApi.getGlobalSessionEventsUrl,
@@ -45,6 +46,7 @@ export const apiClient = {
 
   // Providers
   listProviders: providerApi.listProviders,
+  getProviderUsageInsights: providerApi.getProviderUsageInsights,
   getProvider: providerApi.getProvider,
   createProvider: providerApi.createProvider,
   updateProvider: providerApi.updateProvider,

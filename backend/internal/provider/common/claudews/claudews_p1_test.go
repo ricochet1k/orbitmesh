@@ -163,7 +163,7 @@ func TestWSConn_StartPingDetectsDeadConnection(t *testing.T) {
 	}
 }
 
-func TestHandleResultMsg_EmitsTurnCompletionMetadataAfterOutput(t *testing.T) {
+func TestHandleResultMsg_EmitsTurnCompletionSystemMessageAfterOutput(t *testing.T) {
 	p := NewClaudeWSProvider("s1", nil)
 	p.turnSeq = 2
 	rm := RawMessage{Raw: []byte(`{"type":"result","subtype":"success","is_error":false,"result":"done","duration_ms":12.5,"duration_api_ms":9.1,"num_turns":2,"total_cost_usd":0.01,"stop_reason":"end_turn","usage":{"input_tokens":4,"output_tokens":5}}`)}
@@ -182,27 +182,13 @@ func TestHandleResultMsg_EmitsTurnCompletionMetadataAfterOutput(t *testing.T) {
 			switch ev.Type {
 			case domain.EventTypeOutput:
 				seenOutput = true
-			case domain.EventTypeMetadata:
-				meta, ok := ev.Metadata()
-				if !ok || meta.Key != "turn_completed" {
+			case domain.EventTypeSystemMessage:
+				sm, ok := ev.SystemMessage()
+				if !ok || !strings.Contains(strings.ToLower(sm.Content), "turn 2") {
 					continue
 				}
 				if !seenOutput {
-					t.Fatal("expected output event before turn_completed metadata")
-				}
-				payload, _ := meta.Value.(map[string]any)
-				if payload["subtype"] != "success" || payload["is_error"] != false {
-					t.Fatalf("unexpected turn_completed payload: %+v", payload)
-				}
-				numTurnsOK := payload["num_turns"] == 2 || payload["num_turns"] == float64(2)
-				if !numTurnsOK {
-					t.Fatalf("expected num_turns=2, got %+v", payload)
-				}
-				if payload["stop_reason"] != "end_turn" {
-					t.Fatalf("expected stop_reason=end_turn, got %+v", payload)
-				}
-				if payload["turn_index"] != 2 {
-					t.Fatalf("expected turn_index=2, got %+v", payload)
+					t.Fatal("expected output event before turn completion message")
 				}
 				seenCompletion = true
 			case domain.EventTypeProgress:
@@ -217,7 +203,7 @@ func TestHandleResultMsg_EmitsTurnCompletionMetadataAfterOutput(t *testing.T) {
 				}
 			}
 		case <-deadline:
-			t.Fatalf("timed out waiting for turn completion metadata (completion=%v output=%v)", seenCompletion, seenOutput)
+			t.Fatalf("timed out waiting for turn completion message (completion=%v output=%v)", seenCompletion, seenOutput)
 		}
 	}
 	for _, ev := range drainEvents(events) {
@@ -257,6 +243,16 @@ func TestProcessInput_TwoTurnReentryUsesSessionIDAfterInit(t *testing.T) {
 	if err := p.inputBuffer.Send(context.Background(), "first"); err != nil {
 		t.Fatalf("queue first input: %v", err)
 	}
+	initialize := decodeJSONMap(t, <-outbound)
+	if initialize["type"] != "control_request" {
+		t.Fatalf("expected initialize control_request before first user message, got %v", initialize["type"])
+	}
+	requestID, _ := initialize["request_id"].(string)
+	if requestID == "" {
+		t.Fatalf("expected initialize request_id, got payload: %v", initialize)
+	}
+	p.dispatchMessage([]byte(`{"type":"control_response","response":{"request_id":"` + requestID + `","subtype":"success","response":{}}}`))
+
 	first := decodeJSONMap(t, <-outbound)
 	if first["type"] != "user" {
 		t.Fatalf("expected first outbound message to be user, got %v", first["type"])
@@ -300,13 +296,22 @@ func TestProcessInput_FirstTurnDoesNotWaitForInitSessionID(t *testing.T) {
 	}
 
 	select {
-	case msg := <-outbound:
-		payload := decodeJSONMap(t, msg)
+	case initializeMsg := <-outbound:
+		initialize := decodeJSONMap(t, initializeMsg)
+		if initialize["type"] != "control_request" {
+			t.Fatalf("expected outbound initialize control_request, got %v", initialize["type"])
+		}
+		requestID, _ := initialize["request_id"].(string)
+		if requestID == "" {
+			t.Fatalf("expected initialize request_id, got payload: %v", initialize)
+		}
+		p.dispatchMessage([]byte(`{"type":"control_response","response":{"request_id":"` + requestID + `","subtype":"success","response":{}}}`))
+		payload := decodeJSONMap(t, <-outbound)
 		if payload["type"] != "user" {
 			t.Fatalf("expected outbound user message, got %v", payload["type"])
 		}
 	case <-time.After(300 * time.Millisecond):
-		t.Fatal("expected first turn to send promptly without waiting for init")
+		t.Fatal("expected first turn initialize+send sequence to start promptly")
 	}
 
 	p.cancel()

@@ -2,16 +2,8 @@ import { onMount, onCleanup, createSignal, createEffect } from "solid-js"
 import { EditorView, basicSetup } from "codemirror"
 import { keymap } from "@codemirror/view"
 import { oneDark } from "@codemirror/theme-one-dark"
-import { javascript } from "@codemirror/lang-javascript"
-import { go } from "@codemirror/lang-go"
-import { css } from "@codemirror/lang-css"
-import { html } from "@codemirror/lang-html"
-import { json } from "@codemirror/lang-json"
-import { python } from "@codemirror/lang-python"
-import { rust } from "@codemirror/lang-rust"
-import { markdown } from "@codemirror/lang-markdown"
-import type { LanguageSupport } from "@codemirror/language"
 import type { FileReadResponse } from "../api/files"
+import { getLanguageSupportForFile } from "./code/languageSupport"
 
 interface CodeEditorProps {
   file: FileReadResponse
@@ -19,44 +11,6 @@ interface CodeEditorProps {
   onDirtyChange?: (dirty: boolean) => void
   isTreeOpen?: boolean
   onToggleTree?: () => void
-}
-
-function getLanguageSupport(mimeType: string, path: string): LanguageSupport | null {
-  const ext = path.includes(".") ? "." + path.split(".").pop()! : ""
-
-  if (ext === ".ts" || ext === ".tsx" || mimeType === "application/typescript") {
-    return javascript({ typescript: true, jsx: path.endsWith(".tsx") })
-  }
-  if (
-    ext === ".js" ||
-    ext === ".jsx" ||
-    mimeType === "text/javascript" ||
-    mimeType === "application/javascript"
-  ) {
-    return javascript({ jsx: path.endsWith(".jsx") })
-  }
-  if (ext === ".go" || mimeType === "text/x-go") {
-    return go()
-  }
-  if (ext === ".css" || mimeType === "text/css") {
-    return css()
-  }
-  if (ext === ".html" || mimeType === "text/html") {
-    return html()
-  }
-  if (ext === ".json" || mimeType === "application/json") {
-    return json()
-  }
-  if (ext === ".py" || mimeType === "text/x-python") {
-    return python()
-  }
-  if (ext === ".rs" || mimeType === "text/x-rust") {
-    return rust()
-  }
-  if (ext === ".md" || mimeType === "text/markdown") {
-    return markdown()
-  }
-  return null
 }
 
 export default function CodeEditor(props: CodeEditorProps) {
@@ -93,7 +47,7 @@ export default function CodeEditor(props: CodeEditorProps) {
   }
 
   onMount(() => {
-    const langSupport = getLanguageSupport(props.file.mime_type, props.file.path)
+    const langSupport = getLanguageSupportForFile(props.file.mime_type, props.file.path)
 
     const extensions = [
       basicSetup,

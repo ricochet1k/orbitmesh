@@ -361,6 +361,64 @@ func TestDispatchMessage_AssistantThinkingEmitsThoughtAndProgress(t *testing.T) 
 	}
 }
 
+func TestDispatchMessage_AssistantSnapshotEmitsResourceUsageAndUpdatesCacheStats(t *testing.T) {
+	p := NewClaudeWSProvider("s1", nil)
+	p.dispatchMessage([]byte(`{"type":"assistant","message":{"role":"assistant","id":"msg_1","usage":{"input_tokens":2,"output_tokens":3,"cache_read_input_tokens":13,"cache_creation_input_tokens":7}}}`))
+
+	events := drainEvents(p.events.Events())
+	if containsMetadataEventKey(events, "assistant_snapshot") {
+		t.Fatal("did not expect assistant_snapshot metadata event")
+	}
+
+	foundUsage := false
+	for _, ev := range events {
+		if ev.Type != domain.EventTypeResourceUsage {
+			continue
+		}
+		usage, ok := ev.ResourceUsage()
+		if !ok || usage.Scope != "turn" {
+			continue
+		}
+		foundUsage = true
+	}
+	if !foundUsage {
+		t.Fatal("expected turn-scoped resource_usage event")
+	}
+
+	status := p.Status()
+	if status.Metrics.CacheReadInputTokens != 13 {
+		t.Fatalf("cache read tokens = %d, want 13", status.Metrics.CacheReadInputTokens)
+	}
+	if status.Metrics.CacheCreationInputTokens != 7 {
+		t.Fatalf("cache creation tokens = %d, want 7", status.Metrics.CacheCreationInputTokens)
+	}
+}
+
+func TestDispatchMessage_SystemInitEmitsProviderModelUsage(t *testing.T) {
+	p := NewClaudeWSProvider("s1", nil)
+	p.dispatchMessage([]byte(`{"type":"system","subtype":"init","session_id":"cli-session-1","cwd":"/tmp","model":"claude-sonnet-4-5","claude_code_version":"1","permissionMode":"default","apiKeySource":"test","tools":[],"mcp_servers":[]}`))
+
+	events := drainEvents(p.events.Events())
+	seenProviderUsage := false
+	for _, ev := range events {
+		if ev.Type != domain.EventTypeResourceUsage {
+			continue
+		}
+		usage, ok := ev.ResourceUsage()
+		if !ok || usage.Scope != "models" {
+			continue
+		}
+		payload, _ := usage.Data.(map[string]any)
+		if payload["current_model"] == "claude-sonnet-4-5" {
+			seenProviderUsage = true
+			break
+		}
+	}
+	if !seenProviderUsage {
+		t.Fatal("expected models-scoped usage from system init")
+	}
+}
+
 func TestDispatchMessage_ToolLifecycleAndCompletionSingleTurn(t *testing.T) {
 	p := NewClaudeWSProvider("s1", nil)
 	p.turnSeq = 1
@@ -372,7 +430,7 @@ func TestDispatchMessage_ToolLifecycleAndCompletionSingleTurn(t *testing.T) {
 	events := drainEvents(p.events.Events())
 	seenStarted := false
 	seenCompleted := false
-	seenTurnCompleted := false
+	seenTurnCompletedSystem := false
 	for _, ev := range events {
 		switch ev.Type {
 		case domain.EventTypeToolCall:
@@ -386,10 +444,10 @@ func TestDispatchMessage_ToolLifecycleAndCompletionSingleTurn(t *testing.T) {
 			if data.Status == "completed" {
 				seenCompleted = true
 			}
-		case domain.EventTypeMetadata:
-			metadata, ok := ev.Metadata()
-			if ok && metadata.Key == "turn_completed" {
-				seenTurnCompleted = true
+		case domain.EventTypeSystemMessage:
+			sm, ok := ev.SystemMessage()
+			if ok && strings.Contains(strings.ToLower(sm.Content), "turn 1") {
+				seenTurnCompletedSystem = true
 			}
 		}
 	}
@@ -400,9 +458,104 @@ func TestDispatchMessage_ToolLifecycleAndCompletionSingleTurn(t *testing.T) {
 	if !seenCompleted {
 		t.Fatal("expected tool_call completed event")
 	}
-	if !seenTurnCompleted {
-		t.Fatal("expected turn_completed metadata event")
+	if containsMetadataEventKey(events, "tool_result") {
+		t.Fatal("did not expect synthetic tool_result metadata event")
 	}
+	if !seenTurnCompletedSystem {
+		t.Fatal("expected turn completion system message event")
+	}
+}
+
+func TestHandleUserMsg_ToolResultFailedStatusAndNoMetadataLeak(t *testing.T) {
+	p := NewClaudeWSProvider("s1", nil)
+	p.dispatchMessage([]byte(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"boom","is_error":true}]}}`))
+
+	events := drainEvents(p.events.Events())
+	if containsMetadataEventKey(events, "tool_result") {
+		t.Fatal("did not expect synthetic tool_result metadata event")
+	}
+
+	foundFailed := false
+	for _, ev := range events {
+		if ev.Type != domain.EventTypeToolCall {
+			continue
+		}
+		data, ok := ev.ToolCall()
+		if !ok || data.ID != "toolu_1" {
+			continue
+		}
+		if data.Status != "failed" {
+			t.Fatalf("expected failed status, got %+v", data)
+		}
+		if data.Output != "boom" {
+			t.Fatalf("expected output boom, got %#v", data.Output)
+		}
+		foundFailed = true
+	}
+
+	if !foundFailed {
+		t.Fatal("expected failed tool_call completion event")
+	}
+}
+
+func TestHandleUserMsg_ToolResultStructuredOutputPreserved(t *testing.T) {
+	p := NewClaudeWSProvider("s1", nil)
+	p.dispatchMessage([]byte(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_struct","content":{"summary":"ok","entries":[{"k":"v"}]},"is_error":false}]}}`))
+
+	events := drainEvents(p.events.Events())
+	found := false
+	for _, ev := range events {
+		if ev.Type != domain.EventTypeToolCall {
+			continue
+		}
+		data, ok := ev.ToolCall()
+		if !ok || data.ID != "toolu_struct" {
+			continue
+		}
+		expected := map[string]any{
+			"summary": "ok",
+			"entries": []any{map[string]any{"k": "v"}},
+		}
+		if !reflect.DeepEqual(data.Output, expected) {
+			t.Fatalf("expected structured output preserved, got %#v", data.Output)
+		}
+		found = true
+	}
+
+	if !found {
+		t.Fatal("expected completed tool_call event for structured output")
+	}
+}
+
+func TestHandleUserMsg_ToolResultCompletionIncludesPriorContext(t *testing.T) {
+	p := NewClaudeWSProvider("s1", nil)
+	p.dispatchMessage([]byte(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_ctx","name":"Bash","input":{"command":"ls"}}]}}`))
+	p.dispatchMessage([]byte(`{"type":"tool_progress","tool_use_id":"toolu_ctx","tool_name":"Bash","elapsed_time_seconds":1.5}`))
+	p.dispatchMessage([]byte(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_ctx","content":"done","is_error":false}]}}`))
+
+	events := drainEvents(p.events.Events())
+	for _, ev := range events {
+		if ev.Type != domain.EventTypeToolCall {
+			continue
+		}
+		data, ok := ev.ToolCall()
+		if !ok || data.ID != "toolu_ctx" || data.Status != "completed" {
+			continue
+		}
+		if data.Name != "Bash" {
+			t.Fatalf("expected name from prior lifecycle event, got %+v", data)
+		}
+		if data.Title == "" {
+			t.Fatalf("expected title from prior lifecycle event, got %+v", data)
+		}
+		expectedInput := map[string]any{"command": "ls"}
+		if !reflect.DeepEqual(data.Input, expectedInput) {
+			t.Fatalf("expected input from prior lifecycle event, got %#v", data.Input)
+		}
+		return
+	}
+
+	t.Fatal("expected completed tool_call event with lifecycle context")
 }
 
 func drainEvents(events <-chan domain.Event) []domain.Event {

@@ -2,6 +2,7 @@ import type {
   ProviderConfigRequest,
   ProviderConfigResponse,
   ProviderConfigListResponse,
+  ProviderUsageInsightsResponse,
   ProviderTestRequest,
   ProviderTestResponse,
 } from "../types/api";
@@ -9,6 +10,12 @@ import { BASE_URL, withCSRFHeaders, readErrorMessage } from "./_base";
 
 export async function listProviders(): Promise<ProviderConfigListResponse> {
   const resp = await fetch(`${BASE_URL}/v1/providers`);
+  if (!resp.ok) throw new Error(await readErrorMessage(resp));
+  return resp.json();
+}
+
+export async function getProviderUsageInsights(): Promise<ProviderUsageInsightsResponse> {
+  const resp = await fetch(`${BASE_URL}/v1/providers/usage`);
   if (!resp.ok) throw new Error(await readErrorMessage(resp));
   return resp.json();
 }

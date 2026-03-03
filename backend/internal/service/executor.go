@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -97,7 +98,10 @@ type AgentExecutor struct {
 	bootID             string
 	resumeTokenTTL     time.Duration
 
-	messageLogStore *storage.SessionMessagesLogStore
+	messageLogStore    *storage.SessionMessagesLogStore
+	usageMu            sync.RWMutex
+	sessionUsageStats  map[string]session.UsageStats
+	providerUsageStats map[string]providerUsageState
 
 	evalCoordinator *EvalCoordinator
 
@@ -138,6 +142,8 @@ func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
 
 	exec := &AgentExecutor{
 		sessions:           make(map[string]*sessionContext),
+		sessionUsageStats:  make(map[string]session.UsageStats),
+		providerUsageStats: make(map[string]providerUsageState),
 		storage:            cfg.Storage,
 		terminalStorage:    cfg.TerminalStorage,
 		broadcaster:        cfg.Broadcaster,
@@ -330,13 +336,18 @@ func (e *AgentExecutor) GetSessionStatus(id string) (session.Status, error) {
 		return session.Status{}, ErrSessionNotFound
 	}
 
+	sessionUsage, providerUsage := e.usageSnapshots(sc.session.ID, sc.session.PreferredProviderID, sc.session.ProviderType)
+
 	// If there's no active run, return a default status
 	run := sc.getRun()
 	if run == nil {
-		return session.Status{}, nil
+		return session.Status{SessionUsage: sessionUsage, ProviderUsage: providerUsage}, nil
 	}
 
-	return run.Session.Status(), nil
+	status := run.Session.Status()
+	status.SessionUsage = sessionUsage
+	status.ProviderUsage = providerUsage
+	return status, nil
 }
 
 func (e *AgentExecutor) ListSessions() []*domain.Session {
@@ -440,6 +451,53 @@ func (e *AgentExecutor) SendInput(ctx context.Context, id string, input string, 
 		ProjectID:     sc.session.ProjectID,
 		SessionCustom: sc.session.CustomDataCopy(),
 	}
+	_, err := run.Session.SendInput(ctx, cfg, input)
+	return err
+}
+
+func (e *AgentExecutor) RespondAction(ctx context.Context, id string, response session.ActionResponse, providerID string, providerType string) error {
+	e.mu.RLock()
+	sc, exists := e.sessions[id]
+	e.mu.RUnlock()
+
+	if !exists {
+		return ErrSessionNotFound
+	}
+
+	if providerID != "" {
+		sc.session.SetPreferredProviderID(providerID)
+		if e.storage != nil {
+			if err := e.storage.Save(sc.session); err != nil {
+				return fmt.Errorf("failed to save session with provider preference: %w", err)
+			}
+		}
+	}
+
+	run := sc.getRun()
+	if run == nil {
+		return fmt.Errorf("no active provider run for session %s", id)
+	}
+
+	cfg := session.Config{
+		ProviderType:  sc.session.ProviderType,
+		WorkingDir:    sc.session.WorkingDir,
+		ProjectID:     sc.session.ProjectID,
+		SessionCustom: sc.session.CustomDataCopy(),
+	}
+
+	if responder, ok := run.Session.(session.ActionResponder); ok {
+		_, err := responder.RespondAction(ctx, cfg, response)
+		return err
+	}
+
+	input := strings.TrimSpace(response.Input)
+	if input == "" {
+		input = strings.TrimSpace(response.Decision)
+	}
+	if input == "" {
+		return fmt.Errorf("action response requires either input or decision")
+	}
+
 	_, err := run.Session.SendInput(ctx, cfg, input)
 	return err
 }
@@ -658,6 +716,47 @@ func (e *AgentExecutor) listSessionIDs() []string {
 		sessionIDs = append(sessionIDs, id)
 	}
 	return sessionIDs
+}
+
+// DrainActiveSessions waits for each running session's current agent turn to
+// complete before stopping it. Sessions whose providers do not implement
+// session.TurnBoundaryDrainer are stopped immediately. All sessions are
+// drained concurrently; the call blocks until all are done or ctx expires.
+func (e *AgentExecutor) DrainActiveSessions(ctx context.Context) {
+	sessionIDs := e.listSessionIDs()
+	if len(sessionIDs) == 0 {
+		return
+	}
+
+	var wg sync.WaitGroup
+	for _, id := range sessionIDs {
+		e.mu.RLock()
+		sc, exists := e.sessions[id]
+		e.mu.RUnlock()
+		if !exists {
+			continue
+		}
+		currentState := sc.session.GetState()
+		if currentState != domain.SessionStateRunning && currentState != domain.SessionStateSuspended {
+			continue
+		}
+		run := sc.getRun()
+		if run == nil {
+			continue
+		}
+
+		wg.Add(1)
+		go func(sessionID string, run *session.Run) {
+			defer wg.Done()
+			if drainer, ok := run.Session.(session.TurnBoundaryDrainer); ok {
+				if err := drainer.DrainAtTurnBoundary(ctx); err != nil {
+					log.Printf("shutdown: session %s turn boundary drain: %v", sessionID, err)
+				}
+			}
+			_ = e.StopSession(ctx, sessionID)
+		}(id, run)
+	}
+	wg.Wait()
 }
 
 func formatTaskReference(id, title string) string {

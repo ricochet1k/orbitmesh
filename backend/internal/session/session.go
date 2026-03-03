@@ -69,18 +69,62 @@ type Config struct {
 }
 
 type Metrics struct {
-	TokensIn       int64
-	TokensOut      int64
-	RequestCount   int64
-	LastActivityAt time.Time
+	TokensIn                 int64
+	TokensOut                int64
+	RequestCount             int64
+	CacheReadInputTokens     int64
+	CacheCreationInputTokens int64
+	LastActivityAt           time.Time
+}
+
+type UsageStat struct {
+	Scope     string
+	Data      any
+	Metadata  map[string]any
+	UpdatedAt time.Time
+}
+
+type UsageStats struct {
+	ByScope       map[string]UsageStat
+	LastUpdatedAt time.Time
 }
 
 type Status struct {
-	State       State
-	CurrentTask string
-	Output      string
-	Error       error
-	Metrics     Metrics
+	State         State
+	CurrentTask   string
+	Output        string
+	Error         error
+	Metrics       Metrics
+	SessionUsage  UsageStats
+	ProviderUsage UsageStats
+}
+
+// ActionResponse captures a user decision for an action_request event.
+// Providers that support first-class action handling can implement
+// ActionResponder to consume this structured response.
+type ActionResponse struct {
+	ActionID string
+	Decision string
+	Input    string
+	Metadata map[string]any
+}
+
+// TurnBoundaryDrainer is an optional interface for providers that track discrete
+// agent turns. If implemented, the executor calls DrainAtTurnBoundary during
+// graceful shutdown so that the current turn can complete before the process is
+// terminated. Providers that do not implement this interface are stopped
+// immediately via Stop/Kill as before.
+type TurnBoundaryDrainer interface {
+	// DrainAtTurnBoundary blocks until the current agent turn completes (or ctx
+	// is cancelled). If the provider is not currently executing a turn it
+	// returns nil immediately.
+	DrainAtTurnBoundary(ctx context.Context) error
+}
+
+// ActionResponder is an optional interface for providers that can consume
+// structured action/approval responses without relying on plain text input.
+type ActionResponder interface {
+	RespondAction(ctx context.Context, config Config, response ActionResponse) (<-chan domain.Event, error)
 }
 
 // Session is the interface implemented by every agent runner (ACP, Claude, PTY, ADK, …).

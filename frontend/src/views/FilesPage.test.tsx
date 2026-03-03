@@ -68,19 +68,20 @@ describe("FilesPage", () => {
     const { container } = render(() => <FilesPage />)
 
     const panel = container.querySelector("#files-tree-panel") as HTMLElement
-    const toggle = screen.getByRole("button", { name: "Browse files" })
+    const toggle = container.querySelector(".editor-tree-toggle") as HTMLButtonElement
 
     expect(panel.classList.contains("open")).toBe(false)
     await fireEvent.click(toggle)
     expect(panel.classList.contains("open")).toBe(true)
-    await fireEvent.click(screen.getByRole("button", { name: "Hide files" }))
+    await fireEvent.click(toggle)
     expect(panel.classList.contains("open")).toBe(false)
   })
 
   it("closes the mobile menu after selecting a file", async () => {
     const { container } = render(() => <FilesPage />)
+    const toggle = container.querySelector(".editor-tree-toggle") as HTMLButtonElement
 
-    await fireEvent.click(screen.getByRole("button", { name: "Browse files" }))
+    await fireEvent.click(toggle)
     const panel = container.querySelector("#files-tree-panel") as HTMLElement
     expect(panel.classList.contains("open")).toBe(true)
 

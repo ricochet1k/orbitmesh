@@ -53,6 +53,7 @@ vi.mock("../api/client", () => ({
     getSession: vi.fn(),
     getPermissions: vi.fn(),
     listProviders: vi.fn(),
+    getProviderUsageInsights: vi.fn(),
     listAgents: vi.fn(),
     listSessions: vi.fn(),
     createDockSession: vi.fn(),
@@ -86,6 +87,7 @@ describe("AgentDock", () => {
     }));
     (apiClient.listSessions as any).mockResolvedValue({ sessions: [] });
     (apiClient.listProviders as any).mockResolvedValue({ providers: [] });
+    (apiClient.getProviderUsageInsights as any).mockResolvedValue({ providers: [] });
     (apiClient.listAgents as any).mockResolvedValue({ agents: [] });
     (apiClient.createDockSession as any).mockResolvedValue({
       id: "dock-session-1",
@@ -320,6 +322,50 @@ describe("AgentDock", () => {
     await waitFor(() => {
       const dock = screen.getByTestId("agent-dock");
       expect(dock.textContent).toMatch(/Connection lost|Stream endpoint|disconnected/i);
+    });
+  });
+
+  it("shows latest TodoWrite checklist in pinned transcript region", async () => {
+    (apiClient.getSession as any).mockResolvedValue({
+      id: "session-1",
+      provider_type: "native",
+      state: "running",
+      working_dir: "/tmp",
+      created_at: "2026-02-05T12:00:00Z",
+      updated_at: "2026-02-05T12:00:00Z",
+      current_task: "T1",
+    });
+    (apiClient.getPermissions as any).mockResolvedValue({
+      role: "developer",
+      can_initiate_bulk_actions: true,
+    });
+    (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1");
+
+    render(() => <AgentDock sessionId="session-1" />);
+
+    await waitFor(() => expect(eventSources.length).toBe(1));
+    screen.getByTestId("agent-dock-toggle").click();
+
+    eventSources[0]?.emit("tool_call", {
+      type: "tool_call",
+      event_id: 50,
+      timestamp: "2026-02-05T12:00:05Z",
+      session_id: "session-1",
+      data: {
+        id: "todo-1",
+        name: "todowrite",
+        status: "done",
+        input: {
+          todos: [
+            { content: "Implement feature", status: "completed" },
+          ],
+        },
+      },
+    });
+
+    await waitFor(() => {
+      const pinned = screen.getByTestId("transcript-pinned-todo");
+      expect(pinned.textContent).toContain("Implement feature");
     });
   });
 });

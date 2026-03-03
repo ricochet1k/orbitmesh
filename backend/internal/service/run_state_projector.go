@@ -90,7 +90,7 @@ func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.
 				})
 			}
 
-		case "completed":
+		case "completed", "failed":
 			// Persist a MKToolResponse message with the result payload.
 			// JSON format matches what openai/session.go newSession reads back:
 			//   {"tool_call_id":"...","content":"..."}
@@ -126,7 +126,6 @@ func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.
 				sc.session.SetCurrentTask(task)
 			}
 		}
-		e.updateSessionCustomDataFromMetadata(sc.session, data)
 		if !isInternalMetadataKey(data.Key) {
 			e.appendSessionMessageRaw(sc.session, domain.MessageKindSystem, formatMetadataContent(data), event.Raw, event.Timestamp)
 		}
@@ -146,7 +145,11 @@ func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.
 	case domain.ProgressData:
 		streamMessageID := ""
 		if id := strings.TrimSpace(data.StreamID); id != "" {
-			streamMessageID = "progress:" + id
+			if ch := strings.TrimSpace(data.Channel); ch != "" {
+				streamMessageID = "progress:" + ch + ":" + id
+			} else {
+				streamMessageID = "progress:" + id
+			}
 		}
 		if data.IsDelta {
 			e.appendMessageDelta(sc.session, domain.MessageKindSystem, streamMessageID, data.Content, event.Raw, event.Timestamp)
@@ -154,7 +157,8 @@ func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.
 		}
 		e.appendSessionMessageRaw(sc.session, domain.MessageKindSystem, formatProgressContent(data), event.Raw, event.Timestamp)
 	case domain.ResourceUsageData:
-		e.appendSessionMessageRaw(sc.session, domain.MessageKindMetric, formatResourceUsageContent(data), event.Raw, event.Timestamp)
+		e.updateSessionCustomDataFromResourceUsage(sc.session, data)
+		e.applyResourceUsage(sc, data.Scope, data.Data, data.Metadata, event.Timestamp)
 	case domain.ActionRequestData:
 		e.appendSessionMessageRaw(sc.session, domain.MessageKindSystem, formatActionRequestContent(data), event.Raw, event.Timestamp)
 	case domain.ArtifactUpdateData:
@@ -167,12 +171,15 @@ func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.
 	e.touchRunAttempt(sc)
 }
 
-func (e *AgentExecutor) updateSessionCustomDataFromMetadata(sess *domain.Session, data domain.MetadataData) {
-	if data.Key != "system_init" {
+func (e *AgentExecutor) updateSessionCustomDataFromResourceUsage(sess *domain.Session, data domain.ResourceUsageData) {
+	if normalizeUsageScope(data.Scope) != "provider" {
 		return
 	}
-	v, ok := data.Value.(map[string]any)
+	v, ok := data.Data.(map[string]any)
 	if !ok {
+		return
+	}
+	if source, _ := v["source"].(string); strings.TrimSpace(source) != "system_init" {
 		return
 	}
 	sessionID, ok := v["claude_session_id"].(string)
@@ -188,8 +195,10 @@ func isInternalMetadataKey(key string) bool {
 	case "system_init", "assistant_snapshot", "message_start", "message_complete",
 		"content_block_stop", "stop_reason", "system_status", "compact_boundary",
 		"task_notification", "tool_progress", "tool_use_summary", "auth_status",
-		"stderr", "parse_error", "unknown_message_type", "unknown_ws_message",
-		"unknown_control_request", "circuit_breaker_cooldown":
+		"stderr", "parse_error", "tool_result", "unknown_message_type", "unknown_ws_message",
+		"unknown_control_request", "circuit_breaker_cooldown",
+		// Codex-specific internal keys — raw protocol noise, not user-visible.
+		"codex_notification", "codex_item", "turn_started", "turn_completed", "turn_diff_updated":
 		return true
 	default:
 		return false
@@ -225,19 +234,6 @@ func formatProgressContent(data domain.ProgressData) string {
 		return fmt.Sprintf("%s update", channel)
 	}
 	return fmt.Sprintf("%s: %s", channel, content)
-}
-
-func formatResourceUsageContent(data domain.ResourceUsageData) string {
-	encoded := "{}"
-	if data.Data != nil {
-		if b, err := json.Marshal(data.Data); err == nil {
-			encoded = string(b)
-		}
-	}
-	if strings.TrimSpace(data.Scope) == "" {
-		return fmt.Sprintf("usage: %s", encoded)
-	}
-	return fmt.Sprintf("usage(%s): %s", data.Scope, encoded)
 }
 
 func formatActionRequestContent(data domain.ActionRequestData) string {

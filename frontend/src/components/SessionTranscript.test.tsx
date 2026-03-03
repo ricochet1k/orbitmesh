@@ -1,12 +1,18 @@
 import { fireEvent, render, screen } from "@solidjs/testing-library"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import SessionTranscript from "./SessionTranscript"
 import type { TranscriptMessage } from "../types/api"
+import type { TodoWriteState } from "../hooks/useSessionData"
 
-function renderTranscript(messages: TranscriptMessage[]) {
+function renderTranscript(
+  messages: TranscriptMessage[],
+  latestTodoWrite: TodoWriteState | null = null,
+  onRespondActionRequest?: (response: { actionId: string; decision: string; input?: string }) => void | Promise<void>,
+) {
   return render(() => (
     <SessionTranscript
       messages={() => messages}
+      latestTodoWrite={() => latestTodoWrite}
       filter={() => ""}
       setFilter={() => {}}
       autoScroll={() => true}
@@ -14,6 +20,7 @@ function renderTranscript(messages: TranscriptMessage[]) {
       activityCursor={() => null}
       activityHistoryLoading={() => false}
       onLoadEarlier={() => {}}
+      onRespondActionRequest={onRespondActionRequest}
     />
   ))
 }
@@ -149,5 +156,196 @@ describe("SessionTranscript", () => {
     expect(screen.getByTestId("rich-artifact-update-card")).toBeDefined()
     expect(screen.getByText("reasoning")).toBeDefined()
     expect(screen.getByText("Approve patch")).toBeDefined()
+  })
+
+  it("renders action decision controls and emits selected decision", () => {
+    const onRespond = vi.fn()
+    renderTranscript([
+      {
+        id: "action-approval",
+        type: "system",
+        kind: "action_request",
+        timestamp: "2026-02-05T12:00:02Z",
+        content: "approval needed",
+        payload: {
+          id: "req_approve",
+          kind: "approval",
+          status: "pending",
+          title: "Approve command",
+          payload: {
+            decisions: [
+              { value: "approve_once", label: "Approve once" },
+              { value: "deny", label: "Deny" },
+            ],
+          },
+        },
+      },
+    ], null, onRespond)
+
+    fireEvent.click(screen.getByTestId("action-request-approve_once"))
+
+    expect(onRespond).toHaveBeenCalledWith({ actionId: "req_approve", decision: "approve_once", input: undefined })
+  })
+
+  it("renders generic tool calls as python-like signatures", () => {
+    renderTranscript([
+      {
+        id: "tool-generic",
+        type: "system",
+        kind: "tool_call",
+        timestamp: "2026-02-05T12:00:00Z",
+        content: "legacy",
+        payload: {
+          name: "question",
+          status: "running",
+          input: {
+            questions: [{ header: "Mode", options: [{ label: "Fast" }] }],
+            multiple: false,
+          },
+        },
+      },
+    ])
+
+    expect(screen.getByTestId("tool-generic-card")).toBeDefined()
+    expect(screen.getByText(/question\(/i)).toBeDefined()
+    expect(screen.getByText("running")).toBeDefined()
+  })
+
+  it("renders bash tool calls in a terminal-style block", () => {
+    renderTranscript([
+      {
+        id: "tool-bash",
+        type: "system",
+        kind: "tool_call",
+        timestamp: "2026-02-05T12:00:00Z",
+        content: "fallback content",
+        payload: {
+          name: "bash",
+          status: "done",
+          input: {
+            command: "npm test",
+            description: "Runs frontend test suite",
+          },
+        },
+      },
+    ])
+
+    expect(screen.getByTestId("tool-bash-card")).toBeDefined()
+    expect(screen.getByText("npm test")).toBeDefined()
+    expect(screen.getByText("Runs frontend test suite")).toBeDefined()
+  })
+
+  it("renders read tool calls as compact file cards", () => {
+    renderTranscript([
+      {
+        id: "tool-read",
+        type: "system",
+        kind: "tool_call",
+        timestamp: "2026-02-05T12:00:00Z",
+        content: "line 1\nline 2",
+        payload: {
+          name: "read",
+          status: "done",
+          input: {
+            filePath: "/Users/matt/mycode/orbitmesh/frontend/src/App.tsx",
+          },
+          output: "1: test",
+        },
+      },
+    ])
+
+    expect(screen.getByTestId("tool-read-card")).toBeDefined()
+    const link = screen.getByText("App.tsx") as HTMLAnchorElement
+    expect(link.getAttribute("href")).toBe("/files?path=frontend%2Fsrc%2FApp.tsx")
+    const details = screen.getByText("Show contents").closest("details")
+    expect(details?.open).toBe(false)
+  })
+
+  it("shows only pinned TodoWrite checklist outside message flow", () => {
+    renderTranscript(
+      [
+        {
+          id: "assistant-1",
+          type: "agent",
+          kind: "output",
+          timestamp: "2026-02-05T12:00:00Z",
+          content: "Assistant reply",
+        },
+        {
+          id: "tool-todo-old",
+          type: "system",
+          kind: "tool_call",
+          timestamp: "2026-02-05T12:00:01Z",
+          content: "old todo",
+          payload: {
+            name: "todowrite",
+            input: { todos: [{ content: "Old", status: "pending" }] },
+          },
+        },
+      ],
+      {
+        messageId: "tool-todo-latest",
+        timestamp: "2026-02-05T12:00:02Z",
+        status: "done",
+        items: [
+          { content: "Implement renderer", status: "completed" },
+          { content: "Add tests", status: "in_progress" },
+        ],
+      },
+    )
+
+    const pinned = screen.getByTestId("transcript-pinned-todo")
+    expect(pinned.textContent).toContain("Implement renderer")
+    expect(screen.getByText("Assistant reply")).toBeDefined()
+    expect(screen.queryByText("old todo")).toBeNull()
+  })
+
+  it("renders markdown content for transcript message bodies", () => {
+    const { container } = renderTranscript([
+      {
+        id: "markdown-1",
+        type: "agent",
+        kind: "output",
+        timestamp: "2026-02-05T12:00:00Z",
+        content: "# Heading\n\n- item one\n- item two\n\nUse `code`.",
+      },
+    ])
+
+    expect(container.querySelector(".transcript-markdown-chunk h1")?.textContent).toBe("Heading")
+    const listItems = container.querySelectorAll(".transcript-markdown-chunk li")
+    expect(listItems).toHaveLength(2)
+    expect(container.querySelector(".transcript-markdown-chunk code")?.textContent).toBe("code")
+  })
+
+  it("renders fenced code blocks with codemirror highlighting after message finalization", () => {
+    const { container } = renderTranscript([
+      {
+        id: "markdown-code-1",
+        type: "agent",
+        kind: "output",
+        timestamp: "2026-02-05T12:00:00Z",
+        content: "```ts\nconst value: number = 1\n```",
+      },
+    ])
+
+    const codeEditor = container.querySelector(".transcript-code-block .cm-editor")
+    expect(codeEditor).toBeTruthy()
+    expect(codeEditor?.textContent).toContain("const value")
+  })
+
+  it("keeps partial streaming code fences readable before final message", () => {
+    const { container } = renderTranscript([
+      {
+        id: "markdown-code-stream",
+        type: "agent",
+        kind: "output",
+        timestamp: "2026-02-05T12:00:00Z",
+        open: true,
+        content: "```ts\nconst value =",
+      },
+    ])
+
+    expect(container.querySelector(".transcript-code-block .cm-editor")).toBeNull()
+    expect(container.querySelector(".transcript-content")?.textContent).toContain("const value")
   })
 })

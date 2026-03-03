@@ -1,4 +1,3 @@
-import MarkdownIt from "markdown-it"
 import { Schema, type Node as PMNode } from "prosemirror-model"
 import { schema as basicSchema } from "prosemirror-schema-basic"
 import { addListNodes } from "prosemirror-schema-list"
@@ -9,6 +8,7 @@ import {
   defaultMarkdownSerializer,
 } from "prosemirror-markdown"
 import { tableNodes } from "prosemirror-tables"
+import { createCommonmarkMarkdownIt } from "./markdownIt"
 
 const nodeSpecs = addListNodes(
   basicSchema.spec.nodes,
@@ -26,7 +26,7 @@ export const markdownSchema = new Schema({
   marks: basicSchema.spec.marks,
 })
 
-const tokenizer = MarkdownIt("commonmark", { html: false }).enable("table")
+const tokenizer = createCommonmarkMarkdownIt()
 
 const markdownTokens = {
   ...defaultMarkdownParser.tokens,

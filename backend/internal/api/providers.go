@@ -33,6 +33,14 @@ func (h *Handler) listProviders(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) getProviderUsageInsights(w http.ResponseWriter, r *http.Request) {
+	providers := h.providerUsageInsights(r.Context())
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(apiTypes.ProviderUsageInsightsResponse{Providers: providers})
+}
+
 func (h *Handler) getACPRuntimeStats(w http.ResponseWriter, r *http.Request) {
 	stats := acp.SharedRuntimeStats()
 	w.Header().Set("Content-Type", "application/json")

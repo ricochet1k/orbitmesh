@@ -66,6 +66,7 @@ Drain/deferred replay behavior is part of the reliability contract and must stay
 
 - UI-mock suite (mocked APIs): `cd frontend && npm run test:ui-mock`
 - E2E smoke suite (real backend, PR checks): `cd frontend && npm run test:e2e`
+- Smoke includes a mock-provider ACP echo transcript parity guard (`acp-echo-transcript-parity` tool-rendering check) to catch regressions where live stream rendering diverges from post-reload transcript rendering.
 - E2E full suite (real backend, scheduled/on-demand): `cd frontend && npm run test:e2e:full`
 
 ## Timeouts and Reliability

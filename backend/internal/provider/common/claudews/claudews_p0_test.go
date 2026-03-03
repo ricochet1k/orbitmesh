@@ -83,6 +83,17 @@ func TestProcessInput_FirstSendIncludesEmptySessionID(t *testing.T) {
 		t.Fatalf("queue input: %v", err)
 	}
 
+	initMsg := <-outbound
+	initPayload := decodeJSONMap(t, initMsg)
+	if initPayload["type"] != "control_request" {
+		t.Fatalf("expected initialize control_request before first user turn, got %v", initPayload["type"])
+	}
+	requestID, _ := initPayload["request_id"].(string)
+	if requestID == "" {
+		t.Fatalf("expected initialize request_id, got payload: %v", initPayload)
+	}
+	p.dispatchMessage([]byte(`{"type":"control_response","response":{"request_id":"` + requestID + `","subtype":"success","response":{}}}`))
+
 	msg := <-outbound
 	trimmed := bytes.TrimSpace(msg)
 

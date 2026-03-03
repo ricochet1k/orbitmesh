@@ -99,6 +99,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/sessions/{id}", h.getSession)
 	r.Delete("/api/sessions/{id}", h.stopSession)
 	r.Post("/api/sessions/{id}/input", h.sendSessionInput)
+	r.Post("/api/sessions/{id}/actions/respond", h.respondSessionAction)
 	r.Get("/api/sessions/{id}/messages", h.getSessionMessages)
 	r.Post("/api/sessions/{id}/messages", h.sendSessionMessage)
 	r.Post("/api/sessions/{id}/cancel", h.cancelSession)
@@ -113,6 +114,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/v1/sessions/{id}/terminal/snapshot", h.getTerminalSnapshot)
 	r.Post("/api/v1/sessions/{id}/extractor/replay", h.replayExtractor)
 	r.Get("/api/v1/providers", h.listProviders)
+	r.Get("/api/v1/providers/usage", h.getProviderUsageInsights)
 	r.Get("/api/v1/settings/mcp-gateway", h.getMCPGatewaySettings)
 	r.Put("/api/v1/settings/mcp-gateway", h.putMCPGatewaySettings)
 	r.Get("/api/v1/providers/acp/runtime", h.getACPRuntimeStats)
@@ -321,6 +323,42 @@ func (h *Handler) sendSessionInput(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to send input", err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) respondSessionAction(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var req apiTypes.SessionActionResponseRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", err.Error())
+		return
+	}
+
+	if strings.TrimSpace(req.ActionID) == "" {
+		writeError(w, http.StatusBadRequest, "action_id is required", "")
+		return
+	}
+	if strings.TrimSpace(req.Decision) == "" && strings.TrimSpace(req.Input) == "" {
+		writeError(w, http.StatusBadRequest, "decision or input is required", "")
+		return
+	}
+
+	err := h.executor.RespondAction(r.Context(), id, session.ActionResponse{
+		ActionID: strings.TrimSpace(req.ActionID),
+		Decision: strings.TrimSpace(req.Decision),
+		Input:    req.Input,
+		Metadata: req.Metadata,
+	}, req.ProviderID, req.ProviderType)
+	if err != nil {
+		if errors.Is(err, service.ErrSessionNotFound) {
+			writeError(w, http.StatusNotFound, "session not found", err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to respond to action", err.Error())
 		return
 	}
 
@@ -881,12 +919,34 @@ func sessionToStatusResponse(s domain.SessionSnapshot, status session.Status) ap
 	return apiTypes.SessionStatusResponse{
 		SessionResponse: sessionToResponse(s),
 		Metrics: apiTypes.SessionMetrics{
-			TokensIn:       status.Metrics.TokensIn,
-			TokensOut:      status.Metrics.TokensOut,
-			RequestCount:   status.Metrics.RequestCount,
-			LastActivityAt: status.Metrics.LastActivityAt,
+			TokensIn:                 status.Metrics.TokensIn,
+			TokensOut:                status.Metrics.TokensOut,
+			RequestCount:             status.Metrics.RequestCount,
+			CacheReadInputTokens:     status.Metrics.CacheReadInputTokens,
+			CacheCreationInputTokens: status.Metrics.CacheCreationInputTokens,
+			LastActivityAt:           status.Metrics.LastActivityAt,
 		},
+		SessionUsage:  usageStatsToAPI(status.SessionUsage),
+		ProviderUsage: usageStatsToAPI(status.ProviderUsage),
 	}
+}
+
+func usageStatsToAPI(stats session.UsageStats) apiTypes.UsageStats {
+	out := apiTypes.UsageStats{LastUpdatedAt: stats.LastUpdatedAt}
+	if len(stats.ByScope) == 0 {
+		return out
+	}
+	out.ByScope = make(map[string]apiTypes.UsageStat, len(stats.ByScope))
+	for scope, stat := range stats.ByScope {
+		entry := apiTypes.UsageStat{
+			Scope:     stat.Scope,
+			Data:      stat.Data,
+			Metadata:  stat.Metadata,
+			UpdatedAt: stat.UpdatedAt,
+		}
+		out.ByScope[scope] = entry
+	}
+	return out
 }
 
 func dockMCPServers(sessionID string) []session.MCPServerConfig {
@@ -915,8 +975,10 @@ func dockMCPConfig(sessionID string) map[string]any {
 // server named "orbitmesh" is already present it does nothing.
 //
 // In addition to MCPServers (consumed by ADK and similar SDK-based providers) it
-// also merges the entry into Custom["mcp_config"] for claude/claude-ws providers
-// that build --mcp-config CLI arguments from that key.
+// also merges the entry into Custom["mcp_config"] for providers that build
+// --mcp-config CLI arguments from that key. The claude-ws provider is excluded
+// because it registers MCP servers via sdkMcpServers in the WS initialize message
+// instead, and passing both paths would double-register the server with the CLI.
 func injectOrbitmeshMCP(sessionID string, config *session.Config) {
 	for _, srv := range config.MCPServers {
 		if srv.Name == "orbitmesh" {
@@ -928,6 +990,10 @@ func injectOrbitmeshMCP(sessionID string, config *session.Config) {
 		Command: "orbitmesh",
 		Args:    []string{"mcp-bridge", "--session-id", sessionID},
 	})
+	// claude-ws registers orbitmesh via sdkMcpServers in the WS initialize message.
+	if config.ProviderType == "claude-ws" {
+		return
+	}
 	if config.Custom == nil {
 		config.Custom = map[string]any{}
 	}

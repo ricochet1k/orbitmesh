@@ -188,7 +188,7 @@ func (rt *sharedRuntime) initialize(ctx context.Context) error {
 	return nil
 }
 
-func (rt *sharedRuntime) createSession(ctx context.Context, s *Session, cfg sessionRuntimeConfig) (string, error) {
+func (rt *sharedRuntime) createSession(ctx context.Context, s *Session, cfg sessionRuntimeConfig) (acpsdk.NewSessionResponse, error) {
 	rt.cancelIdleShutdown()
 	if ctx == nil {
 		ctx = context.Background()
@@ -205,19 +205,19 @@ func (rt *sharedRuntime) createSession(ctx context.Context, s *Session, cfg sess
 		McpServers: cfg.mcpServers,
 	})
 	if err != nil {
-		return "", fmt.Errorf("new session failed: %w", err)
+		return acpsdk.NewSessionResponse{}, fmt.Errorf("new session failed: %w", err)
 	}
 
 	acpSessionID := string(resp.SessionId)
 	rt.mu.Lock()
 	if rt.stopped {
 		rt.mu.Unlock()
-		return "", fmt.Errorf("acp runtime has stopped")
+		return acpsdk.NewSessionResponse{}, fmt.Errorf("acp runtime has stopped")
 	}
 	rt.sessions[acpSessionID] = s
 	rt.mu.Unlock()
 
-	return acpSessionID, nil
+	return resp, nil
 }
 
 func (rt *sharedRuntime) removeSession(acpSessionID string) {

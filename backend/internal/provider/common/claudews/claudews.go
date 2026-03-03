@@ -49,6 +49,9 @@ type ClaudeWSProvider struct {
 	config    session.Config
 	turnSeq   int
 
+	toolContextMu sync.RWMutex
+	toolContext   map[string]toolCallContext
+
 	processMgr     *process.Manager
 	inputBuffer    *buffer.InputBuffer
 	circuitBreaker *circuit.Breaker
@@ -74,6 +77,12 @@ type ClaudeWSProvider struct {
 	starting bool
 	started  bool
 
+	// turnActive and turnBoundaryCh track whether a Claude turn is currently
+	// executing. turnBoundaryCh is replaced for each turn and closed when that
+	// turn's result message arrives. Both are guarded by mu.
+	turnActive    bool
+	turnBoundaryCh chan struct{}
+
 	stderrMu   sync.Mutex
 	stderrTail string
 	stderrDone chan error
@@ -92,6 +101,12 @@ type pendingPermission struct {
 	cancelReason string
 	cancel       context.CancelFunc
 	done         bool
+}
+
+type toolCallContext struct {
+	Name  string
+	Title string
+	Input any
 }
 
 const maxStartupStderrTailBytes = 4096
@@ -116,6 +131,7 @@ func NewClaudeWSProvider(sessionID string, permHandler tools.PermissionHandler) 
 		events:         native.NewEventAdapter(sessionID, 100),
 		inputBuffer:    buffer.NewInputBuffer(10),
 		circuitBreaker: circuit.NewBreaker(3, 30*time.Second),
+		toolContext:    make(map[string]toolCallContext),
 		permHandler:    permHandler,
 		connReady:      make(chan struct{}),
 		initReady:      make(chan struct{}),
@@ -168,6 +184,7 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) (er
 	p.inboundSignal = make(chan struct{}, 1)
 	p.claudeSessionID = ""
 	p.turnSeq = 0
+	p.toolContext = make(map[string]toolCallContext)
 	p.stderrTail = ""
 	p.stderrDone = make(chan error, 1)
 	p.mu.Unlock()
@@ -237,6 +254,9 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) (er
 			env[parts[0]] = parts[1]
 		}
 	}
+	// Unset CLAUDECODE so the spawned claude CLI does not detect a nested
+	// session and refuse to start.
+	delete(env, "CLAUDECODE")
 	maps.Copy(env, config.Environment)
 
 	log.Printf("[claudews] Starting claude in %q with args %q", config.WorkingDir, args)
@@ -308,6 +328,26 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) (er
 	// Already emitted idle->running at startup
 
 	return nil
+}
+
+// DrainAtTurnBoundary implements session.TurnBoundaryDrainer. It blocks until
+// the current Claude turn emits its result message, then returns. If no turn
+// is active it returns immediately.
+func (p *ClaudeWSProvider) DrainAtTurnBoundary(ctx context.Context) error {
+	p.mu.RLock()
+	active := p.turnActive
+	ch := p.turnBoundaryCh
+	p.mu.RUnlock()
+
+	if !active || ch == nil {
+		return nil
+	}
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Stop gracefully shuts down the provider.
@@ -538,11 +578,11 @@ func (p *ClaudeWSProvider) dispatchMessage(data []byte) {
 		p.handleAuthStatus(rm)
 	case "keep_alive":
 		// no-op
+	case "rate_limit_event":
+		p.handleRateLimitEvent(rm)
 	default:
-		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "unknown_ws_message", map[string]any{
-			"type":    rm.Type,
-			"subtype": rm.Subtype,
-		}, rm.Raw))
+		// Ignore unknown provider frames unless they can be mapped to
+		// provider-agnostic domain events.
 	}
 }
 
@@ -569,17 +609,35 @@ func (p *ClaudeWSProvider) handleSystemMsg(rm RawMessage) {
 		for i, s := range msg.MCPServers {
 			mcpServers[i] = map[string]any{"name": s.Name, "status": s.Status}
 		}
-		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "system_init", map[string]any{
-			"subtype":             "init",
-			"claude_session_id":   msg.SessionID,
-			"working_dir":         msg.CWD,
-			"model":               msg.Model,
-			"claude_code_version": msg.ClaudeCodeVersion,
-			"permission_mode":     msg.PermissionMode,
-			"api_key_source":      msg.APIKeySource,
-			"tools":               tools,
-			"mcp_servers":         mcpServers,
+		p.events.Emit(domain.NewResourceUsageEvent(p.sessionID, domain.ResourceUsageData{
+			Scope: "provider",
+			Data: map[string]any{
+				"source":              "system_init",
+				"provider_type":       "claude-ws",
+				"claude_session_id":   msg.SessionID,
+				"working_dir":         msg.CWD,
+				"model":               msg.Model,
+				"claude_code_version": msg.ClaudeCodeVersion,
+				"permission_mode":     msg.PermissionMode,
+				"api_key_source":      msg.APIKeySource,
+				"tools":               tools,
+				"mcp_servers":         mcpServers,
+			},
 		}, rm.Raw))
+		if strings.TrimSpace(msg.Model) != "" {
+			p.events.Emit(domain.NewResourceUsageEvent(p.sessionID, domain.ResourceUsageData{
+				Scope: "models",
+				Data: map[string]any{
+					"source":        "system_init",
+					"current_model": msg.Model,
+					"available_models": []map[string]any{{
+						"id":    msg.Model,
+						"label": msg.Model,
+					}},
+					"runtime_version": msg.ClaudeCodeVersion,
+				},
+			}, rm.Raw))
+		}
 
 	case "status":
 		var msg SystemStatusMessage
@@ -623,20 +681,20 @@ func (p *ClaudeWSProvider) handleAssistantMsg(rm RawMessage) {
 		inner = map[string]any{}
 	}
 
-	metadata := map[string]any{
-		"role": "assistant",
+	resourceUsage := map[string]any{
+		"source": "assistant_snapshot",
 	}
-	if model, ok := inner["model"].(string); ok {
-		metadata["model"] = model
+	if model, ok := inner["model"].(string); ok && strings.TrimSpace(model) != "" {
+		resourceUsage["model"] = model
 	}
-	if id, ok := inner["id"].(string); ok {
-		metadata["message_id"] = id
+	if id, ok := inner["id"].(string); ok && strings.TrimSpace(id) != "" {
+		resourceUsage["message_id"] = id
 	}
 	if stop, ok := inner["stop_reason"].(string); ok && stop != "" {
-		metadata["stop_reason"] = stop
+		resourceUsage["stop_reason"] = stop
 	}
 	if msg.Error != "" {
-		metadata["error"] = msg.Error
+		resourceUsage["error"] = msg.Error
 	}
 	if usageMap, ok := inner["usage"].(map[string]any); ok {
 		usage := map[string]any{}
@@ -650,7 +708,12 @@ func (p *ClaudeWSProvider) handleAssistantMsg(rm RawMessage) {
 		extractInt64("cache_read_input_tokens")
 		extractInt64("cache_creation_input_tokens")
 		if len(usage) > 0 {
-			metadata["usage"] = usage
+			resourceUsage["usage"] = usage
+			cacheRead, readOK := usage["cache_read_input_tokens"].(int64)
+			cacheCreation, creationOK := usage["cache_creation_input_tokens"].(int64)
+			if readOK || creationOK {
+				p.state.AddCacheTokens(cacheRead, cacheCreation)
+			}
 		}
 	}
 
@@ -667,12 +730,12 @@ func (p *ClaudeWSProvider) handleAssistantMsg(rm RawMessage) {
 				input := block["input"]
 				id, _ := block["id"].(string)
 				name, _ := block["name"].(string)
-				p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+				p.emitToolCall(domain.ToolCallData{
 					ID:     id,
 					Name:   name,
 					Status: "started",
 					Input:  input,
-				}, rm.Raw))
+				}, rm.Raw)
 			case "thinking":
 				thinking, _ := block["thinking"].(string)
 				thinking = strings.TrimSpace(thinking)
@@ -702,7 +765,12 @@ func (p *ClaudeWSProvider) handleAssistantMsg(rm RawMessage) {
 		}
 	}
 
-	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "assistant_snapshot", metadata, rm.Raw))
+	if len(resourceUsage) > 1 {
+		p.events.Emit(domain.NewResourceUsageEvent(p.sessionID, domain.ResourceUsageData{
+			Scope: "turn",
+			Data:  resourceUsage,
+		}, rm.Raw))
+	}
 }
 
 func (p *ClaudeWSProvider) handleUserMsg(rm RawMessage) {
@@ -726,7 +794,6 @@ func (p *ClaudeWSProvider) handleUserMsg(rm RawMessage) {
 		return
 	}
 
-	emitted := false
 	for _, item := range content {
 		itemMap, ok := item.(map[string]any)
 		if !ok {
@@ -738,23 +805,18 @@ func (p *ClaudeWSProvider) handleUserMsg(rm RawMessage) {
 		}
 
 		toolUseID, _ := itemMap["tool_use_id"].(string)
-		output, _ := itemMap["content"].(string)
+		output := itemMap["content"]
 		isError, _ := itemMap["is_error"].(bool)
 		status := "completed"
 		if isError {
 			status = "failed"
 		}
 
-		p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+		p.emitToolCall(domain.ToolCallData{
 			ID:     toolUseID,
 			Status: status,
 			Output: output,
-		}, rm.Raw))
-		emitted = true
-	}
-
-	if emitted {
-		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "tool_result", map[string]any{"role": "user"}, rm.Raw))
+		}, rm.Raw)
 	}
 }
 
@@ -805,22 +867,18 @@ func (p *ClaudeWSProvider) dispatchInnerStreamEvent(eventType string, data map[s
 		if cb, ok := data["content_block"].(map[string]any); ok {
 			if cbType, ok := cb["type"].(string); ok && cbType == "tool_use" {
 				idx, _ := data["index"].(float64)
-				p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+				p.emitToolCall(domain.ToolCallData{
 					ID:     fmt.Sprint(cb["id"]),
 					Name:   fmt.Sprint(cb["name"]),
 					Status: "started",
 					Title:  fmt.Sprintf("tool #%d", int64(idx)),
 					Input:  cb["input"],
-				}, raw))
+				}, raw)
 			}
 		}
 
 	case "content_block_stop":
-		if idx, ok := data["index"].(float64); ok {
-			p.events.Emit(domain.NewMetadataEvent(p.sessionID, "content_block_stop", map[string]any{
-				"index": int64(idx),
-			}, raw))
-		}
+		// No-op for now; this is a provider-internal frame.
 
 	case "message_start":
 		if msgMap, ok := data["message"].(map[string]any); ok {
@@ -840,14 +898,9 @@ func (p *ClaudeWSProvider) dispatchInnerStreamEvent(eventType string, data map[s
 				p.emitEvent(domain.NewMetricEvent(p.sessionID, 0, int64(out), 0, raw), raw)
 			}
 		}
-		if delta, ok := data["delta"].(map[string]any); ok {
-			if reason, ok := delta["stop_reason"].(string); ok {
-				p.events.Emit(domain.NewMetadataEvent(p.sessionID, "stream_stop_reason", map[string]any{"reason": reason}, raw))
-			}
-		}
 
 	case "message_stop":
-		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "message_complete", map[string]any{"type": "message_stop"}, raw))
+		// No-op. Completion is represented by result/status/progress events.
 
 	case "error":
 		if errMap, ok := data["error"].(map[string]any); ok {
@@ -896,26 +949,10 @@ func (p *ClaudeWSProvider) handleResultMsg(rm RawMessage) {
 	if msg.Result != "" {
 		p.emitEvent(domain.NewOutputEvent(p.sessionID, msg.Result, rm.Raw), rm.Raw)
 	}
-	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "stop_reason", map[string]any{
-		"reason":  stopReason,
-		"present": msg.StopReason != nil,
-	}, rm.Raw))
-
 	if stopReason != "" {
 		p.events.Emit(domain.NewSystemMessageEvent(p.sessionID, fmt.Sprintf("Claude stop reason: %s", stopReason)))
 	}
-
-	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "turn_completed", map[string]any{
-		"turn_index":      turnIndex,
-		"subtype":         msg.Subtype,
-		"is_error":        msg.IsError,
-		"num_turns":       msg.NumTurns,
-		"stop_reason":     stopReason,
-		"duration_ms":     msg.DurationMS,
-		"duration_api_ms": msg.DurationAPIMS,
-		"total_cost_usd":  msg.TotalCostUSD,
-		"errors":          msg.Errors,
-	}, rm.Raw))
+	p.events.Emit(domain.NewSystemMessageEvent(p.sessionID, buildTurnCompletedMessage(turnIndex, stopReason, msg.IsError)))
 
 	p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
 		Channel:  "turn_completion",
@@ -930,6 +967,16 @@ func (p *ClaudeWSProvider) handleResultMsg(rm RawMessage) {
 		reason = fmt.Sprintf("turn completed: %s", stopReason)
 	}
 	p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateRunning, domain.SessionStateIdle, reason, rm.Raw))
+
+	// Signal any DrainAtTurnBoundary waiter that the turn is done.
+	p.mu.Lock()
+	ch := p.turnBoundaryCh
+	p.turnActive = false
+	p.turnBoundaryCh = nil
+	p.mu.Unlock()
+	if ch != nil {
+		close(ch)
+	}
 }
 
 func (p *ClaudeWSProvider) handleControlRequest(rm RawMessage) {
@@ -958,10 +1005,6 @@ func (p *ClaudeWSProvider) handleControlRequest(rm RawMessage) {
 	case "hook_callback":
 		p.handleHookCallback(req, rm.Raw)
 	default:
-		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "unsupported_control_request", map[string]any{
-			"subtype":    inner.Subtype,
-			"request_id": req.RequestID,
-		}, rm.Raw))
 		_ = p.sendControlError(req.RequestID, fmt.Sprintf("unsupported control_request subtype %q", inner.Subtype))
 	}
 }
@@ -1014,13 +1057,13 @@ func (p *ClaudeWSProvider) handleCanUseTool(req ControlRequest, raw []byte) {
 	}
 
 	// Emit the permission request as a metadata event so callers can observe it.
-	p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+	p.emitToolCall(domain.ToolCallData{
 		ID:     req.RequestID,
 		Name:   toolReq.ToolName,
 		Status: "permission_request",
 		Title:  "tool permission request",
 		Input:  toolReq.Input,
-	}, raw))
+	}, raw)
 
 	handler := p.permHandler
 	if handler == nil {
@@ -1069,22 +1112,22 @@ func (p *ClaudeWSProvider) handleCanUseTool(req ControlRequest, raw []byte) {
 					}
 				}
 				_ = p.sendWS(p.wsConn, DenyResponse(req.RequestID, reason))
-				p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+				p.emitToolCall(domain.ToolCallData{
 					ID:     req.RequestID,
 					Name:   toolReq.ToolName,
 					Status: "permission_denied",
 					Title:  reason,
-				}, raw))
+				}, raw)
 				return
 			}
 
 			_ = p.sendWS(p.wsConn, AllowResponse(req.RequestID, toolReq.Input))
-			p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+			p.emitToolCall(domain.ToolCallData{
 				ID:     req.RequestID,
 				Name:   toolReq.ToolName,
 				Status: "permission_granted",
 				Title:  "tool permission granted",
-			}, raw))
+			}, raw)
 
 		case <-permCtx.Done():
 			if !p.completePendingPermission(req.RequestID, pending) {
@@ -1099,12 +1142,12 @@ func (p *ClaudeWSProvider) handleCanUseTool(req ControlRequest, raw []byte) {
 				}
 			}
 			_ = p.sendWS(p.wsConn, DenyResponse(req.RequestID, reason))
-			p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+			p.emitToolCall(domain.ToolCallData{
 				ID:     req.RequestID,
 				Name:   toolReq.ToolName,
 				Status: "permission_denied",
 				Title:  reason,
-			}, raw))
+			}, raw)
 		}
 	})
 }
@@ -1130,12 +1173,63 @@ func (p *ClaudeWSProvider) handleToolProgress(rm RawMessage) {
 	if err := json.Unmarshal(rm.Raw, &msg); err != nil {
 		return
 	}
-	p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+	p.emitToolCall(domain.ToolCallData{
 		ID:     msg.ToolUseID,
 		Name:   msg.ToolName,
 		Status: "running",
 		Title:  fmt.Sprintf("running for %.1fs", msg.ElapsedTimeSeconds),
-	}, rm.Raw))
+	}, rm.Raw)
+}
+
+func (p *ClaudeWSProvider) emitToolCall(data domain.ToolCallData, raw []byte) {
+	data = p.applyToolContext(data)
+	p.recordToolContext(data)
+	p.events.Emit(domain.NewToolCallEvent(p.sessionID, data, raw))
+}
+
+func (p *ClaudeWSProvider) applyToolContext(data domain.ToolCallData) domain.ToolCallData {
+	if strings.TrimSpace(data.ID) == "" {
+		return data
+	}
+
+	p.toolContextMu.RLock()
+	ctx, ok := p.toolContext[data.ID]
+	p.toolContextMu.RUnlock()
+	if !ok {
+		return data
+	}
+
+	if strings.TrimSpace(data.Name) == "" {
+		data.Name = ctx.Name
+	}
+	if strings.TrimSpace(data.Title) == "" {
+		data.Title = ctx.Title
+	}
+	if data.Input == nil {
+		data.Input = ctx.Input
+	}
+
+	return data
+}
+
+func (p *ClaudeWSProvider) recordToolContext(data domain.ToolCallData) {
+	if strings.TrimSpace(data.ID) == "" {
+		return
+	}
+
+	p.toolContextMu.Lock()
+	ctx := p.toolContext[data.ID]
+	if strings.TrimSpace(data.Name) != "" {
+		ctx.Name = data.Name
+	}
+	if strings.TrimSpace(data.Title) != "" {
+		ctx.Title = data.Title
+	}
+	if data.Input != nil {
+		ctx.Input = data.Input
+	}
+	p.toolContext[data.ID] = ctx
+	p.toolContextMu.Unlock()
 }
 
 func (p *ClaudeWSProvider) handleToolUseSummary(rm RawMessage) {
@@ -1236,7 +1330,8 @@ func (p *ClaudeWSProvider) processInput() {
 			isFirstTurn := firstUserMessage
 			p.mu.Lock()
 			p.turnSeq++
-			turnIndex := p.turnSeq
+			p.turnActive = true
+			p.turnBoundaryCh = make(chan struct{})
 			p.mu.Unlock()
 
 			p.mu.RLock()
@@ -1271,29 +1366,13 @@ func (p *ClaudeWSProvider) processInput() {
 					sid = p.claudeSessionID
 					p.mu.RUnlock()
 				case <-time.After(wait):
-					p.events.Emit(domain.NewMetadataEvent(p.sessionID, "session_id_pending", map[string]any{
-						"note":       "system/init session_id still pending before follow-up prompt",
-						"turn_index": turnIndex,
-					}, nil))
+					// Continue without a session ID when init is delayed.
 				case <-p.ctx.Done():
 					return
 				}
 			}
 
-			p.events.Emit(domain.NewMetadataEvent(p.sessionID, "turn_started", map[string]any{
-				"turn_index":       turnIndex,
-				"session_id":       sid,
-				"has_session_id":   sid != "",
-				"input_char_count": len(input),
-			}, nil))
-
 			msg := NewUserMessage(input, sid)
-			if sid == "" {
-				p.events.Emit(domain.NewMetadataEvent(p.sessionID, "session_id_pending", map[string]any{
-					"note":       "sending prompt before system/init provided session_id",
-					"turn_index": turnIndex,
-				}, nil))
-			}
 			drained := false
 			for !drained {
 				select {
@@ -1466,19 +1545,88 @@ func (p *ClaudeWSProvider) sendInitializeIfConfigured(conn *wsConn) error {
 	p.recordLifecycle("lifecycle.initialize.completed", map[string]any{
 		"request_id": requestID,
 	})
-	p.events.Emit(domain.NewMetadataEvent(p.sessionID, "initialize_completed", map[string]any{
-		"request_id": requestID,
-		"subtype":    resp.Subtype,
-		"response":   resp.Response,
+	p.events.Emit(domain.NewResourceUsageEvent(p.sessionID, domain.ResourceUsageData{
+		Scope: "provider",
+		Data: map[string]any{
+			"source":     "initialize_completed",
+			"request_id": requestID,
+			"subtype":    resp.Subtype,
+			"response":   resp.Response,
+		},
 	}, nil))
 	return nil
 }
 
-func (p *ClaudeWSProvider) initializePayload() (map[string]any, bool, error) {
-	if payload, enabled, err := decodeInitializePayload(p.config.Custom); enabled || err != nil {
-		return payload, enabled, err
+func (p *ClaudeWSProvider) handleRateLimitEvent(rm RawMessage) {
+	var payload map[string]any
+	if err := json.Unmarshal(rm.Raw, &payload); err != nil {
+		return
 	}
-	return decodeInitializePayload(p.config.SessionCustom)
+
+	p.events.Emit(domain.NewResourceUsageEvent(p.sessionID, domain.ResourceUsageData{
+		Scope: "rate_limit",
+		Data: map[string]any{
+			"source": "rate_limit_event",
+			"event":  payload,
+		},
+	}, rm.Raw))
+}
+
+func buildTurnCompletedMessage(turnIndex int, stopReason string, isError bool) string {
+	status := "completed"
+	if isError {
+		status = "failed"
+	}
+	if stopReason != "" {
+		return fmt.Sprintf("Turn %d %s (%s)", turnIndex, status, stopReason)
+	}
+	return fmt.Sprintf("Turn %d %s", turnIndex, status)
+}
+
+func (p *ClaudeWSProvider) initializePayload() (map[string]any, bool, error) {
+	// Start with any explicitly configured initialize payload.
+	payload, _, err := decodeInitializePayload(p.config.Custom)
+	if err != nil {
+		return nil, false, err
+	}
+	if payload == nil {
+		payload, _, err = decodeInitializePayload(p.config.SessionCustom)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+
+	// Always inject the built-in OrbitMesh MCP server so the CLI connects back
+	// to the OrbitMesh tool gateway for this session.
+	orbitmeshJSON, merr := json.Marshal(map[string]any{
+		"mcpServers": map[string]any{
+			"orbitmesh": map[string]any{
+				"command": "orbitmesh",
+				"args":    []string{"mcp-bridge", "--session-id", p.sessionID},
+			},
+		},
+	})
+	if merr != nil {
+		return nil, false, fmt.Errorf("marshal orbitmesh MCP: %w", merr)
+	}
+	switch existing := payload["sdkMcpServers"].(type) {
+	case []any:
+		payload["sdkMcpServers"] = append(existing, string(orbitmeshJSON))
+	case []string:
+		result := make([]any, len(existing)+1)
+		for i, s := range existing {
+			result[i] = s
+		}
+		result[len(existing)] = string(orbitmeshJSON)
+		payload["sdkMcpServers"] = result
+	default:
+		payload["sdkMcpServers"] = []any{string(orbitmeshJSON)}
+	}
+
+	return payload, true, nil
 }
 
 func decodeInitializePayload(src map[string]any) (map[string]any, bool, error) {
@@ -1772,7 +1920,7 @@ func (p *ClaudeWSProvider) emitEvent(event domain.Event, raw []byte) {
 		}
 	case domain.EventTypeMetric:
 		if data, ok := event.Metric(); ok {
-			p.state.AddTokens(data.TokensIn, data.TokensOut)
+			p.state.AddMetric(data.TokensIn, data.TokensOut, data.RequestCount)
 			p.events.Emit(domain.NewMetricEvent(p.sessionID, data.TokensIn, data.TokensOut, data.RequestCount, raw))
 		}
 	case domain.EventTypeError:

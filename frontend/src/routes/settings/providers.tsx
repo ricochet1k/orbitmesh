@@ -1,8 +1,14 @@
 import { createFileRoute } from '@tanstack/solid-router'
-import { createResource, createSignal, For, Show } from 'solid-js'
+import { createResource, createSignal, createMemo, For, Show } from 'solid-js'
 import { apiClient } from '../../api/client'
+import type { ProviderConfigResponse, ProviderUsageInsight } from '../../types/api'
 import { PROVIDER_TYPES } from './providers/-_shared'
 import { ProviderForm } from './providers/-_form'
+import {
+  extractProviderModelSummary,
+  extractUsageLimitSummary,
+  findProviderInsight,
+} from '../../utils/providerInsights'
 
 export const Route = createFileRoute('/settings/providers')({
   component: ProvidersPage,
@@ -10,8 +16,20 @@ export const Route = createFileRoute('/settings/providers')({
 
 function ProvidersPage() {
   const [providers, { refetch }] = createResource(() => apiClient.listProviders())
+  const [usageInsights, { refetch: refetchInsights }] = createResource(() => apiClient.getProviderUsageInsights())
   // null = list view, 'add' = adding new, <id> = editing that provider
   const [formMode, setFormMode] = createSignal<null | 'add' | string>(null)
+
+  const insightsByProviderId = createMemo(() => {
+    const map = new Map<string, ProviderUsageInsight>()
+    const providerList = providers()?.providers ?? []
+    const insights = usageInsights()?.providers ?? []
+    for (const provider of providerList) {
+      const insight = findProviderInsight(provider, insights)
+      if (insight) map.set(provider.id, insight)
+    }
+    return map
+  })
 
   const editingProvider = () => {
     const mode = formMode()
@@ -30,18 +48,27 @@ function ProvidersPage() {
           <p class="panel-kicker ds-kicker">Configuration</p>
           <h2>Providers</h2>
         </div>
-        <Show
-          when={formMode() === 'add'}
-          fallback={
-            <button class="btn btn-primary" onClick={openAdd}>
-              Add Provider
-            </button>
-          }
-        >
-          <button class="btn btn-secondary" onClick={closeForm}>
-            Cancel
+        <div class="provider-page-actions">
+          <button
+            class="btn btn-secondary"
+            onClick={() => void refetchInsights()}
+            disabled={usageInsights.loading}
+          >
+            {usageInsights.loading ? 'Refreshing…' : 'Refresh insights'}
           </button>
-        </Show>
+          <Show
+            when={formMode() === 'add'}
+            fallback={
+              <button class="btn btn-primary" onClick={openAdd}>
+                Add Provider
+              </button>
+            }
+          >
+            <button class="btn btn-secondary" onClick={closeForm}>
+              Cancel
+            </button>
+          </Show>
+        </div>
       </div>
 
       <Show when={formMode() === 'add'}>
@@ -61,6 +88,9 @@ function ProvidersPage() {
         </Show>
         <Show when={providers.error}>
           <p class="error-message">Failed to load providers: {String(providers.error)}</p>
+        </Show>
+        <Show when={usageInsights.error}>
+          <p class="error-message">Failed to load provider insights: {String(usageInsights.error)}</p>
         </Show>
         <Show when={providers()?.providers.length === 0 && !providers.loading}>
           <div class="empty-state">
@@ -110,6 +140,10 @@ function ProvidersPage() {
                       </span>
                     </Show>
                   </div>
+                  <ProviderCapabilityPanel
+                    provider={provider}
+                    insight={insightsByProviderId().get(provider.id)}
+                  />
                 </div>
                 <div class="provider-actions">
                   <button
@@ -154,4 +188,76 @@ function ProvidersPage() {
       </div>
     </section>
   )
+}
+
+function ProviderCapabilityPanel(props: {
+  provider: ProviderConfigResponse
+  insight?: ProviderUsageInsight
+}) {
+  const modelSummary = createMemo(() => extractProviderModelSummary(props.insight))
+  const usageSummary = createMemo(() => extractUsageLimitSummary(props.insight))
+  const listPreview = createMemo(() => {
+    const models = modelSummary().availableModels
+    if (models.length === 0) return ''
+    return models.slice(0, 5).join(', ')
+  })
+
+  return (
+    <div class="provider-capability-panel">
+      <div class="provider-capability-block">
+        <p class="provider-capability-title">Model availability</p>
+        <Show
+          when={modelSummary().availableModels.length > 0 || modelSummary().currentModel}
+          fallback={
+            <p class="provider-capability-note">
+              unavailable ({modelSummary().discovery.status})
+              <Show when={modelSummary().discovery.reason}>
+                {' '} - {modelSummary().discovery.reason}
+              </Show>
+            </p>
+          }
+        >
+          <p class="provider-capability-note">
+            {modelSummary().availableModels.length} known
+            <Show when={modelSummary().currentModel}>
+              {' '} - current: {modelSummary().currentModel}
+            </Show>
+          </p>
+          <Show when={listPreview()}>
+            <p class="provider-capability-list">{listPreview()}</p>
+          </Show>
+          <Show when={modelSummary().availableModels.length > 5}>
+            <p class="provider-capability-note">+{modelSummary().availableModels.length - 5} more</p>
+          </Show>
+        </Show>
+      </div>
+
+      <div class="provider-capability-block">
+        <p class="provider-capability-title">Usage limits</p>
+        <Show
+          when={usageSummary().used !== undefined || usageSummary().limit !== undefined || usageSummary().remaining !== undefined}
+          fallback={
+            <p class="provider-capability-note">
+              {usageSummary().status}
+              <Show when={usageSummary().reason}>
+                {' '} - {usageSummary().reason}
+              </Show>
+            </p>
+          }
+        >
+          <p class="provider-capability-note">
+            used: {formatMaybeNumber(usageSummary().used)} - limit: {formatMaybeNumber(usageSummary().limit)} - remaining: {formatMaybeNumber(usageSummary().remaining)}
+          </p>
+          <Show when={usageSummary().resetAt}>
+            <p class="provider-capability-note">reset: {usageSummary().resetAt}</p>
+          </Show>
+        </Show>
+      </div>
+    </div>
+  )
+}
+
+function formatMaybeNumber(value: number | undefined): string {
+  if (value === undefined) return 'unknown'
+  return Number.isInteger(value) ? String(value) : value.toFixed(2)
 }

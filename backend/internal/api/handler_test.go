@@ -1093,6 +1093,48 @@ func TestSendSessionInput_WithProviderOverride(t *testing.T) {
 	}
 }
 
+func TestRespondSessionAction_OK(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	created := createSession(t, r, "mock", "/tmp")
+	waitForRunning(t, env.executor, created.ID)
+
+	body, _ := json.Marshal(apiTypes.SessionActionResponseRequest{
+		ActionID: "req_1",
+		Decision: "approve",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/actions/respond", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+	if env.lastMock.lastInput != "approve" {
+		t.Fatalf("expected action decision to be forwarded as input, got %q", env.lastMock.lastInput)
+	}
+}
+
+func TestRespondSessionAction_RequiresActionID(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	created := createSession(t, r, "mock", "/tmp")
+	waitForRunning(t, env.executor, created.ID)
+
+	body, _ := json.Marshal(apiTypes.SessionActionResponseRequest{Decision: "approve"})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/actions/respond", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------

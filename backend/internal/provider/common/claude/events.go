@@ -3,6 +3,7 @@ package claude
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
 )
@@ -228,6 +229,35 @@ func handleSystemMessage(sessionID string, msg Message) (domain.Event, bool) {
 	return domain.NewMetadataEvent(sessionID, "system_init", metadata, msg.Raw()), true
 }
 
+func modelAvailabilityFromSystemMessage(msg Message) (domain.ResourceUsageData, bool) {
+	model, ok := msg.GetString("model")
+	if !ok {
+		return domain.ResourceUsageData{}, false
+	}
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return domain.ResourceUsageData{}, false
+	}
+	payload := map[string]any{
+		"source":        "system_init",
+		"current_model": model,
+		"available_models": []map[string]any{{
+			"id":    model,
+			"label": model,
+		}},
+	}
+	if version, ok := msg.GetString("claude_code_version"); ok && strings.TrimSpace(version) != "" {
+		payload["runtime_version"] = version
+	}
+	if tools, ok := msg.GetArray("tools"); ok {
+		payload["tools"] = tools
+	}
+	if mcpServers, ok := msg.GetArray("mcp_servers"); ok {
+		payload["mcp_servers"] = mcpServers
+	}
+	return domain.ResourceUsageData{Scope: "models", Data: payload}, true
+}
+
 // handleUserMessage processes user messages (typically tool results).
 func handleUserMessage(sessionID string, msg Message) (domain.Event, bool) {
 	// Extract message content
@@ -275,72 +305,99 @@ func handleUserMessage(sessionID string, msg Message) (domain.Event, bool) {
 
 // handleAssistantMessage processes assistant snapshot messages.
 func handleAssistantMessage(sessionID string, msg Message) (domain.Event, bool) {
-	// Extract message data
-	messageMap, ok := msg.GetMap("message")
+	usage, ok := assistantUsageFromMessage(msg)
 	if !ok {
 		return domain.Event{}, false
 	}
 
-	metadata := make(map[string]any)
-
-	if role, ok := messageMap["role"].(string); ok {
-		metadata["role"] = role
-	}
-	if model, ok := messageMap["model"].(string); ok {
-		metadata["model"] = model
-	}
-	if msgID, ok := messageMap["id"].(string); ok {
-		metadata["message_id"] = msgID
-	}
-	if stopReason, ok := messageMap["stop_reason"].(string); ok && stopReason != "" {
-		metadata["stop_reason"] = stopReason
+	payload := map[string]any{
+		"source": "assistant_snapshot",
+		"usage": map[string]any{
+			"input_tokens":                usage.InputTokens,
+			"output_tokens":               usage.OutputTokens,
+			"cache_read_input_tokens":     usage.CacheReadInputTokens,
+			"cache_creation_input_tokens": usage.CacheCreationInputTokens,
+		},
 	}
 
-	// Extract usage data if available
-	if usageMap, ok := messageMap["usage"].(map[string]any); ok {
-		usage := make(map[string]any)
-		if inputTokens, ok := usageMap["input_tokens"].(float64); ok {
-			usage["input_tokens"] = int64(inputTokens)
-		}
-		if outputTokens, ok := usageMap["output_tokens"].(float64); ok {
-			usage["output_tokens"] = int64(outputTokens)
-		}
-		if cacheRead, ok := usageMap["cache_read_input_tokens"].(float64); ok {
-			usage["cache_read_input_tokens"] = int64(cacheRead)
-		}
-		if cacheCreation, ok := usageMap["cache_creation_input_tokens"].(float64); ok {
-			usage["cache_creation_input_tokens"] = int64(cacheCreation)
-		}
-		metadata["usage"] = usage
-	}
-
-	// Extract content summary (don't include full content as it's redundant with deltas)
-	if content, ok := messageMap["content"].([]any); ok && len(content) > 0 {
-		contentSummary := make([]map[string]any, 0, len(content))
-		for _, item := range content {
-			itemMap, ok := item.(map[string]any)
-			if !ok {
-				continue
+	if messageMap, ok := msg.GetMap("message"); ok {
+		if model, ok := messageMap["model"].(string); ok {
+			model = strings.TrimSpace(model)
+			if model != "" {
+				payload["model"] = model
 			}
-
-			summary := make(map[string]any)
-			if itemType, ok := itemMap["type"].(string); ok {
-				summary["type"] = itemType
-
-				// For tool use, include details
-				if itemType == "tool_use" {
-					if name, ok := itemMap["name"].(string); ok {
-						summary["name"] = name
-					}
-					if id, ok := itemMap["id"].(string); ok {
-						summary["id"] = id
-					}
-				}
-			}
-			contentSummary = append(contentSummary, summary)
 		}
-		metadata["content_summary"] = contentSummary
+		if msgID, ok := messageMap["id"].(string); ok {
+			msgID = strings.TrimSpace(msgID)
+			if msgID != "" {
+				payload["message_id"] = msgID
+			}
+		}
 	}
 
-	return domain.NewMetadataEvent(sessionID, "assistant_snapshot", metadata, msg.Raw()), true
+	return domain.NewResourceUsageEvent(sessionID, domain.ResourceUsageData{
+		Scope: "turn",
+		Data:  payload,
+	}, msg.Raw()), true
+}
+
+type assistantUsage struct {
+	InputTokens              int64
+	OutputTokens             int64
+	CacheReadInputTokens     int64
+	CacheCreationInputTokens int64
+}
+
+func usageCacheTokenCounts(value any) (int64, int64) {
+	usageMap, ok := value.(map[string]any)
+	if !ok {
+		return 0, 0
+	}
+	cacheRead, _ := numberValue(usageMap, "cache_read_input_tokens")
+	cacheCreation, _ := numberValue(usageMap, "cache_creation_input_tokens")
+	return cacheRead, cacheCreation
+}
+
+func assistantUsageFromMessage(msg Message) (assistantUsage, bool) {
+	messageMap, ok := msg.GetMap("message")
+	if !ok {
+		return assistantUsage{}, false
+	}
+	usageMap, ok := messageMap["usage"].(map[string]any)
+	if !ok {
+		return assistantUsage{}, false
+	}
+
+	inputTokens, inputOK := numberValue(usageMap, "input_tokens")
+	outputTokens, outputOK := numberValue(usageMap, "output_tokens")
+	cacheRead, _ := numberValue(usageMap, "cache_read_input_tokens")
+	cacheCreation, _ := numberValue(usageMap, "cache_creation_input_tokens")
+
+	if !inputOK && !outputOK && cacheRead == 0 && cacheCreation == 0 {
+		return assistantUsage{}, false
+	}
+
+	return assistantUsage{
+		InputTokens:              inputTokens,
+		OutputTokens:             outputTokens,
+		CacheReadInputTokens:     cacheRead,
+		CacheCreationInputTokens: cacheCreation,
+	}, true
+}
+
+func numberValue(m map[string]any, key string) (int64, bool) {
+	value, exists := m[key]
+	if !exists {
+		return 0, false
+	}
+	switch n := value.(type) {
+	case float64:
+		return int64(n), true
+	case int64:
+		return n, true
+	case int:
+		return int64(n), true
+	default:
+		return 0, false
+	}
 }

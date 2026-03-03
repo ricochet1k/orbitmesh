@@ -111,11 +111,23 @@ func (s *ProviderState) SetCurrentTask(task string) {
 }
 
 func (s *ProviderState) AddTokens(tokensIn, tokensOut int64) {
+	s.AddMetric(tokensIn, tokensOut, 1)
+}
+
+func (s *ProviderState) AddMetric(tokensIn, tokensOut, requestCount int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.metrics.TokensIn += tokensIn
 	s.metrics.TokensOut += tokensOut
-	s.metrics.RequestCount++
+	s.metrics.RequestCount += requestCount
+	s.metrics.LastActivityAt = time.Now()
+}
+
+func (s *ProviderState) AddCacheTokens(cacheReadInputTokens, cacheCreationInputTokens int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.metrics.CacheReadInputTokens += cacheReadInputTokens
+	s.metrics.CacheCreationInputTokens += cacheCreationInputTokens
 	s.metrics.LastActivityAt = time.Now()
 }
 

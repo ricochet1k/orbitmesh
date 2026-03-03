@@ -708,6 +708,158 @@ describe("useSessionData", () => {
     })
   })
 
+  it("merges tool_call lifecycle updates into a single transcript item", async () => {
+    let data: ReturnType<typeof useSessionData> | undefined
+
+    createRoot((d) => {
+      dispose = d
+      const [sessionId] = createSignal("session-1")
+      const [canInspect] = createSignal<boolean | null>(false)
+      data = useSessionData({
+        sessionId,
+        canInspect,
+        eventsUrl: () => `/events/session-1`,
+        streamOptions: noPreflightOpts,
+      })
+    })
+
+    await vi.waitFor(() => expect(mockEventSources.length).toBeGreaterThan(0))
+    const source = mockEventSources[0]
+
+    source.emit("tool_call", {
+      type: "tool_call",
+      event_id: 20,
+      timestamp: "2026-02-05T12:01:00Z",
+      session_id: "session-1",
+      data: {
+        id: "tool-1",
+        name: "bash",
+        title: "Run command",
+        input: "ls",
+        status: "running",
+      },
+    })
+
+    await vi.waitFor(() => expect(data!.messages().some((m) => m.id === "tool:tool-1")).toBe(true))
+
+    source.emit("tool_call", {
+      type: "tool_call",
+      event_id: 21,
+      timestamp: "2026-02-05T12:01:05Z",
+      session_id: "session-1",
+      data: {
+        id: "tool-1",
+        status: "done",
+        output: "ok",
+      },
+    })
+
+    await vi.waitFor(() => {
+      const messages = data!.messages()
+      const toolMessages = messages.filter((m) => m.id.startsWith("tool:"))
+      expect(toolMessages).toHaveLength(1)
+      expect(toolMessages[0]?.id).toBe("tool:tool-1")
+      expect(toolMessages[0]?.content).toBe("Run command(ls): ok")
+      expect(toolMessages[0]?.open).toBe(false)
+      expect(messages.some((m) => m.id === "tool:tool-1:result")).toBe(false)
+    })
+  })
+
+  it("exposes only the latest TodoWrite event outside filtered transcript flow", async () => {
+    let data: ReturnType<typeof useSessionData> | undefined
+
+    createRoot((d) => {
+      dispose = d
+      const [sessionId] = createSignal("session-1")
+      const [canInspect] = createSignal<boolean | null>(false)
+      data = useSessionData({
+        sessionId,
+        canInspect,
+        eventsUrl: () => `/events/session-1`,
+        streamOptions: noPreflightOpts,
+      })
+    })
+
+    await vi.waitFor(() => expect(mockEventSources.length).toBeGreaterThan(0))
+    const source = mockEventSources[0]
+
+    source.emit("tool_call", {
+      type: "tool_call",
+      event_id: 30,
+      timestamp: "2026-02-05T12:01:00Z",
+      session_id: "session-1",
+      data: {
+        id: "todo-1",
+        name: "todowrite",
+        status: "running",
+        input: {
+          todos: [
+            { content: "Draft", status: "pending" },
+          ],
+        },
+      },
+    })
+
+    source.emit("tool_call", {
+      type: "tool_call",
+      event_id: 31,
+      timestamp: "2026-02-05T12:01:05Z",
+      session_id: "session-1",
+      data: {
+        id: "todo-2",
+        name: "todowrite",
+        status: "done",
+        input: {
+          todos: [
+            { content: "Ship", status: "completed" },
+          ],
+        },
+      },
+    })
+
+    await vi.waitFor(() => {
+      expect(data!.messages().filter((m) => m.id.startsWith("tool:todo-")).length).toBe(2)
+      expect(data!.filteredMessages().some((m) => m.id.startsWith("tool:todo-"))).toBe(false)
+      expect(data!.latestTodoWrite()?.messageId).toBe("tool:todo-2")
+      expect(data!.latestTodoWrite()?.items[0]?.content).toBe("Ship")
+    })
+  })
+
+  it("streams system_message events into transcript", async () => {
+    let data: ReturnType<typeof useSessionData> | undefined
+
+    createRoot((d) => {
+      dispose = d
+      const [sessionId] = createSignal("session-1")
+      const [canInspect] = createSignal<boolean | null>(false)
+      data = useSessionData({
+        sessionId,
+        canInspect,
+        eventsUrl: () => `/events/session-1`,
+        streamOptions: noPreflightOpts,
+      })
+    })
+
+    await vi.waitFor(() => expect(mockEventSources.length).toBeGreaterThan(0))
+    const source = mockEventSources[0]
+
+    source.emit("system_message", {
+      type: "system_message",
+      event_id: 22,
+      timestamp: "2026-02-05T12:01:06Z",
+      session_id: "session-1",
+      data: {
+        content: "Claude status: ready",
+      },
+    })
+
+    await vi.waitFor(() => {
+      const msg = data!.messages().find((m) => m.kind === "system_message")
+      expect(msg?.type).toBe("system")
+      expect(msg?.content).toBe("Claude status: ready")
+    })
+  })
+
   it("renders stderr metadata as a plain transcript message", async () => {
     let data: ReturnType<typeof useSessionData> | undefined
 
@@ -740,6 +892,199 @@ describe("useSessionData", () => {
     await vi.waitFor(() => {
       expect(data!.messages().some((m) => m.content.includes("stderr: websocket: close 1006"))).toBe(true)
     })
+  })
+
+  it("suppresses assistant snapshot metadata transcript spam", async () => {
+    let data: ReturnType<typeof useSessionData> | undefined
+
+    createRoot((d) => {
+      dispose = d
+      const [sessionId] = createSignal("session-1")
+      const [canInspect] = createSignal<boolean | null>(false)
+      data = useSessionData({
+        sessionId,
+        canInspect,
+        eventsUrl: () => `/events/session-1`,
+        streamOptions: noPreflightOpts,
+      })
+    })
+
+    await vi.waitFor(() => expect(mockEventSources.length).toBeGreaterThan(0))
+    const source = mockEventSources[0]
+
+    source.emit("metadata", {
+      type: "metadata",
+      event_id: 12,
+      timestamp: "2026-02-05T12:01:00Z",
+      session_id: "session-1",
+      data: {
+        key: "assistant_snapshot",
+        value: {
+          usage: { cache_read_input_tokens: 21 },
+        },
+      },
+    })
+
+    await vi.waitFor(() => {
+      expect(data!.messages().some((m) => m.kind === "resource_usage")).toBe(false)
+      expect(data!.messages().some((m) => m.content.includes("assistant_snapshot"))).toBe(false)
+    })
+  })
+
+  it("keeps metadata rendering generic while deriving intel from resource_usage events", async () => {
+    let data: ReturnType<typeof useSessionData> | undefined
+
+    createRoot((d) => {
+      dispose = d
+      const [sessionId] = createSignal("session-1")
+      const [canInspect] = createSignal<boolean | null>(false)
+      data = useSessionData({
+        sessionId,
+        canInspect,
+        eventsUrl: () => `/events/session-1`,
+        streamOptions: noPreflightOpts,
+      })
+    })
+
+    await vi.waitFor(() => expect(mockEventSources.length).toBeGreaterThan(0))
+    const source = mockEventSources[0]
+
+    source.emit("metadata", {
+      type: "metadata",
+      event_id: 13,
+      timestamp: "2026-02-05T12:01:00Z",
+      session_id: "session-1",
+      data: {
+        key: "system_init",
+        value: {
+          model: "claude-sonnet-4-5",
+          claude_code_version: "1.2.3",
+          permission_mode: "acceptEdits",
+          tools: [{ name: "bash" }, { name: "edit" }],
+        },
+      },
+    })
+
+    source.emit("metadata", {
+      type: "metadata",
+      event_id: 14,
+      timestamp: "2026-02-05T12:01:01Z",
+      session_id: "session-1",
+      data: { key: "provider_debug", value: { ok: true } },
+    })
+
+    source.emit("resource_usage", {
+      type: "resource_usage",
+      event_id: 15,
+      timestamp: "2026-02-05T12:01:02Z",
+      session_id: "session-1",
+      data: {
+        scope: "provider",
+        data: {
+          provider_type: "claude-ws",
+          model: "claude-sonnet-4-5",
+          permission_mode: "acceptEdits",
+          tools: ["bash", "edit"],
+        },
+      },
+    })
+
+    source.emit("resource_usage", {
+      type: "resource_usage",
+      event_id: 16,
+      timestamp: "2026-02-05T12:01:02Z",
+      session_id: "session-1",
+      data: {
+        scope: "account",
+        data: {
+          used: 7,
+          limit: 30,
+          remaining: 23,
+          reset_at: "2026-02-05T12:10:00Z",
+        },
+      },
+    })
+
+    await vi.waitFor(() => {
+      expect(data!.messages().some((m) => m.kind === "metadata")).toBe(true)
+      expect(data!.sessionIntel().model).toBe("claude-sonnet-4-5")
+      expect(data!.sessionIntel().permissionMode).toBe("acceptEdits")
+      expect(data!.sessionIntel().tools).toEqual(["bash", "edit"])
+      expect(data!.sessionIntel().rateLimit?.remaining).toBe(23)
+    })
+  })
+
+  it("keeps turn_completed as a normal metadata message", async () => {
+    let data: ReturnType<typeof useSessionData> | undefined
+
+    createRoot((d) => {
+      dispose = d
+      const [sessionId] = createSignal("session-1")
+      const [canInspect] = createSignal<boolean | null>(false)
+      data = useSessionData({
+        sessionId,
+        canInspect,
+        eventsUrl: () => `/events/session-1`,
+        streamOptions: noPreflightOpts,
+      })
+    })
+
+    await vi.waitFor(() => expect(mockEventSources.length).toBeGreaterThan(0))
+    const source = mockEventSources[0]
+
+    source.emit("metadata", {
+      type: "metadata",
+      event_id: 17,
+      timestamp: "2026-02-05T12:01:03Z",
+      session_id: "session-1",
+      data: {
+        key: "turn_completed",
+        value: {
+          turn: 4,
+          stop_reason: "end_turn",
+        },
+      },
+    })
+
+    await vi.waitFor(() => {
+      const line = data!.messages().find((m) => m.kind === "metadata")
+      expect(line?.content).toContain("turn_completed")
+      expect(line?.type).toBe("system")
+    })
+  })
+
+  it("does not append metric events as transcript lines", async () => {
+    let data: ReturnType<typeof useSessionData> | undefined
+
+    createRoot((d) => {
+      dispose = d
+      const [sessionId] = createSignal("session-1")
+      const [canInspect] = createSignal<boolean | null>(false)
+      data = useSessionData({
+        sessionId,
+        canInspect,
+        eventsUrl: () => `/events/session-1`,
+        streamOptions: noPreflightOpts,
+      })
+    })
+
+    await vi.waitFor(() => expect(mockEventSources.length).toBeGreaterThan(0))
+    const source = mockEventSources[0]
+
+    source.emit("metric", {
+      type: "metric",
+      event_id: 18,
+      timestamp: "2026-02-05T12:01:04Z",
+      session_id: "session-1",
+      data: {
+        tokens_in: 3,
+        tokens_out: 4,
+        request_count: 1,
+      },
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(data!.messages().some((m) => m.kind === "metric")).toBe(false)
   })
 
   it("merges progress deltas by stream id", async () => {

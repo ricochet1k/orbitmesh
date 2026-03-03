@@ -71,21 +71,41 @@ type CodexProvider struct {
 	turnActive   bool
 	started      bool
 
+	// turnBoundaryCh is replaced for each new turn and closed when that turn's
+	// turn/completed notification arrives. Guarded by mu.
+	turnBoundaryCh chan struct{}
+
 	deltaMu       sync.Mutex
 	deltaByItemID map[string]bool
+
+	// Deduplication state for codex dual-format notifications.
+	// Codex sends events via both the legacy codex/event/* path and the newer
+	// item/* path. We track which format "won" per item/call to emit each
+	// logical event exactly once.
+	dupMu            sync.Mutex
+	seenExecBegin    map[string]bool   // call IDs handled via codex/event/exec_command_begin
+	seenExecEnd      map[string]bool   // call IDs handled via codex/event/exec_command_end
+	seenExecApproval map[string]bool   // call IDs handled via codex/event/exec_approval_request
+	outputDeltaFmt   map[string]string // "codex"|"item": first-wins for tool output deltas
+	reasonDeltaFmt   map[string]string // "codex"|"item": first-wins for reasoning deltas
 }
 
 // NewCodexProvider creates a new Codex app-server provider.
 func NewCodexProvider(sessionID string, staticCfg Config) *CodexProvider {
 	return &CodexProvider{
-		sessionID:      sessionID,
-		state:          native.NewProviderState(),
-		events:         native.NewEventAdapter(sessionID, 100),
-		inputBuffer:    buffer.NewInputBuffer(10),
-		circuitBreaker: circuit.NewBreaker(3, 30*time.Second),
-		staticCfg:      staticCfg,
-		pending:        make(map[int64]chan rpcMessage),
-		deltaByItemID:  make(map[string]bool),
+		sessionID:        sessionID,
+		state:            native.NewProviderState(),
+		events:           native.NewEventAdapter(sessionID, 100),
+		inputBuffer:      buffer.NewInputBuffer(10),
+		circuitBreaker:   circuit.NewBreaker(3, 30*time.Second),
+		staticCfg:        staticCfg,
+		pending:          make(map[int64]chan rpcMessage),
+		deltaByItemID:    make(map[string]bool),
+		seenExecBegin:    make(map[string]bool),
+		seenExecEnd:      make(map[string]bool),
+		seenExecApproval: make(map[string]bool),
+		outputDeltaFmt:   make(map[string]string),
+		reasonDeltaFmt:   make(map[string]string),
 	}
 }
 
@@ -105,6 +125,17 @@ func (p *CodexProvider) SendInput(ctx context.Context, config session.Config, in
 	}
 
 	return p.events.Events(), nil
+}
+
+func (p *CodexProvider) RespondAction(ctx context.Context, config session.Config, response session.ActionResponse) (<-chan domain.Event, error) {
+	input := strings.TrimSpace(response.Input)
+	if input == "" {
+		input = strings.TrimSpace(response.Decision)
+	}
+	if input == "" {
+		return nil, fmt.Errorf("codex action response requires decision or input")
+	}
+	return p.SendInput(ctx, config, input)
 }
 
 // start launches codex app-server and performs initialize + thread/start.
@@ -182,6 +213,26 @@ func (p *CodexProvider) start(ctx context.Context, config session.Config) error 
 	p.state.SetState(session.StateRunning)
 	p.started = true
 	return nil
+}
+
+// DrainAtTurnBoundary implements session.TurnBoundaryDrainer. It blocks until
+// the current codex turn emits its turn/completed notification, then returns.
+// If no turn is active it returns immediately.
+func (p *CodexProvider) DrainAtTurnBoundary(ctx context.Context) error {
+	p.mu.RLock()
+	active := p.turnActive
+	ch := p.turnBoundaryCh
+	p.mu.RUnlock()
+
+	if !active || ch == nil {
+		return nil
+	}
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (p *CodexProvider) Stop(ctx context.Context) error {
@@ -356,6 +407,7 @@ func (p *CodexProvider) handleNotification(method string, params json.RawMessage
 			p.mu.Lock()
 			p.activeTurnID = payload.Turn.ID
 			p.turnActive = true
+			p.turnBoundaryCh = make(chan struct{})
 			p.mu.Unlock()
 		}
 		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "turn_started", map[string]any{"turn_id": payload.Turn.ID}, raw))
@@ -374,7 +426,12 @@ func (p *CodexProvider) handleNotification(method string, params json.RawMessage
 		p.mu.Lock()
 		p.turnActive = false
 		p.activeTurnID = ""
+		ch := p.turnBoundaryCh
+		p.turnBoundaryCh = nil
 		p.mu.Unlock()
+		if ch != nil {
+			close(ch)
+		}
 		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "turn_completed", map[string]any{
 			"turn_id": payload.Turn.ID,
 			"status":  payload.Turn.Status,
@@ -397,7 +454,7 @@ func (p *CodexProvider) handleNotification(method string, params json.RawMessage
 
 	case "codex/event/agent_reasoning_delta", "codex/event/reasoning_content_delta", "item/reasoning/summaryTextDelta":
 		text, itemID := extractReasoningDelta(method, params)
-		if text != "" {
+		if text != "" && itemID != "" && p.markOrCheckDeltaFmt(p.reasonDeltaFmt, itemID, method) {
 			p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
 				Channel:  "reasoning",
 				StreamID: itemID,
@@ -407,16 +464,22 @@ func (p *CodexProvider) handleNotification(method string, params json.RawMessage
 		}
 
 	case "codex/event/agent_reasoning":
-		if text := extractAgentReasoningText(params); text != "" {
+		// Emit a done signal to close the delta stream for this reasoning section.
+		// Avoid re-emitting the full text since deltas already carry the content.
+		if itemID := extractAgentReasoningItemID(params); itemID != "" {
 			p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
-				Channel: "reasoning",
-				Content: text,
-				Done:    true,
+				Channel:  "reasoning",
+				StreamID: itemID,
+				IsDelta:  true,
+				Done:     true,
 			}, raw))
 		}
 
 	case "codex/event/exec_command_begin":
 		if call, ok := parseExecCommandBegin(params); ok {
+			p.dupMu.Lock()
+			p.seenExecBegin[call.ID] = true
+			p.dupMu.Unlock()
 			p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
 				ID:     call.ID,
 				Name:   "command/exec",
@@ -428,6 +491,9 @@ func (p *CodexProvider) handleNotification(method string, params json.RawMessage
 
 	case "codex/event/exec_command_end":
 		if call, ok := parseExecCommandEnd(params); ok {
+			p.dupMu.Lock()
+			p.seenExecEnd[call.ID] = true
+			p.dupMu.Unlock()
 			p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
 				ID:     call.ID,
 				Name:   "command/exec",
@@ -440,22 +506,26 @@ func (p *CodexProvider) handleNotification(method string, params json.RawMessage
 
 	case "codex/event/exec_command_output_delta":
 		if chunk, callID, ok := parseExecOutputDelta(params); ok {
-			p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
-				Channel:  "tool_output",
-				StreamID: callID,
-				Content:  chunk,
-				IsDelta:  true,
-			}, raw))
+			if p.markOrCheckDeltaFmt(p.outputDeltaFmt, callID, method) {
+				p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
+					Channel:  "tool_output",
+					StreamID: callID,
+					Content:  chunk,
+					IsDelta:  true,
+				}, raw))
+			}
 		}
 
 	case "item/commandExecution/outputDelta":
 		if chunk, callID, ok := parseItemCommandOutputDelta(params); ok {
-			p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
-				Channel:  "tool_output",
-				StreamID: callID,
-				Content:  chunk,
-				IsDelta:  true,
-			}, raw))
+			if p.markOrCheckDeltaFmt(p.outputDeltaFmt, callID, method) {
+				p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
+					Channel:  "tool_output",
+					StreamID: callID,
+					Content:  chunk,
+					IsDelta:  true,
+				}, raw))
+			}
 		}
 
 	case "codex/event/token_count", "thread/tokenUsage/updated", "account/rateLimits/updated":
@@ -489,9 +559,37 @@ func (p *CodexProvider) handleNotification(method string, params json.RawMessage
 			}, raw))
 		}
 
+	// ── Lifecycle noise ─────────────────────────────────────────────────────────
+	// These carry no actionable UI information; their content is already
+	// delivered via the dedicated delta/item/* paths above.
+	case "thread/started",
+		"thread/status/changed",
+		"codex/event/mcp_startup_complete",
+		"codex/event/task_started",
+		"codex/event/user_message",
+		"codex/event/agent_reasoning_section_break",
+		"item/reasoning/summaryPartAdded":
+		// Suppress.
+
+	case "codex/event/exec_approval_request":
+		if req := parseExecApprovalRequest(params); req != nil {
+			p.dupMu.Lock()
+			p.seenExecApproval[req.ID] = true
+			p.dupMu.Unlock()
+			p.events.Emit(domain.NewActionRequestEvent(p.sessionID, *req, raw))
+		}
+
+	case "item/commandExecution/requestApproval":
+		if req := parseCommandExecutionApprovalRequest(params); req != nil {
+			p.dupMu.Lock()
+			seen := p.seenExecApproval[req.ID]
+			p.dupMu.Unlock()
+			if !seen {
+				p.events.Emit(domain.NewActionRequestEvent(p.sessionID, *req, raw))
+			}
+		}
+
 	default:
-		// TODO(codex): handle server-originated tool/requestUserInput and review
-		// flows once OrbitMesh has first-class UI/state for approval prompts.
 		var value any
 		_ = json.Unmarshal(params, &value)
 		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "codex_notification", map[string]any{
@@ -518,6 +616,10 @@ func (p *CodexProvider) handleItemNotification(method string, params json.RawMes
 	normalizedItemType := strings.ToLower(strings.TrimSpace(itemType))
 
 	switch normalizedItemType {
+	case "usermessage":
+		// Echo of the user's own input; no event needed.
+		return
+
 	case "agentmessage":
 		if method != "item/completed" {
 			return
@@ -543,16 +645,15 @@ func (p *CodexProvider) handleItemNotification(method string, params json.RawMes
 		}
 
 	case "reasoning":
-		content := asString(item["text"])
-		if content == "" {
-			content = asString(item["summary"])
-		}
-		if content != "" {
+		// Reasoning content arrives via delta events; the full-text echo from
+		// item lifecycle events would create duplicate messages.  Only emit a
+		// done signal on item/completed to close the delta stream.
+		if method == "item/completed" {
 			p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
 				Channel:  "reasoning",
 				StreamID: itemID,
-				Content:  content,
-				Done:     method == "item/completed",
+				IsDelta:  true,
+				Done:     true,
 			}, raw))
 		}
 
@@ -572,6 +673,19 @@ func (p *CodexProvider) handleItemNotification(method string, params json.RawMes
 		if method == "item/completed" {
 			status = "completed"
 		}
+		// Suppress if codex/event/exec_command_begin or exec_command_end already
+		// emitted a tool_call event for this call ID — those carry more structured
+		// input data (command as []string rather than a flattened string).
+		p.dupMu.Lock()
+		if status == "running" && p.seenExecBegin[itemID] {
+			p.dupMu.Unlock()
+			return
+		}
+		if status == "completed" && p.seenExecEnd[itemID] {
+			p.dupMu.Unlock()
+			return
+		}
+		p.dupMu.Unlock()
 		name := strings.TrimSpace(asString(item["command"]))
 		if name == "" {
 			name = "command"
@@ -1038,7 +1152,8 @@ func parseResourceUsage(method string, params json.RawMessage) *domain.ResourceU
 	if err := json.Unmarshal(params, &value); err != nil {
 		return nil
 	}
-	data := &domain.ResourceUsageData{Data: value}
+	metadata := map[string]any{"source": method}
+	data := &domain.ResourceUsageData{Data: value, Metadata: metadata}
 	switch method {
 	case "codex/event/token_count":
 		data.Scope = "turn"
@@ -1046,10 +1161,37 @@ func parseResourceUsage(method string, params json.RawMessage) *domain.ResourceU
 		data.Scope = "thread"
 	case "account/rateLimits/updated":
 		data.Scope = "account"
+		for k, v := range extractCodexLimitMetadata(value) {
+			metadata[k] = v
+		}
 	default:
 		data.Scope = "provider"
 	}
 	return data
+}
+
+func extractCodexLimitMetadata(value any) map[string]any {
+	usageMap, ok := value.(map[string]any)
+	if !ok || len(usageMap) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for _, key := range []string{
+		"reset_at", "resetAt", "reset_seconds", "resetSeconds",
+		"remaining", "remaining_requests", "remaining_tokens",
+		"limit", "max", "window_seconds", "windowSeconds", "retry_after_seconds", "retryAfterSeconds",
+	} {
+		if v, ok := usageMap[key]; ok {
+			out[key] = v
+		}
+	}
+	if limits, ok := usageMap["limits"]; ok {
+		out["limits"] = limits
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func parseActionRequest(method string, params json.RawMessage) (*domain.ActionRequestData, *domain.ArtifactUpdateData) {
@@ -1066,14 +1208,20 @@ func parseActionRequest(method string, params json.RawMessage) (*domain.ActionRe
 		request.Kind = "approval"
 		request.ID = asString(value["itemId"])
 		request.Title = "File change approval requested"
-		request.Payload = value
+		request.Payload = map[string]any{
+			"request":   value,
+			"decisions": []map[string]string{{"value": "approve", "label": "Approve"}, {"value": "deny", "label": "Deny"}},
+		}
 		artifact = nil
 	case "codex/event/apply_patch_approval_request":
 		msg, _ := value["msg"].(map[string]any)
 		request.Kind = "approval"
 		request.ID = asString(msg["call_id"])
 		request.Title = "Patch apply approval requested"
-		request.Payload = msg
+		request.Payload = map[string]any{
+			"request":   msg,
+			"decisions": []map[string]string{{"value": "approve", "label": "Approve"}, {"value": "deny", "label": "Deny"}},
+		}
 
 		artifact = &domain.ArtifactUpdateData{
 			ID:      asString(msg["call_id"]),
@@ -1179,6 +1327,112 @@ func customStringSlice(custom map[string]any, key string) []string {
 		return fields
 	default:
 		return nil
+	}
+}
+
+// markOrCheckDeltaFmt registers the first format that emits a delta for a
+// given item/call ID, then returns whether the calling method matches that
+// format. Pass the notification method name; item/* methods are treated as
+// "item" format, everything else as "codex" format. Returns true if the event
+// should be processed, false if it should be suppressed (other format won).
+func (p *CodexProvider) markOrCheckDeltaFmt(formats map[string]string, id, method string) bool {
+	p.dupMu.Lock()
+	defer p.dupMu.Unlock()
+	isItem := strings.HasPrefix(method, "item/")
+	want := "codex"
+	if isItem {
+		want = "item"
+	}
+	if existing := formats[id]; existing == "" {
+		formats[id] = want
+		return true
+	} else {
+		return existing == want
+	}
+}
+
+// extractAgentReasoningItemID extracts the item_id from a
+// codex/event/agent_reasoning notification so we can close its delta stream.
+func extractAgentReasoningItemID(params json.RawMessage) string {
+	var payload struct {
+		Msg struct {
+			ItemID string `json:"item_id"`
+		} `json:"msg"`
+	}
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.Msg.ItemID)
+}
+
+// parseExecApprovalRequest parses a codex/event/exec_approval_request
+// notification into an ActionRequestData.
+func parseExecApprovalRequest(params json.RawMessage) *domain.ActionRequestData {
+	var payload struct {
+		Msg struct {
+			CallID  string   `json:"call_id"`
+			Command []string `json:"command"`
+			Reason  string   `json:"reason"`
+		} `json:"msg"`
+	}
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return nil
+	}
+	callID := strings.TrimSpace(payload.Msg.CallID)
+	if callID == "" {
+		return nil
+	}
+	title := "Command execution approval required"
+	if len(payload.Msg.Command) > 0 {
+		title = fmt.Sprintf("Approve: %s", strings.Join(payload.Msg.Command, " "))
+	}
+	return &domain.ActionRequestData{
+		ID:     callID,
+		Kind:   "approval",
+		Title:  title,
+		Status: "pending",
+		Payload: map[string]any{
+			"call_id": callID,
+			"command": payload.Msg.Command,
+			"reason":  payload.Msg.Reason,
+			"decisions": []map[string]string{
+				{"value": "approve", "label": "Approve"},
+				{"value": "deny", "label": "Deny"},
+			},
+		},
+	}
+}
+
+// parseCommandExecutionApprovalRequest parses an
+// item/commandExecution/requestApproval notification into an ActionRequestData.
+func parseCommandExecutionApprovalRequest(params json.RawMessage) *domain.ActionRequestData {
+	var payload struct {
+		ItemID             string `json:"itemId"`
+		AvailableDecisions []struct {
+			Value string `json:"value"`
+			Label string `json:"label"`
+		} `json:"availableDecisions"`
+	}
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return nil
+	}
+	itemID := strings.TrimSpace(payload.ItemID)
+	if itemID == "" {
+		return nil
+	}
+	decisions := make([]map[string]string, 0, len(payload.AvailableDecisions))
+	for _, d := range payload.AvailableDecisions {
+		decisions = append(decisions, map[string]string{"value": d.Value, "label": d.Label})
+	}
+	return &domain.ActionRequestData{
+		ID:     itemID,
+		Kind:   "approval",
+		Title:  "Command execution approval required",
+		Status: "pending",
+		Payload: map[string]any{
+			"item_id":   itemID,
+			"decisions": decisions,
+		},
 	}
 }
 

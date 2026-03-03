@@ -76,6 +76,7 @@ vi.mock("../api/client", () => ({
     getActivityEntries: vi.fn(),
     getEventsUrl: vi.fn(),
     getPermissions: vi.fn(),
+    getProviderUsageInsights: vi.fn(),
     listAgents: vi.fn(),
     sendSessionInput: vi.fn(),
     listTerminals: vi.fn(),
@@ -113,6 +114,7 @@ describe("SessionViewer", () => {
        ; (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1")
        ; (apiClient.getActivityEntries as any).mockResolvedValue({ entries: [], next_cursor: null })
        ; (apiClient.getPermissions as any).mockResolvedValue(defaultPermissions)
+       ; (apiClient.getProviderUsageInsights as any).mockResolvedValue({ providers: [] })
        ; (apiClient.listAgents as any).mockResolvedValue({ agents: [] })
        ; (apiClient.listTerminals as any).mockResolvedValue({ terminals: [] })
        ; (apiClient.sendSessionInput as any).mockResolvedValue(undefined)
@@ -185,6 +187,24 @@ describe("SessionViewer", () => {
     expect(screen.queryByText("First entry")).toBeNull()
   })
 
+  it("renders streamed system_message events in transcript", async () => {
+    (apiClient.getSession as any).mockResolvedValue(baseSession)
+
+    render(() => <SessionViewer sessionId="session-1" />)
+
+    await waitFor(() => expect(eventSources.length).toBeGreaterThan(0))
+
+    eventSources[0]?.emit("system_message", {
+      type: "system_message",
+      event_id: 12,
+      timestamp: "2026-02-05T12:02:01Z",
+      session_id: "session-1",
+      data: { content: "Claude status: warming up" },
+    })
+
+    expect(await screen.findByText("Claude status: warming up")).toBeDefined()
+  })
+
   it("renders terminal when session provider is PTY", async () => {
     (apiClient.getSession as any).mockResolvedValue(makeSession({ provider_type: "pty" }))
 
@@ -194,6 +214,37 @@ describe("SessionViewer", () => {
     expect(await screen.findByTestId("terminal-view")).toBeDefined()
     expect(screen.queryByTestId("activity-stream-status")).toBeNull()
     expect(screen.queryByTestId("terminal-stream-status")).toBeNull()
+  })
+
+  it("pins latest TodoWrite checklist outside transcript item flow", async () => {
+    (apiClient.getSession as any).mockResolvedValue(baseSession)
+
+    render(() => <SessionViewer sessionId="session-1" />)
+
+    await waitFor(() => expect(eventSources.length).toBeGreaterThan(0))
+
+    eventSources[0]?.emit("tool_call", {
+      type: "tool_call",
+      event_id: 40,
+      timestamp: "2026-02-05T12:02:00Z",
+      session_id: "session-1",
+      data: {
+        id: "todo-1",
+        name: "todowrite",
+        status: "done",
+        input: {
+          todos: [
+            { content: "Capture events", status: "completed" },
+            { content: "Refine styling", status: "in_progress" },
+          ],
+        },
+      },
+    })
+
+    const pinned = await screen.findByTestId("transcript-pinned-todo")
+    expect(pinned.textContent).toContain("Capture events")
+    expect(pinned.textContent).toContain("Refine styling")
+    expect(screen.queryByText("todo-1")).toBeNull()
   })
 
   it("does not render raw output for PTY sessions", async () => {

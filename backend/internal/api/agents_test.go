@@ -352,7 +352,13 @@ func TestSendMessage_WithAgentAndModelOverrides(t *testing.T) {
 	if sess.AgentID != "agent_001" {
 		t.Fatalf("session.AgentID = %q, want %q", sess.AgentID, "agent_001")
 	}
-	if len(sess.ProviderCustom) != 0 {
-		t.Fatalf("expected session.ProviderCustom to remain empty, got %v", sess.ProviderCustom)
+	if _, ok := sess.ProviderCustom["model"]; ok {
+		t.Fatalf("expected per-message model override to remain transient, got session model in ProviderCustom: %v", sess.ProviderCustom["model"])
+	}
+	if _, ok := sess.ProviderCustom["permission_mode"]; ok {
+		t.Fatalf("expected agent permission_mode override to remain transient, got session permission_mode in ProviderCustom: %v", sess.ProviderCustom["permission_mode"])
+	}
+	if _, ok := sess.ProviderCustom["mcp_config"]; !ok {
+		t.Fatalf("expected session.ProviderCustom to retain injected mcp_config, got %v", sess.ProviderCustom)
 	}
 }

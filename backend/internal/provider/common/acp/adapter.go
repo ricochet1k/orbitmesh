@@ -198,22 +198,24 @@ func (a *acpClientAdapter) SessionUpdate(ctx context.Context, notif acpsdk.Sessi
 
 	update := notif.Update
 
-	// Note: Usage tracking happens on PromptResponse, not SessionUpdate
-	// The streaming updates don't include final token counts
+	if usage, ok := parseACPUpdateMeta(updateMeta(update)); ok {
+		raw, _ := json.Marshal(map[string]any{"meta": updateMeta(update)})
+		sess.events.Emit(domain.NewResourceUsageEvent(sess.sessionID, usage, raw))
+	}
 
 	switch {
-	case update.UserMessageChunk != nil:
+	case update.UserMessageChunk != nil && (update.UserMessageChunk.SessionUpdate == "" || update.UserMessageChunk.SessionUpdate == "user_message_chunk"):
 		// User message echo - useful for confirmation
 		a.handleContentBlock(sess, update.UserMessageChunk.Content, true)
 		a.emitMetadata(sess, "user_message_chunk", map[string]any{
 			"content": update.UserMessageChunk.Content,
 		})
 
-	case update.AgentMessageChunk != nil:
+	case update.AgentMessageChunk != nil && (update.AgentMessageChunk.SessionUpdate == "" || update.AgentMessageChunk.SessionUpdate == "agent_message_chunk"):
 		// Streaming agent message chunk
 		a.handleContentBlock(sess, update.AgentMessageChunk.Content, true)
 
-	case update.AgentThoughtChunk != nil:
+	case update.AgentThoughtChunk != nil && (update.AgentThoughtChunk.SessionUpdate == "" || update.AgentThoughtChunk.SessionUpdate == "agent_thought_chunk"):
 		// Internal reasoning/thinking process
 		a.handleContentBlock(sess, update.AgentThoughtChunk.Content, false)
 		raw, _ := json.Marshal(update.AgentThoughtChunk)
@@ -221,7 +223,7 @@ func (a *acpClientAdapter) SessionUpdate(ctx context.Context, notif acpsdk.Sessi
 			sess.events.Emit(domain.NewThoughtEvent(sess.sessionID, update.AgentThoughtChunk.Content.Text.Text, raw))
 		}
 
-	case update.ToolCall != nil:
+	case update.ToolCall != nil && (update.ToolCall.SessionUpdate == "" || update.ToolCall.SessionUpdate == "tool_call"):
 		// Tool call notification
 		raw, _ := json.Marshal(update.ToolCall)
 		sess.events.Emit(domain.NewToolCallEvent(sess.sessionID, domain.ToolCallData{
@@ -230,7 +232,7 @@ func (a *acpClientAdapter) SessionUpdate(ctx context.Context, notif acpsdk.Sessi
 			Title:  update.ToolCall.Title,
 		}, raw))
 
-	case update.ToolCallUpdate != nil:
+	case update.ToolCallUpdate != nil && (update.ToolCallUpdate.SessionUpdate == "" || update.ToolCallUpdate.SessionUpdate == "tool_call_update"):
 		// Tool call status update
 		raw, _ := json.Marshal(update.ToolCallUpdate)
 		title := ""
@@ -243,18 +245,18 @@ func (a *acpClientAdapter) SessionUpdate(ctx context.Context, notif acpsdk.Sessi
 			Title:  title,
 		}, raw))
 
-	case update.Plan != nil:
+	case update.Plan != nil && (update.Plan.SessionUpdate == "" || update.Plan.SessionUpdate == "plan"):
 		// Agent's execution plan for complex tasks
 		raw, _ := json.Marshal(update.Plan)
 		sess.events.Emit(domain.NewPlanEvent(sess.sessionID, domain.PlanData{Description: fmt.Sprint(update.Plan)}, raw))
 
-	case update.AvailableCommandsUpdate != nil:
+	case update.AvailableCommandsUpdate != nil && (update.AvailableCommandsUpdate.SessionUpdate == "" || update.AvailableCommandsUpdate.SessionUpdate == "available_commands_update"):
 		// Dynamic command discovery
 		a.emitMetadata(sess, "available_commands", map[string]any{
 			"commands": update.AvailableCommandsUpdate,
 		})
 
-	case update.CurrentModeUpdate != nil:
+	case update.CurrentModeUpdate != nil && (update.CurrentModeUpdate.SessionUpdate == "" || update.CurrentModeUpdate.SessionUpdate == "current_mode_update"):
 		// Session mode changes
 		a.emitMetadata(sess, "mode_change", map[string]any{
 			"mode": update.CurrentModeUpdate,
@@ -262,6 +264,29 @@ func (a *acpClientAdapter) SessionUpdate(ctx context.Context, notif acpsdk.Sessi
 	}
 
 	return nil
+}
+
+func updateMeta(update acpsdk.SessionUpdate) any {
+	switch {
+	case update.UserMessageChunk != nil:
+		return update.UserMessageChunk.Meta
+	case update.AgentMessageChunk != nil:
+		return update.AgentMessageChunk.Meta
+	case update.AgentThoughtChunk != nil:
+		return update.AgentThoughtChunk.Meta
+	case update.ToolCall != nil:
+		return update.ToolCall.Meta
+	case update.ToolCallUpdate != nil:
+		return update.ToolCallUpdate.Meta
+	case update.Plan != nil:
+		return update.Plan.Meta
+	case update.AvailableCommandsUpdate != nil:
+		return update.AvailableCommandsUpdate.Meta
+	case update.CurrentModeUpdate != nil:
+		return update.CurrentModeUpdate.Meta
+	default:
+		return nil
+	}
 }
 
 // CreateTerminal handles terminal creation requests from the agent.

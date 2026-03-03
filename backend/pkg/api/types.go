@@ -40,6 +40,15 @@ type SessionInputRequest struct {
 	ProviderType string `json:"provider_type,omitempty"`
 }
 
+type SessionActionResponseRequest struct {
+	ActionID     string         `json:"action_id"`
+	Decision     string         `json:"decision,omitempty"`
+	Input        string         `json:"input,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+	ProviderID   string         `json:"provider_id,omitempty"`
+	ProviderType string         `json:"provider_type,omitempty"`
+}
+
 type SendMessageRequest struct {
 	Content         string   `json:"content"`
 	ProviderID      string   `json:"provider_id,omitempty"`
@@ -114,15 +123,42 @@ type SessionListResponse struct {
 }
 
 type SessionMetrics struct {
-	TokensIn       int64     `json:"tokens_in"`
-	TokensOut      int64     `json:"tokens_out"`
-	RequestCount   int64     `json:"request_count"`
-	LastActivityAt time.Time `json:"last_activity_at,omitempty"`
+	TokensIn                 int64     `json:"tokens_in"`
+	TokensOut                int64     `json:"tokens_out"`
+	RequestCount             int64     `json:"request_count"`
+	CacheReadInputTokens     int64     `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int64     `json:"cache_creation_input_tokens"`
+	LastActivityAt           time.Time `json:"last_activity_at,omitempty"`
+}
+
+type UsageStat struct {
+	Scope     string         `json:"scope"`
+	Data      any            `json:"data,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+	UpdatedAt time.Time      `json:"updated_at,omitempty"`
+}
+
+type UsageStats struct {
+	ByScope       map[string]UsageStat `json:"by_scope,omitempty"`
+	LastUpdatedAt time.Time            `json:"last_updated_at,omitempty"`
 }
 
 type SessionStatusResponse struct {
 	SessionResponse
-	Metrics SessionMetrics `json:"metrics"`
+	Metrics       SessionMetrics `json:"metrics"`
+	SessionUsage  UsageStats     `json:"session_usage,omitempty"`
+	ProviderUsage UsageStats     `json:"provider_usage,omitempty"`
+}
+
+type ProviderUsageInsight struct {
+	ProviderKey  string     `json:"provider_key"`
+	ProviderID   string     `json:"provider_id,omitempty"`
+	ProviderType string     `json:"provider_type,omitempty"`
+	Usage        UsageStats `json:"usage,omitempty"`
+}
+
+type ProviderUsageInsightsResponse struct {
+	Providers []ProviderUsageInsight `json:"providers"`
 }
 
 type EventType string
@@ -226,8 +262,9 @@ type ProgressData struct {
 }
 
 type ResourceUsageData struct {
-	Scope string `json:"scope,omitempty"`
-	Data  any    `json:"data,omitempty"`
+	Scope    string         `json:"scope,omitempty"`
+	Data     any            `json:"data,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 type ActionRequestData struct {

@@ -41,6 +41,13 @@ export interface SessionInputRequest {
   input: string;
 }
 
+export interface SessionActionResponseRequest {
+  action_id: string;
+  decision?: string;
+  input?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface SessionResponse {
   id: string;
   provider_type: string;
@@ -84,11 +91,67 @@ export interface SessionMetrics {
   tokens_in: number;
   tokens_out: number;
   request_count: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
   last_activity_at?: string;
+}
+
+export interface UsageStat {
+  scope: string;
+  data?: unknown;
+  metadata?: Record<string, unknown>;
+  updated_at?: string;
+}
+
+export interface UsageStats {
+  by_scope?: Record<string, UsageStat>;
+  last_updated_at?: string;
 }
 
 export interface SessionStatusResponse extends SessionResponse {
   metrics: SessionMetrics;
+  session_usage?: UsageStats;
+  provider_usage?: UsageStats;
+}
+
+export interface ProviderUsageInsight {
+  provider_key: string;
+  provider_id?: string;
+  provider_type?: string;
+  usage?: UsageStats;
+}
+
+export interface ProviderUsageInsightsResponse {
+  providers: ProviderUsageInsight[];
+}
+
+export interface ProviderModelOption {
+  id: string;
+  label?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ProviderModelDiscovery {
+  supported?: boolean;
+  status?: string;
+  reason?: string;
+  source?: string;
+}
+
+export interface ProviderModelsInsight {
+  current_model?: string;
+  available_models?: ProviderModelOption[];
+  discovery?: ProviderModelDiscovery;
+}
+
+export interface ProviderUsageLimitInsight {
+  supported?: boolean;
+  status?: string;
+  reason?: string;
+  used?: number;
+  limit?: number;
+  remaining?: number;
+  reset_at?: string;
 }
 
 // ── SSE event payloads ────────────────────────────────────────────────────────
@@ -150,6 +213,7 @@ export interface ProgressData {
 export interface ResourceUsageData {
   scope?: string;
   data?: unknown;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ActionRequestData {
@@ -183,6 +247,10 @@ export interface UserMessageData {
   content: string;
 }
 
+export interface SystemMessageData {
+  content: string;
+}
+
 export interface SessionStateStreamEvent {
   event_id: number;
   type: "session_state";
@@ -206,6 +274,7 @@ export type SSEEvent =
   | { event_id: number; type: "thought";        timestamp: string; session_id: string; data: ThoughtData; raw?: unknown }
   | { event_id: number; type: "plan";           timestamp: string; session_id: string; data: PlanData; raw?: unknown }
   | { event_id: number; type: "user_message";   timestamp: string; session_id: string; data: UserMessageData; raw?: unknown }
+  | { event_id: number; type: "system_message"; timestamp: string; session_id: string; data: SystemMessageData; raw?: unknown }
   | { event_id: number; type: "progress";       timestamp: string; session_id: string; data: ProgressData; raw?: unknown }
   | { event_id: number; type: "resource_usage"; timestamp: string; session_id: string; data: ResourceUsageData; raw?: unknown }
   | { event_id: number; type: "action_request"; timestamp: string; session_id: string; data: ActionRequestData; raw?: unknown }

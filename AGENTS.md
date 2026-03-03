@@ -86,6 +86,19 @@ When touching lifecycle/drain code, treat these as required expectations:
 - Treat persisted session state as advisory; runtime-active state should be derived from live run presence and run-attempt metadata.
 - Error messages returned to users must include actionable root-cause context (what failed and why), not only generic wrappers.
 
+## Provider Boundary Rules
+
+Provider-specific behavior must stay isolated so frontend and runtime layers remain provider-agnostic.
+
+- Allowed locations for provider-specific logic:
+  - `backend/internal/provider/**`
+  - provider settings UI under `frontend/src/routes/settings/providers/**`
+  - provider-specific tests
+- Explicitly out of scope for this rule: `pty` provider.
+- Disallowed: adding provider-specific keys, conditionals, or protocol assumptions in generic layers (`backend/internal/service/**`, generic frontend hooks/components, and shared transcript/session rendering paths).
+- If provider-specific data must be surfaced outside provider directories, convert it to provider-agnostic domain events/session usage mutations first, then consume those generic shapes.
+- During review, treat new provider string checks outside allowed locations as a correctness issue unless there is a documented exception.
+
 ## Tooling Addendum
 
 - **playwright-cli** (see `.claude/skills/playwright/SKILL.md`): browser automation skill that can record snapshots, manipulate elements, mock network traffic, and capture media. Use whenever frontend testing, form filling, screenshot capture, or interactive exploration via a real browser session helps clarify or verify UI behavior.

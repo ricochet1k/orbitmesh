@@ -50,6 +50,7 @@ export interface SessionData {
   // Transcript
   messages: Accessor<TranscriptMessage[]>
   filteredMessages: Accessor<TranscriptMessage[]>
+  latestTodoWrite: Accessor<TodoWriteState | null>
   filter: Accessor<string>
   setFilter: (v: string) => void
   autoScroll: Accessor<boolean>
@@ -62,6 +63,46 @@ export interface SessionData {
   streamStatus: Accessor<StreamStatus>
   /** Last parsed SSE event (dock-specific UI state can read from here). */
   lastEvent: Accessor<ReturnType<typeof parseSSEEvent>>
+  /** Session/provider metadata derived from stream metadata events. */
+  sessionIntel: Accessor<SessionStreamIntel>
+}
+
+export interface TodoWriteItem {
+  content: string
+  status: string
+  priority?: string
+}
+
+export interface TodoWriteState {
+  messageId: string
+  timestamp: string
+  status?: string
+  items: TodoWriteItem[]
+}
+
+export interface SessionRateLimitUsage {
+  used?: number
+  limit?: number
+  remaining?: number
+  resetAt?: string
+  window?: string
+  requests?: number
+  tokensIn?: number
+  tokensOut?: number
+  cacheReadInputTokens?: number
+  cacheCreationInputTokens?: number
+}
+
+export interface SessionStreamIntel {
+  providerType?: string
+  providerName?: string
+  model?: string
+  runtimeVersion?: string
+  permissionMode?: string
+  tools: string[]
+  mcpServers: string[]
+  rateLimit?: SessionRateLimitUsage
+  initializeResponse?: Record<string, unknown>
 }
 
 // ── Stream event types ────────────────────────────────────────────────────────
@@ -76,6 +117,7 @@ const STREAM_EVENT_TYPES = [
   "tool_call",
   "plan",
   "user_message",
+  "system_message",
   "progress",
   "resource_usage",
   "action_request",
@@ -99,11 +141,26 @@ export function useSessionData({
   const [filter, setFilter] = createSignal("")
   const [autoScroll, setAutoScroll] = createSignal(true)
   const [lastEvent, setLastEvent] = createSignal<ReturnType<typeof parseSSEEvent>>(null)
+  const [sessionIntel, setSessionIntel] = createSignal<SessionStreamIntel>({
+    tools: [],
+    mcpServers: [],
+  })
+
+  const visibleMessages = createMemo(() => messages().filter((msg) => !isTodoWriteMessage(msg)))
+
+  const latestTodoWrite = createMemo(() => {
+    const list = messages()
+    for (let idx = list.length - 1; idx >= 0; idx -= 1) {
+      const parsed = extractTodoWriteState(list[idx])
+      if (parsed) return parsed
+    }
+    return null
+  })
 
   const filteredMessages = createMemo(() => {
     const term = filter().trim().toLowerCase()
-    if (!term) return messages()
-    return messages().filter(
+    if (!term) return visibleMessages()
+    return visibleMessages().filter(
       (msg) =>
         msg.content.toLowerCase().includes(term) || msg.type.toLowerCase().includes(term),
     )
@@ -141,6 +198,15 @@ export function useSessionData({
 
   const pushMessage = (message: TranscriptMessage) => {
     setMessages((prev) => [...prev, message])
+  }
+
+  const updateSessionIntel = (next: Partial<SessionStreamIntel>) => {
+    setSessionIntel((prev) => ({
+      ...prev,
+      ...next,
+      tools: next.tools ?? prev.tools,
+      mcpServers: next.mcpServers ?? prev.mcpServers,
+    }))
   }
 
   const applyStreamEvent = (eventType: string, event: MessageEvent) => {
@@ -182,13 +248,36 @@ export function useSessionData({
         break
       }
       case "output": {
-        const { content, is_delta } = payload.data
+        const { content, is_delta, message_id } = payload.data
         if (!content) break
         if (is_delta) {
           setMessages((prev) => {
-            // Only append to the last message if it is already an open output message.
-            // Searching backward for any open agent message causes out-of-order display
-            // when a tool_call or other event has been pushed since the output started.
+            // If the provider supplied a stable message_id, target that message
+            // directly so interleaved events (tool calls, metadata, etc.) don't
+            // cause each delta to open a new bubble.
+            if (message_id) {
+              const idx = prev.findIndex(
+                (m) => m.id === message_id || m.id === `message:${message_id}`,
+              )
+              if (idx >= 0 && prev[idx].type === "agent") {
+                const existing = prev[idx]
+                return [
+                  ...prev.slice(0, idx),
+                  {
+                    ...existing,
+                    content: existing.content + content,
+                    open: true,
+                    timestamp: payload.timestamp,
+                    raw: payload.raw,
+                  },
+                  ...prev.slice(idx + 1),
+                ]
+              }
+            }
+            // Fallback: only append to the last message if it is already an open
+            // output message. Searching backward for any open agent message causes
+            // out-of-order display when a tool_call or other event has been pushed
+            // since the output started.
             const last = prev[prev.length - 1]
             if (last && last.type === "agent" && last.open) {
               const updated = { ...last, content: last.content + content }
@@ -197,7 +286,7 @@ export function useSessionData({
             return [
               ...prev,
               {
-                id: stableId("output"),
+                id: message_id || stableId("output"),
                 type: "agent",
                 kind: "output",
                 timestamp: payload.timestamp,
@@ -210,7 +299,7 @@ export function useSessionData({
         } else {
           mergeMessages(
             [{
-              id: stableId("output"),
+              id: message_id || stableId("output"),
               type: "agent",
               kind: "output",
               timestamp: payload.timestamp,
@@ -224,15 +313,6 @@ export function useSessionData({
         break
       }
       case "metric": {
-        const { tokens_in, tokens_out, request_count } = payload.data
-        pushMessage({
-          id: stableId("metric"),
-          type: "system",
-          kind: "metric",
-          timestamp: payload.timestamp,
-          content: `Metrics updated - in ${tokens_in} - out ${tokens_out} - requests ${request_count}`,
-          raw: payload.raw,
-        })
         break
       }
       case "error": {
@@ -264,6 +344,10 @@ export function useSessionData({
           })
           break
         }
+        if (key === "assistant_snapshot") {
+          break
+        }
+
         pushMessage({
           id: stableId("metadata"),
           type: "system",
@@ -324,52 +408,60 @@ export function useSessionData({
       case "tool_call": {
         const { id: toolId, name, status, title, input, output } = payload.data
         const msgId = toolId ? `tool:${toolId}` : stableId("tool_call")
-        const label = title || name
+        const stringifyValue = (value: unknown) =>
+          typeof value === "string" ? value : JSON.stringify(value)
 
-        if (output != null) {
-          // Tool result: update the running tool_call to closed, then push the
-          // result as a separate message so it appears after any other messages
-          // that arrived while the tool was running.
-          mergeMessages(
-            [{
-              id: msgId,
-              type: "system",
-              kind: "tool_call",
-              timestamp: payload.timestamp,
-              content: input != null
-                ? `${label}(${typeof input === "string" ? input : JSON.stringify(input)})`
-                : label,
-              open: false,
-              raw: payload.raw,
-            }],
-            { sort: false },
-          )
-          pushMessage({
-            id: `${msgId}:result`,
+        setMessages((prev) => {
+          const idx = prev.findIndex((msg) => msg.id === msgId)
+          const existing = idx >= 0 ? prev[idx] : undefined
+          const existingPayload = (existing?.payload && typeof existing.payload === "object")
+            ? existing.payload as Record<string, unknown>
+            : {}
+
+          const mergedTitle = title ?? (typeof existingPayload.title === "string" ? existingPayload.title : undefined)
+          const mergedName = name ?? (typeof existingPayload.name === "string" ? existingPayload.name : undefined)
+          const mergedInput = input !== undefined ? input : existingPayload.input
+          const mergedOutput = output !== undefined ? output : existingPayload.output
+          const mergedStatus = status ?? (typeof existingPayload.status === "string" ? existingPayload.status : undefined)
+
+          const label = mergedTitle || mergedName || "Tool"
+          const detail = mergedInput != null
+            ? `${label}(${stringifyValue(mergedInput)})`
+            : label
+          const content = mergedOutput != null
+            ? `${detail}: ${stringifyValue(mergedOutput)}`
+            : detail
+          const open = mergedOutput == null && mergedStatus === "running"
+
+          const nextMessage: TranscriptMessage = {
+            id: msgId,
             type: "system",
             kind: "tool_call",
             timestamp: payload.timestamp,
-            content: `${label}: ${typeof output === "string" ? output : JSON.stringify(output)}`,
-            open: false,
+            content,
+            open,
+            payload: {
+              id: toolId ?? (typeof existingPayload.id === "string" ? existingPayload.id : undefined),
+              name: mergedName,
+              title: mergedTitle,
+              status: mergedStatus,
+              input: mergedInput,
+              output: mergedOutput,
+            },
             raw: payload.raw,
-          })
-        } else {
-          const detail = input != null
-            ? `${label}(${typeof input === "string" ? input : JSON.stringify(input)})`
-            : label
-          mergeMessages(
-            [{
-              id: msgId,
-              type: "system",
-              kind: "tool_call",
-              timestamp: payload.timestamp,
-              content: detail,
-              open: status === "running",
-              raw: payload.raw,
-            }],
-            { sort: false },
-          )
-        }
+          }
+
+          if (idx < 0) {
+            return [...prev, nextMessage]
+          }
+
+          const next = [...prev]
+          next[idx] = {
+            ...existing,
+            ...nextMessage,
+          }
+          return next
+        })
         break
       }
       case "plan": {
@@ -398,6 +490,19 @@ export function useSessionData({
           id: stableId("user_message"),
           type: "user",
           kind: "user",
+          timestamp: payload.timestamp,
+          content,
+          raw: payload.raw,
+        })
+        break
+      }
+      case "system_message": {
+        const { content } = payload.data
+        if (!content) break
+        pushMessage({
+          id: stableId("system_message"),
+          type: "system",
+          kind: "system_message",
           timestamp: payload.timestamp,
           content,
           raw: payload.raw,
@@ -452,15 +557,7 @@ export function useSessionData({
         break
       }
       case "resource_usage": {
-        pushMessage({
-          id: stableId("resource_usage"),
-          type: "system",
-          kind: "resource_usage",
-          timestamp: payload.timestamp,
-          content: `Resource usage${payload.data.scope ? ` (${payload.data.scope})` : ""}: ${JSON.stringify(payload.data.data ?? {})}`,
-          payload: payload.data,
-          raw: payload.raw,
-        })
+        ingestResourceUsageForSessionIntel(payload.data, updateSessionIntel)
         break
       }
       case "action_request": {
@@ -493,16 +590,21 @@ export function useSessionData({
   const applyRealtimeSnapshot = (snapshot: SessionActivitySnapshot) => {
     if (!snapshot) return
     const entryMessages = Array.isArray(snapshot.entries)
-      ? snapshot.entries.map((entry) => toActivityMessage({
-        id: entry.id,
-        session_id: entry.session_id,
-        kind: entry.kind,
-        ts: entry.ts,
-        rev: entry.rev,
-        open: entry.open,
-        data: entry.data ?? {},
-        event_id: entry.event_id,
-      }))
+      ? snapshot.entries
+        .map((entry) => {
+          const activity = {
+            id: entry.id,
+            session_id: entry.session_id,
+            kind: entry.kind,
+            ts: entry.ts,
+            rev: entry.rev,
+            open: entry.open,
+            data: entry.data ?? {},
+            event_id: entry.event_id,
+          }
+          return toActivityMessage(activity)
+        })
+        .filter((message): message is TranscriptMessage => message !== null)
       : []
     const transcriptMessages = Array.isArray(snapshot.messages)
       ? snapshot.messages.map(toTranscriptFromSessionMessage)
@@ -566,6 +668,7 @@ export function useSessionData({
     setPaginationCursor(undefined)
     setStreamStatus("connecting")
     setLastEvent(null)
+    setSessionIntel({ tools: [], mcpServers: [] })
 
     openStream(id, inspect)
   }))
@@ -588,6 +691,7 @@ export function useSessionData({
     setPaginationCursor(undefined)
     setStreamStatus("connecting")
     setLastEvent(null)
+    setSessionIntel({ tools: [], mcpServers: [] })
 
     openStream(id, inspect)
   })
@@ -758,7 +862,7 @@ export function useSessionData({
           // Pagination load (loadEarlier): merge new older entries
           const entries = page.entries ?? []
           if (entries.length > 0) {
-            mergeMessages(entries.map(toActivityMessage), { sort: true })
+            mergeMessages(entries.map(toActivityMessage).filter((message): message is TranscriptMessage => message !== null), { sort: true })
           }
           return
         }
@@ -773,7 +877,7 @@ export function useSessionData({
         }
 
         if (entries.length > 0) {
-          mergeMessages(entries.map(toActivityMessage), { sort: true })
+          mergeMessages(entries.map(toActivityMessage).filter((message): message is TranscriptMessage => message !== null), { sort: true })
         }
 
         if (pendingRealtimeSnapshot) {
@@ -810,6 +914,7 @@ export function useSessionData({
   return {
     messages,
     filteredMessages,
+    latestTodoWrite,
     filter,
     setFilter,
     autoScroll,
@@ -819,6 +924,7 @@ export function useSessionData({
     loadEarlier,
     streamStatus,
     lastEvent,
+    sessionIntel,
   }
 }
 
@@ -837,8 +943,9 @@ function toTranscriptFromSessionMessage(message: SessionActivitySnapshot["messag
   }
 }
 
-function toActivityMessage(entry: ActivityEntry): TranscriptMessage {
+function toActivityMessage(entry: ActivityEntry): TranscriptMessage | null {
   const kind = normalizeMessageKind(entry.kind)
+
   return {
     id: `activity:${entry.id}`,
     entryId: entry.id,
@@ -879,4 +986,151 @@ function normalizeMessageKind(kind: string | null | undefined): string {
     .trim()
     .toLowerCase()
     .replace(/[\s-]+/g, "_")
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
+function pickString(record: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === "string" && value.trim()) return value.trim()
+  }
+  return undefined
+}
+
+function extractToolNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const names = new Set<string>()
+  for (const item of value) {
+    if (typeof item === "string" && item.trim()) {
+      names.add(item.trim())
+      continue
+    }
+    const record = asRecord(item)
+    if (!record) continue
+    const name = pickString(record, ["name", "id", "title", "tool"])
+    if (name) names.add(name)
+  }
+  return Array.from(names)
+}
+
+function extractServerNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const names = new Set<string>()
+  for (const item of value) {
+    if (typeof item === "string" && item.trim()) {
+      names.add(item.trim())
+      continue
+    }
+    const record = asRecord(item)
+    if (!record) continue
+    const name = pickString(record, ["name", "id"])
+    if (name) names.add(name)
+  }
+  return Array.from(names)
+}
+
+function ingestResourceUsageForSessionIntel(
+  usage: { scope?: string; data?: unknown; metadata?: Record<string, unknown> },
+  update: (next: Partial<SessionStreamIntel>) => void,
+) {
+  const scope = String(usage.scope ?? "").trim().toLowerCase()
+  const data = asRecord(usage.data)
+  if (!data) return
+
+  if (scope === "models") {
+    update({
+      model: pickString(data, ["current_model", "model"]),
+      runtimeVersion: pickString(data, ["runtime_version", "claude_code_version", "version"]),
+    })
+    return
+  }
+
+  if (scope === "provider") {
+    update({
+      providerType: pickString(data, ["provider_type", "provider"]),
+      providerName: pickString(data, ["provider_name"]),
+      model: pickString(data, ["current_model", "model"]),
+      runtimeVersion: pickString(data, ["runtime_version", "claude_code_version", "version"]),
+      permissionMode: pickString(data, ["permission_mode"]),
+      tools: extractToolNames(data["tools"]),
+      mcpServers: extractServerNames(data["mcp_servers"]),
+      initializeResponse: asRecord(data["response"]) ?? undefined,
+    })
+    return
+  }
+
+  if (scope === "account" || scope === "rate_limit" || scope === "rate_limits") {
+    const source = asRecord(data["event"]) ?? data
+    const detail = asRecord(source["detail"]) ?? asRecord(source["usage"]) ?? asRecord(source["rate_limit"]) ?? source
+    const rateLimit: SessionRateLimitUsage = {
+      used: asFiniteNumber(detail["used"]) ?? asFiniteNumber(detail["usage"]) ?? asFiniteNumber(detail["consumed"]),
+      limit: asFiniteNumber(detail["limit"]) ?? asFiniteNumber(detail["max"]) ?? asFiniteNumber(detail["quota"]),
+      remaining: asFiniteNumber(detail["remaining"]) ?? asFiniteNumber(detail["available"]) ?? asFiniteNumber(detail["left"]),
+      resetAt: pickString(detail, ["reset_at", "resetAt", "resets_at"]),
+      window: pickString(detail, ["window", "window_seconds"]),
+      requests: asFiniteNumber(detail["requests"]) ?? asFiniteNumber(detail["request_count"]),
+      tokensIn: asFiniteNumber(detail["tokens_in"]),
+      tokensOut: asFiniteNumber(detail["tokens_out"]),
+      cacheReadInputTokens: asFiniteNumber(detail["cache_read_input_tokens"]),
+      cacheCreationInputTokens: asFiniteNumber(detail["cache_creation_input_tokens"]),
+    }
+    if (Object.values(rateLimit).some((entry) => entry !== undefined)) {
+      update({ rateLimit })
+    }
+  }
+}
+
+function isTodoWriteMessage(message: TranscriptMessage): boolean {
+  return extractTodoWriteState(message) !== null
+}
+
+function extractTodoWriteState(message: TranscriptMessage): TodoWriteState | null {
+  if (normalizeMessageKind(message.kind) !== "tool_call") return null
+  const payload = asRecord(message.payload)
+  if (!payload) return null
+  const toolName = pickString(payload, ["name", "title", "tool", "tool_name"])
+  if (!toolName || toolName.trim().toLowerCase() !== "todowrite") return null
+
+  const input = asRecord(payload["input"])
+  if (!input) return null
+  const rawTodos = input["todos"]
+  if (!Array.isArray(rawTodos)) return null
+
+  const items: TodoWriteItem[] = rawTodos
+    .map((entry) => {
+      const record = asRecord(entry)
+      if (!record) return null
+      const content = pickString(record, ["content", "title", "text"])
+      if (!content) return null
+      const status = pickString(record, ["status", "state"]) ?? "pending"
+      const priority = pickString(record, ["priority"])
+      return {
+        content,
+        status,
+        priority,
+      }
+    })
+    .filter((entry): entry is TodoWriteItem => entry !== null)
+
+  if (items.length === 0) return null
+
+  return {
+    messageId: message.id,
+    timestamp: message.timestamp,
+    status: pickString(payload, ["status"]),
+    items,
+  }
+}
+
+function asFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return undefined
 }

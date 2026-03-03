@@ -12,6 +12,7 @@ const STREAM_EVENT_TYPES = [
   "resource_usage",
   "action_request",
   "artifact_update",
+  "system_message",
   "activity_entry",
 ] as const
 

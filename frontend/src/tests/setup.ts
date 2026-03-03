@@ -12,6 +12,33 @@ const originalTimers = {
   clearInterval: globalThis.clearInterval,
 };
 
+const originalWebSocket = globalThis.WebSocket;
+
+class TestWebSocket {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
+
+  readonly url: string;
+  readyState = TestWebSocket.CONNECTING;
+  onopen: ((this: WebSocket, ev: Event) => any) | null = null;
+  onclose: ((this: WebSocket, ev: CloseEvent) => any) | null = null;
+  onerror: ((this: WebSocket, ev: Event) => any) | null = null;
+  onmessage: ((this: WebSocket, ev: MessageEvent) => any) | null = null;
+
+  constructor(url: string | URL) {
+    this.url = String(url);
+  }
+
+  close() {
+    this.readyState = TestWebSocket.CLOSED;
+    this.onclose?.call(this as unknown as WebSocket, new CloseEvent("close"));
+  }
+
+  send(_data: string | ArrayBufferLike | Blob | ArrayBufferView) {}
+}
+
 const dumpActiveHandles = (label: string) => {
   const getter = (process as any)?._getActiveHandles;
   if (typeof getter !== "function") return;
@@ -47,6 +74,8 @@ beforeAll(() => {
     return originalTimers.clearInterval(id as any);
   }) as typeof clearInterval;
 
+  globalThis.WebSocket = TestWebSocket as unknown as typeof WebSocket;
+
 });
 
 afterEach(() => {
@@ -71,4 +100,5 @@ afterAll(() => {
   globalThis.clearTimeout = originalTimers.clearTimeout;
   globalThis.setInterval = originalTimers.setInterval;
   globalThis.clearInterval = originalTimers.clearInterval;
+  globalThis.WebSocket = originalWebSocket;
 });

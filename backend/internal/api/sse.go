@@ -285,7 +285,7 @@ func convertEventData(e domain.Event) any {
 			Status:   d.Status,
 		}
 	case domain.ResourceUsageData:
-		return apiTypes.ResourceUsageData{Scope: d.Scope, Data: d.Data}
+		return apiTypes.ResourceUsageData{Scope: d.Scope, Data: d.Data, Metadata: d.Metadata}
 	case domain.ActionRequestData:
 		return apiTypes.ActionRequestData{
 			ID:      d.ID,

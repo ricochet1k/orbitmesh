@@ -27,9 +27,10 @@ import (
 )
 
 const (
-	defaultPort     = "8080"
-	shutdownTimeout = 5 * time.Second
-	drainLogEvery   = 750 * time.Millisecond
+	defaultPort              = "8080"
+	shutdownTimeout          = 5 * time.Second
+	drainLogEvery            = 750 * time.Millisecond
+	turnBoundaryDrainTimeout = 5 * time.Minute
 )
 
 func listenAddr() string {
@@ -227,6 +228,24 @@ func main() {
 		"eval_waiter_count":    len(initialDrain.Evals.WaitOn),
 		"blockers":             blockersFromStatus(initialDrain),
 	})
+
+	// If there are active sessions, wait for each one to reach a turn boundary
+	// before stopping it. This prevents killing process-based providers (codex,
+	// claudews) mid-turn and losing in-progress work. A separate long-lived
+	// context is used so this phase is not constrained by the 5-second
+	// shutdownTimeout.
+	if len(initialDrain.SessionRuns.WaitOn) > 0 {
+		logShutdownEvent("shutdown.turn_boundary.start", map[string]any{
+			"active_sessions": initialDrain.SessionRuns.WaitOn,
+			"timeout":         turnBoundaryDrainTimeout.String(),
+		})
+		tbCtx, tbCancel := context.WithTimeout(context.Background(), turnBoundaryDrainTimeout)
+		executor.DrainActiveSessions(tbCtx)
+		tbCancel()
+		logShutdownEvent("shutdown.turn_boundary.done", map[string]any{
+			"elapsed": time.Since(shutdownStartedAt).String(),
+		})
+	}
 
 	httpShutdownCh := make(chan error, 1)
 	go func() {

@@ -8,8 +8,8 @@ export default defineConfig({
     globals: true,
     setupFiles: ['src/tests/setup.ts'],
     globalSetup: ['src/tests/global-setup.ts'],
-    include: ['src/**/*.test.{ts,tsx}'],
-    exclude: ['tests/**'],
+    include: ['src/**/*.test.{ts,tsx}', 'tests/helpers/**/*.test.ts'],
+    exclude: ['tests/e2e/**', 'tests/ui/**'],
     testTimeout: 4000,
     hookTimeout: 4000,
     server: {

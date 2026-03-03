@@ -1,104 +1,71 @@
-// acp-echo is a minimal ACP agent that echoes the user's message back as a
-// JSON string. It speaks the full ACP (Agent Client Protocol) over stdin/stdout
-// and is designed for use in end-to-end tests that need a real provider session
-// without incurring LLM costs.
-//
-// Usage:
-//
-//	acp-echo          # reads from stdin, writes to stdout (typical ACP mode)
 package main
 
 import (
 	"context"
-	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
-
-	acp "github.com/coder/acp-go-sdk"
 )
 
-// echoAgent implements the ACP Agent interface.
-// On every Prompt call it streams back a single JSON-encoded message
-// containing the original user text, then signals end-of-turn.
-type echoAgent struct {
-	conn *acp.AgentSideConnection
+type config struct {
+	mode           string
+	controlAddr    string
+	transcriptPath string
+	sdkURL         string
 }
 
-var _ acp.Agent = (*echoAgent)(nil)
-
-func (a *echoAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.InitializeResponse, error) {
-	return acp.InitializeResponse{
-		ProtocolVersion:   acp.ProtocolVersionNumber,
-		AgentCapabilities: acp.AgentCapabilities{LoadSession: false},
-	}, nil
-}
-
-func (a *echoAgent) Authenticate(_ context.Context, _ acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {
-	return acp.AuthenticateResponse{}, nil
-}
-
-func (a *echoAgent) NewSession(_ context.Context, _ acp.NewSessionRequest) (acp.NewSessionResponse, error) {
-	return acp.NewSessionResponse{SessionId: "echo-session"}, nil
-}
-
-func (a *echoAgent) SetSessionMode(_ context.Context, _ acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
-	return acp.SetSessionModeResponse{}, nil
-}
-
-func (a *echoAgent) Cancel(_ context.Context, _ acp.CancelNotification) error {
-	return nil
-}
-
-func (a *echoAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
-	// Extract text from the prompt blocks.
-	userText := extractText(req.Prompt)
-
-	// Build the echo payload as JSON.
-	payload := map[string]string{
-		"echo": userText,
-	}
-	jsonBytes, err := json.Marshal(payload)
-	if err != nil {
-		return acp.PromptResponse{}, fmt.Errorf("acp-echo: marshal: %w", err)
-	}
-
-	// Stream the response back as an agent message text update.
-	if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{
-		SessionId: req.SessionId,
-		Update:    acp.UpdateAgentMessageText(string(jsonBytes)),
-	}); err != nil {
-		return acp.PromptResponse{}, err
-	}
-
-	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
-}
-
-// extractText returns the concatenated text from a slice of ContentBlocks.
-func extractText(blocks []acp.ContentBlock) string {
-	result := ""
-	for _, block := range blocks {
-		if block.Text != nil {
-			result += block.Text.Text
-		}
-	}
-	if result == "" {
-		return "(no input)"
-	}
-	return result
+func parseConfig() config {
+	cfg := config{}
+	flag.StringVar(&cfg.mode, "mode", "acp", "mock mode: acp, claude-stdio, claudews, codex-app-server")
+	flag.StringVar(&cfg.controlAddr, "control-addr", "", "optional localhost control HTTP bind address (for example 127.0.0.1:18080)")
+	flag.StringVar(&cfg.transcriptPath, "transcript-path", "", "optional NDJSON transcript output path")
+	flag.StringVar(&cfg.sdkURL, "sdk-url", "", "ClaudeWS SDK websocket URL (required in --mode claudews)")
+	flag.Parse()
+	return cfg
 }
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	ag := &echoAgent{}
-	asc := acp.NewAgentSideConnection(ag, os.Stdout, os.Stdin)
-	ag.conn = asc
+	cfg := parseConfig()
 
-	select {
-	case <-ctx.Done():
-	case <-asc.Done():
+	recorder, err := newTranscriptRecorder(cfg.transcriptPath)
+	if err != nil {
+		fatalf("transcript setup failed: %v", err)
 	}
+	defer recorder.Close()
+
+	controller := newController(recorder)
+	if cfg.controlAddr != "" {
+		if err := controller.Start(cfg.controlAddr); err != nil {
+			fatalf("control server failed to start: %v", err)
+		}
+		defer controller.Close()
+		fmt.Fprintf(os.Stderr, "acp-echo control listening on http://%s\n", controller.Addr())
+	}
+
+	switch cfg.mode {
+	case "acp":
+		err = runACPMode(ctx, controller, recorder)
+	case "claude-stdio":
+		err = runClaudeStdioMode(ctx, os.Stdin, os.Stdout, controller, recorder)
+	case "claudews":
+		err = runClaudeWSMode(ctx, cfg.sdkURL, controller, recorder)
+	case "codex-app-server":
+		err = runCodexAppServerMode(ctx, os.Stdin, os.Stdout, controller, recorder)
+	default:
+		err = fmt.Errorf("unknown mode %q", cfg.mode)
+	}
+
+	if err != nil {
+		fatalf("%v", err)
+	}
+}
+
+func fatalf(format string, args ...any) {
+	_, _ = fmt.Fprintf(os.Stderr, "acp-echo: "+format+"\n", args...)
+	os.Exit(1)
 }

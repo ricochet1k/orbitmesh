@@ -4,8 +4,11 @@ import type { Accessor } from "solid-js"
 import type {
   AgentConfigResponse,
   ProviderConfigResponse,
+  ProviderUsageInsight,
   SessionResponse,
 } from "../types/api"
+import type { SessionStreamIntel } from "./useSessionData"
+import { findProviderInsight, modelOptionsFromInsight, extractProviderModelSummary } from "../utils/providerInsights"
 
 const DOCK_UI_ALLOWED_TOOLS = [
   "list_ui_components",
@@ -27,6 +30,8 @@ export function useSessionSendOptions(params: {
   session: Accessor<SessionLike | null | undefined>
   providers: Accessor<ProviderConfigResponse[]>
   agents: Accessor<AgentConfigResponse[]>
+  providerInsights?: Accessor<ProviderUsageInsight[]>
+  sessionIntel?: Accessor<SessionStreamIntel | null | undefined>
   includeDockUITools?: boolean
 }) {
   const [selectedProviderId, setSelectedProviderId] = createSignal<string | null>(null)
@@ -39,6 +44,8 @@ export function useSessionSendOptions(params: {
 
   const providerList = createMemo(() => params.providers() ?? [])
   const agentList = createMemo(() => params.agents() ?? [])
+  const providerInsights = createMemo(() => params.providerInsights?.() ?? [])
+  const streamIntel = createMemo(() => params.sessionIntel?.() ?? null)
 
   const selectedProvider = createMemo(() => {
     const providers = providerList()
@@ -58,6 +65,18 @@ export function useSessionSendOptions(params: {
     return typeof value === "string" ? value : ""
   })
 
+  const selectedProviderInsight = createMemo(() => {
+    const provider = selectedProvider()
+    if (!provider) return undefined
+    return findProviderInsight(provider, providerInsights())
+  })
+
+  const selectedProviderInsightModel = createMemo(() => {
+    return extractProviderModelSummary(selectedProviderInsight()).currentModel ?? ""
+  })
+
+  const streamIntelModel = createMemo(() => streamIntel()?.model?.trim() ?? "")
+
   const selectedProviderDefaultModel = createMemo(() => {
     const value = selectedProvider()?.custom?.["model"]
     return typeof value === "string" ? value : ""
@@ -65,6 +84,9 @@ export function useSessionSendOptions(params: {
 
   const modelOptions = createMemo(() => {
     const set = new Set<string>()
+    modelOptionsFromInsight(selectedProviderInsight()).forEach((model) => set.add(model))
+    const fromStream = streamIntelModel()
+    if (fromStream) set.add(fromStream)
     const fromAgent = selectedAgentDefaultModel().trim()
     if (fromAgent) set.add(fromAgent)
     const fromProvider = selectedProviderDefaultModel().trim()
@@ -122,6 +144,16 @@ export function useSessionSendOptions(params: {
       setSelectedModel(fromAgent)
       return
     }
+    const fromStream = streamIntelModel().trim()
+    if (fromStream) {
+      setSelectedModel(fromStream)
+      return
+    }
+    const fromInsight = selectedProviderInsightModel().trim()
+    if (fromInsight) {
+      setSelectedModel(fromInsight)
+      return
+    }
     const fromProvider = selectedProviderDefaultModel().trim()
     if (fromProvider) {
       setSelectedModel(fromProvider)
@@ -154,6 +186,12 @@ export function useSessionSendOptions(params: {
     return Object.keys(options).length > 0 ? options : undefined
   }
 
+  const sessionOptionHints = createMemo(() => ({
+    model: streamIntel()?.model?.trim() || undefined,
+    permissionMode: streamIntel()?.permissionMode?.trim() || undefined,
+    tools: streamIntel()?.tools ?? [],
+  }))
+
   return {
     providerList,
     agentList,
@@ -166,5 +204,6 @@ export function useSessionSendOptions(params: {
     setSelectedModel: updateModel,
     modelOptions,
     buildSendOptions,
+    sessionOptionHints,
   }
 }

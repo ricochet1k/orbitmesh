@@ -223,6 +223,24 @@ describe("apiClient", () => {
     );
   });
 
+  it("respondSessionAction sends POST request with CSRF token", async () => {
+    (fetch as any).mockResolvedValue({ ok: true });
+
+    await apiClient.respondSessionAction("1", { action_id: "act_1", decision: "approve" });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/1/actions/respond",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+          "X-CSRF-Token": "test-token",
+        }),
+        body: JSON.stringify({ action_id: "act_1", decision: "approve" }),
+      }),
+    );
+  });
+
   it("getPermissions fetches permissions", async () => {
     (fetch as any).mockResolvedValue({
       ok: true,

@@ -246,16 +246,34 @@ func (s *Session) createACPSession(ctx context.Context) error {
 	if mcpServers == nil {
 		mcpServers = []acpsdk.McpServer{}
 	}
-	sessionID, err := s.runtime.createSession(ctx, s, sessionRuntimeConfig{cwd: cwd, mcpServers: mcpServers})
+	resp, err := s.runtime.createSession(ctx, s, sessionRuntimeConfig{cwd: cwd, mcpServers: mcpServers})
 	if err != nil {
 		return err
 	}
+	sessionID := string(resp.SessionId)
 	s.acpSessionID = &sessionID
 	s.events.Emit(domain.NewMetadataEvent(s.sessionID, "acp_session_id", map[string]any{
 		"session_id": sessionID,
 	}, nil))
+	s.emitInitialUsageFromSessionResponse(resp)
 
 	return nil
+}
+
+func (s *Session) emitInitialUsageFromSessionResponse(resp acpsdk.NewSessionResponse) {
+	if usage, ok := modelUsageFromACPState(resp.Models, "session_setup"); ok {
+		s.events.Emit(domain.NewResourceUsageEvent(s.sessionID, usage, nil))
+	}
+	s.events.Emit(domain.NewResourceUsageEvent(s.sessionID, domain.ResourceUsageData{
+		Scope: "capabilities",
+		Data: map[string]any{
+			"provider_usage_limits": map[string]any{
+				"supported": false,
+				"status":    "unsupported",
+				"reason":    "ACP usage limits are unavailable unless the agent emits explicit limit updates",
+			},
+		},
+	}, nil))
 }
 
 func (s *Session) runPrompt(ctx context.Context, runtime *sharedRuntime, acpSessionID string, input string) {

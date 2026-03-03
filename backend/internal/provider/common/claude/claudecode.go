@@ -396,7 +396,14 @@ func (p *ClaudeCodeProvider) emitEvent(event domain.Event) {
 		}
 	case domain.EventTypeMetric:
 		if data, ok := event.Metric(); ok {
-			p.state.AddTokens(data.TokensIn, data.TokensOut)
+			p.state.AddMetric(data.TokensIn, data.TokensOut, data.RequestCount)
+		}
+	case domain.EventTypeResourceUsage:
+		if data, ok := event.ResourceUsage(); ok {
+			cacheRead, cacheCreation := usageCacheTokenCounts(data.Data)
+			if cacheRead > 0 || cacheCreation > 0 {
+				p.state.AddCacheTokens(cacheRead, cacheCreation)
+			}
 		}
 	case domain.EventTypeError:
 		if data, ok := event.Error(); ok {
@@ -408,6 +415,10 @@ func (p *ClaudeCodeProvider) emitEvent(event domain.Event) {
 // updateStateFromMessage updates provider state based on Claude message.
 func (p *ClaudeCodeProvider) updateStateFromMessage(msg Message) {
 	switch msg.Type {
+	case "system":
+		if usage, ok := modelAvailabilityFromSystemMessage(msg); ok {
+			p.emitEvent(domain.NewResourceUsageEvent(p.sessionID, usage, msg.Raw()))
+		}
 	case MessageTypeMessageDelta:
 		if stopReason, ok := msg.GetString("delta", "stop_reason"); ok {
 			p.noteStopReason(stopReason)

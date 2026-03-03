@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/solid-router'
-import { createResource, createSignal, createEffect, createMemo, on, Show, For } from 'solid-js'
+import { createResource, createSignal, createEffect, createMemo, on, onMount, Show, For } from 'solid-js'
 import { apiClient } from '../../api/client'
 import { listProviders } from '../../api/providers'
 import type { SessionState } from '../../types/api'
@@ -34,6 +34,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   const [session, { refetch: refetchSession }] = createResource(sessionId, apiClient.getSession)
   const [permissions] = createResource(apiClient.getPermissions)
   const [providers] = createResource(listProviders)
+  const [providerInsights] = createResource(apiClient.getProviderUsageInsights)
   const [agents] = createResource(apiClient.listAgents)
   // Only relevant for PTY sessions; toolbar hides the terminal pill for non-PTY
   const [terminalStatus, setTerminalStatus] = createSignal<
@@ -47,6 +48,8 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   const [actionNotice, setActionNotice] = createSignal<{ tone: "error" | "success"; message: string } | null>(null)
   const [composerError, setComposerError] = createSignal<string | null>(null)
   const [composerPending, setComposerPending] = createSignal<string | null>(null)
+  const [actionResponsePending, setActionResponsePending] = createSignal<string | null>(null)
+  const [mobileTab, setMobileTab] = createSignal<"transcript" | "intel">("transcript")
   let transcriptRef: HTMLDivElement | undefined
 
   // canInspect: null while permissions are loading, then boolean
@@ -96,6 +99,8 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     session,
     providers: () => providers()?.providers ?? [],
     agents: () => agents()?.agents ?? [],
+    providerInsights: () => providerInsights()?.providers ?? [],
+    sessionIntel: data.sessionIntel,
   })
   const providerList = sendOptionsState.providerList
   const agentList = sendOptionsState.agentList
@@ -125,6 +130,9 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     if (!transcriptRef) return
     transcriptRef.scrollTop = transcriptRef.scrollHeight
   }
+
+  // Scroll to bottom on initial mount so the newest messages are visible first.
+  onMount(() => requestAnimationFrame(scrollToBottom))
 
   // Auto-scroll when messages update.
   createEffect(() => {
@@ -174,6 +182,24 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
       setComposerError(err instanceof Error ? err.message : "Failed to send interrupt")
     } finally {
       setComposerPending(null)
+    }
+  }
+
+  const handleRespondActionRequest = async (response: { actionId: string; decision: string; input?: string }) => {
+    setActionNotice(null)
+    setActionResponsePending(response.actionId)
+    try {
+      await apiClient.respondSessionAction(sessionId(), {
+        action_id: response.actionId,
+        decision: response.decision,
+        input: response.input,
+      })
+      setActionNotice({ tone: "success", message: `Submitted action response: ${response.decision}` })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to submit action response"
+      setActionNotice({ tone: "error", message })
+    } finally {
+      setActionResponsePending(null)
     }
   }
 
@@ -261,6 +287,12 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
           <span class="session-intel-chip">In {session()?.metrics?.tokens_in ?? "-"}</span>
           <span class="session-intel-chip">Out {session()?.metrics?.tokens_out ?? "-"}</span>
           <span class="session-intel-chip">Req {session()?.metrics?.request_count ?? "-"}</span>
+          <span class="session-intel-chip">
+            Session usage {Object.keys(session()?.session_usage?.by_scope ?? {}).length || 0}
+          </span>
+          <span class="session-intel-chip">
+            Provider usage {Object.keys(session()?.provider_usage?.by_scope ?? {}).length || 0}
+          </span>
         </div>
 
         <OverflowMenu
@@ -310,13 +342,18 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
                     class="session-viewer-menu-select"
                     value={selectedModel()}
                     onChange={(e) => setSelectedModel(e.currentTarget.value)}
-                    disabled={modelOptions().length === 0}
                   >
                   <option value="">Session/provider default</option>
                   <For each={modelOptions()}>
                     {(model) => <option value={model}>{model}</option>}
                   </For>
                 </select>
+                <input
+                  class="session-viewer-menu-select"
+                  value={selectedModel()}
+                  onInput={(e) => setSelectedModel(e.currentTarget.value)}
+                  placeholder="Custom model override"
+                />
               </div>
               <div class="session-viewer-menu-divider" />
 
@@ -376,7 +413,28 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
       </Show>
 
       <main class="session-layout ds-layout">
-        <section class="session-panel ds-panel">
+        <div class="session-mobile-tabs" role="tablist">
+          <button
+            role="tab"
+            class="session-tab-btn"
+            classList={{ active: mobileTab() === "transcript" }}
+            aria-selected={mobileTab() === "transcript"}
+            onClick={() => setMobileTab("transcript")}
+          >
+            Transcript
+          </button>
+          <button
+            role="tab"
+            class="session-tab-btn"
+            classList={{ active: mobileTab() === "intel" }}
+            aria-selected={mobileTab() === "intel"}
+            onClick={() => setMobileTab("intel")}
+          >
+            Session Intel
+          </button>
+        </div>
+
+        <section class="session-panel ds-panel" classList={{ "session-tab-hidden": mobileTab() !== "transcript" }}>
 
             <div class="session-transcript-wrap">
               <div class="panel-header ds-panel-header">
@@ -409,6 +467,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
 
             <SessionTranscript
               messages={data.filteredMessages}
+              latestTodoWrite={data.latestTodoWrite}
               filter={data.filter}
               setFilter={data.setFilter}
               autoScroll={data.autoScroll}
@@ -418,6 +477,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
               onLoadEarlier={data.loadEarlier}
               onRef={(el) => { transcriptRef = el }}
               onScroll={handleScroll}
+              onRespondActionRequest={handleRespondActionRequest}
             />
           </div>
 
@@ -425,7 +485,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
             sessionState={sessionState}
             canSend={canSendMessage}
             isRunning={isRunning}
-            pendingAction={composerPending}
+            pendingAction={() => composerPending() ?? actionResponsePending()}
             onSend={handleSend}
             onInterrupt={handleInterrupt}
             error={composerError}
@@ -434,11 +494,12 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
           />
         </section >
 
-        <div class="session-side-panels ds-stack">
+        <div class="session-side-panels ds-stack" classList={{ "session-tab-hidden": mobileTab() !== "intel" }}>
           <SessionMetrics
             sessionId={sessionId}
             session={session}
             providerType={providerType}
+            sessionIntel={data.sessionIntel}
             onTerminalStatusChange={setTerminalStatus}
           />
 

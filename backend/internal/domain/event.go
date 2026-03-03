@@ -215,8 +215,9 @@ type ProgressData struct {
 }
 
 type ResourceUsageData struct {
-	Scope string
-	Data  any
+	Scope    string
+	Data     any
+	Metadata map[string]any
 }
 
 type ActionRequestData struct {

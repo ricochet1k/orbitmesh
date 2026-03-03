@@ -6,6 +6,8 @@ const disableWsProxy =
   process.env.VITE_DISABLE_WS_PROXY === "1" ||
   process.env.VITE_DISABLE_WS_PROXY === "true"
 
+const apiProxyTarget = process.env.VITE_API_PROXY_TARGET || 'http://localhost:8080'
+
 export default defineConfig({
   plugins: [
     tanstackRouter({
@@ -19,7 +21,7 @@ export default defineConfig({
     host: '127.0.0.1',
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        target: apiProxyTarget,
         changeOrigin: true,
         ws: !disableWsProxy,
       },
