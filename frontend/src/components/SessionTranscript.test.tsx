@@ -25,6 +25,40 @@ function renderTranscript(
   ))
 }
 
+type NormalizedTranscriptCardSnapshot = {
+  kind: string
+  label: string
+  state: "streaming" | "done" | ""
+  richMarkers: string[]
+  coreContent: string
+}
+
+function captureNormalizedCardSnapshot(container: HTMLElement): NormalizedTranscriptCardSnapshot {
+  const article = container.querySelector("article.transcript-item") as HTMLElement | null
+  if (!article) {
+    throw new Error("transcript item not found")
+  }
+
+  const markerSelectors: Array<{ marker: string; selector: string }> = [
+    { marker: "tool-bash-card", selector: "[data-testid='tool-bash-card']" },
+    { marker: "tool-generic-card", selector: "[data-testid='tool-generic-card']" },
+    { marker: "rich-progress-card", selector: "[data-testid='rich-progress-card']" },
+    { marker: "rich-progress-class", selector: ".transcript-rich-progress" },
+  ]
+
+  const normalizeText = (value: string) => value.replace(/\s+/g, " ").replace(/stream\s+[A-Za-z0-9._:-]+/g, "stream <id>").trim()
+  const clone = article.cloneNode(true) as HTMLElement
+  clone.querySelector(".transcript-item-header")?.remove()
+
+  return {
+    kind: article.dataset.kind ?? "",
+    label: normalizeText(article.querySelector(".transcript-type")?.textContent ?? ""),
+    state: ((article.querySelector(".transcript-status")?.textContent ?? "").trim() as "streaming" | "done" | "") || "",
+    richMarkers: markerSelectors.filter(({ selector }) => article.querySelector(selector)).map(({ marker }) => marker),
+    coreContent: normalizeText(clone.textContent ?? ""),
+  }
+}
+
 describe("SessionTranscript", () => {
   it("normalizes message kind labels for transcript items", () => {
     renderTranscript([
@@ -355,5 +389,83 @@ describe("SessionTranscript", () => {
 
     expect(container.querySelector(".transcript-code-block .cm-editor")).toBeNull()
     expect(container.querySelector(".transcript-content")?.textContent).toContain("const value")
+  })
+
+  it("renders the same tool card structure for persisted and live tool_call payloads", () => {
+    const historyRender = renderTranscript([
+      {
+        id: "history-tool-1",
+        type: "system",
+        kind: "tool_call",
+        timestamp: "2026-02-05T12:00:00Z",
+        content: "Run command({\"command\":\"pwd\"}): /tmp",
+        open: false,
+        payload: {
+          id: "tool-1",
+          name: "bash",
+          title: "Run command",
+          status: "done",
+          input: { command: "pwd" },
+          output: "/tmp",
+        },
+      },
+    ])
+    const liveRender = renderTranscript([
+      {
+        id: "live-tool-1",
+        type: "system",
+        kind: "tool_call",
+        timestamp: "2026-02-05T12:00:05Z",
+        content: "Run command({\"command\":\"pwd\"}): /tmp",
+        open: false,
+        payload: {
+          id: "tool-1",
+          name: "bash",
+          title: "Run command",
+          status: "done",
+          input: { command: "pwd" },
+          output: "/tmp",
+        },
+      },
+    ])
+
+    expect(captureNormalizedCardSnapshot(historyRender.container)).toEqual(captureNormalizedCardSnapshot(liveRender.container))
+  })
+
+  it("renders the same reasoning progress card structure for persisted and live messages", () => {
+    const historyRender = renderTranscript([
+      {
+        id: "history-progress-1",
+        type: "system",
+        kind: "progress",
+        timestamp: "2026-02-05T12:00:00Z",
+        content: "Assessing next steps",
+        open: false,
+        payload: {
+          channel: "reasoning",
+          stream_id: "reasoning-1",
+          is_delta: true,
+          done: true,
+        },
+      },
+    ])
+    const liveRender = renderTranscript([
+      {
+        id: "live-progress-1",
+        type: "system",
+        kind: "progress",
+        timestamp: "2026-02-05T12:00:04Z",
+        content: "Assessing next steps",
+        open: false,
+        payload: {
+          channel: "reasoning",
+          stream_id: "reasoning-2",
+          is_delta: true,
+          done: true,
+        },
+      },
+    ])
+
+    expect(captureNormalizedCardSnapshot(historyRender.container)).toEqual(captureNormalizedCardSnapshot(liveRender.container))
   })
 })

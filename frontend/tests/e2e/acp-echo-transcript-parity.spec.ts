@@ -267,6 +267,82 @@ exec "$BIN" --mode claude-stdio "$@"
   return shimPath
 }
 
+type NormalizedTranscriptItemSnapshot = {
+  kind: string
+  label: string
+  state: "streaming" | "done" | ""
+  richMarkers: string[]
+  coreContent: string
+}
+
+const richMarkerSelectors: Array<{ marker: string; selector: string }> = [
+  { marker: "tool-bash-card", selector: "[data-testid='tool-bash-card']" },
+  { marker: "tool-read-card", selector: "[data-testid='tool-read-card']" },
+  { marker: "tool-edit-card", selector: "[data-testid='tool-edit-card']" },
+  { marker: "tool-generic-card", selector: "[data-testid='tool-generic-card']" },
+  { marker: "rich-progress-card", selector: "[data-testid='rich-progress-card']" },
+  { marker: "rich-resource-usage-card", selector: "[data-testid='rich-resource-usage-card']" },
+  { marker: "rich-action-request-card", selector: "[data-testid='rich-action-request-card']" },
+  { marker: "rich-artifact-update-card", selector: "[data-testid='rich-artifact-update-card']" },
+  { marker: "rich-progress-class", selector: ".transcript-rich-progress" },
+]
+
+function normalizeSnapshotText(value: string): string {
+  return value
+    .replace(/\s+/g, " ")
+    .replace(/stream\s+[A-Za-z0-9._:-]+/g, "stream <id>")
+    .trim()
+}
+
+async function captureNormalizedTranscriptSnapshots(
+  page: Page,
+  options?: { kind?: string },
+): Promise<NormalizedTranscriptItemSnapshot[]> {
+  const locator = options?.kind
+    ? page.locator(`article[data-kind='${options.kind}']`)
+    : page.locator("article.transcript-item")
+
+  await expect.poll(() => locator.count(), { timeout: 20_000 }).toBeGreaterThan(0)
+
+  const rawSnapshots = await locator.evaluateAll(
+    (articles, markers) =>
+      articles.map((article) => {
+        const element = article as HTMLElement
+        const kind = element.dataset.kind ?? ""
+        const label = (element.querySelector(".transcript-type")?.textContent ?? "").trim()
+        const state = (element.querySelector(".transcript-status")?.textContent ?? "").trim()
+
+        const richMarkers = (markers as Array<{ marker: string; selector: string }>)
+          .filter(({ selector }) => Boolean(element.querySelector(selector)))
+          .map(({ marker }) => marker)
+
+        const clone = element.cloneNode(true) as HTMLElement
+        clone.querySelector(".transcript-item-header")?.remove()
+        const coreContent = clone.textContent ?? ""
+
+        return {
+          kind,
+          label,
+          state,
+          richMarkers,
+          coreContent,
+        }
+      }),
+    richMarkerSelectors,
+  )
+
+  return rawSnapshots.map((snapshot) => ({
+    kind: snapshot.kind,
+    label: normalizeSnapshotText(snapshot.label),
+    state: (snapshot.state === "streaming" || snapshot.state === "done" ? snapshot.state : "") as
+      | "streaming"
+      | "done"
+      | "",
+    richMarkers: snapshot.richMarkers,
+    coreContent: normalizeSnapshotText(snapshot.coreContent),
+  }))
+}
+
 test.describe("ACP echo transcript parity", () => {
   test.describe.configure({ mode: "serial" })
 
@@ -334,6 +410,8 @@ test.describe("ACP echo transcript parity", () => {
 
       await expect.poll(() => page.locator("article[data-kind='tool_call']").count(), { timeout: 20_000 }).toBeGreaterThan(0)
       await expect(page.locator("article[data-kind='tool_call']").last()).toContainText("pwd")
+      const toolSnapshotsBeforeReload = await captureNormalizedTranscriptSnapshots(page, { kind: "tool_call" })
+      const latestToolSnapshotBeforeReload = toolSnapshotsBeforeReload[toolSnapshotsBeforeReload.length - 1]
 
       await page.reload()
       await expect(page.getByTestId("session-viewer-heading")).toBeVisible({ timeout: 10_000 })
@@ -373,6 +451,10 @@ test.describe("ACP echo transcript parity", () => {
 
       await expect.poll(() => page.locator("article[data-kind='tool_call']").count(), { timeout: 20_000 }).toBeGreaterThan(0)
       await expect(page.locator("article[data-kind='tool_call']").last()).toContainText("pwd")
+
+      const toolSnapshotsAfterReload = await captureNormalizedTranscriptSnapshots(page, { kind: "tool_call" })
+      const latestToolSnapshotAfterReload = toolSnapshotsAfterReload[toolSnapshotsAfterReload.length - 1]
+      expect(latestToolSnapshotAfterReload).toEqual(latestToolSnapshotBeforeReload)
     } finally {
       if (sessionId) {
         await stopSession(sessionId, csrfToken)
@@ -551,6 +633,10 @@ test.describe("ACP echo transcript parity", () => {
       await expect(page.locator(".session-viewer .transcript")).toContainText('{"content":"Hello "}')
       await expect(page.locator(".session-viewer .transcript")).toContainText('{"content":"delta parity"}')
 
+      const metadataSnapshotsBeforeReload = (await captureNormalizedTranscriptSnapshots(page, { kind: "metadata" }))
+        .filter((snapshot) => snapshot.coreContent.includes("delta_output"))
+      const trailingDeltaSnapshotsBeforeReload = metadataSnapshotsBeforeReload.slice(-2)
+
       await page.reload()
       await expect(page.getByTestId("session-viewer-heading")).toBeVisible({ timeout: 10_000 })
 
@@ -582,6 +668,11 @@ test.describe("ACP echo transcript parity", () => {
       }).toBeGreaterThan(1)
       await expect(page.locator(".session-viewer .transcript")).toContainText('{"content":"Hello "}')
       await expect(page.locator(".session-viewer .transcript")).toContainText('{"content":"delta parity"}')
+
+      const metadataSnapshotsAfterReload = (await captureNormalizedTranscriptSnapshots(page, { kind: "metadata" }))
+        .filter((snapshot) => snapshot.coreContent.includes("delta_output"))
+      const trailingDeltaSnapshotsAfterReload = metadataSnapshotsAfterReload.slice(-2)
+      expect(trailingDeltaSnapshotsAfterReload).toEqual(trailingDeltaSnapshotsBeforeReload)
     } finally {
       if (sessionId) {
         await stopSession(sessionId, csrfToken)
