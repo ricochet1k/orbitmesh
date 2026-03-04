@@ -36,6 +36,8 @@ type MessageLogRecord struct {
 	Projection      MessageProjection  `json:"projection"`
 	Kind            domain.MessageKind `json:"kind"`
 	Contents        string             `json:"contents"`
+	Payload         json.RawMessage    `json:"payload,omitempty"`
+	Open            *bool              `json:"open,omitempty"`
 	Raw             json.RawMessage    `json:"raw,omitempty"`
 	TargetMessageID string             `json:"target_message_id,omitempty"`
 }
@@ -263,6 +265,74 @@ func (s *JSONLLogStorage) ReadFrom(id string, fromSeq int64) ([]MessageLogRecord
 		}
 	}
 	return result, err
+}
+
+// ReadPageDescending returns a page of records in descending sequence order.
+// Records with Seq >= before are excluded when before is provided.
+func (s *JSONLLogStorage) ReadPageDescending(id string, before *int64, limit int) ([]MessageLogRecord, *int64, error) {
+	if err := validateSessionID(id); err != nil {
+		return nil, nil, err
+	}
+	if limit <= 0 {
+		limit = 1
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	idx, err := s.streamIndexLocked(id)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	maxSeq := int64(0)
+	if before != nil {
+		maxSeq = *before - 1
+	}
+
+	page := make([]MessageLogRecord, 0, limit)
+	for i := len(idx.lines) - 1; i >= 0; i-- {
+		rec := idx.lines[i].record
+		if rec == nil || rec.Seq <= 0 {
+			continue
+		}
+		if before != nil && rec.Seq > maxSeq {
+			continue
+		}
+		if rec.Projection == MessageProjectionOutputDelta || rec.Projection == MessageProjectionAppendDelta {
+			continue
+		}
+		page = append(page, *rec)
+		if len(page) == limit {
+			break
+		}
+	}
+
+	if len(page) == 0 {
+		return page, nil, nil
+	}
+
+	oldestSeq := page[len(page)-1].Seq
+	hasOlder := false
+	for i := len(idx.lines) - 1; i >= 0; i-- {
+		rec := idx.lines[i].record
+		if rec == nil || rec.Seq <= 0 {
+			continue
+		}
+		if rec.Projection == MessageProjectionOutputDelta || rec.Projection == MessageProjectionAppendDelta {
+			continue
+		}
+		if rec.Seq < oldestSeq {
+			hasOlder = true
+			break
+		}
+	}
+
+	if !hasOlder {
+		return page, nil, nil
+	}
+	nextBefore := oldestSeq
+	return page, &nextBefore, nil
 }
 
 // Delete removes <dir>/<id>.jsonl. Returns nil if the file does not exist.

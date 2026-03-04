@@ -129,6 +129,123 @@ func TestSessionMessagesLogStore_LoadFrom(t *testing.T) {
 	}
 }
 
+func TestSessionMessagesLogStore_LoadPageDescending(t *testing.T) {
+	dir := t.TempDir()
+	store := NewSessionMessagesLogStore(dir)
+
+	sessionID := "test-session-page"
+	ts := time.Now().UTC()
+	open := true
+	closed := false
+
+	first, err := store.Append(sessionID, MessageLogRecord{
+		Timestamp:  ts,
+		Projection: MessageProjectionAppend,
+		Kind:       domain.MessageKindOutput,
+		Contents:   "one",
+		Payload:    json.RawMessage(`{"idx":1}`),
+		Open:       &closed,
+	})
+	if err != nil {
+		t.Fatalf("append first: %v", err)
+	}
+
+	second, err := store.Append(sessionID, MessageLogRecord{
+		Timestamp:  ts.Add(time.Second),
+		Projection: MessageProjectionAppend,
+		Kind:       domain.MessageKindSystem,
+		Contents:   "two",
+		Payload:    json.RawMessage(`{"idx":2}`),
+		Open:       &open,
+	})
+	if err != nil {
+		t.Fatalf("append second: %v", err)
+	}
+
+	_, err = store.Append(sessionID, MessageLogRecord{
+		Timestamp:  ts.Add(2 * time.Second),
+		Projection: MessageProjectionAppend,
+		Kind:       domain.MessageKindToolCall,
+		Contents:   "three",
+		Payload:    json.RawMessage(`{"idx":3}`),
+		Open:       &open,
+	})
+	if err != nil {
+		t.Fatalf("append third: %v", err)
+	}
+
+	page, nextBefore, err := store.LoadPageDescending(sessionID, nil, 2)
+	if err != nil {
+		t.Fatalf("LoadPageDescending tail: %v", err)
+	}
+	if len(page) != 2 {
+		t.Fatalf("expected 2 messages in tail page, got %d", len(page))
+	}
+	if page[0].Contents != "three" || page[1].Contents != "two" {
+		t.Fatalf("unexpected tail order: %+v", page)
+	}
+	if page[0].Open == nil || !*page[0].Open {
+		t.Fatalf("expected first page entry to be open")
+	}
+	if string(page[0].Payload) != `{"idx":3}` {
+		t.Fatalf("unexpected payload for first entry: %s", string(page[0].Payload))
+	}
+	if nextBefore == nil || *nextBefore != second.Seq {
+		t.Fatalf("expected next_before=%d, got %v", second.Seq, nextBefore)
+	}
+
+	olderPage, olderCursor, err := store.LoadPageDescending(sessionID, nextBefore, 2)
+	if err != nil {
+		t.Fatalf("LoadPageDescending older: %v", err)
+	}
+	if len(olderPage) != 1 {
+		t.Fatalf("expected 1 older message, got %d", len(olderPage))
+	}
+	if olderPage[0].ID != "log_"+strconv.FormatInt(first.Seq, 10) {
+		t.Fatalf("unexpected older message ID: %q", olderPage[0].ID)
+	}
+	if olderPage[0].Open == nil || *olderPage[0].Open {
+		t.Fatalf("expected older message open=false")
+	}
+	if olderCursor != nil {
+		t.Fatalf("expected no next cursor on final page, got %v", *olderCursor)
+	}
+}
+
+func TestSessionMessagesLogStore_PayloadAndOpenPersistOnLoad(t *testing.T) {
+	dir := t.TempDir()
+	store := NewSessionMessagesLogStore(dir)
+
+	open := true
+	_, err := store.Append("test-session-payload", MessageLogRecord{
+		Timestamp:  time.Now().UTC(),
+		Projection: MessageProjectionAppend,
+		Kind:       domain.MessageKindToolCall,
+		Contents:   "tool call",
+		Payload:    json.RawMessage(`{"id":"tool-1","status":"running"}`),
+		Open:       &open,
+	})
+	if err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	sm, err := store.Load("test-session-payload")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	msgs := sm.GetMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if string(msgs[0].Payload) != `{"id":"tool-1","status":"running"}` {
+		t.Fatalf("unexpected payload: %s", string(msgs[0].Payload))
+	}
+	if msgs[0].Open == nil || !*msgs[0].Open {
+		t.Fatalf("expected open=true, got %+v", msgs[0].Open)
+	}
+}
+
 func TestSessionMessagesLogStore_DeltaMutatesLatestLogEntry(t *testing.T) {
 	dir := t.TempDir()
 	store := NewSessionMessagesLogStore(dir)

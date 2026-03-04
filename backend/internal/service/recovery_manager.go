@@ -73,7 +73,7 @@ func (r *recoveryManager) OnStartup(ctx context.Context) error {
 				return fmt.Errorf("recovery save attempt %s/%s: %w", sess.ID, attempt.AttemptID, err)
 			}
 
-			r.executor.appendToMessageLog(sess.ID, storage.MessageProjectionAppend, domain.MessageKindSystem, recoveryMessageForAttempt(attempt), nil, now, "")
+			r.executor.appendToMessageLog(sess.ID, storage.MessageProjectionAppend, domain.MessageKindSystem, recoveryMessageForAttempt(attempt), nil, nil, nil, now, "")
 		}
 	}
 

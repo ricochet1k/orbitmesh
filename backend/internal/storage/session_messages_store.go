@@ -14,7 +14,8 @@ import (
 // Files are stored at <dir>/<sessionID>.jsonl where dir is typically
 // <baseDir>/sessions (matching the layout used by JSONLLogStorage).
 type SessionMessagesLogStore struct {
-	store *entity.LogStore[MessageLogRecord]
+	store      *entity.LogStore[MessageLogRecord]
+	jsonlStore *JSONLLogStorage
 }
 
 // NewSessionMessagesLogStore constructs a SessionMessagesLogStore that stores
@@ -22,7 +23,8 @@ type SessionMessagesLogStore struct {
 func NewSessionMessagesLogStore(dir string) *SessionMessagesLogStore {
 	underlying := NewJSONLLogStorage(filepath.Clean(dir))
 	return &SessionMessagesLogStore{
-		store: entity.NewLogStore[MessageLogRecord](underlying),
+		store:      entity.NewLogStore[MessageLogRecord](underlying),
+		jsonlStore: underlying,
 	}
 }
 
@@ -61,6 +63,34 @@ func (s *SessionMessagesLogStore) LoadFrom(sessionID string, fromSeq int64) (*do
 		}
 	}
 	return RebuildSessionMessages(sessionID, records), nil
+}
+
+// LoadPageDescending reads a newest-first page of persisted session messages.
+// When before is nil, it returns the tail page. When provided, only messages
+// with sequence < *before are returned.
+func (s *SessionMessagesLogStore) LoadPageDescending(sessionID string, before *int64, limit int) ([]domain.Message, *int64, error) {
+	records, nextBefore, err := s.jsonlStore.ReadPageDescending(sessionID, before, limit)
+	if err != nil {
+		var ce *LogCorruptionError
+		if !errors.As(err, &ce) {
+			return nil, nil, err
+		}
+	}
+
+	messages := make([]domain.Message, 0, len(records))
+	for _, rec := range records {
+		messages = append(messages, domain.Message{
+			ID:        recordMessageID(rec),
+			Kind:      rec.Kind,
+			Contents:  rec.Contents,
+			Payload:   rec.Payload,
+			Open:      rec.Open,
+			Timestamp: rec.Timestamp,
+			Raw:       rec.Raw,
+		})
+	}
+
+	return messages, nextBefore, nil
 }
 
 // Delete removes the message log for sessionID.

@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
 	"github.com/ricochet1k/orbitmesh/internal/session"
@@ -231,4 +232,94 @@ func TestMetadataToolResult_DoesNotAppendVisibleSystemMessage(t *testing.T) {
 	if got := len(messages.GetMessages()); got != 0 {
 		t.Fatalf("expected no transcript messages for tool_result metadata, got %d", got)
 	}
+}
+
+func TestUpdateSessionFromEvent_PersistsPayloadAndOpenState(t *testing.T) {
+	msgStore := storage.NewSessionMessagesLogStore(t.TempDir())
+	exec := &AgentExecutor{messageLogStore: msgStore}
+	sess := domain.NewSession("s1", "codex", "/tmp")
+	sc := &sessionContext{session: sess}
+	pending := []DispatchOptions{}
+
+	exec.updateSessionFromEvent(sc, domain.NewToolCallEvent(sess.ID, domain.ToolCallData{
+		ID:     "call-1",
+		Name:   "lookup",
+		Status: "started",
+		Input:  map[string]any{"query": "abc"},
+	}, nil), &pending)
+
+	exec.updateSessionFromEvent(sc, domain.NewProgressEvent(sess.ID, domain.ProgressData{
+		Channel:  "tool",
+		StreamID: "stream-1",
+		Content:  "working",
+		IsDelta:  true,
+		Done:     false,
+		Status:   "running",
+	}, nil), &pending)
+
+	exec.updateSessionFromEvent(sc, domain.NewActionRequestEvent(sess.ID, domain.ActionRequestData{
+		ID:      "action-1",
+		Kind:    "permission",
+		Title:   "Need approval",
+		Status:  "pending",
+		Payload: map[string]any{"scope": "workspace"},
+	}, nil), &pending)
+
+	exec.updateSessionFromEvent(sc, domain.NewArtifactUpdateEvent(sess.ID, domain.ArtifactUpdateData{
+		ID:      "artifact-1",
+		Kind:    "file",
+		Title:   "main.go",
+		IsDelta: true,
+		Payload: map[string]any{"path": "main.go"},
+	}, nil), &pending)
+
+	exec.updateSessionFromEvent(sc, domain.NewDeltaOutputEventForMessage(sess.ID, "out-1", "delta", nil), &pending)
+	exec.updateSessionFromEvent(sc, domain.Event{
+		Type:      domain.EventTypeThought,
+		Timestamp: time.Now(),
+		SessionID: sess.ID,
+		Data: domain.ThoughtData{
+			Content:   "thinking",
+			IsDelta:   true,
+			MessageID: "thought-1",
+		},
+	}, &pending)
+
+	messages, err := msgStore.Load(sess.ID)
+	if err != nil {
+		t.Fatalf("load message log: %v", err)
+	}
+
+	got := messages.GetMessages()
+	if len(got) == 0 {
+		t.Fatal("expected persisted messages")
+	}
+
+	assertHasOpenPayload := func(kind domain.MessageKind, payloadKey string) {
+		t.Helper()
+		for _, msg := range got {
+			if msg.Kind != kind {
+				continue
+			}
+			if msg.Open == nil || !*msg.Open {
+				t.Fatalf("expected %s message to be open", kind)
+			}
+			if payloadKey != "" {
+				var payload map[string]any
+				if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+					t.Fatalf("unmarshal payload for %s: %v", kind, err)
+				}
+				if _, ok := payload[payloadKey]; !ok {
+					t.Fatalf("expected payload key %q for %s, got %v", payloadKey, kind, payload)
+				}
+			}
+			return
+		}
+		t.Fatalf("missing %s message", kind)
+	}
+
+	assertHasOpenPayload(domain.MessageKindToolCall, "ID")
+	assertHasOpenPayload(domain.MessageKindOutput, "Content")
+	assertHasOpenPayload(domain.MessageKindThought, "Content")
+	assertHasOpenPayload(domain.MessageKindSystem, "Channel")
 }

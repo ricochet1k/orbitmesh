@@ -226,11 +226,12 @@ func (s *inMemStore) LoadResumeToken(tokenID string) (*storage.ResumeTokenMetada
 // ---------------------------------------------------------------------------
 
 type testEnv struct {
-	executor    *service.AgentExecutor
-	broadcaster *service.EventBroadcaster
-	handler     *Handler
-	lastMock    *mockProvider
-	store       *inMemStore
+	executor     *service.AgentExecutor
+	broadcaster  *service.EventBroadcaster
+	handler      *Handler
+	lastMock     *mockProvider
+	store        *inMemStore
+	messageStore *storage.SessionMessagesLogStore
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -239,11 +240,14 @@ func newTestEnv(t *testing.T) *testEnv {
 		broadcaster: service.NewEventBroadcaster(100),
 	}
 	store := newInMemStore()
+	messageStore := storage.NewSessionMessagesLogStore(t.TempDir())
 	env.store = store
+	env.messageStore = messageStore
 	env.executor = service.NewAgentExecutor(service.ExecutorConfig{
 		Storage:         store,
 		TerminalStorage: store,
 		Broadcaster:     env.broadcaster,
+		MessageLogStore: messageStore,
 		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
 			if providerType != "mock" {
 				return nil, fmt.Errorf("unsupported provider: %s", providerType)
@@ -1438,28 +1442,56 @@ func TestGetSessionMessagesNotFound(t *testing.T) {
 	}
 }
 
-func TestGetSessionMessagesWithSinceFilter(t *testing.T) {
+func TestGetSessionMessagesTailPagination(t *testing.T) {
 	env := newTestEnv(t)
 
-	// Create a router and setup the routes
 	router := chi.NewRouter()
 	env.handler.Mount(router)
 
-	// Create a session first
-	createReq := httptest.NewRequest("POST", "/api/sessions", strings.NewReader(`{
-		"provider_type": "mock",
-		"working_dir": "/tmp"
-	}`))
 	createW := httptest.NewRecorder()
+	createReq := httptest.NewRequest("POST", "/api/sessions", strings.NewReader(`{"provider_type":"mock","working_dir":"/tmp"}`))
 	router.ServeHTTP(createW, createReq)
-
 	var createResp apiTypes.SessionResponse
 	_ = json.Unmarshal(createW.Body.Bytes(), &createResp)
 	sessionID := createResp.ID
 
-	// Get messages with a since filter (future timestamp should return no messages)
-	futureTime := time.Now().Add(1 * time.Hour).Format(time.RFC3339)
-	req := httptest.NewRequest("GET", fmt.Sprintf("/api/sessions/%s/messages?since=%s", sessionID, futureTime), nil)
+	open := true
+	closed := false
+	first, err := env.messageStore.Append(sessionID, storage.MessageLogRecord{
+		Timestamp:  time.Now().Add(-3 * time.Second),
+		Projection: storage.MessageProjectionAppend,
+		Kind:       domain.MessageKindOutput,
+		Contents:   "first",
+		Payload:    json.RawMessage(`{"source":"output"}`),
+		Open:       &closed,
+	})
+	if err != nil {
+		t.Fatalf("append first: %v", err)
+	}
+	_, err = env.messageStore.Append(sessionID, storage.MessageLogRecord{
+		Timestamp:  time.Now().Add(-2 * time.Second),
+		Projection: storage.MessageProjectionAppend,
+		Kind:       domain.MessageKindSystem,
+		Contents:   "progressing",
+		Payload:    json.RawMessage(`{"status":"working"}`),
+		Open:       &open,
+	})
+	if err != nil {
+		t.Fatalf("append second: %v", err)
+	}
+	third, err := env.messageStore.Append(sessionID, storage.MessageLogRecord{
+		Timestamp:  time.Now().Add(-1 * time.Second),
+		Projection: storage.MessageProjectionAppend,
+		Kind:       domain.MessageKindToolCall,
+		Contents:   "tool call",
+		Payload:    json.RawMessage(`{"id":"tool-1"}`),
+		Open:       &open,
+	})
+	if err != nil {
+		t.Fatalf("append third: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", fmt.Sprintf("/api/sessions/%s/messages?limit=2", sessionID), nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -1468,25 +1500,58 @@ func TestGetSessionMessagesWithSinceFilter(t *testing.T) {
 	}
 
 	var messagesResp apiTypes.MessageListResponse
-	_ = json.Unmarshal(w.Body.Bytes(), &messagesResp)
+	if err := json.Unmarshal(w.Body.Bytes(), &messagesResp); err != nil {
+		t.Fatalf("decode first page: %v", err)
+	}
+	if len(messagesResp.Messages) != 2 {
+		t.Fatalf("expected 2 messages in first page, got %d", len(messagesResp.Messages))
+	}
+	if messagesResp.Messages[0].ID != "log_"+fmt.Sprint(third.Seq) {
+		t.Fatalf("expected newest message first, got %q", messagesResp.Messages[0].ID)
+	}
+	if messagesResp.Messages[0].Open == nil || !*messagesResp.Messages[0].Open {
+		t.Fatalf("expected newest message open=true")
+	}
+	if string(messagesResp.Messages[0].Payload) != `{"id":"tool-1"}` {
+		t.Fatalf("unexpected payload for newest message: %s", string(messagesResp.Messages[0].Payload))
+	}
+	if messagesResp.NextBefore == nil {
+		t.Fatal("expected next_before cursor")
+	}
 
-	if messagesResp.Messages == nil {
-		t.Fatal("messages should not be nil")
+	req = httptest.NewRequest("GET", fmt.Sprintf("/api/sessions/%s/messages?before=%d&limit=2", sessionID, *messagesResp.NextBefore), nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	var olderResp apiTypes.MessageListResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &olderResp); err != nil {
+		t.Fatalf("decode older page: %v", err)
+	}
+	if len(olderResp.Messages) != 1 {
+		t.Fatalf("expected 1 older message, got %d", len(olderResp.Messages))
+	}
+	if olderResp.Messages[0].ID != "log_"+fmt.Sprint(first.Seq) {
+		t.Fatalf("expected oldest message, got %q", olderResp.Messages[0].ID)
+	}
+	if olderResp.Messages[0].Open == nil || *olderResp.Messages[0].Open {
+		t.Fatalf("expected oldest message open=false")
+	}
+	if olderResp.NextBefore != nil {
+		t.Fatalf("expected no next_before at boundary, got %v", *olderResp.NextBefore)
 	}
 }
 
-func TestGetSessionMessagesInvalidSinceParameter(t *testing.T) {
+func TestGetSessionMessagesPaginationBoundaries(t *testing.T) {
 	env := newTestEnv(t)
 
-	// Create a router and setup the routes
 	router := chi.NewRouter()
 	env.handler.Mount(router)
 
-	// Create a session first
-	createReq := httptest.NewRequest("POST", "/api/sessions", strings.NewReader(`{
-		"provider_type": "mock",
-		"working_dir": "/tmp"
-	}`))
+	createReq := httptest.NewRequest("POST", "/api/sessions", strings.NewReader(`{"provider_type":"mock","working_dir":"/tmp"}`))
 	createW := httptest.NewRecorder()
 	router.ServeHTTP(createW, createReq)
 
@@ -1494,9 +1559,39 @@ func TestGetSessionMessagesInvalidSinceParameter(t *testing.T) {
 	_ = json.Unmarshal(createW.Body.Bytes(), &createResp)
 	sessionID := createResp.ID
 
-	// Get messages with an invalid since parameter
-	req := httptest.NewRequest("GET", fmt.Sprintf("/api/sessions/%s/messages?since=invalid", sessionID), nil)
+	for i := 0; i < 3; i++ {
+		_, err := env.messageStore.Append(sessionID, storage.MessageLogRecord{
+			Timestamp:  time.Now().Add(time.Duration(i) * time.Second),
+			Projection: storage.MessageProjectionAppend,
+			Kind:       domain.MessageKindOutput,
+			Contents:   fmt.Sprintf("msg-%d", i),
+		})
+		if err != nil {
+			t.Fatalf("append message %d: %v", i, err)
+		}
+	}
+
+	req := httptest.NewRequest("GET", fmt.Sprintf("/api/sessions/%s/messages?limit=600", sessionID), nil)
 	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var cappedResp apiTypes.MessageListResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &cappedResp)
+	if len(cappedResp.Messages) != 3 {
+		t.Fatalf("expected capped request to return all 3 messages, got %d", len(cappedResp.Messages))
+	}
+
+	req = httptest.NewRequest("GET", fmt.Sprintf("/api/sessions/%s/messages?limit=0", sessionID), nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("limit=0 status = %d, want 400", w.Code)
+	}
+
+	req = httptest.NewRequest("GET", fmt.Sprintf("/api/sessions/%s/messages?before=invalid", sessionID), nil)
+	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
@@ -1505,7 +1600,7 @@ func TestGetSessionMessagesInvalidSinceParameter(t *testing.T) {
 
 	var errResp apiTypes.ErrorResponse
 	_ = json.Unmarshal(w.Body.Bytes(), &errResp)
-	if errResp.Error != "invalid since parameter" {
-		t.Fatalf("error = %s, want 'invalid since parameter'", errResp.Error)
+	if errResp.Error != "invalid before parameter" {
+		t.Fatalf("error = %s, want 'invalid before parameter'", errResp.Error)
 	}
 }

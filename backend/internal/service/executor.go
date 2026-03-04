@@ -293,14 +293,25 @@ func (e *AgentExecutor) StartSession(ctx context.Context, id string, config sess
 // It reads from the JSONL message log via messageLogStore.
 // If messageLogStore is nil, it validates the session exists and returns empty SessionMessages.
 func (e *AgentExecutor) GetSessionMessages(id string) (*domain.SessionMessages, error) {
-	if e.messageLogStore != nil {
-		return e.messageLogStore.Load(id)
-	}
-	// No message log store configured. Validate the session exists first.
 	if _, err := e.GetSession(id); err != nil {
 		return nil, err
 	}
+	if e.messageLogStore != nil {
+		return e.messageLogStore.Load(id)
+	}
 	return domain.NewSessionMessages(id), nil
+}
+
+// GetSessionMessagesPage returns a newest-first page of messages from storage.
+// before is an exclusive sequence cursor; when nil, the tail page is returned.
+func (e *AgentExecutor) GetSessionMessagesPage(id string, before *int64, limit int) ([]domain.Message, *int64, error) {
+	if _, err := e.GetSession(id); err != nil {
+		return nil, nil, err
+	}
+	if e.messageLogStore != nil {
+		return e.messageLogStore.LoadPageDescending(id, before, limit)
+	}
+	return []domain.Message{}, nil, nil
 }
 
 func (e *AgentExecutor) GetSession(id string) (*domain.Session, error) {

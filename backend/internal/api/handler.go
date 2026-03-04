@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -786,8 +787,30 @@ func (h *Handler) stopSession(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) getSessionMessages(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
-	// Get all messages via the executor (reads from JSONL log).
-	sm, err := h.executor.GetSessionMessages(id)
+	limit := 100
+	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+		parsedLimit, err := strconv.Atoi(rawLimit)
+		if err != nil || parsedLimit <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid limit parameter", "must be a positive integer")
+			return
+		}
+		if parsedLimit > 500 {
+			parsedLimit = 500
+		}
+		limit = parsedLimit
+	}
+
+	var before *int64
+	if rawBefore := strings.TrimSpace(r.URL.Query().Get("before")); rawBefore != "" {
+		parsedBefore, err := strconv.ParseInt(rawBefore, 10, 64)
+		if err != nil || parsedBefore <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid before parameter", "must be a positive integer")
+			return
+		}
+		before = &parsedBefore
+	}
+
+	messages, nextBefore, err := h.executor.GetSessionMessagesPage(id, before, limit)
 	if err != nil {
 		if errors.Is(err, storage.ErrSessionNotFound) || errors.Is(err, service.ErrSessionNotFound) {
 			writeError(w, http.StatusNotFound, "session not found", "")
@@ -796,30 +819,16 @@ func (h *Handler) getSessionMessages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to get messages", err.Error())
 		return
 	}
-	messages := sm.GetMessages()
 
-	// Parse optional ?since query parameter
-	var sinceTime *time.Time
-	if sinceParam := r.URL.Query().Get("since"); sinceParam != "" {
-		t, err := time.Parse(time.RFC3339, sinceParam)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid since parameter", "must be RFC3339 timestamp")
-			return
-		}
-		sinceTime = &t
-	}
-
-	// Convert messages to API format and filter by timestamp if needed
+	// Convert newest-first messages to API format.
 	apiMessages := make([]apiTypes.Message, 0, len(messages))
 	for _, msg := range messages {
-		// Filter by since timestamp if provided
-		if sinceTime != nil && !msg.Timestamp.IsZero() && msg.Timestamp.Before(*sinceTime) {
-			continue
-		}
 		apiMessages = append(apiMessages, apiTypes.Message{
 			ID:        msg.ID,
 			Kind:      string(msg.Kind),
 			Contents:  msg.Contents,
+			Payload:   msg.Payload,
+			Open:      msg.Open,
 			Timestamp: msg.Timestamp,
 		})
 	}
@@ -827,7 +836,8 @@ func (h *Handler) getSessionMessages(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(apiTypes.MessageListResponse{
-		Messages: apiMessages,
+		Messages:   apiMessages,
+		NextBefore: nextBefore,
 	})
 }
 

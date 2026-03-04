@@ -38,6 +38,8 @@ func rebuildMessagesFromExportedRecords(records []MessageLogRecord) []domain.Mes
 			ID:        messageIDForRecord(rec),
 			Kind:      rec.Kind,
 			Contents:  rec.Contents,
+			Payload:   rec.Payload,
+			Open:      rec.Open,
 			Timestamp: rec.Timestamp,
 			Raw:       rec.Raw,
 		})
@@ -57,6 +59,12 @@ func applyDeltaRecord(messages *[]domain.Message, rec MessageLogRecord) bool {
 			if (*messages)[i].ID == rec.TargetMessageID {
 				if (*messages)[i].Kind == targetKind {
 					(*messages)[i].Contents += rec.Contents
+					if len(rec.Payload) > 0 {
+						(*messages)[i].Payload = rec.Payload
+					}
+					if rec.Open != nil {
+						(*messages)[i].Open = rec.Open
+					}
 					return true
 				}
 				break
@@ -66,6 +74,8 @@ func applyDeltaRecord(messages *[]domain.Message, rec MessageLogRecord) bool {
 			ID:        rec.TargetMessageID,
 			Kind:      targetKind,
 			Contents:  rec.Contents,
+			Payload:   rec.Payload,
+			Open:      rec.Open,
 			Timestamp: rec.Timestamp,
 			Raw:       rec.Raw,
 		})
@@ -75,6 +85,12 @@ func applyDeltaRecord(messages *[]domain.Message, rec MessageLogRecord) bool {
 	n := len(*messages)
 	if n > 0 && (*messages)[n-1].Kind == targetKind {
 		(*messages)[n-1].Contents += rec.Contents
+		if len(rec.Payload) > 0 {
+			(*messages)[n-1].Payload = rec.Payload
+		}
+		if rec.Open != nil {
+			(*messages)[n-1].Open = rec.Open
+		}
 		return true
 	}
 

@@ -129,10 +129,12 @@ const (
 
 // Message is a single entry in a session's conversation history.
 type Message struct {
-	ID        string      `json:"id"`
-	Kind      MessageKind `json:"kind"`
-	Contents  string      `json:"contents"`
-	Timestamp time.Time   `json:"timestamp"`
+	ID        string          `json:"id"`
+	Kind      MessageKind     `json:"kind"`
+	Contents  string          `json:"contents"`
+	Timestamp time.Time       `json:"timestamp"`
+	Payload   json.RawMessage `json:"payload,omitempty"`
+	Open      *bool           `json:"open,omitempty"`
 	// Raw holds the original provider-specific bytes that produced this message,
 	// preserved verbatim so callers can re-parse fields not originally extracted.
 	Raw json.RawMessage `json:"raw,omitempty"`

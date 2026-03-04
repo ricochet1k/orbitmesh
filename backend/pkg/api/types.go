@@ -705,14 +705,17 @@ type ProviderTestResponse struct {
 }
 
 type Message struct {
-	ID        string    `json:"id"`
-	Kind      string    `json:"kind"`
-	Contents  string    `json:"contents"`
-	Timestamp time.Time `json:"timestamp,omitempty"`
+	ID        string          `json:"id"`
+	Kind      string          `json:"kind"`
+	Contents  string          `json:"contents"`
+	Payload   json.RawMessage `json:"payload,omitempty"`
+	Open      *bool           `json:"open,omitempty"`
+	Timestamp time.Time       `json:"timestamp,omitempty"`
 }
 
 type MessageListResponse struct {
-	Messages []Message `json:"messages"`
+	Messages   []Message `json:"messages"`
+	NextBefore *int64    `json:"next_before,omitempty"`
 }
 
 // AgentConfigRequest is the request body for create/update agent endpoints.

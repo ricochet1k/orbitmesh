@@ -17,19 +17,23 @@ func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.
 	switch data := event.Data.(type) {
 	case domain.OutputData:
 		if data.IsDelta {
+			open := true
 			if data.MessageID != "" {
-				e.appendOutputDeltaToMessage(sc.session, data.MessageID, data.Content, event.Raw, event.Timestamp)
+				e.appendMessageDelta(sc.session, domain.MessageKindOutput, data.MessageID, data.Content, data, &open, event.Raw, event.Timestamp)
 			} else {
-				e.appendOutputDelta(sc.session, data.Content, event.Raw, event.Timestamp)
+				e.appendMessageDelta(sc.session, domain.MessageKindOutput, "", data.Content, data, &open, event.Raw, event.Timestamp)
 			}
 		} else {
-			e.appendSessionMessageRaw(sc.session, domain.MessageKindOutput, data.Content, event.Raw, event.Timestamp)
+			open := false
+			e.appendSessionMessageRawWithState(sc.session, domain.MessageKindOutput, data.Content, data, &open, event.Raw, event.Timestamp)
 		}
 	case domain.ThoughtData:
 		if data.IsDelta {
-			e.appendThoughtDeltaToMessage(sc.session, data.MessageID, data.Content, event.Raw, event.Timestamp)
+			open := true
+			e.appendMessageDelta(sc.session, domain.MessageKindThought, data.MessageID, data.Content, data, &open, event.Raw, event.Timestamp)
 		} else {
-			e.appendSessionMessageRaw(sc.session, domain.MessageKindThought, data.Content, event.Raw, event.Timestamp)
+			open := false
+			e.appendSessionMessageRawWithState(sc.session, domain.MessageKindThought, data.Content, data, &open, event.Raw, event.Timestamp)
 		}
 	case domain.ErrorData:
 		e.appendSessionMessageRaw(sc.session, domain.MessageKindError, data.Message, event.Raw, event.Timestamp)
@@ -55,7 +59,8 @@ func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.
 				"name":      data.Name,
 				"arguments": arguments,
 			})
-			e.appendSessionMessageRaw(sc.session, domain.MessageKindToolCall, string(payload), event.Raw, event.Timestamp)
+			open := data.Status != "completed" && data.Status != "failed"
+			e.appendSessionMessageRawWithState(sc.session, domain.MessageKindToolCall, string(payload), data, &open, event.Raw, event.Timestamp)
 
 			// Accumulate for batch dispatch at stream close. Only "running"
 			// carries a complete input; "started" is a streaming preamble.
@@ -154,23 +159,50 @@ func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.
 			}
 		}
 		if data.IsDelta {
-			e.appendMessageDelta(sc.session, domain.MessageKindSystem, streamMessageID, data.Content, event.Raw, event.Timestamp)
+			open := progressOpenState(data)
+			e.appendMessageDelta(sc.session, domain.MessageKindSystem, streamMessageID, data.Content, data, &open, event.Raw, event.Timestamp)
 			break
 		}
-		e.appendSessionMessageRaw(sc.session, domain.MessageKindSystem, formatProgressContent(data), event.Raw, event.Timestamp)
+		open := progressOpenState(data)
+		e.appendSessionMessageRawWithState(sc.session, domain.MessageKindSystem, formatProgressContent(data), data, &open, event.Raw, event.Timestamp)
 	case domain.ResourceUsageData:
 		e.updateSessionCustomDataFromResourceUsage(sc.session, data)
 		e.applyResourceUsage(sc, data.Scope, data.Data, data.Metadata, event.Timestamp)
 	case domain.ActionRequestData:
-		e.appendSessionMessageRaw(sc.session, domain.MessageKindSystem, formatActionRequestContent(data), event.Raw, event.Timestamp)
+		open := actionRequestOpenState(data.Status)
+		e.appendSessionMessageRawWithState(sc.session, domain.MessageKindSystem, formatActionRequestContent(data), data, &open, event.Raw, event.Timestamp)
 	case domain.ArtifactUpdateData:
-		e.appendSessionMessageRaw(sc.session, domain.MessageKindSystem, formatArtifactUpdateContent(data), event.Raw, event.Timestamp)
+		open := data.IsDelta
+		e.appendSessionMessageRawWithState(sc.session, domain.MessageKindSystem, formatArtifactUpdateContent(data), data, &open, event.Raw, event.Timestamp)
 	}
 
 	if e.storage != nil {
 		_ = e.storage.Save(sc.session)
 	}
 	e.touchRunAttempt(sc)
+}
+
+func progressOpenState(data domain.ProgressData) bool {
+	if data.Done {
+		return false
+	}
+	status := strings.ToLower(strings.TrimSpace(data.Status))
+	switch status {
+	case "done", "completed", "complete", "failed", "error", "cancelled", "canceled", "closed":
+		return false
+	default:
+		return true
+	}
+}
+
+func actionRequestOpenState(status string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(status))
+	switch normalized {
+	case "resolved", "completed", "complete", "approved", "accepted", "rejected", "failed", "cancelled", "canceled", "closed":
+		return false
+	default:
+		return true
+	}
 }
 
 func (e *AgentExecutor) updateSessionCustomDataFromResourceUsage(sess *domain.Session, data domain.ResourceUsageData) {
