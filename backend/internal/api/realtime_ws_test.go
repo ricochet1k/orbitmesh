@@ -11,6 +11,7 @@ import (
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
 	"github.com/ricochet1k/orbitmesh/internal/service"
+	"github.com/ricochet1k/orbitmesh/internal/storage"
 	"github.com/ricochet1k/orbitmesh/internal/terminal"
 	realtimeTypes "github.com/ricochet1k/orbitmesh/pkg/realtime"
 )
@@ -148,6 +149,19 @@ func TestRealtimeWebSocket_SessionsActivitySnapshotAndEvent(t *testing.T) {
 	defer srv.Close()
 
 	sessionID := createSessionViaHTTP(t, srv.URL)
+	open := true
+	_, appendErr := env.messageStore.Append(sessionID, storage.MessageLogRecord{
+		Timestamp:  time.Now().UTC(),
+		Projection: storage.MessageProjectionAppend,
+		Kind:       domain.MessageKindToolCall,
+		Contents:   "Run command(ls): ok",
+		Payload:    json.RawMessage(`{"id":"tool-1","name":"bash","input":"ls","output":"ok"}`),
+		Open:       &open,
+		Raw:        json.RawMessage(`{"provider":"claude","opaque":"value"}`),
+	})
+	if appendErr != nil {
+		t.Fatalf("append session message: %v", appendErr)
+	}
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/realtime"
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
@@ -183,6 +197,18 @@ func TestRealtimeWebSocket_SessionsActivitySnapshotAndEvent(t *testing.T) {
 	}
 	if snapshot.SessionID != sessionID {
 		t.Fatalf("snapshot session_id = %q, want %q", snapshot.SessionID, sessionID)
+	}
+	if len(snapshot.Messages) != 1 {
+		t.Fatalf("snapshot messages len = %d, want 1", len(snapshot.Messages))
+	}
+	if snapshot.Messages[0].Payload == nil {
+		t.Fatal("snapshot message payload is nil, want populated payload")
+	}
+	if snapshot.Messages[0].Open == nil || !*snapshot.Messages[0].Open {
+		t.Fatalf("snapshot message open = %#v, want true", snapshot.Messages[0].Open)
+	}
+	if snapshot.Messages[0].Raw != nil {
+		t.Fatalf("snapshot message raw should be sanitized when include_raw is false, got %s", string(snapshot.Messages[0].Raw))
 	}
 
 	env.broadcaster.Broadcast(domain.NewOutputEvent(sessionID, "hello from activity stream", nil))

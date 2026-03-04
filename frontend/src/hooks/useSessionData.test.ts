@@ -625,19 +625,53 @@ describe("useSessionData", () => {
       topic: "sessions.activity:session-1",
       payload: {
         session_id: "session-1",
-        entries: [],
+        entries: [
+          {
+            id: "entry-legacy-1",
+            session_id: "session-1",
+            kind: "tool_call",
+            ts: "2026-02-05T11:59:59Z",
+            rev: 1,
+            open: true,
+            data: {
+              id: "legacy-tool",
+              name: "bash",
+              input: "pwd",
+              output: "legacy output",
+            },
+          },
+        ],
         messages: [
           {
             id: "m1",
-            kind: "assistant",
-            contents: "from snapshot",
+            kind: "tool_call",
+            contents: "Run command(ls): ok",
             timestamp: "2026-02-05T12:00:00Z",
+            payload: {
+              id: "tool-1",
+              name: "bash",
+              input: "ls",
+              output: "ok",
+            },
+            open: false,
+            raw: { provider: "claude" },
           },
         ],
       },
     })
 
-    await vi.waitFor(() => expect(data!.messages().some((m) => m.content === "from snapshot")).toBe(true))
+    await vi.waitFor(() => {
+      const snapshotMessage = data!.messages().find((m) => m.id === "m1")
+      expect(snapshotMessage?.payload).toEqual({
+        id: "tool-1",
+        name: "bash",
+        input: "ls",
+        output: "ok",
+      })
+      expect(snapshotMessage?.open).toBe(false)
+      expect(snapshotMessage?.raw).toEqual({ provider: "claude" })
+      expect(data!.messages().some((m) => m.id === "activity:entry-legacy-1")).toBe(false)
+    })
 
     realtimeHandler?.({
       type: "event",

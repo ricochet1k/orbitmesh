@@ -1,14 +1,12 @@
 import { createEffect, createMemo, createResource, createSignal, on, onCleanup, untrack } from "solid-js"
 import type { Accessor } from "solid-js"
 import type {
-  ActivityEntry,
   SessionTranscriptHistoryMessage,
   SessionState,
   TranscriptMessage,
 } from "../types/api"
 import { parseSSEEvent } from "../types/api"
 import { apiClient } from "../api/client"
-import { formatActivityContent } from "../utils/activityFormatting"
 import { startEventStream } from "../utils/eventStream"
 import { TIMEOUTS } from "../constants/timeouts"
 import type { StreamOptions } from "./useSessionStream"
@@ -608,27 +606,10 @@ export function useSessionData({
 
   const applyRealtimeSnapshot = (snapshot: SessionActivitySnapshot) => {
     if (!snapshot) return
-    const entryMessages = Array.isArray(snapshot.entries)
-      ? snapshot.entries
-        .map((entry) => {
-          const activity = {
-            id: entry.id,
-            session_id: entry.session_id,
-            kind: entry.kind,
-            ts: entry.ts,
-            rev: entry.rev,
-            open: entry.open,
-            data: entry.data ?? {},
-            event_id: entry.event_id,
-          }
-          return toActivityMessage(activity)
-        })
-        .filter((message): message is TranscriptMessage => message !== null)
-      : []
     const transcriptMessages = Array.isArray(snapshot.messages)
       ? snapshot.messages.map(toTranscriptFromSnapshotMessage)
       : []
-    mergeMessages([...entryMessages, ...transcriptMessages], { sort: true })
+    mergeMessages(transcriptMessages, { sort: true })
   }
 
   const applyRealtimeEvent = (payload: SessionActivityEvent) => {
@@ -957,9 +938,9 @@ function toTranscriptFromSnapshotMessage(message: SessionActivitySnapshot["messa
     kind,
     timestamp: message.timestamp,
     content: message.contents,
-    payload: (message as { payload?: unknown }).payload,
-    open: (message as { open?: boolean }).open,
-    raw: (message as { raw?: unknown }).raw,
+    payload: message.payload,
+    open: message.open,
+    raw: message.raw,
   }
 }
 
@@ -992,23 +973,6 @@ function extractEventIdFromMessageId(messageId: string | undefined): number {
   const raw = messageId.split(":", 3)[1]
   const parsed = raw ? Number(raw) : 0
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 0
-}
-
-function toActivityMessage(entry: ActivityEntry): TranscriptMessage | null {
-  const kind = normalizeMessageKind(entry.kind)
-
-  return {
-    id: `activity:${entry.id}`,
-    entryId: entry.id,
-    revision: entry.rev,
-    open: entry.open,
-    kind,
-    type: mapActivityKindToType(kind),
-    timestamp: entry.ts,
-    content: formatActivityContent(entry),
-    payload: entry.data,
-    raw: entry.data?.raw,
-  }
 }
 
 function mapActivityKindToType(kind: string): TranscriptMessage["type"] {

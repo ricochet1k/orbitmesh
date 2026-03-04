@@ -83,6 +83,8 @@ func (p *SnapshotProvider) sessionsActivitySnapshot(sessionID string) (realtimeT
 				Kind:      string(msg.Kind),
 				Contents:  msg.Contents,
 				Timestamp: msg.Timestamp,
+				Payload:   msg.Payload,
+				Open:      msg.Open,
 				Raw:       msg.Raw,
 			}
 		}

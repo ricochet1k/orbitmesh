@@ -72,6 +72,8 @@ type SessionMessage struct {
 	Kind      string          `json:"kind"`
 	Contents  string          `json:"contents"`
 	Timestamp time.Time       `json:"timestamp"`
+	Payload   json.RawMessage `json:"payload,omitempty"`
+	Open      *bool           `json:"open,omitempty"`
 	Raw       json.RawMessage `json:"raw,omitempty"`
 }
 
