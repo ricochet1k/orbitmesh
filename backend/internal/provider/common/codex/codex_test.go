@@ -254,6 +254,63 @@ func TestSession44MethodsEmitNoUnknownEvents(t *testing.T) {
 	if e.Type == domain.EventTypeUnknown {
 		t.Fatalf("item/completed emitted unknown event")
 	}
+
+	p.handleNotification("codex/event/agent_message_content_delta", json.RawMessage(`{
+	  "msg": {"item_id": "msg_3", "delta": " tail"}
+	}`), nil)
+	e = <-p.events.Events()
+	if e.Type == domain.EventTypeUnknown {
+		t.Fatalf("agent_message_content_delta emitted unknown event")
+	}
+
+	p.handleNotification("codex/event/task_complete", json.RawMessage(`{
+	  "msg": {"type": "task_complete", "last_agent_message": "done"}
+	}`), nil)
+	select {
+	case e = <-p.events.Events():
+		t.Fatalf("expected no event for task_complete, got %v", e.Type)
+	default:
+	}
+}
+
+func TestKnownCodexNoiseDoesNotEmitUnknownEvents(t *testing.T) {
+	p := NewCodexProvider("sess_known_noise", Config{})
+
+	assertNoUnknown := func(method string, params json.RawMessage) {
+		t.Helper()
+		p.handleNotification(method, params, nil)
+		select {
+		case e := <-p.events.Events():
+			if e.Type == domain.EventTypeUnknown {
+				t.Fatalf("%s emitted unknown event", method)
+			}
+		default:
+			// Suppressed noise is acceptable.
+		}
+	}
+
+	assertNoUnknown("codex/event/agent_message_delta", json.RawMessage(`{
+	  "msg": {"item_id": "msg_legacy", "delta": "draft"}
+	}`))
+	assertNoUnknown("codex/event/terminal_output_delta", json.RawMessage(`{
+	  "msg": {"call_id": "call_legacy", "chunk": "aGVsbG8="}
+	}`))
+}
+
+func TestExtractDeltaText_CodexEventWrapper(t *testing.T) {
+	text, itemID := extractDeltaText(json.RawMessage(`{
+	  "msg": {
+	    "type": "agent_message_content_delta",
+	    "item_id": "msg_wrapped",
+	    "delta": " and"
+	  }
+	}`))
+	if itemID != "msg_wrapped" {
+		t.Fatalf("expected itemID msg_wrapped, got %q", itemID)
+	}
+	if text != " and" {
+		t.Fatalf("expected delta text ' and', got %q", text)
+	}
 }
 
 func TestHandleItemNotification_CommandExecutionIncludesOutput(t *testing.T) {

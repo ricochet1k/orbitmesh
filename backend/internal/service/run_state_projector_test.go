@@ -234,7 +234,34 @@ func TestMetadataToolResult_DoesNotAppendVisibleSystemMessage(t *testing.T) {
 	}
 }
 
-func TestUpdateSessionFromEvent_PersistsPayloadAndOpenState(t *testing.T) {
+func TestUnknownCodexNoise_DoesNotAppendTranscriptMessage(t *testing.T) {
+	msgStore := storage.NewSessionMessagesLogStore(t.TempDir())
+	exec := &AgentExecutor{messageLogStore: msgStore}
+	sess := domain.NewSession("s1", "codex", "/tmp")
+	sc := &sessionContext{session: sess}
+	pending := []DispatchOptions{}
+
+	exec.updateSessionFromEvent(sc, domain.NewUnknownEvent(sess.ID, domain.UnknownData{
+		Source:  "codex/event/exec_command_output_delta",
+		Summary: "Known codex terminal delta noise",
+		Payload: map[string]any{"msg": map[string]any{"call_id": "call-1", "chunk": "aGVsbG8="}},
+	}, nil), &pending)
+	exec.updateSessionFromEvent(sc, domain.NewUnknownEvent(sess.ID, domain.UnknownData{
+		Source:  "codex/event/agent_message_content_delta",
+		Summary: "Known codex agent delta noise",
+		Payload: map[string]any{"msg": map[string]any{"item_id": "msg-1", "delta": "hi"}},
+	}, nil), &pending)
+
+	messages, err := msgStore.Load(sess.ID)
+	if err != nil {
+		t.Fatalf("load message log: %v", err)
+	}
+	if got := len(messages.GetMessages()); got != 0 {
+		t.Fatalf("expected known codex noise unknown events to be suppressed, got %d transcript messages", got)
+	}
+}
+
+func TestUpdateSessionFromEvent_PersistsCanonicalTranscriptKindsAndPayloadKeys(t *testing.T) {
 	msgStore := storage.NewSessionMessagesLogStore(t.TempDir())
 	exec := &AgentExecutor{messageLogStore: msgStore}
 	sess := domain.NewSession("s1", "codex", "/tmp")
@@ -295,7 +322,7 @@ func TestUpdateSessionFromEvent_PersistsPayloadAndOpenState(t *testing.T) {
 		t.Fatal("expected persisted messages")
 	}
 
-	assertHasOpenPayload := func(kind domain.MessageKind, payloadKey string) {
+	assertHasOpenPayload := func(kind domain.MessageKind, payloadKeys []string, forbiddenKeys []string) {
 		t.Helper()
 		for _, msg := range got {
 			if msg.Kind != kind {
@@ -304,13 +331,20 @@ func TestUpdateSessionFromEvent_PersistsPayloadAndOpenState(t *testing.T) {
 			if msg.Open == nil || !*msg.Open {
 				t.Fatalf("expected %s message to be open", kind)
 			}
-			if payloadKey != "" {
+			if len(payloadKeys) > 0 {
 				var payload map[string]any
 				if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 					t.Fatalf("unmarshal payload for %s: %v", kind, err)
 				}
-				if _, ok := payload[payloadKey]; !ok {
-					t.Fatalf("expected payload key %q for %s, got %v", payloadKey, kind, payload)
+				for _, key := range payloadKeys {
+					if _, ok := payload[key]; !ok {
+						t.Fatalf("expected payload key %q for %s, got %v", key, kind, payload)
+					}
+				}
+				for _, key := range forbiddenKeys {
+					if _, ok := payload[key]; ok {
+						t.Fatalf("did not expect Go-style payload key %q for %s, got %v", key, kind, payload)
+					}
 				}
 			}
 			return
@@ -318,8 +352,10 @@ func TestUpdateSessionFromEvent_PersistsPayloadAndOpenState(t *testing.T) {
 		t.Fatalf("missing %s message", kind)
 	}
 
-	assertHasOpenPayload(domain.MessageKindToolCall, "ID")
-	assertHasOpenPayload(domain.MessageKindOutput, "Content")
-	assertHasOpenPayload(domain.MessageKindThought, "Content")
-	assertHasOpenPayload(domain.MessageKindSystem, "Channel")
+	assertHasOpenPayload(domain.MessageKindToolCall, []string{"id", "name", "arguments"}, []string{"ID", "Name", "Input"})
+	assertHasOpenPayload(domain.MessageKindOutput, []string{"content", "is_delta"}, []string{"Content", "IsDelta"})
+	assertHasOpenPayload(domain.MessageKindThought, []string{"content", "is_delta", "message_id"}, []string{"Content", "IsDelta", "MessageID"})
+	assertHasOpenPayload(domain.MessageKind("progress"), []string{"stream_id", "channel", "status", "is_delta"}, []string{"StreamID", "Channel", "Status", "IsDelta"})
+	assertHasOpenPayload(domain.MessageKind("action_request"), []string{"id", "kind", "status", "payload"}, []string{"ID", "Kind", "Status", "Payload"})
+	assertHasOpenPayload(domain.MessageKind("artifact_update"), []string{"id", "kind", "is_delta", "payload"}, []string{"ID", "Kind", "IsDelta", "Payload"})
 }
