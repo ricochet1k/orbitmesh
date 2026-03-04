@@ -435,7 +435,7 @@ func (p *CodexProvider) handleNotification(method string, params json.RawMessage
 			p.events.Emit(domain.NewErrorEvent(p.sessionID, payload.Turn.Error.Message, "CODEX_TURN_FAILED", raw))
 		}
 
-	case "item/agentMessage/delta":
+	case "item/agentMessage/delta", "codex/event/agent_message_content_delta":
 		text, itemID := extractDeltaText(params)
 		if itemID != "" {
 			p.deltaMu.Lock()
@@ -565,8 +565,13 @@ func (p *CodexProvider) handleNotification(method string, params json.RawMessage
 		"thread/status/changed",
 		"codex/event/mcp_startup_complete",
 		"codex/event/task_started",
+		"codex/event/task_complete",
+		"codex/event/agent_message_delta",
 		"codex/event/user_message",
 		"codex/event/agent_reasoning_section_break",
+		"codex/event/terminal_interaction",
+		"codex/event/terminal_output_delta",
+		"item/commandExecution/terminalInteraction",
 		"item/reasoning/summaryPartAdded":
 		// Suppress.
 
@@ -979,6 +984,15 @@ func extractDeltaText(params json.RawMessage) (text string, itemID string) {
 	var payload map[string]any
 	if err := json.Unmarshal(params, &payload); err != nil {
 		return "", ""
+	}
+
+	if msg, ok := payload["msg"].(map[string]any); ok {
+		if id := asString(msg["item_id"]); id != "" {
+			itemID = id
+		}
+		if d := asString(msg["delta"]); d != "" {
+			return d, itemID
+		}
 	}
 
 	if id := asString(payload["itemId"]); id != "" {

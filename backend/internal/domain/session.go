@@ -120,11 +120,14 @@ const (
 	// MessageKindToolResponse persists the result of a tool invocation.
 	// The JSON payload matches the format expected by openai/session.go newSession:
 	//   {"tool_call_id":"...","content":"..."}
-	MessageKindToolResponse MessageKind = "tool_response"
-	MessageKindError        MessageKind = "error"
-	MessageKindSystem       MessageKind = "system"
-	MessageKindPlan         MessageKind = "plan"
-	MessageKindMetric       MessageKind = "metric"
+	MessageKindToolResponse   MessageKind = "tool_response"
+	MessageKindError          MessageKind = "error"
+	MessageKindSystem         MessageKind = "system"
+	MessageKindPlan           MessageKind = "plan"
+	MessageKindMetric         MessageKind = "metric"
+	MessageKindProgress       MessageKind = "progress"
+	MessageKindActionRequest  MessageKind = "action_request"
+	MessageKindArtifactUpdate MessageKind = "artifact_update"
 )
 
 // Message is a single entry in a session's conversation history.
