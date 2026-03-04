@@ -54,6 +54,7 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   const [composerPending, setComposerPending] = createSignal<string | null>(null)
   const [actionResponsePending, setActionResponsePending] = createSignal<string | null>(null)
   const [mobileTab, setMobileTab] = createSignal<"transcript" | "intel">("transcript")
+  const [topHistoryLoadInFlight, setTopHistoryLoadInFlight] = createSignal(false)
   let transcriptRef: HTMLDivElement | undefined
 
   // canInspect: null while permissions are loading, then boolean
@@ -144,8 +145,27 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     scrollToBottom()
   })
 
+  createEffect(() => {
+    if (!data.historyLoading()) {
+      setTopHistoryLoadInFlight(false)
+    }
+  })
+
+  const triggerLoadEarlier = () => {
+    if (!data.historyCursor()) return
+    if (data.historyLoading()) return
+    if (topHistoryLoadInFlight()) return
+    setTopHistoryLoadInFlight(true)
+    data.loadEarlier()
+  }
+
   const handleScroll = () => {
     if (!transcriptRef) return
+    const topThreshold = 96
+    if (transcriptRef.scrollTop <= topThreshold) {
+      triggerLoadEarlier()
+    }
+
     const buffer = 80
     const distance = transcriptRef.scrollHeight - transcriptRef.scrollTop - transcriptRef.clientHeight
     if (distance <= buffer) {
@@ -447,18 +467,21 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
             <div class="session-transcript-wrap">
               <div class="panel-header ds-panel-header">
                 <div class="panel-tools">
-                  <button
-                    type="button"
-                  class="neutral"
-                  onClick={data.loadEarlier}
-                  disabled={!data.historyCursor() || data.historyLoading()}
-                  data-testid="session-load-earlier"
-                >
-                  {data.historyLoading() ? "Loading…" : "Load earlier"}
-                </button>
-                <input
-                  type="search"
-                  placeholder="Search transcript"
+                  <Show when={data.historyCursor() || data.historyLoading()}>
+                    <button
+                      type="button"
+                      class="neutral"
+                      onClick={triggerLoadEarlier}
+                      disabled={!data.historyCursor() || data.historyLoading()}
+                      data-testid="session-load-earlier"
+                      aria-label="Load older messages"
+                    >
+                      {data.historyLoading() ? "Loading older messages..." : "Load older messages"}
+                    </button>
+                  </Show>
+                  <input
+                    type="search"
+                    placeholder="Search transcript"
                   value={data.filter()}
                   onInput={(e) => data.setFilter(e.currentTarget.value)}
                 />

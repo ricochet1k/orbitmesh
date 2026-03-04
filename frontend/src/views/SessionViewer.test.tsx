@@ -152,6 +152,100 @@ describe("SessionViewer", () => {
     expect(await screen.findByText("Streaming output")).toBeDefined()
   })
 
+  it("loads older history when transcript scroll reaches top threshold", async () => {
+    (apiClient.getSession as any).mockResolvedValue(baseSession)
+    ;(apiClient.getSessionMessagesPage as any)
+      .mockResolvedValueOnce({
+        messages: [
+          {
+            id: "message-new",
+            kind: "assistant",
+            contents: "Newest output",
+            open: false,
+            timestamp: "2026-02-05T12:01:00Z",
+          },
+        ],
+        next_before: 42,
+      })
+      .mockResolvedValueOnce({
+        messages: [
+          {
+            id: "message-old",
+            kind: "assistant",
+            contents: "Older output",
+            open: false,
+            timestamp: "2026-02-05T12:00:00Z",
+          },
+        ],
+        next_before: null,
+      })
+
+    render(() => <SessionViewer sessionId="session-1" />)
+
+    expect(await screen.findByText("Newest output")).toBeDefined()
+
+    const transcript = document.querySelector(".transcript") as HTMLDivElement
+    expect(transcript).toBeTruthy()
+    Object.defineProperty(transcript, "clientHeight", { value: 320, configurable: true })
+    Object.defineProperty(transcript, "scrollHeight", { value: 1200, configurable: true })
+    Object.defineProperty(transcript, "scrollTop", { value: 20, writable: true, configurable: true })
+
+    fireEvent.scroll(transcript)
+
+    await waitFor(() => {
+      expect(apiClient.getSessionMessagesPage).toHaveBeenCalledTimes(2)
+    })
+    expect(apiClient.getSessionMessagesPage).toHaveBeenNthCalledWith(2, "session-1", {
+      limit: 100,
+      before: 42,
+    })
+    expect(await screen.findByText("Older output")).toBeDefined()
+  })
+
+  it("does not spam loadEarlier while history page is still loading", async () => {
+    (apiClient.getSession as any).mockResolvedValue(baseSession)
+
+    let resolveOlderPage: ((value: unknown) => void) | undefined
+    const olderPagePending = new Promise((resolve) => {
+      resolveOlderPage = resolve
+    })
+
+    ;(apiClient.getSessionMessagesPage as any)
+      .mockResolvedValueOnce({
+        messages: [
+          {
+            id: "message-new",
+            kind: "assistant",
+            contents: "Newest output",
+            open: false,
+            timestamp: "2026-02-05T12:01:00Z",
+          },
+        ],
+        next_before: 77,
+      })
+      .mockReturnValueOnce(olderPagePending)
+
+    render(() => <SessionViewer sessionId="session-1" />)
+
+    expect(await screen.findByText("Newest output")).toBeDefined()
+
+    const transcript = document.querySelector(".transcript") as HTMLDivElement
+    expect(transcript).toBeTruthy()
+    Object.defineProperty(transcript, "clientHeight", { value: 320, configurable: true })
+    Object.defineProperty(transcript, "scrollHeight", { value: 1200, configurable: true })
+    Object.defineProperty(transcript, "scrollTop", { value: 20, writable: true, configurable: true })
+
+    fireEvent.scroll(transcript)
+    fireEvent.scroll(transcript)
+    fireEvent.scroll(transcript)
+
+    await waitFor(() => {
+      expect(apiClient.getSessionMessagesPage).toHaveBeenCalledTimes(2)
+    })
+
+    resolveOlderPage?.({ messages: [], next_before: null })
+  })
+
   it("renders activity entry revisions without duplication", async () => {
     (apiClient.getSession as any).mockResolvedValue(baseSession)
 
