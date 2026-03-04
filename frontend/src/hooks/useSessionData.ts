@@ -829,13 +829,13 @@ export function useSessionData({
   }
 }
 
-// ── Activity entry helpers ────────────────────────────────────────────────────
+// ── Transcript mapping helpers ────────────────────────────────────────────────
 
 function toTranscriptFromSnapshotMessage(message: SessionActivitySnapshot["messages"][number]): TranscriptMessage {
   const kind = normalizeMessageKind(message.kind)
   return {
     id: message.id || message.timestamp,
-    type: mapActivityKindToType(kind),
+    type: mapTranscriptKindToType(kind),
     kind,
     timestamp: message.timestamp,
     content: message.contents,
@@ -849,7 +849,7 @@ function toTranscriptFromHistoryMessage(message: SessionTranscriptHistoryMessage
   const kind = normalizeMessageKind(message.kind)
   return {
     id: message.id || message.timestamp,
-    type: mapActivityKindToType(kind),
+    type: mapTranscriptKindToType(kind),
     kind,
     timestamp: message.timestamp,
     content: message.contents,
@@ -876,7 +876,7 @@ function extractEventIdFromMessageId(messageId: string | undefined): number {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 0
 }
 
-function mapActivityKindToType(kind: string): TranscriptMessage["type"] {
+function mapTranscriptKindToType(kind: string): TranscriptMessage["type"] {
   const normalized = normalizeMessageKind(kind)
 
   switch (normalized) {

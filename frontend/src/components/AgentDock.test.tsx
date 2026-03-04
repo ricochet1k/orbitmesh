@@ -47,7 +47,6 @@ vi.mock("../api/client", () => ({
     sendSessionInput: vi.fn(),
     sendMessage: vi.fn(),
     getSessionMessagesPage: vi.fn(),
-    getActivityEntries: vi.fn(),
     listTerminals: vi.fn(),
   },
 }));
@@ -76,7 +75,6 @@ describe("AgentDock", () => {
     (apiClient.pollDockMcp as any).mockResolvedValue(null);
     (apiClient.respondDockMcp as any).mockResolvedValue(undefined);
     (apiClient.getSessionMessagesPage as any).mockResolvedValue({ messages: [], next_before: null });
-    (apiClient.getActivityEntries as any).mockResolvedValue({ entries: [], next_cursor: null });
     (apiClient.listTerminals as any).mockResolvedValue({ terminals: [] });
   });
 

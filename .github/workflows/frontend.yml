@@ -33,12 +33,19 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: 'pnpm'
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+
       - uses: arduino/setup-task@v2
         with:
           version: 3.x
 
       - name: Run lint
         run: task frontend:lint
+
+      - name: Verify realtime generated types
+        run: pnpm --dir frontend run check:realtime-types
 
       - name: Run tests
         run: task frontend:test

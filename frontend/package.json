@@ -11,6 +11,8 @@
     "test:ui": "vitest --ui",
     "test:ui-mock": "playwright test -c playwright.config.ts",
     "lint": "eslint src --ext .ts,.tsx",
+    "generate:realtime-types": "go run ../backend/cmd/typegen-realtime",
+    "check:realtime-types": "node ./scripts/check-realtime-types.mjs",
     "test:e2e": "playwright test -c playwright.e2e.config.ts --grep @smoke",
     "test:e2e:full": "playwright test -c playwright.e2e.config.ts",
     "e2e:backend": "node ./scripts/e2e-backend.mjs",

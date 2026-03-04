@@ -331,11 +331,6 @@ export interface ActivityEntryMutation {
   entries?: ActivityEntry[];
 }
 
-export interface ActivityHistoryResponse {
-  entries: ActivityEntry[];
-  next_cursor?: string | null;
-}
-
 export interface SessionTranscriptHistoryMessage {
   id: string;
   kind: string;

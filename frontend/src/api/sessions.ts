@@ -5,7 +5,6 @@ import type {
   SessionStatusResponse,
   SessionInputRequest,
   SessionActionResponseRequest,
-  ActivityHistoryResponse,
   SessionMessagesPageResponse,
   DockMcpRequest,
   DockMcpResponse,
@@ -128,21 +127,6 @@ export async function getSession(id: string): Promise<SessionStatusResponse> {
   if (!resp.ok) throw new Error(await readErrorMessage(resp));
   const session = await resp.json();
   return normalizeSessionResponse(session);
-}
-
-export async function getActivityEntries(
-  id: string,
-  params: { limit?: number; cursor?: string | null } = {},
-): Promise<ActivityHistoryResponse> {
-  const search = new URLSearchParams();
-  if (params.limit) search.set("limit", String(params.limit));
-  if (params.cursor) search.set("cursor", params.cursor);
-  const suffix = search.toString();
-  const resp = await fetch(
-    `${BASE_URL}/sessions/${id}/activity${suffix ? `?${suffix}` : ""}`,
-  );
-  if (!resp.ok) throw new Error(await readErrorMessage(resp));
-  return resp.json();
 }
 
 export async function getSessionMessagesPage(
