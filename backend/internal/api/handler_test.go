@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1602,5 +1603,139 @@ func TestGetSessionMessagesPaginationBoundaries(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &errResp)
 	if errResp.Error != "invalid before parameter" {
 		t.Fatalf("error = %s, want 'invalid before parameter'", errResp.Error)
+	}
+}
+
+func TestGetSessionMessagesPagination_NoGapsOrDupesAcrossPages(t *testing.T) {
+	env := newTestEnv(t)
+
+	router := chi.NewRouter()
+	env.handler.Mount(router)
+
+	createReq := httptest.NewRequest("POST", "/api/sessions", strings.NewReader(`{"provider_type":"mock","working_dir":"/tmp"}`))
+	createW := httptest.NewRecorder()
+	router.ServeHTTP(createW, createReq)
+
+	if createW.Code != http.StatusCreated {
+		t.Fatalf("create session status = %d, want 201", createW.Code)
+	}
+
+	var createResp apiTypes.SessionResponse
+	if err := json.Unmarshal(createW.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("decode create session response: %v", err)
+	}
+	sessionID := createResp.ID
+
+	kinds := []domain.MessageKind{
+		domain.MessageKindToolCall,
+		domain.MessageKindMetric,
+		domain.MessageKindOutput,
+		domain.MessageKindSystem,
+		domain.MessageKindError,
+	}
+	expectedDescending := make([]string, 0, 17)
+
+	for i := 0; i < 17; i++ {
+		open := i%2 == 0
+		appended, err := env.messageStore.Append(sessionID, storage.MessageLogRecord{
+			Timestamp:  time.Now().Add(time.Duration(i) * time.Millisecond),
+			Projection: storage.MessageProjectionAppend,
+			Kind:       kinds[i%len(kinds)],
+			Contents:   fmt.Sprintf("page-msg-%02d", i),
+			Payload:    json.RawMessage(fmt.Sprintf(`{"idx":%d}`, i)),
+			Open:       &open,
+		})
+		if err != nil {
+			t.Fatalf("append message %d: %v", i, err)
+		}
+		expectedDescending = append([]string{"log_" + fmt.Sprint(appended.Seq)}, expectedDescending...)
+	}
+
+	collected := make([]string, 0, len(expectedDescending))
+	seen := make(map[string]struct{}, len(expectedDescending))
+	seenKinds := make(map[domain.MessageKind]struct{}, len(kinds))
+	var before *int64
+
+	for pageNumber := 0; pageNumber < 10; pageNumber++ {
+		path := fmt.Sprintf("/api/sessions/%s/messages?limit=5", sessionID)
+		if before != nil {
+			path = fmt.Sprintf("/api/sessions/%s/messages?before=%d&limit=5", sessionID, *before)
+		}
+
+		req := httptest.NewRequest("GET", path, nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("page %d status = %d, want 200", pageNumber, w.Code)
+		}
+
+		var resp apiTypes.MessageListResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode page %d: %v", pageNumber, err)
+		}
+
+		if len(resp.Messages) > 5 {
+			t.Fatalf("page %d exceeded limit: %d", pageNumber, len(resp.Messages))
+		}
+
+		var prevSeq int64
+		for i, msg := range resp.Messages {
+			seq, err := strconv.ParseInt(strings.TrimPrefix(msg.ID, "log_"), 10, 64)
+			if err != nil {
+				t.Fatalf("parse sequence from %q: %v", msg.ID, err)
+			}
+			if i > 0 && seq >= prevSeq {
+				t.Fatalf("page %d not in descending order: prev=%d current=%d", pageNumber, prevSeq, seq)
+			}
+			prevSeq = seq
+
+			if _, exists := seen[msg.ID]; exists {
+				t.Fatalf("duplicate message id across pages: %s", msg.ID)
+			}
+			seen[msg.ID] = struct{}{}
+			seenKinds[domain.MessageKind(msg.Kind)] = struct{}{}
+			collected = append(collected, msg.ID)
+		}
+
+		if resp.NextBefore == nil {
+			break
+		}
+		if len(resp.Messages) == 0 {
+			t.Fatal("received next_before cursor with empty page")
+		}
+		before = resp.NextBefore
+	}
+
+	if len(collected) != len(expectedDescending) {
+		t.Fatalf("collected %d messages, expected %d", len(collected), len(expectedDescending))
+	}
+	for i := range expectedDescending {
+		if collected[i] != expectedDescending[i] {
+			t.Fatalf("message mismatch at index %d: got %s want %s", i, collected[i], expectedDescending[i])
+		}
+	}
+	if len(seenKinds) != len(kinds) {
+		t.Fatalf("expected %d message kinds across pages, got %d", len(kinds), len(seenKinds))
+	}
+
+	oldestSeq, err := strconv.ParseInt(strings.TrimPrefix(collected[len(collected)-1], "log_"), 10, 64)
+	if err != nil {
+		t.Fatalf("parse oldest sequence: %v", err)
+	}
+	terminalReq := httptest.NewRequest("GET", fmt.Sprintf("/api/sessions/%s/messages?before=%d&limit=5", sessionID, oldestSeq), nil)
+	terminalW := httptest.NewRecorder()
+	router.ServeHTTP(terminalW, terminalReq)
+	if terminalW.Code != http.StatusOK {
+		t.Fatalf("terminal page status = %d, want 200", terminalW.Code)
+	}
+	var terminalResp apiTypes.MessageListResponse
+	if err := json.Unmarshal(terminalW.Body.Bytes(), &terminalResp); err != nil {
+		t.Fatalf("decode terminal page: %v", err)
+	}
+	if len(terminalResp.Messages) != 0 {
+		t.Fatalf("expected no messages at termination boundary, got %d", len(terminalResp.Messages))
+	}
+	if terminalResp.NextBefore != nil {
+		t.Fatalf("expected nil next_before at termination boundary, got %v", *terminalResp.NextBefore)
 	}
 }

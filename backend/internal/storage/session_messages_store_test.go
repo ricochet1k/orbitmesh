@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -209,6 +210,163 @@ func TestSessionMessagesLogStore_LoadPageDescending(t *testing.T) {
 	}
 	if olderCursor != nil {
 		t.Fatalf("expected no next cursor on final page, got %v", *olderCursor)
+	}
+}
+
+func TestSessionMessagesLogStore_LoadPageDescending_NoGapsOrDupesAcrossPages(t *testing.T) {
+	dir := t.TempDir()
+	store := NewSessionMessagesLogStore(dir)
+
+	sessionID := "test-session-page-invariants"
+	ts := time.Now().UTC()
+	kinds := []domain.MessageKind{
+		domain.MessageKindToolCall,
+		domain.MessageKindMetric,
+		domain.MessageKindOutput,
+		domain.MessageKindSystem,
+		domain.MessageKindError,
+	}
+
+	expectedDescending := make([]string, 0, 24)
+	for i := 0; i < 24; i++ {
+		open := i%2 == 0
+		appended, err := store.Append(sessionID, MessageLogRecord{
+			Timestamp:  ts.Add(time.Duration(i) * time.Millisecond),
+			Projection: MessageProjectionAppend,
+			Kind:       kinds[i%len(kinds)],
+			Contents:   fmt.Sprintf("msg-%02d", i),
+			Payload:    json.RawMessage(fmt.Sprintf(`{"idx":%d}`, i)),
+			Open:       &open,
+		})
+		if err != nil {
+			t.Fatalf("append record %d: %v", i, err)
+		}
+		expectedDescending = append([]string{"log_" + strconv.FormatInt(appended.Seq, 10)}, expectedDescending...)
+
+		if i%5 == 2 {
+			_, err = store.Append(sessionID, MessageLogRecord{
+				Timestamp:  ts.Add(time.Duration(i)*time.Millisecond + time.Microsecond),
+				Projection: MessageProjectionOutputDelta,
+				Kind:       domain.MessageKindOutput,
+				Contents:   "+delta",
+			})
+			if err != nil {
+				t.Fatalf("append delta %d: %v", i, err)
+			}
+		}
+	}
+
+	collected := make([]string, 0, len(expectedDescending))
+	seen := make(map[string]struct{}, len(expectedDescending))
+	var before *int64
+
+	for {
+		page, nextBefore, err := store.LoadPageDescending(sessionID, before, 4)
+		if err != nil {
+			t.Fatalf("LoadPageDescending before=%v: %v", before, err)
+		}
+		if len(page) > 4 {
+			t.Fatalf("page exceeded requested limit: %d", len(page))
+		}
+
+		var prevSeq int64
+		for i, msg := range page {
+			seq, err := strconv.ParseInt(strings.TrimPrefix(msg.ID, "log_"), 10, 64)
+			if err != nil {
+				t.Fatalf("parse sequence from %q: %v", msg.ID, err)
+			}
+			if i > 0 && seq >= prevSeq {
+				t.Fatalf("page not in descending order: prev=%d current=%d", prevSeq, seq)
+			}
+			prevSeq = seq
+
+			if _, exists := seen[msg.ID]; exists {
+				t.Fatalf("duplicate message id across pages: %s", msg.ID)
+			}
+			seen[msg.ID] = struct{}{}
+			collected = append(collected, msg.ID)
+		}
+
+		if nextBefore == nil {
+			break
+		}
+		if len(page) == 0 {
+			t.Fatal("received next_before cursor with empty page")
+		}
+		before = nextBefore
+	}
+
+	if len(collected) != len(expectedDescending) {
+		t.Fatalf("collected %d messages, expected %d", len(collected), len(expectedDescending))
+	}
+	for i := range expectedDescending {
+		if collected[i] != expectedDescending[i] {
+			t.Fatalf("message mismatch at index %d: got %s want %s", i, collected[i], expectedDescending[i])
+		}
+	}
+
+	oldestSeq, err := strconv.ParseInt(strings.TrimPrefix(expectedDescending[len(expectedDescending)-1], "log_"), 10, 64)
+	if err != nil {
+		t.Fatalf("parse oldest sequence: %v", err)
+	}
+	emptyPage, terminalCursor, err := store.LoadPageDescending(sessionID, &oldestSeq, 4)
+	if err != nil {
+		t.Fatalf("LoadPageDescending at termination boundary: %v", err)
+	}
+	if len(emptyPage) != 0 {
+		t.Fatalf("expected empty page at termination boundary, got %d", len(emptyPage))
+	}
+	if terminalCursor != nil {
+		t.Fatalf("expected nil cursor at termination boundary, got %v", *terminalCursor)
+	}
+}
+
+func TestSessionMessagesLogStore_LoadPageDescending_LargeLogBounded(t *testing.T) {
+	dir := t.TempDir()
+	store := NewSessionMessagesLogStore(dir)
+
+	sessionID := "test-session-large-page"
+	ts := time.Now().UTC()
+	const total = 512
+
+	expectedDescending := make([]string, 0, total)
+	for i := 0; i < total; i++ {
+		appended, err := store.Append(sessionID, MessageLogRecord{
+			Timestamp:  ts.Add(time.Duration(i) * time.Microsecond),
+			Projection: MessageProjectionAppend,
+			Kind:       domain.MessageKindOutput,
+			Contents:   fmt.Sprintf("bulk-%03d", i),
+		})
+		if err != nil {
+			t.Fatalf("append record %d: %v", i, err)
+		}
+		expectedDescending = append([]string{"log_" + strconv.FormatInt(appended.Seq, 10)}, expectedDescending...)
+	}
+
+	collected := make([]string, 0, total)
+	var before *int64
+	for pageNumber := 0; pageNumber < 64; pageNumber++ {
+		page, nextBefore, err := store.LoadPageDescending(sessionID, before, 37)
+		if err != nil {
+			t.Fatalf("LoadPageDescending page %d: %v", pageNumber, err)
+		}
+		for _, msg := range page {
+			collected = append(collected, msg.ID)
+		}
+		if nextBefore == nil {
+			break
+		}
+		before = nextBefore
+	}
+
+	if len(collected) != total {
+		t.Fatalf("collected %d messages, expected %d", len(collected), total)
+	}
+	if collected[0] != expectedDescending[0] {
+		t.Fatalf("newest message mismatch: got %s want %s", collected[0], expectedDescending[0])
+	}
+	if collected[len(collected)-1] != expectedDescending[len(expectedDescending)-1] {
+		t.Fatalf("oldest message mismatch: got %s want %s", collected[len(collected)-1], expectedDescending[len(expectedDescending)-1])
 	}
 }
 

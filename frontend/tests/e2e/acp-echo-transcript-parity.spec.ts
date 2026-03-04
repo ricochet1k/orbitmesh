@@ -347,6 +347,10 @@ test.describe("ACP echo transcript parity", () => {
 
     let sessionId = ""
     let providerId = ""
+    const websocketURLs: string[] = []
+    page.on("websocket", (ws) => {
+      websocketURLs.push(ws.url())
+    })
     try {
       providerId = await createProviderForMock(csrfToken, "claude-ws", sessionConfig)
       sessionId = await createSession(csrfToken, {
@@ -358,6 +362,7 @@ test.describe("ACP echo transcript parity", () => {
       })
       await page.goto(`/sessions/${sessionId}`)
       await expect(page.getByTestId("session-viewer-heading")).toBeVisible({ timeout: 10_000 })
+      await expect.poll(() => websocketURLs.some((url) => url.includes("/api/realtime")), { timeout: 20_000 }).toBe(true)
 
       await sendSessionMessage(sessionId, csrfToken, "boot transcript parity run", { id: providerId, type: "claude-ws" })
       await waitForControlReady(mock)
@@ -374,7 +379,7 @@ test.describe("ACP echo transcript parity", () => {
                 id: "tool-parity-1",
                 name: "Bash",
                 input: {
-                  command: "pwd",
+                  command: "echo ws-parity-1",
                 },
               },
             ],
@@ -388,23 +393,12 @@ test.describe("ACP echo transcript parity", () => {
               {
                 type: "tool_result",
                 tool_use_id: "tool-parity-1",
-                content: "/tmp",
+                content: "ws-parity-1",
                 is_error: false,
               },
             ],
           },
         },
-      ])
-
-      await expect.poll(() => page.locator("article[data-kind='tool_call']").count(), { timeout: 20_000 }).toBeGreaterThan(0)
-      await expect(page.locator("article[data-kind='tool_call']").last()).toContainText("pwd")
-      const toolSnapshotsBeforeReload = await captureNormalizedTranscriptSnapshots(page, { kind: "tool_call" })
-      const latestToolSnapshotBeforeReload = toolSnapshotsBeforeReload[toolSnapshotsBeforeReload.length - 1]
-
-      await page.reload()
-      await expect(page.getByTestId("session-viewer-heading")).toBeVisible({ timeout: 10_000 })
-
-      await acpEchoEmitMany(mock, [
         {
           type: "assistant",
           message: {
@@ -415,7 +409,7 @@ test.describe("ACP echo transcript parity", () => {
                 id: "tool-parity-2",
                 name: "Bash",
                 input: {
-                  command: "pwd",
+                  command: "echo ws-parity-2",
                 },
               },
             ],
@@ -429,7 +423,7 @@ test.describe("ACP echo transcript parity", () => {
               {
                 type: "tool_result",
                 tool_use_id: "tool-parity-2",
-                content: "/tmp",
+                content: "ws-parity-2",
                 is_error: false,
               },
             ],
@@ -437,12 +431,137 @@ test.describe("ACP echo transcript parity", () => {
         },
       ])
 
-      await expect.poll(() => page.locator("article[data-kind='tool_call']").count(), { timeout: 20_000 }).toBeGreaterThan(0)
-      await expect(page.locator("article[data-kind='tool_call']").last()).toContainText("pwd")
+      await expect.poll(
+        async () => (await captureNormalizedTranscriptSnapshots(page, { kind: "tool_call" }))
+          .filter((snapshot) => snapshot.coreContent.includes("ws-parity-")).length,
+        { timeout: 20_000 },
+      ).toBe(2)
 
-      const toolSnapshotsAfterReload = await captureNormalizedTranscriptSnapshots(page, { kind: "tool_call" })
-      const latestToolSnapshotAfterReload = toolSnapshotsAfterReload[toolSnapshotsAfterReload.length - 1]
-      expect(latestToolSnapshotAfterReload).toEqual(latestToolSnapshotBeforeReload)
+      const toolSnapshotsBeforeReload = (await captureNormalizedTranscriptSnapshots(page, { kind: "tool_call" }))
+        .filter((snapshot) => snapshot.coreContent.includes("ws-parity-"))
+      expect(toolSnapshotsBeforeReload).toHaveLength(2)
+
+      await page.reload()
+      await expect(page.getByTestId("session-viewer-heading")).toBeVisible({ timeout: 10_000 })
+      await expect.poll(() => websocketURLs.filter((url) => url.includes("/api/realtime")).length, { timeout: 20_000 }).toBeGreaterThan(0)
+
+      await acpEchoEmitMany(mock, [
+        {
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "tool-parity-reload-1",
+                name: "Bash",
+                input: {
+                  command: "echo ws-parity-1",
+                },
+              },
+            ],
+          },
+        },
+        {
+          type: "user",
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "tool-parity-reload-1",
+                content: "ws-parity-1",
+                is_error: false,
+              },
+            ],
+          },
+        },
+        {
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "tool-parity-reload-2",
+                name: "Bash",
+                input: {
+                  command: "echo ws-parity-2",
+                },
+              },
+            ],
+          },
+        },
+        {
+          type: "user",
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "tool-parity-reload-2",
+                content: "ws-parity-2",
+                is_error: false,
+              },
+            ],
+          },
+        },
+      ])
+
+      await expect.poll(
+        async () => (await captureNormalizedTranscriptSnapshots(page, { kind: "tool_call" }))
+          .filter((snapshot) => snapshot.coreContent.includes("ws-parity-")).length,
+        { timeout: 20_000 },
+      ).toBeGreaterThanOrEqual(2)
+
+      const toolSnapshotsAfterReload = (await captureNormalizedTranscriptSnapshots(page, { kind: "tool_call" }))
+        .filter((snapshot) => snapshot.coreContent.includes("ws-parity-"))
+      const trailingParitySnapshotsAfterReload = toolSnapshotsAfterReload.slice(-2)
+      expect(trailingParitySnapshotsAfterReload).toEqual(toolSnapshotsBeforeReload)
+
+      await acpEchoEmitMany(mock, [
+        {
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "tool-parity-live",
+                name: "Bash",
+                input: {
+                  command: "echo ws-parity-live",
+                },
+              },
+            ],
+          },
+        },
+        {
+          type: "user",
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "tool-parity-live",
+                content: "ws-parity-live",
+                is_error: false,
+              },
+            ],
+          },
+        },
+      ])
+
+      await expect.poll(
+        async () => (await captureNormalizedTranscriptSnapshots(page, { kind: "tool_call" }))
+          .filter((snapshot) => snapshot.coreContent.includes("ws-parity-")).length,
+        { timeout: 20_000 },
+      ).toBeGreaterThanOrEqual(3)
+
+      const toolSnapshotsAfterLiveUpdate = (await captureNormalizedTranscriptSnapshots(page, { kind: "tool_call" }))
+        .filter((snapshot) => snapshot.coreContent.includes("ws-parity-"))
+
+      expect(toolSnapshotsAfterLiveUpdate[toolSnapshotsAfterLiveUpdate.length - 1].coreContent).toContain("ws-parity-live")
     } finally {
       if (sessionId) {
         await stopSession(sessionId, csrfToken)
