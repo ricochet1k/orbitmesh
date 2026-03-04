@@ -344,7 +344,8 @@ The backend provides a RESTful API for session management and real-time event st
 | `DELETE` | `/api/v1/sessions/{id}` | Stop and remove a session |
 | `POST` | `/api/v1/sessions/{id}/pause` | Pause a running session |
 | `POST` | `/api/v1/sessions/{id}/resume` | Resume a paused session |
-| `GET` | `/api/v1/sessions/{id}/events` | Stream real-time events (SSE) |
+| `GET` | `/api/sessions/{id}/messages` | Fetch paged transcript history |
+| `GET` | `/api/realtime` | Stream realtime topic snapshots/events (WebSocket) |
 
 ### Session Creation
 
@@ -363,18 +364,14 @@ The backend provides a RESTful API for session management and real-time event st
 }
 ```
 
-### Event Streaming (SSE)
+### Event Streaming (WebSocket)
 
-Real-time updates are streamed using Server-Sent Events. Clients should listen on `/api/v1/sessions/{id}/events`.
+Real-time updates are streamed over `/api/realtime` using topic envelopes:
 
-**Event Format:**
-```
-event: status_change
-data: {"old_state": "running", "new_state": "paused", "reason": "user requested pause"}
+- `sessions.activity:{id}` for transcript snapshots/events
+- `sessions.state` for derived session state events
 
-event: output
-data: {"content": "Processing data..."}
-```
+Transcript history paging is handled separately via `GET /api/sessions/{id}/messages` with `before` and `next_before` cursors.
 
 ## Data Flow
 

@@ -33,8 +33,8 @@ from the dashboard.
 ## Current State Review (Observed)
 - Session lists exist in dashboard and sessions routes but are not synchronized.
 - Session list data is cached in localStorage and can become stale.
-- The session viewer uses SSE for activity but does not update session state in
-  list views.
+- The session viewer uses realtime WebSocket topics for activity/state and does
+  not yet keep all list views synchronized.
 - Terminal view is read-only and depends on a websocket; no input support exists
   in UI.
 - When the terminal stream closes, the last snapshot is not shown.
@@ -112,8 +112,10 @@ TerminalRef
   sessions.
 - `GET /api/sessions/{id}` -> include `terminals` and optional last snapshot
   metadata.
-- `GET /api/sessions/{id}/events` -> unchanged; add session-state updates to UI
-  caches.
+- `GET /api/sessions/{id}/messages` -> paged transcript history (`before`,
+  `next_before`) for initial load and older-page fetches.
+- `GET /api/realtime` -> websocket transport used by the session viewer
+  (`sessions.activity:{id}`, `sessions.state`) for live updates.
 
 ### Terminals
 - `GET /api/v1/terminals` -> list all terminals (including detached or closed).

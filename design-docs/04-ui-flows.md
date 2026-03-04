@@ -87,7 +87,7 @@ This is the primary happy path for operating agents in OrbitMesh.
    └─> Show: "Starting agent, please wait..."
 
 5. VIEW LIVE SESSION
-   SessionViewer mounts with active SSE stream
+   SessionViewer mounts with active realtime WebSocket subscription
    ├─ Top bar: Session ID, status, elapsed time, created timestamp
    ├─ Main content: Live transcript with auto-scroll
    ├─ Right panel: System info, metadata, links back to task
@@ -98,7 +98,7 @@ This is the primary happy path for operating agents in OrbitMesh.
    Watch agent execution in real-time
    ├─ Output streams in chunks (messages, tool calls, results)
    ├─ User can: pause for review, send follow-up prompts, stop
-   ├─ Automatic status updates every 100ms (SSE tick)
+   ├─ Automatic status updates from `sessions.state` events
    └─ Session completes or user stops it
 
 7. REVIEW RESULTS / REPLAY

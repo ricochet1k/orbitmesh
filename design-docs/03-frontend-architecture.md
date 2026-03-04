@@ -22,14 +22,14 @@ The system graph represents the state of the mesh using:
 ### Update Strategy
 The graph uses a force-directed simulation to maintain a readable layout.
 - **Initialization**: Nodes and links are fetched via the API on mount.
-- **Updates**: Real-time updates are received via Server-Sent Events (SSE).
+- **Updates**: Real-time updates are received via the realtime WebSocket hub.
 - **Transitions**: D3 transitions and the simulation tick ensure smooth movement as agents switch tasks or new tasks are created.
 
 ## Real-Time Architecture
-The frontend maintains a persistent connection to the backend using SSE.
-1. **Connection**: The `apiClient` establishes an SSE connection to `/api/v1/sessions/{id}/events`.
-2. **Event Processing**: Events (status changes, output, metrics) are dispatched to the relevant components.
-3. **State Management**: SolidJS signals and resources are updated, triggering reactive UI changes.
+The frontend maintains a persistent connection to the backend using `/api/realtime`.
+1. **Connection**: `realtimeClient` opens a WebSocket to `/api/realtime` and subscribes to topic streams.
+2. **Event Processing**: Session viewer reads `sessions.activity:{id}` snapshots/events plus `sessions.state` events.
+3. **State Management**: SolidJS signals/resources merge paged history and realtime events into one transcript model.
 
 ## UI/UX Design
 The dashboard is designed for high-density information display:
