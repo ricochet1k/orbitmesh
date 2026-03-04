@@ -15,6 +15,7 @@ const (
 	EventTypeMetric
 	EventTypeError
 	EventTypeMetadata
+	EventTypeUnknown       // Untranslated provider event; should be replaced with typed handling.
 	EventTypeToolCall      // Structured tool call information
 	EventTypeThought       // Agent reasoning/thinking
 	EventTypePlan          // Agent execution plans
@@ -38,6 +39,8 @@ func (t EventType) String() string {
 		return "error"
 	case EventTypeMetadata:
 		return "metadata"
+	case EventTypeUnknown:
+		return "unknown"
 	case EventTypeToolCall:
 		return "tool_call"
 	case EventTypeThought:
@@ -99,6 +102,11 @@ func (e Event) Error() (ErrorData, bool) {
 
 func (e Event) Metadata() (MetadataData, bool) {
 	d, ok := e.Data.(MetadataData)
+	return d, ok
+}
+
+func (e Event) Unknown() (UnknownData, bool) {
+	d, ok := e.Data.(UnknownData)
 	return d, ok
 }
 
@@ -174,6 +182,15 @@ type ErrorData struct {
 type MetadataData struct {
 	Key   string
 	Value any
+}
+
+// UnknownData captures provider payloads that are not yet translated into a
+// first-class OrbitMesh event shape. Any event emitted as UnknownData should
+// be treated as implementation debt and eventually replaced by typed handling.
+type UnknownData struct {
+	Source  string
+	Summary string
+	Payload any
 }
 
 type ToolCallData struct {
@@ -300,6 +317,16 @@ func NewMetadataEvent(sessionID, key string, value any, raw json.RawMessage) Eve
 			Key:   key,
 			Value: value,
 		},
+	}
+}
+
+func NewUnknownEvent(sessionID string, data UnknownData, raw json.RawMessage) Event {
+	return Event{
+		Type:      EventTypeUnknown,
+		Timestamp: time.Now(),
+		SessionID: sessionID,
+		Raw:       raw,
+		Data:      data,
 	}
 }
 

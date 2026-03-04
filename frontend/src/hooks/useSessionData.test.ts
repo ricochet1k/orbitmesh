@@ -1053,6 +1053,44 @@ describe("useSessionData", () => {
     })
   })
 
+  it("renders unknown events as explicit unknown transcript entries", async () => {
+    let data: ReturnType<typeof useSessionData> | undefined
+
+    createRoot((d) => {
+      dispose = d
+      const [sessionId] = createSignal("session-1")
+      const [canInspect] = createSignal<boolean | null>(false)
+      data = useSessionData({
+        sessionId,
+        canInspect,
+        eventsUrl: () => `/events/session-1`,
+        streamOptions: noPreflightOpts,
+      })
+    })
+
+    await vi.waitFor(() => expect(mockEventSources.length).toBeGreaterThan(0))
+    const source = mockEventSources[0]
+
+    source.emit("unknown", {
+      type: "unknown",
+      event_id: 18,
+      timestamp: "2026-02-05T12:01:04Z",
+      session_id: "session-1",
+      data: {
+        source: "codex/event/unhandled",
+        summary: "Unhandled provider notification",
+        payload: { method: "codex/event/unhandled" },
+      },
+    })
+
+    await vi.waitFor(() => {
+      const msg = data!.messages().find((m) => m.kind === "unknown")
+      expect(msg?.content).toContain("Unhandled provider notification")
+      expect(msg?.content).toContain("codex/event/unhandled")
+      expect(msg?.type).toBe("system")
+    })
+  })
+
   it("does not append metric events as transcript lines", async () => {
     let data: ReturnType<typeof useSessionData> | undefined
 

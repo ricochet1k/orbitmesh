@@ -119,6 +119,143 @@ func TestParseDiffUpdate(t *testing.T) {
 	}
 }
 
+func TestHandleNotification_TurnStartedEmitsNoTranscriptEvent(t *testing.T) {
+	p := NewCodexProvider("sess_turn_started", Config{})
+	params := json.RawMessage(`{"turn":{"id":"turn_123"}}`)
+
+	p.handleNotification("turn/started", params, nil)
+
+	select {
+	case e := <-p.events.Events():
+		t.Fatalf("expected no event, got %v", e.Type)
+	default:
+	}
+}
+
+func TestHandleNotification_TurnCompletedEmitsNoTranscriptEvent(t *testing.T) {
+	p := NewCodexProvider("sess_turn_completed", Config{})
+	params := json.RawMessage(`{"turn":{"id":"turn_123","status":"ok"}}`)
+
+	p.handleNotification("turn/completed", params, nil)
+
+	select {
+	case e := <-p.events.Events():
+		t.Fatalf("expected no event, got %v", e.Type)
+	default:
+	}
+}
+
+func TestHandleNotification_TurnDiffUpdatedEmitsArtifactUpdate(t *testing.T) {
+	p := NewCodexProvider("sess_turn_diff", Config{})
+	params := json.RawMessage(`{"threadId":"thr_1","turnId":"turn_2","diff":"diff --git a/x b/x\n+hi"}`)
+
+	p.handleNotification("turn/diff/updated", params, nil)
+
+	e := <-p.events.Events()
+	if e.Type != domain.EventTypeArtifactUpdate {
+		t.Fatalf("expected artifact_update event, got %v", e.Type)
+	}
+	artifact, ok := e.ArtifactUpdate()
+	if !ok {
+		t.Fatalf("expected artifact update payload")
+	}
+	if artifact.Kind != "turn_diff" {
+		t.Fatalf("expected turn_diff kind, got %q", artifact.Kind)
+	}
+	if artifact.Title != "Turn diff updated" {
+		t.Fatalf("unexpected title: %q", artifact.Title)
+	}
+}
+
+func TestHandleNotification_UnknownNotificationEmitsUnknownEvent(t *testing.T) {
+	p := NewCodexProvider("sess_unknown_notification", Config{})
+	params := json.RawMessage(`{"foo":"bar"}`)
+
+	p.handleNotification("codex/event/unhandled", params, nil)
+
+	e := <-p.events.Events()
+	if e.Type != domain.EventTypeUnknown {
+		t.Fatalf("expected unknown event, got %v", e.Type)
+	}
+	unknown, ok := e.Unknown()
+	if !ok {
+		t.Fatalf("expected unknown payload")
+	}
+	if unknown.Source != "codex/event/unhandled" {
+		t.Fatalf("unexpected source: %q", unknown.Source)
+	}
+	if !strings.Contains(unknown.Summary, "Unhandled") {
+		t.Fatalf("unexpected summary: %q", unknown.Summary)
+	}
+}
+
+func TestSession44MethodsEmitNoUnknownEvents(t *testing.T) {
+	p := NewCodexProvider("sess_session44", Config{})
+
+	p.handleNotification("codex/event/reasoning_content_delta", json.RawMessage(`{
+	  "msg": {"item_id": "reason_1", "delta": "Checking"}
+	}`), nil)
+	e := <-p.events.Events()
+	if e.Type == domain.EventTypeUnknown {
+		t.Fatalf("reasoning_content_delta emitted unknown event")
+	}
+
+	p.handleNotification("codex/event/exec_command_begin", json.RawMessage(`{
+	  "msg": {"call_id": "call_1", "command": ["/bin/zsh", "-lc", "ls"]}
+	}`), nil)
+	e = <-p.events.Events()
+	if e.Type == domain.EventTypeUnknown {
+		t.Fatalf("exec_command_begin emitted unknown event")
+	}
+
+	p.handleNotification("codex/event/exec_command_output_delta", json.RawMessage(`{
+	  "msg": {"call_id": "call_1", "chunk": "aGVsbG8="}
+	}`), nil)
+	e = <-p.events.Events()
+	if e.Type == domain.EventTypeUnknown {
+		t.Fatalf("exec_command_output_delta emitted unknown event")
+	}
+
+	p.handleNotification("codex/event/exec_command_end", json.RawMessage(`{
+	  "msg": {
+	    "call_id": "call_1",
+	    "command": ["/bin/zsh", "-lc", "ls"],
+	    "aggregated_output": "ok",
+	    "exit_code": 0
+	  }
+	}`), nil)
+	e = <-p.events.Events()
+	if e.Type == domain.EventTypeUnknown {
+		t.Fatalf("exec_command_end emitted unknown event")
+	}
+
+	p.handleNotification("turn/plan/updated", json.RawMessage(`{
+	  "explanation": "Do work",
+	  "plan": [{"step": "one", "status": "in_progress"}]
+	}`), nil)
+	e = <-p.events.Events()
+	if e.Type == domain.EventTypeUnknown {
+		t.Fatalf("turn/plan/updated emitted unknown event")
+	}
+
+	p.handleNotification("item/agentMessage/delta", json.RawMessage(`{
+	  "itemId": "msg_1",
+	  "delta": "hello"
+	}`), nil)
+	e = <-p.events.Events()
+	if e.Type == domain.EventTypeUnknown {
+		t.Fatalf("item/agentMessage/delta emitted unknown event")
+	}
+
+	p.handleNotification("item/completed", json.RawMessage(`{
+	  "item": {"type": "agentMessage", "id": "msg_2", "text": "done"}
+	}`), nil)
+	e = <-p.events.Events()
+	if e.Type == domain.EventTypeUnknown {
+		t.Fatalf("item/completed emitted unknown event")
+	}
+}
+
 func TestHandleItemNotification_CommandExecutionIncludesOutput(t *testing.T) {
 	p := NewCodexProvider("sess_1", Config{})
 	params := json.RawMessage(`{

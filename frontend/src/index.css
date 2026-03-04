@@ -3740,6 +3740,28 @@ tbody tr:hover {
   border: 1px solid color-mix(in srgb, var(--color-error) 35%, transparent);
 }
 
+.ui-stability-toast-stack {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 1200;
+  display: grid;
+  gap: 0.55rem;
+  width: min(30rem, calc(100vw - 2rem));
+  pointer-events: none;
+}
+
+.ui-stability-toast {
+  border: 1px solid color-mix(in srgb, var(--color-error) 36%, transparent);
+  background: color-mix(in srgb, var(--color-error) 14%, var(--color-surface-0));
+  color: var(--color-text-primary);
+  border-radius: var(--radius-3);
+  box-shadow: var(--shadow-3);
+  padding: 0.7rem 0.85rem;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
 @media (max-width: 1024px) {
   .settings-shell {
     grid-template-columns: 1fr;

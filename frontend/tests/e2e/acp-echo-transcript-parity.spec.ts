@@ -77,6 +77,13 @@ async function apiRequest<T>(options: {
 }
 
 async function bridgeBrowserApiToBackend(page: Page): Promise<void> {
+  const isRouteTeardown = (error: unknown): boolean => {
+    if (!(error instanceof Error)) {
+      return false
+    }
+    return /Target page, context or browser has been closed|route is already handled/i.test(error.message)
+  }
+
   await page.addInitScript(() => {
     Object.defineProperty(window, "WebSocket", {
       value: undefined,
@@ -85,37 +92,49 @@ async function bridgeBrowserApiToBackend(page: Page): Promise<void> {
   })
 
   await page.route("**/api/**", async (route) => {
-    const requestURL = new URL(route.request().url())
-    if (!requestURL.pathname.startsWith("/api/")) {
-      await route.continue()
-      return
+    try {
+      const requestURL = new URL(route.request().url())
+      if (!requestURL.pathname.startsWith("/api/")) {
+        await route.continue()
+        return
+      }
+
+      if (requestURL.pathname === "/api/v1/me/permissions") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            role: "owner",
+            can_inspect_sessions: true,
+            can_manage_roles: true,
+            can_manage_templates: true,
+            can_initiate_bulk_actions: true,
+            requires_owner_approval_for_role_changes: false,
+          }),
+        })
+        return
+      }
+
+      const targetURL = new URL(`${requestURL.pathname}${requestURL.search}`, backendURL).toString()
+
+      if (requestURL.pathname.endsWith("/events")) {
+        await route.continue({ url: targetURL })
+        return
+      }
+
+      const response = await route.fetch({ url: targetURL })
+      await route.fulfill({ response })
+    } catch (error) {
+      if (page.isClosed() || isRouteTeardown(error)) {
+        try {
+          await route.abort()
+        } catch {
+          // ignore teardown races while page/context is closing
+        }
+        return
+      }
+      throw error
     }
-
-    if (requestURL.pathname === "/api/v1/me/permissions") {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          role: "owner",
-          can_inspect_sessions: true,
-          can_manage_roles: true,
-          can_manage_templates: true,
-          can_initiate_bulk_actions: true,
-          requires_owner_approval_for_role_changes: false,
-        }),
-      })
-      return
-    }
-
-    const targetURL = new URL(`${requestURL.pathname}${requestURL.search}`, backendURL).toString()
-
-    if (requestURL.pathname.endsWith("/events")) {
-      await route.continue({ url: targetURL })
-      return
-    }
-
-    const response = await route.fetch({ url: targetURL })
-    await route.fulfill({ response })
   })
 }
 

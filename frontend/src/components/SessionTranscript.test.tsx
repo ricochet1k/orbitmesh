@@ -49,11 +49,19 @@ describe("SessionTranscript", () => {
         timestamp: "2026-02-05T12:00:02Z",
         content: "state changed",
       },
+      {
+        id: "m4",
+        type: "system",
+        kind: "unknown",
+        timestamp: "2026-02-05T12:00:03Z",
+        content: "unhandled event",
+      },
     ])
 
     expect(screen.getByText("Assistant")).toBeDefined()
     expect(screen.getByText("Tool")).toBeDefined()
     expect(screen.getByText("Status")).toBeDefined()
+    expect(screen.getByText("Unknown")).toBeDefined()
   })
 
   it("applies normalized kind class names for style matching", () => {

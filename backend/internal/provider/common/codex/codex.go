@@ -410,7 +410,6 @@ func (p *CodexProvider) handleNotification(method string, params json.RawMessage
 			p.turnBoundaryCh = make(chan struct{})
 			p.mu.Unlock()
 		}
-		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "turn_started", map[string]any{"turn_id": payload.Turn.ID}, raw))
 
 	case "turn/completed":
 		var payload struct {
@@ -432,10 +431,6 @@ func (p *CodexProvider) handleNotification(method string, params json.RawMessage
 		if ch != nil {
 			close(ch)
 		}
-		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "turn_completed", map[string]any{
-			"turn_id": payload.Turn.ID,
-			"status":  payload.Turn.Status,
-		}, raw))
 		if payload.Turn.Error != nil && payload.Turn.Error.Message != "" {
 			p.events.Emit(domain.NewErrorEvent(p.sessionID, payload.Turn.Error.Message, "CODEX_TURN_FAILED", raw))
 		}
@@ -554,8 +549,12 @@ func (p *CodexProvider) handleNotification(method string, params json.RawMessage
 
 	case "turn/diff/updated":
 		if diff := parseDiffUpdate(params); diff != "" {
-			p.events.Emit(domain.NewMetadataEvent(p.sessionID, "turn_diff_updated", map[string]any{
-				"diff": diff,
+			p.events.Emit(domain.NewArtifactUpdateEvent(p.sessionID, domain.ArtifactUpdateData{
+				Kind:  "turn_diff",
+				Title: "Turn diff updated",
+				Payload: map[string]any{
+					"diff": diff,
+				},
 			}, raw))
 		}
 
@@ -590,12 +589,7 @@ func (p *CodexProvider) handleNotification(method string, params json.RawMessage
 		}
 
 	default:
-		var value any
-		_ = json.Unmarshal(params, &value)
-		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "codex_notification", map[string]any{
-			"method": method,
-			"params": value,
-		}, raw))
+		p.emitUnhandledNotification(method, params, raw)
 	}
 }
 
@@ -704,12 +698,35 @@ func (p *CodexProvider) handleItemNotification(method string, params json.RawMes
 		}, raw))
 
 	default:
-		p.events.Emit(domain.NewMetadataEvent(p.sessionID, "codex_item", map[string]any{
-			"phase": method,
-			"type":  itemType,
-			"item":  item,
+		kind := strings.TrimSpace(itemType)
+		if kind == "" {
+			kind = "unknown"
+		}
+		p.events.Emit(domain.NewUnknownEvent(p.sessionID, domain.UnknownData{
+			Source:  method,
+			Summary: fmt.Sprintf("Unhandled item notification type %q", kind),
+			Payload: item,
 		}, raw))
 	}
+}
+
+func (p *CodexProvider) emitUnhandledNotification(method string, params json.RawMessage, raw json.RawMessage) {
+	if strings.TrimSpace(method) == "" {
+		p.events.Emit(domain.NewUnknownEvent(p.sessionID, domain.UnknownData{
+			Source:  "codex",
+			Summary: "Unhandled provider notification",
+		}, raw))
+		return
+	}
+	var payload any
+	if err := json.Unmarshal(params, &payload); err != nil {
+		payload = string(params)
+	}
+	p.events.Emit(domain.NewUnknownEvent(p.sessionID, domain.UnknownData{
+		Source:  method,
+		Summary: "Unhandled provider notification",
+		Payload: payload,
+	}, raw))
 }
 
 func (p *CodexProvider) handleCodexEventItemNotification(method string, params json.RawMessage, raw json.RawMessage) {

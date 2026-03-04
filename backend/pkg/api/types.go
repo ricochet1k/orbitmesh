@@ -172,6 +172,7 @@ const (
 	EventTypeMetric         EventType = "metric"
 	EventTypeError          EventType = "error"
 	EventTypeMetadata       EventType = "metadata"
+	EventTypeUnknown        EventType = "unknown"
 	EventTypeToolCall       EventType = "tool_call"
 	EventTypeThought        EventType = "thought"
 	EventTypePlan           EventType = "plan"
@@ -235,6 +236,14 @@ type ErrorData struct {
 type MetadataData struct {
 	Key   string `json:"key"`
 	Value any    `json:"value"`
+}
+
+// UnknownData carries provider payloads that have not been translated into a
+// first-class API event yet and should eventually be replaced by typed events.
+type UnknownData struct {
+	Source  string `json:"source,omitempty"`
+	Summary string `json:"summary,omitempty"`
+	Payload any    `json:"payload,omitempty"`
 }
 
 type ToolCallData struct {
@@ -325,6 +334,17 @@ type ErrorResponse struct {
 	Error   string `json:"error"`
 	Code    string `json:"code,omitempty"`
 	Details any    `json:"details,omitempty"`
+}
+
+type FrontendUIAnomalyRequest struct {
+	Kind          string         `json:"kind"`
+	ProbeID       string         `json:"probe_id"`
+	RoutePath     string         `json:"route_path"`
+	Source        string         `json:"source"`
+	Message       string         `json:"message"`
+	AnimationName string         `json:"animation_name,omitempty"`
+	Metadata      map[string]any `json:"metadata,omitempty"`
+	DetectedAt    time.Time      `json:"detected_at"`
 }
 
 type DockMCPRequest struct {

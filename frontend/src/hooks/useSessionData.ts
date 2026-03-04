@@ -113,6 +113,7 @@ const STREAM_EVENT_TYPES = [
   "metric",
   "error",
   "metadata",
+  "unknown",
   "thought",
   "tool_call",
   "plan",
@@ -354,6 +355,23 @@ export function useSessionData({
           kind: "metadata",
           timestamp: payload.timestamp,
           content: `Metadata - ${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`,
+          raw: payload.raw,
+        })
+        break
+      }
+      case "unknown": {
+        const source = payload.data.source?.trim() || "provider"
+        const summary = payload.data.summary?.trim() || "Unhandled event"
+        const payloadText = payload.data.payload === undefined
+          ? ""
+          : `: ${typeof payload.data.payload === "string" ? payload.data.payload : JSON.stringify(payload.data.payload)}`
+        pushMessage({
+          id: stableId("unknown"),
+          type: "system",
+          kind: "unknown",
+          timestamp: payload.timestamp,
+          content: `${summary} (${source})${payloadText}`,
+          payload: payload.data,
           raw: payload.raw,
         })
         break

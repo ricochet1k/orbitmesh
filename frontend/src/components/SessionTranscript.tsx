@@ -270,6 +270,8 @@ function formatMessageLabel(type: TranscriptMessage["type"], kind: string) {
       return "Metric"
     case "metadata":
       return "Metadata"
+    case "unknown":
+      return "Unknown"
     case "user_input":
       return "User"
     default:

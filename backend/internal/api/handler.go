@@ -33,19 +33,20 @@ type ProviderTester interface {
 
 // Handler routes REST API requests to the agent executor service.
 type Handler struct {
-	executor        *service.AgentExecutor
-	broadcaster     *service.EventBroadcaster
-	providerStorage *storage.ProviderConfigStorage
-	agentStorage    *storage.AgentConfigStorage
-	projectStorage  *storage.ProjectStorage
-	mcpConfigStore  *storage.MCPGatewayConfigStorage
-	mcpGateway      *mcpws.Gateway
-	providerTester  ProviderTester
-	gitDir          string
-	dockBridge      *DockBridge
-	realtimeHub     *realtime.Hub
-	snapshotter     *realtime.SnapshotProvider
-	dashboard       *service.DashboardSummaryService
+	executor           *service.AgentExecutor
+	broadcaster        *service.EventBroadcaster
+	providerStorage    *storage.ProviderConfigStorage
+	agentStorage       *storage.AgentConfigStorage
+	projectStorage     *storage.ProjectStorage
+	mcpConfigStore     *storage.MCPGatewayConfigStorage
+	mcpGateway         *mcpws.Gateway
+	providerTester     ProviderTester
+	gitDir             string
+	dockBridge         *DockBridge
+	realtimeHub        *realtime.Hub
+	snapshotter        *realtime.SnapshotProvider
+	dashboard          *service.DashboardSummaryService
+	frontendAnomalyLog *frontendAnomalyLogger
 }
 
 // NewHandler creates a Handler backed by the given executor and broadcaster.
@@ -63,6 +64,7 @@ func NewHandler(executor *service.AgentExecutor, broadcaster *service.EventBroad
 	}
 	h.dashboard = service.NewDashboardSummaryService(executor, h.gitDir)
 	h.dashboard.SetAutoScanEnabled(true)
+	h.frontendAnomalyLog = newFrontendAnomalyLogger(h.gitDir)
 	h.startRealtimeBridge()
 	return h
 }
@@ -115,6 +117,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Post("/api/v1/sessions/{id}/extractor/replay", h.replayExtractor)
 	r.Get("/api/v1/providers", h.listProviders)
 	r.Get("/api/v1/providers/usage", h.getProviderUsageInsights)
+	r.Post("/api/v1/frontend/anomalies", h.reportFrontendAnomaly)
 	r.Get("/api/v1/settings/mcp-gateway", h.getMCPGatewaySettings)
 	r.Put("/api/v1/settings/mcp-gateway", h.putMCPGatewaySettings)
 	r.Get("/api/v1/providers/acp/runtime", h.getACPRuntimeStats)

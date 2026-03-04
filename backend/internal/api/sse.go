@@ -254,6 +254,8 @@ func convertEventData(e domain.Event) any {
 		return apiTypes.ErrorData{Message: d.Message, Code: d.Code}
 	case domain.MetadataData:
 		return apiTypes.MetadataData{Key: d.Key, Value: d.Value}
+	case domain.UnknownData:
+		return apiTypes.UnknownData{Source: d.Source, Summary: d.Summary, Payload: d.Payload}
 	case domain.ToolCallData:
 		return apiTypes.ToolCallData{
 			ID:     d.ID,

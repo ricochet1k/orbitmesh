@@ -14,6 +14,7 @@ import SessionMetrics from '../../components/SessionMetrics'
 import SessionTranscript from '../../components/SessionTranscript'
 import SessionComposer from '../../components/SessionComposer'
 import SessionTerminals from '../../components/SessionTerminals'
+import { useUiStabilityProbe } from '../../state/uiStability'
 
 export const Route = createFileRoute('/sessions/$sessionId')({
   component: SessionViewer,
@@ -27,6 +28,9 @@ interface SessionViewerProps {
 }
 
 export default function SessionViewer(props: SessionViewerProps = {}) {
+  const sessionPanelProbe = useUiStabilityProbe('sessions/viewer/transcript-panel', {
+    animationNames: ['rise'],
+  })
   const navigate = useNavigate()
   const routeParams = props.sessionId ? null : Route.useParams()
   const sessionId = () => props.sessionId ?? routeParams?.().sessionId ?? ""
@@ -105,7 +109,6 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   const providerList = sendOptionsState.providerList
   const agentList = sendOptionsState.agentList
   const selectedProvider = sendOptionsState.selectedProvider
-  const selectedProviderId = sendOptionsState.selectedProviderId
   const setSelectedProviderId = sendOptionsState.setSelectedProviderId
   const selectedAgentId = sendOptionsState.selectedAgentId
   const setSelectedAgentId = sendOptionsState.setSelectedAgentId
@@ -434,7 +437,12 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
           </button>
         </div>
 
-        <section class="session-panel ds-panel" classList={{ "session-tab-hidden": mobileTab() !== "transcript" }}>
+        <section
+          class="session-panel ds-panel"
+          classList={{ "session-tab-hidden": mobileTab() !== "transcript" }}
+          ref={sessionPanelProbe}
+          data-ui-stability-id="sessions.viewer.transcript-panel"
+        >
 
             <div class="session-transcript-wrap">
               <div class="panel-header ds-panel-header">

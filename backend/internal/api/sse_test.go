@@ -630,6 +630,14 @@ func TestConvertEventData_AllTypes(t *testing.T) {
 			want:  apiTypes.EventTypeMetadata,
 		},
 		{
+			name: "unknown",
+			event: domain.NewUnknownEvent("s1", domain.UnknownData{
+				Source:  "codex/event/unhandled",
+				Summary: "Unhandled provider notification",
+			}, nil),
+			want: apiTypes.EventTypeUnknown,
+		},
+		{
 			name:  "user_message",
 			event: domain.NewUserMessageEvent("s1", "hello"),
 			want:  apiTypes.EventTypeUserMessage,

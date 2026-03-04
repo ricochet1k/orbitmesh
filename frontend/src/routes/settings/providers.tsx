@@ -9,12 +9,16 @@ import {
   extractUsageLimitSummary,
   findProviderInsight,
 } from '../../utils/providerInsights'
+import { useUiStabilityProbe } from '../../state/uiStability'
 
 export const Route = createFileRoute('/settings/providers')({
   component: ProvidersPage,
 })
 
 function ProvidersPage() {
+  const providerPanelProbe = useUiStabilityProbe('settings/providers/panel', {
+    animationNames: ['rise'],
+  })
   const [providers, { refetch }] = createResource(() => apiClient.listProviders())
   const [usageInsights, { refetch: refetchInsights }] = createResource(() => apiClient.getProviderUsageInsights())
   // null = list view, 'add' = adding new, <id> = editing that provider
@@ -42,7 +46,11 @@ function ProvidersPage() {
   const closeForm = () => setFormMode(null)
 
   return (
-    <section class="placeholder-panel ds-panel">
+    <section
+      class="placeholder-panel ds-panel"
+      ref={providerPanelProbe}
+      data-ui-stability-id="settings.providers.panel"
+    >
       <div class="panel-header ds-panel-header">
         <div>
           <p class="panel-kicker ds-kicker">Configuration</p>

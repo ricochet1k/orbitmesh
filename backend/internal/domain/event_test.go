@@ -15,6 +15,7 @@ func TestEventTypeString(t *testing.T) {
 		{EventTypeMetric, "metric"},
 		{EventTypeError, "error"},
 		{EventTypeMetadata, "metadata"},
+		{EventTypeUnknown, "unknown"},
 		{EventType(999), "unknown"},
 	}
 
@@ -160,5 +161,31 @@ func TestNewMetadataEvent(t *testing.T) {
 	}
 	if valueMap["count"] != 42 {
 		t.Errorf("expected Value['count'] = 42, got %d", valueMap["count"])
+	}
+}
+
+func TestNewUnknownEvent(t *testing.T) {
+	e := NewUnknownEvent("session-123", UnknownData{
+		Source:  "codex/event/unhandled",
+		Summary: "Unhandled provider notification",
+		Payload: map[string]any{"foo": "bar"},
+	}, nil)
+
+	if e.Type != EventTypeUnknown {
+		t.Errorf("expected EventTypeUnknown, got %v", e.Type)
+	}
+	if e.SessionID != "session-123" {
+		t.Errorf("expected SessionID 'session-123', got %q", e.SessionID)
+	}
+
+	data, ok := e.Data.(UnknownData)
+	if !ok {
+		t.Fatalf("expected UnknownData, got %T", e.Data)
+	}
+	if data.Source != "codex/event/unhandled" {
+		t.Errorf("expected source codex/event/unhandled, got %q", data.Source)
+	}
+	if data.Summary == "" {
+		t.Error("expected non-empty summary")
 	}
 }

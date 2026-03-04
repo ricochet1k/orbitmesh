@@ -186,6 +186,12 @@ export interface MetadataData {
   value: unknown;
 }
 
+export interface UnknownData {
+  source?: string;
+  summary?: string;
+  payload?: unknown;
+}
+
 export interface ToolCallData {
   id: string;
   name: string;
@@ -270,6 +276,7 @@ export type SSEEvent =
   | { event_id: number; type: "metric";        timestamp: string; session_id: string; data: MetricData; raw?: unknown }
   | { event_id: number; type: "error";         timestamp: string; session_id: string; data: ErrorData; raw?: unknown }
   | { event_id: number; type: "metadata";      timestamp: string; session_id: string; data: MetadataData; raw?: unknown }
+  | { event_id: number; type: "unknown";       timestamp: string; session_id: string; data: UnknownData; raw?: unknown }
   | { event_id: number; type: "tool_call";     timestamp: string; session_id: string; data: ToolCallData; raw?: unknown }
   | { event_id: number; type: "thought";        timestamp: string; session_id: string; data: ThoughtData; raw?: unknown }
   | { event_id: number; type: "plan";           timestamp: string; session_id: string; data: PlanData; raw?: unknown }
@@ -342,6 +349,17 @@ export interface ErrorResponse {
   error: string;
   code?: string;
   details?: any;
+}
+
+export interface FrontendUIAnomalyRequest {
+  kind: string;
+  probe_id: string;
+  route_path: string;
+  source: string;
+  message: string;
+  animation_name?: string;
+  metadata?: Record<string, any>;
+  detected_at: string;
 }
 
 export interface DockMcpRequest {

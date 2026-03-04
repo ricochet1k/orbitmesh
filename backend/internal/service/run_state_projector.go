@@ -129,6 +129,8 @@ func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.
 		if !isInternalMetadataKey(data.Key) {
 			e.appendSessionMessageRaw(sc.session, domain.MessageKindSystem, formatMetadataContent(data), event.Raw, event.Timestamp)
 		}
+	case domain.UnknownData:
+		e.appendSessionMessageRaw(sc.session, domain.MessageKindSystem, formatUnknownContent(data), event.Raw, event.Timestamp)
 	case domain.MetricData:
 		e.appendSessionMessageRaw(sc.session, domain.MessageKindMetric,
 			fmt.Sprintf("in=%d out=%d requests=%d", data.TokensIn, data.TokensOut, data.RequestCount), event.Raw, event.Timestamp)
@@ -222,6 +224,25 @@ func formatMetadataContent(data domain.MetadataData) string {
 		}
 		return fmt.Sprintf("%s: %s", data.Key, string(b))
 	}
+}
+
+func formatUnknownContent(data domain.UnknownData) string {
+	source := strings.TrimSpace(data.Source)
+	summary := strings.TrimSpace(data.Summary)
+	if source == "" {
+		source = "provider"
+	}
+	if summary == "" {
+		summary = "Unhandled event"
+	}
+	if data.Payload == nil {
+		return fmt.Sprintf("unknown(%s): %s", source, summary)
+	}
+	b, err := json.Marshal(data.Payload)
+	if err != nil {
+		return fmt.Sprintf("unknown(%s): %s", source, summary)
+	}
+	return fmt.Sprintf("unknown(%s): %s %s", source, summary, string(b))
 }
 
 func formatProgressContent(data domain.ProgressData) string {
