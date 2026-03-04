@@ -5,7 +5,7 @@ This document defines the provider-agnostic session event model used by OrbitMes
 Source-of-truth code links:
 - Domain event enum and payloads: `backend/internal/domain/event.go`
 - API event types: `backend/pkg/api/types.go`
-- Frontend SSE union: `frontend/src/types/api.ts`
+- Frontend session stream union: `frontend/src/types/api.ts`
 
 If you add/change event types, update all three files and this document in the same PR.
 

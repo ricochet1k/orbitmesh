@@ -7,9 +7,6 @@ import type {
 } from "../types/api"
 import { parseSSEEvent } from "../types/api"
 import { apiClient } from "../api/client"
-import { startEventStream } from "../utils/eventStream"
-import { TIMEOUTS } from "../constants/timeouts"
-import type { StreamOptions } from "./useSessionStream"
 import { realtimeClient } from "../realtime/client"
 import type {
   ServerEnvelope,
@@ -36,11 +33,6 @@ export interface SessionDataOptions {
    * true (default) = open stream and fetch history.
    */
   canInspect?: Accessor<boolean | null>
-  eventsUrl: Accessor<string>
-  streamOptions?: Pick<
-    StreamOptions,
-    "connectionTimeoutMs" | "preflight" | "trackHeartbeat" | "heartbeatTimeoutMs"
-  >
   onStatusChange?: (state: SessionState) => void
   onSessionRefetchNeeded?: () => void
 }
@@ -60,7 +52,7 @@ export interface SessionData {
 
   // Stream
   streamStatus: Accessor<StreamStatus>
-  /** Last parsed SSE event (dock-specific UI state can read from here). */
+  /** Last parsed stream event (dock-specific UI state can read from here). */
   lastEvent: Accessor<ReturnType<typeof parseSSEEvent>>
   /** Session/provider metadata derived from stream metadata events. */
   sessionIntel: Accessor<SessionStreamIntel>
@@ -104,33 +96,11 @@ export interface SessionStreamIntel {
   initializeResponse?: Record<string, unknown>
 }
 
-// ── Stream event types ────────────────────────────────────────────────────────
-
-const STREAM_EVENT_TYPES = [
-  "status_change",
-  "output",
-  "metric",
-  "error",
-  "metadata",
-  "unknown",
-  "thought",
-  "tool_call",
-  "plan",
-  "user_message",
-  "system_message",
-  "progress",
-  "resource_usage",
-  "action_request",
-  "artifact_update",
-] as const
-
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useSessionData({
   sessionId,
   canInspect = () => true,
-  eventsUrl,
-  streamOptions = {},
   onStatusChange,
   onSessionRefetchNeeded,
 }: SessionDataOptions): SessionData {
@@ -709,125 +679,56 @@ export function useSessionData({
     })
 
     // ── Start stream ───────────────────────────────────────────────────────
-    const prefersRealtime = typeof window !== "undefined" && typeof WebSocket !== "undefined"
-    let closeStream = () => { }
-
-    if (prefersRealtime) {
-      const topic = `sessions.activity:${id}`
-      const unsubscribeStatus = realtimeClient.onStatus((status) => {
+    const topic = `sessions.activity:${id}`
+    const unsubscribeStatus = realtimeClient.onStatus((status) => {
+      setStreamStatus((prev) => {
         if (status === "open") {
-          setStreamStatus("live")
-          return
+          return "live"
         }
         if (status === "connecting") {
-          setStreamStatus("connecting")
-          return
-        }
-        setStreamStatus("disconnected")
-      })
-      const unsubscribeTopic = realtimeClient.subscribe(topic, (message: ServerEnvelope) => {
-        if (message.type === "snapshot") {
-          if (historySettled) {
-            applyRealtimeSnapshot(message.payload as SessionActivitySnapshot)
-          } else {
-            pendingRealtimeSnapshot = message.payload as SessionActivitySnapshot
+          if (prev === "live" || prev === "reconnecting" || prev === "disconnected") {
+            return "reconnecting"
           }
-          return
+          return "connecting"
         }
-        if (message.type !== "event") return
-        const payload = message.payload as SessionActivityEvent
-        const event = new MessageEvent("message", { data: JSON.stringify(payload) })
-        if (!historySettled) {
-          buffer.push({ type: payload.type, event })
-          return
+        if (prev === "idle" || prev === "error") {
+          return prev
         }
-        applyRealtimeEvent(payload)
+        return "reconnecting"
       })
-      const unsubscribeState = realtimeClient.subscribe("sessions.state", (message: ServerEnvelope) => {
-        if (message.type !== "event") return
-        const stateEvent = message.payload as SessionStateEvent
-        if (stateEvent.session_id !== id) return
-        onStatusChange?.(stateEvent.derived_state as SessionState)
-        if (stateEvent.derived_state !== "running") {
-          onSessionRefetchNeeded?.()
+    })
+    const unsubscribeTopic = realtimeClient.subscribe(topic, (message: ServerEnvelope) => {
+      if (message.type === "snapshot") {
+        if (historySettled) {
+          applyRealtimeSnapshot(message.payload as SessionActivitySnapshot)
+        } else {
+          pendingRealtimeSnapshot = message.payload as SessionActivitySnapshot
         }
-      })
-      closeStream = () => {
-        unsubscribeTopic()
-        unsubscribeState()
-        unsubscribeStatus()
+        return
       }
-    } else {
-      let lastHeartbeatAt: number | null = null
-      let heartbeatInterval: number | null = null
+      if (message.type !== "event") return
+      const payload = message.payload as SessionActivityEvent
+      const event = new MessageEvent("message", { data: JSON.stringify(payload) })
+      if (!historySettled) {
+        buffer.push({ type: payload.type, event })
+        return
+      }
+      applyRealtimeEvent(payload)
+    })
+    const unsubscribeState = realtimeClient.subscribe("sessions.state", (message: ServerEnvelope) => {
+      if (message.type !== "event") return
+      const stateEvent = message.payload as SessionStateEvent
+      if (stateEvent.session_id !== id) return
+      onStatusChange?.(stateEvent.derived_state as SessionState)
+      if (stateEvent.derived_state !== "running") {
+        onSessionRefetchNeeded?.()
+      }
+    })
 
-      if (streamOptions.trackHeartbeat) {
-        const timeoutMs = streamOptions.heartbeatTimeoutMs ?? TIMEOUTS.HEARTBEAT_TIMEOUT_MS
-        const checkMs = TIMEOUTS.HEARTBEAT_CHECK_MS
-        heartbeatInterval = window.setInterval(() => {
-          if (!lastHeartbeatAt) return
-          if (Date.now() - lastHeartbeatAt > timeoutMs) {
-            setStreamStatus("disconnected")
-          }
-        }, checkMs)
-      }
-
-      const stream = startEventStream(
-        eventsUrl(),
-        {
-          onStatus: (status) => {
-            if (status === "connecting") {
-              setStreamStatus("connecting")
-            } else if (status === "backoff") {
-              setStreamStatus("reconnecting")
-            } else if (status === "not_found") {
-              setStreamStatus("error")
-            }
-          },
-          onOpen: () => {
-            setStreamStatus("live")
-          },
-          onTimeout: () => {
-            setStreamStatus("error")
-          },
-          onError: (httpStatus) => {
-            if (httpStatus === 404) {
-              setStreamStatus("error")
-              return
-            }
-            if (streamStatus() === "connecting") {
-              setStreamStatus("error")
-            } else {
-              setStreamStatus("disconnected")
-            }
-          },
-          onEventSource: (source) => {
-            for (const type of STREAM_EVENT_TYPES) {
-              source.addEventListener(type, (rawEvent) => {
-                const event = rawEvent as MessageEvent
-                if (streamStatus() !== "live") setStreamStatus("live")
-                if (!historySettled) {
-                  buffer.push({ type, event })
-                } else {
-                  applyStreamEvent(type, event)
-                }
-              })
-            }
-            source.addEventListener("heartbeat", () => {
-              lastHeartbeatAt = Date.now()
-              if (streamStatus() !== "live") setStreamStatus("live")
-            })
-          },
-        },
-        {
-          connectionTimeoutMs: streamOptions.connectionTimeoutMs ?? TIMEOUTS.STREAM_CONNECTION_MS,
-          preflight: streamOptions.preflight,
-        },
-      )
-      closeStream = () => {
-        stream.close()
-        if (heartbeatInterval !== null) window.clearInterval(heartbeatInterval)
-      }
+    const closeStream = () => {
+      unsubscribeTopic()
+      unsubscribeState()
+      unsubscribeStatus()
     }
 
     onCleanup(() => {

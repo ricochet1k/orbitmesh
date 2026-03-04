@@ -84,13 +84,6 @@ async function bridgeBrowserApiToBackend(page: Page): Promise<void> {
     return /Target page, context or browser has been closed|route is already handled/i.test(error.message)
   }
 
-  await page.addInitScript(() => {
-    Object.defineProperty(window, "WebSocket", {
-      value: undefined,
-      configurable: true,
-    })
-  })
-
   await page.route("**/api/**", async (route) => {
     try {
       const requestURL = new URL(route.request().url())
@@ -116,11 +109,6 @@ async function bridgeBrowserApiToBackend(page: Page): Promise<void> {
       }
 
       const targetURL = new URL(`${requestURL.pathname}${requestURL.search}`, backendURL).toString()
-
-      if (requestURL.pathname.endsWith("/events")) {
-        await route.continue({ url: targetURL })
-        return
-      }
 
       const response = await route.fetch({ url: targetURL })
       await route.fulfill({ response })

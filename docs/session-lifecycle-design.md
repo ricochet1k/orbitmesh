@@ -119,7 +119,7 @@ The current implementation has the following gaps relative to this design:
 
 ### Persistence gaps
 
-- Only session metadata is persisted, not the full message history (which is reconstructed from SSE event logs). The message history must be a first-class persisted artifact.
+- Only session metadata is persisted, not the full message history (which is reconstructed from live event logs). The message history must be a first-class persisted artifact.
 - Provider-level snapshots (ACP only) are the closest thing to the suspension context described here. This mechanism should be generalized to all providers and tied to the `suspended` state.
 
 ### Start/Stop gaps
@@ -140,7 +140,7 @@ DELETE /api/sessions/{id}                Delete session permanently
 POST   /api/sessions/{id}/messages       Send a message (starts a run if idle)
                                          Body may include provider_id/model override
 GET    /api/sessions/{id}/messages       Get message history
-GET    /api/sessions/{id}/events         SSE stream of live events
+GET    /api/realtime                     WebSocket stream of live events
 
 POST   /api/sessions/{id}/cancel         Cancel the current run (→ idle)
 POST   /api/sessions/{id}/resume         Deliver a suspended tool result (→ running)

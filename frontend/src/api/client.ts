@@ -32,8 +32,6 @@ export const apiClient = {
   sendSessionInput: sessionApi.sendSessionInput,
   respondSessionAction: sessionApi.respondSessionAction,
   sendMessage: sessionApi.sendMessage,
-  getEventsUrl: sessionApi.getEventsUrl,
-  getGlobalSessionEventsUrl: sessionApi.getGlobalSessionEventsUrl,
   pollDockMcp: sessionApi.pollDockMcp,
   respondDockMcp: sessionApi.respondDockMcp,
 

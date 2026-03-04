@@ -2,51 +2,32 @@ import { render, screen, waitFor } from "@solidjs/testing-library";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import AgentDock from "./AgentDock";
 import { apiClient } from "../api/client";
+import type { ServerEnvelope } from "../types/generated/realtime";
 
 const mockNavigate = vi.fn();
+let realtimeHandlers: Map<string, (message: ServerEnvelope) => void> = new Map();
+let realtimeStatusHandler: ((status: "connecting" | "open" | "closed") => void) | undefined;
 
 vi.mock("@tanstack/solid-router", () => ({
   useNavigate: () => mockNavigate,
 }));
 
-type EventListener = (event: MessageEvent) => void;
-
-const eventSources: MockEventSource[] = [];
-
-class MockEventSource {
-  url: string;
-  listeners: Record<string, EventListener[]> = {};
-  onopen: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-
-  constructor(url: string) {
-    this.url = url;
-    eventSources.push(this);
-  }
-
-  addEventListener(type: string, listener: EventListener) {
-    if (!this.listeners[type]) {
-      this.listeners[type] = [];
-    }
-    this.listeners[type].push(listener);
-  }
-
-  removeEventListener(type: string, listener: EventListener) {
-    if (!this.listeners[type]) return;
-    this.listeners[type] = this.listeners[type].filter((entry) => entry !== listener);
-  }
-
-  close() {}
-
-  emit(type: string, payload: unknown = {}) {
-    if (type === "error" && this.onerror) {
-      this.onerror();
-      return;
-    }
-    const event = { data: JSON.stringify(payload) } as MessageEvent;
-    (this.listeners[type] || []).forEach((listener) => listener(event));
-  }
-}
+vi.mock("../realtime/client", () => ({
+  realtimeClient: {
+    subscribe: vi.fn((topic: string, handler: (message: ServerEnvelope) => void) => {
+      realtimeHandlers.set(topic, handler);
+      return () => {
+        realtimeHandlers.delete(topic);
+      };
+    }),
+    onStatus: vi.fn((handler: (status: "connecting" | "open" | "closed") => void) => {
+      realtimeStatusHandler = handler;
+      return () => {
+        realtimeStatusHandler = undefined;
+      };
+    }),
+  },
+}));
 
 vi.mock("../api/client", () => ({
   apiClient: {
@@ -59,13 +40,13 @@ vi.mock("../api/client", () => ({
     createDockSession: vi.fn(),
     pollDockMcp: vi.fn(),
     respondDockMcp: vi.fn(),
-    getEventsUrl: vi.fn(),
     pauseSession: vi.fn(),
     resumeSession: vi.fn(),
     stopSession: vi.fn(),
     cancelSession: vi.fn(),
     sendSessionInput: vi.fn(),
     sendMessage: vi.fn(),
+    getSessionMessagesPage: vi.fn(),
     getActivityEntries: vi.fn(),
     listTerminals: vi.fn(),
   },
@@ -74,17 +55,11 @@ vi.mock("../api/client", () => ({
 describe("AgentDock", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    eventSources.splice(0, eventSources.length);
-    vi.stubGlobal("EventSource", MockEventSource as never);
+    realtimeHandlers = new Map();
+    realtimeStatusHandler = undefined;
     vi.stubGlobal("crypto", {
       randomUUID: () => "123e4567-e89b-12d3-a456-426614174000",
     });
-    vi.stubGlobal("WebSocket", undefined as never);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      body: { cancel: vi.fn().mockResolvedValue(undefined) },
-    }));
     (apiClient.listSessions as any).mockResolvedValue({ sessions: [] });
     (apiClient.listProviders as any).mockResolvedValue({ providers: [] });
     (apiClient.getProviderUsageInsights as any).mockResolvedValue({ providers: [] });
@@ -100,6 +75,7 @@ describe("AgentDock", () => {
     });
     (apiClient.pollDockMcp as any).mockResolvedValue(null);
     (apiClient.respondDockMcp as any).mockResolvedValue(undefined);
+    (apiClient.getSessionMessagesPage as any).mockResolvedValue({ messages: [], next_before: null });
     (apiClient.getActivityEntries as any).mockResolvedValue({ entries: [], next_cursor: null });
     (apiClient.listTerminals as any).mockResolvedValue({ terminals: [] });
   });
@@ -118,7 +94,6 @@ describe("AgentDock", () => {
       role: "developer",
       can_initiate_bulk_actions: true,
     });
-    (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1");
 
     render(() => <AgentDock sessionId="session-1" />);
 
@@ -143,16 +118,20 @@ describe("AgentDock", () => {
       role: "developer",
       can_initiate_bulk_actions: false,
     });
-    (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1");
 
     render(() => <AgentDock sessionId="session-1" />);
+    realtimeStatusHandler?.("open");
+    await waitFor(() => expect(screen.queryByTestId("agent-dock-loading")).toBeNull());
 
-    await waitFor(() => expect(eventSources.length).toBe(1));
-    eventSources[0]?.emit("output", {
-      type: "output",
-      timestamp: "2026-02-05T12:00:05Z",
-      session_id: "session-1",
-      data: { content: "Ready" },
+    realtimeHandlers.get("sessions.activity:session-1")?.({
+      type: "event",
+      topic: "sessions.activity:session-1",
+      payload: {
+        type: "output",
+        timestamp: "2026-02-05T12:00:05Z",
+        session_id: "session-1",
+        data: { content: "Ready" },
+      },
     });
 
     screen.getByTestId("agent-dock-toggle").click();
@@ -180,17 +159,21 @@ describe("AgentDock", () => {
       role: "developer",
       can_initiate_bulk_actions: true,
     });
-    (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1");
     (apiClient.cancelSession as any).mockRejectedValue(new Error("Cancel failed"));
 
     render(() => <AgentDock sessionId="session-1" />);
+    realtimeStatusHandler?.("open");
+    await waitFor(() => expect(screen.queryByTestId("agent-dock-loading")).toBeNull());
 
-    await waitFor(() => expect(eventSources.length).toBe(1));
-    eventSources[0]?.emit("output", {
-      type: "output",
-      timestamp: "2026-02-05T12:00:05Z",
-      session_id: "session-1",
-      data: { content: "Ready" },
+    realtimeHandlers.get("sessions.activity:session-1")?.({
+      type: "event",
+      topic: "sessions.activity:session-1",
+      payload: {
+        type: "output",
+        timestamp: "2026-02-05T12:00:05Z",
+        session_id: "session-1",
+        data: { content: "Ready" },
+      },
     });
 
     screen.getByTestId("agent-dock-toggle").click();
@@ -224,16 +207,20 @@ describe("AgentDock", () => {
       role: "developer",
       can_initiate_bulk_actions: true,
     });
-    (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1");
 
     render(() => <AgentDock sessionId="session-1" />);
+    realtimeStatusHandler?.("open");
+    await waitFor(() => expect(screen.queryByTestId("agent-dock-loading")).toBeNull());
 
-    await waitFor(() => expect(eventSources.length).toBe(1));
-    eventSources[0]?.emit("output", {
-      type: "output",
-      timestamp: "2026-02-05T12:00:05Z",
-      session_id: "session-1",
-      data: { content: "Ready" },
+    realtimeHandlers.get("sessions.activity:session-1")?.({
+      type: "event",
+      topic: "sessions.activity:session-1",
+      payload: {
+        type: "output",
+        timestamp: "2026-02-05T12:00:05Z",
+        session_id: "session-1",
+        data: { content: "Ready" },
+      },
     });
 
     screen.getByTestId("agent-dock-toggle").click();
@@ -271,9 +258,9 @@ describe("AgentDock", () => {
       updated_at: "2026-02-05T12:00:00Z",
       current_task: "Dock",
     });
-    (apiClient.getEventsUrl as any).mockReturnValue("/events/dock-session-1");
-
     render(() => <AgentDock />);
+    realtimeStatusHandler?.("open");
+    await waitFor(() => expect(screen.queryByTestId("agent-dock-loading")).toBeNull());
 
     screen.getByTestId("agent-dock-toggle").click();
 
@@ -309,14 +296,13 @@ describe("AgentDock", () => {
       role: "developer",
       can_initiate_bulk_actions: false,
     });
-    (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1");
 
     render(() => <AgentDock sessionId="session-1" />);
-
-    await waitFor(() => expect(eventSources.length).toBe(1));
+    realtimeStatusHandler?.("open");
+    await waitFor(() => expect(screen.queryByTestId("agent-dock-loading")).toBeNull());
 
     screen.getByTestId("agent-dock-toggle").click();
-    eventSources[0]?.emit("error");
+    realtimeStatusHandler?.("closed");
 
     // Errors are now surfaced as inline text in the header, not a full error panel
     await waitFor(() => {
@@ -339,26 +325,28 @@ describe("AgentDock", () => {
       role: "developer",
       can_initiate_bulk_actions: true,
     });
-    (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1");
 
     render(() => <AgentDock sessionId="session-1" />);
+    realtimeStatusHandler?.("open");
+    await waitFor(() => expect(screen.queryByTestId("agent-dock-loading")).toBeNull());
 
-    await waitFor(() => expect(eventSources.length).toBe(1));
     screen.getByTestId("agent-dock-toggle").click();
 
-    eventSources[0]?.emit("tool_call", {
-      type: "tool_call",
-      event_id: 50,
-      timestamp: "2026-02-05T12:00:05Z",
-      session_id: "session-1",
-      data: {
-        id: "todo-1",
-        name: "todowrite",
-        status: "done",
-        input: {
-          todos: [
-            { content: "Implement feature", status: "completed" },
-          ],
+    realtimeHandlers.get("sessions.activity:session-1")?.({
+      type: "event",
+      topic: "sessions.activity:session-1",
+      payload: {
+        type: "tool_call",
+        event_id: 50,
+        timestamp: "2026-02-05T12:00:05Z",
+        session_id: "session-1",
+        data: {
+          id: "todo-1",
+          name: "todowrite",
+          status: "done",
+          input: {
+            todos: [{ content: "Implement feature", status: "completed" }],
+          },
         },
       },
     });

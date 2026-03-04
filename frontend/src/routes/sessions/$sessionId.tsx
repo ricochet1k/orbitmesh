@@ -4,8 +4,6 @@ import { apiClient } from '../../api/client'
 import { listProviders } from '../../api/providers'
 import type { SessionState } from '../../types/api'
 import { dockSessionId, setDockSessionId } from '../../state/agentDock'
-import { isTestEnv } from '../../utils/env'
-import { TIMEOUTS } from '../../constants/timeouts'
 import { useSessionActions } from '../../hooks/useSessionActions'
 import { useSessionData } from '../../hooks/useSessionData'
 import { useSessionSendOptions } from '../../hooks/useSessionSendOptions'
@@ -66,12 +64,6 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
   const data = useSessionData({
     sessionId,
     canInspect,
-    eventsUrl: () => apiClient.getEventsUrl(sessionId()),
-    streamOptions: {
-      connectionTimeoutMs: TIMEOUTS.STREAM_CONNECTION_MS,
-      preflight: !isTestEnv(),
-      trackHeartbeat: true,
-    },
     onStatusChange: (state) => setStreamState(state),
     onSessionRefetchNeeded: () => void refetchSession(),
   })

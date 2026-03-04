@@ -12,11 +12,13 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/gorilla/websocket"
 	"github.com/ricochet1k/orbitmesh/internal/provider/pty"
 	"github.com/ricochet1k/orbitmesh/internal/service"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
 	apiTypes "github.com/ricochet1k/orbitmesh/pkg/api"
+	realtimeTypes "github.com/ricochet1k/orbitmesh/pkg/realtime"
 )
 
 // TestSessionCreationAndEvents tests the workflow of creating a session and receiving events.
@@ -173,43 +175,38 @@ func TestSessionCreationAndEvents(t *testing.T) {
 		t.Logf("  - WorkingDir: %s", statusResp.WorkingDir)
 	})
 
-	t.Run("Step 4: Connect to SSE stream and receive events", func(t *testing.T) {
+	t.Run("Step 4: Connect to realtime websocket and receive snapshot", func(t *testing.T) {
 
 		// Give the session time to become ready
 		time.Sleep(500 * time.Millisecond)
 
-		resp, err := http.Get(server.URL + "/api/sessions/" + sessionID + "/events")
+		wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/realtime"
+		conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 		if err != nil {
-			t.Fatalf("Failed to GET events: %v", err)
+			t.Fatalf("Failed to dial realtime websocket: %v", err)
 		}
-		defer resp.Body.Close()
+		defer conn.Close()
 
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			t.Fatalf("Expected 200, got %d: %s", resp.StatusCode, string(body))
+		if err := conn.WriteJSON(realtimeTypes.ClientEnvelope{
+			Type:   realtimeTypes.ClientMessageTypeSubscribe,
+			Topics: []string{"sessions.activity:" + sessionID},
+		}); err != nil {
+			t.Fatalf("Failed to subscribe: %v", err)
 		}
 
-		// Read first few lines
-		scanner := io.ReadCloser(resp.Body)
-		buf := make([]byte, 4096)
-
-		// Read some data (this will timeout or get interrupted)
-		time.AfterFunc(2*time.Second, func() {
-			scanner.Close()
-		})
-
-		n, _ := scanner.Read(buf)
-		if n > 0 {
-			output := string(buf[:n])
-			if strings.Contains(output, "heartbeat") || strings.Contains(output, "event:") {
-				t.Logf("✓ SSE stream connected and events received")
-				t.Logf("  Sample: %s", strings.Split(output, "\n")[0])
-			} else {
-				t.Logf("✓ SSE stream connected (got data but no event markers)")
-			}
-		} else {
-			t.Logf("✓ SSE stream connected (connection established)")
+		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		var snapshot realtimeTypes.ServerEnvelope
+		if err := conn.ReadJSON(&snapshot); err != nil {
+			t.Fatalf("Failed to read snapshot: %v", err)
 		}
+		if snapshot.Type != realtimeTypes.ServerMessageTypeSnapshot {
+			t.Fatalf("Expected snapshot message, got %q", snapshot.Type)
+		}
+		if snapshot.Topic != "sessions.activity:"+sessionID {
+			t.Fatalf("Expected topic sessions.activity:%s, got %q", sessionID, snapshot.Topic)
+		}
+
+		t.Logf("✓ Realtime websocket connected and snapshot received")
 	})
 }
 

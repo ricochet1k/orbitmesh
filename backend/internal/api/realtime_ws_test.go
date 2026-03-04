@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -92,6 +93,32 @@ func TestRealtimeWebSocket_SubscribeGetsSnapshotThenEvent(t *testing.T) {
 	}
 	if stateEvent.SessionID != sessionA {
 		t.Fatalf("event session_id = %q, want %q", stateEvent.SessionID, sessionA)
+	}
+}
+
+func TestSessionSSEEndpointsRemoved(t *testing.T) {
+	env := newTestEnv(t)
+	srv := httptest.NewServer(env.router())
+	defer srv.Close()
+
+	sessionID := createSessionViaHTTP(t, srv.URL)
+
+	respSession, err := http.Get(srv.URL + "/api/sessions/" + sessionID + "/events")
+	if err != nil {
+		t.Fatalf("request session events endpoint: %v", err)
+	}
+	defer respSession.Body.Close()
+	if respSession.StatusCode != http.StatusNotFound {
+		t.Fatalf("session events status = %d, want 404", respSession.StatusCode)
+	}
+
+	respGlobal, err := http.Get(srv.URL + "/api/sessions/events")
+	if err != nil {
+		t.Fatalf("request global events endpoint: %v", err)
+	}
+	defer respGlobal.Body.Close()
+	if respGlobal.StatusCode != http.StatusNotFound {
+		t.Fatalf("global events status = %d, want 404", respGlobal.StatusCode)
 	}
 }
 

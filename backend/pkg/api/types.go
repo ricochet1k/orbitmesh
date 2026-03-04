@@ -185,9 +185,8 @@ const (
 )
 
 type Event struct {
-	// EventID is the monotonic SSE event sequence number. Clients should send
-	// this back as Last-Event-ID on reconnect to resume from where they left
-	// off. Zero means the event has no persistent ID (e.g. heartbeats).
+	// EventID is the monotonic stream event sequence number emitted by the
+	// backend event pipeline. Zero means the event has no persistent ID.
 	EventID   int64           `json:"event_id,omitempty"`
 	Type      EventType       `json:"type"`
 	Timestamp time.Time       `json:"timestamp"`
@@ -319,7 +318,7 @@ type ActivityEntry struct {
 	Rev       int            `json:"rev"`
 	Open      bool           `json:"open"`
 	Data      map[string]any `json:"data,omitempty"`
-	// EventID is the monotonic SSE event_id of the stream event that created
+	// EventID is the monotonic event_id of the stream event that created
 	// this entry. Zero means the entry predates event-ID tracking (safe to
 	// treat as "no watermark"). Added for frontend deduplication.
 	EventID int64 `json:"event_id,omitempty"`

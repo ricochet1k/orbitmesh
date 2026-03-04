@@ -81,8 +81,9 @@ curl -s http://localhost:8080/api/v1/commits/<sha> | jq
 # List active sessions
 curl -s http://localhost:8080/api/sessions | jq
 
-# Stream session events (SSE)
-curl -N http://localhost:8080/api/sessions/<session-id>/events
+# Realtime session feed (WebSocket)
+# Example subscribe payload: {"type":"subscribe","topics":["sessions.activity:<session-id>"]}
+wscat -c ws://localhost:8080/api/realtime
 
 # Pause or resume a session
 curl -X POST http://localhost:8080/api/sessions/<session-id>/pause

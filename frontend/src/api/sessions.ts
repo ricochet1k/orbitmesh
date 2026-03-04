@@ -244,18 +244,6 @@ export async function sendMessage(
   if (!resp.ok) throw new Error(await readErrorMessage(resp));
 }
 
-export function getEventsUrl(id: string): string {
-  const suffix = import.meta.env?.DEV ? "?include_raw=1" : "";
-  return `${BASE_URL}/sessions/${id}/events${suffix}`;
-}
-
-export function getGlobalSessionEventsUrl(lastEventId?: number): string {
-  if (lastEventId && lastEventId > 0) {
-    return `${BASE_URL}/sessions/events?last_event_id=${encodeURIComponent(String(lastEventId))}`;
-  }
-  return `${BASE_URL}/sessions/events`;
-}
-
 export async function pollDockMcp(
   id: string,
   options: { timeoutMs?: number } = {},

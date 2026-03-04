@@ -12,7 +12,6 @@ import { useNavigate } from "@tanstack/solid-router"
 import { apiClient } from "../api/client"
 import type { SessionState } from "../types/api"
 import { clearDockSessionId, dockSessionId } from "../state/agentDock"
-import { TIMEOUTS } from "../constants/timeouts"
 import { useSessionData } from "../hooks/useSessionData"
 import { useSessionActions } from "../hooks/useSessionActions"
 import { useSessionSendOptions } from "../hooks/useSessionSendOptions"
@@ -76,11 +75,6 @@ export default function AgentDock(props: AgentDockProps) {
   // Session data hook — owns the full stream + history lifecycle
   const data = useSessionData({
     sessionId,
-    eventsUrl: () => apiClient.getEventsUrl(sessionId()),
-    streamOptions: {
-      connectionTimeoutMs: TIMEOUTS.DOCK_STREAM_CONNECTION_MS,
-      preflight: false,
-    },
     onStatusChange: (state) => setSessionStateOverride(state),
     onSessionRefetchNeeded: () => void refetchSession(),
   })

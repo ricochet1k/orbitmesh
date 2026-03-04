@@ -36,36 +36,6 @@ vi.mock("../realtime/client", () => ({
   },
 }))
 
-type EventListener = (event: MessageEvent) => void
-
-const eventSources: MockEventSource[] = []
-
-class MockEventSource {
-  url: string
-  listeners: Record<string, EventListener[]> = {}
-  onopen: (() => void) | null = null
-  onerror: (() => void) | null = null
-
-  constructor(url: string) {
-    this.url = url
-    eventSources.push(this)
-  }
-
-  addEventListener(type: string, listener: EventListener) {
-    if (!this.listeners[type]) {
-      this.listeners[type] = []
-    }
-    this.listeners[type].push(listener)
-  }
-
-  close() { }
-
-  emit(type: string, payload: unknown) {
-    const event = { data: JSON.stringify(payload) } as MessageEvent
-      ; (this.listeners[type] || []).forEach((listener) => listener(event))
-  }
-}
-
 vi.mock("../api/client", () => ({
   apiClient: {
     getSession: vi.fn(),
@@ -74,7 +44,6 @@ vi.mock("../api/client", () => ({
     stopSession: vi.fn(),
     cancelSession: vi.fn(),
     getSessionMessagesPage: vi.fn(),
-    getEventsUrl: vi.fn(),
     getPermissions: vi.fn(),
     getProviderUsageInsights: vi.fn(),
     listAgents: vi.fn(),
@@ -101,18 +70,14 @@ vi.mock("../api/providers", () => ({
 describe("SessionViewer", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    eventSources.splice(0, eventSources.length)
     realtimeHandlers.clear()
     realtimeStatusHandler = undefined
-    vi.stubGlobal("EventSource", MockEventSource as never)
     vi.stubGlobal("atob", (value: string) => value)
     vi.stubGlobal("btoa", (value: string) => value)
-    vi.stubGlobal("WebSocket", undefined as never)
     vi.stubGlobal("crypto", {
       randomUUID: () => "123e4567-e89b-12d3-a456-426614174000",
     })
-       ; (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1")
-       ; (apiClient.getSessionMessagesPage as any).mockResolvedValue({ messages: [], next_before: null })
+        ; (apiClient.getSessionMessagesPage as any).mockResolvedValue({ messages: [], next_before: null })
        ; (apiClient.getPermissions as any).mockResolvedValue(defaultPermissions)
        ; (apiClient.getProviderUsageInsights as any).mockResolvedValue({ providers: [] })
        ; (apiClient.listAgents as any).mockResolvedValue({ agents: [] })
@@ -138,15 +103,19 @@ describe("SessionViewer", () => {
 
     render(() => <SessionViewer sessionId="session-1" />)
 
-    await waitFor(() => expect(eventSources.length).toBeGreaterThan(0))
+    realtimeStatusHandler?.("open")
     expect(await screen.findByText("Initial output")).toBeDefined()
 
-    eventSources[0]?.emit("output", {
-      type: "output",
-      event_id: 2,
-      timestamp: "2026-02-05T12:02:00Z",
-      session_id: "session-1",
-      data: { content: "Streaming output" },
+    realtimeHandlers.get("sessions.activity:session-1")?.({
+      type: "event",
+      topic: "sessions.activity:session-1",
+      payload: {
+        type: "output",
+        event_id: 2,
+        timestamp: "2026-02-05T12:02:00Z",
+        session_id: "session-1",
+        data: { content: "Streaming output" },
+      },
     })
 
     expect(await screen.findByText("Streaming output")).toBeDefined()
@@ -251,27 +220,35 @@ describe("SessionViewer", () => {
 
     render(() => <SessionViewer sessionId="session-1" />)
 
-    await waitFor(() => expect(eventSources.length).toBeGreaterThan(0))
+    await waitFor(() => expect(realtimeHandlers.has("sessions.activity:session-1")).toBe(true))
     await waitFor(() => expect(screen.getByTestId("session-state-badge").textContent).toContain("running"))
 
     // Emit a tool_call event (running) — uses stable id "tool:tool-act-1"
-    eventSources[0]?.emit("tool_call", {
-      type: "tool_call",
-      event_id: 10,
-      timestamp: "2026-02-05T12:02:00Z",
-      session_id: "session-1",
-      data: { id: "tool-act-1", name: "bash", status: "running", title: "First entry" },
+    realtimeHandlers.get("sessions.activity:session-1")?.({
+      type: "event",
+      topic: "sessions.activity:session-1",
+      payload: {
+        type: "tool_call",
+        event_id: 10,
+        timestamp: "2026-02-05T12:02:00Z",
+        session_id: "session-1",
+        data: { id: "tool-act-1", name: "bash", status: "running", title: "First entry" },
+      },
     })
 
     expect(await screen.findByText("First entry")).toBeDefined()
 
     // Emit updated tool_call (completed) with same id — should replace, not duplicate
-    eventSources[0]?.emit("tool_call", {
-      type: "tool_call",
-      event_id: 11,
-      timestamp: "2026-02-05T12:02:05Z",
-      session_id: "session-1",
-      data: { id: "tool-act-1", name: "bash", status: "done", title: "Updated entry", output: "done" },
+    realtimeHandlers.get("sessions.activity:session-1")?.({
+      type: "event",
+      topic: "sessions.activity:session-1",
+      payload: {
+        type: "tool_call",
+        event_id: 11,
+        timestamp: "2026-02-05T12:02:05Z",
+        session_id: "session-1",
+        data: { id: "tool-act-1", name: "bash", status: "done", title: "Updated entry", output: "done" },
+      },
     })
 
     expect(await screen.findByText("Updated entry: done")).toBeDefined()
@@ -283,14 +260,18 @@ describe("SessionViewer", () => {
 
     render(() => <SessionViewer sessionId="session-1" />)
 
-    await waitFor(() => expect(eventSources.length).toBeGreaterThan(0))
+    await waitFor(() => expect(realtimeHandlers.has("sessions.activity:session-1")).toBe(true))
 
-    eventSources[0]?.emit("system_message", {
-      type: "system_message",
-      event_id: 12,
-      timestamp: "2026-02-05T12:02:01Z",
-      session_id: "session-1",
-      data: { content: "Claude status: warming up" },
+    realtimeHandlers.get("sessions.activity:session-1")?.({
+      type: "event",
+      topic: "sessions.activity:session-1",
+      payload: {
+        type: "system_message",
+        event_id: 12,
+        timestamp: "2026-02-05T12:02:01Z",
+        session_id: "session-1",
+        data: { content: "Claude status: warming up" },
+      },
     })
 
     expect(await screen.findByText("Claude status: warming up")).toBeDefined()
@@ -312,22 +293,26 @@ describe("SessionViewer", () => {
 
     render(() => <SessionViewer sessionId="session-1" />)
 
-    await waitFor(() => expect(eventSources.length).toBeGreaterThan(0))
+    await waitFor(() => expect(realtimeHandlers.has("sessions.activity:session-1")).toBe(true))
 
-    eventSources[0]?.emit("tool_call", {
-      type: "tool_call",
-      event_id: 40,
-      timestamp: "2026-02-05T12:02:00Z",
-      session_id: "session-1",
-      data: {
-        id: "todo-1",
-        name: "todowrite",
-        status: "done",
-        input: {
-          todos: [
-            { content: "Capture events", status: "completed" },
-            { content: "Refine styling", status: "in_progress" },
-          ],
+    realtimeHandlers.get("sessions.activity:session-1")?.({
+      type: "event",
+      topic: "sessions.activity:session-1",
+      payload: {
+        type: "tool_call",
+        event_id: 40,
+        timestamp: "2026-02-05T12:02:00Z",
+        session_id: "session-1",
+        data: {
+          id: "todo-1",
+          name: "todowrite",
+          status: "done",
+          input: {
+            todos: [
+              { content: "Capture events", status: "completed" },
+              { content: "Refine styling", status: "in_progress" },
+            ],
+          },
         },
       },
     })
@@ -343,14 +328,18 @@ describe("SessionViewer", () => {
 
     render(() => <SessionViewer sessionId="session-1" />)
 
-    await waitFor(() => expect(eventSources.length).toBeGreaterThan(0))
+    await waitFor(() => expect(realtimeHandlers.has("sessions.activity:session-1")).toBe(true))
     await waitFor(() => expect(screen.getByTestId("session-state-badge").textContent).toContain("running"))
 
-    eventSources[0]?.emit("output", {
-      type: "output",
-      timestamp: "2026-02-05T12:02:00Z",
-      session_id: "session-1",
-      data: { content: "PTY raw output" },
+    realtimeHandlers.get("sessions.activity:session-1")?.({
+      type: "event",
+      topic: "sessions.activity:session-1",
+      payload: {
+        type: "output",
+        timestamp: "2026-02-05T12:02:00Z",
+        session_id: "session-1",
+        data: { content: "PTY raw output" },
+      },
     })
 
     expect(screen.queryByText("PTY raw output")).toBeNull()
@@ -436,12 +425,8 @@ describe("SessionViewer", () => {
   it("updates state badge when sessions.state WebSocket event arrives", async () => {
     ; (apiClient.getSession as any).mockResolvedValue(baseSession)
 
-    // Enable WebSocket path so the realtime client is used
-    vi.stubGlobal("WebSocket", class MockWebSocket {} as never)
-
     render(() => <SessionViewer sessionId="session-1" />)
 
-    // With WebSocket mode there's no EventSource; wait for realtime subscription
     await waitFor(() => expect(realtimeHandlers.size).toBeGreaterThan(0))
     // Initial state comes from the session resource
     await waitFor(() => expect(screen.getByTestId("session-state-badge").textContent).toContain("running"))

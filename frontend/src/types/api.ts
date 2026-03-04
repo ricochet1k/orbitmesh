@@ -154,7 +154,7 @@ export interface ProviderUsageLimitInsight {
   reset_at?: string;
 }
 
-// ── SSE event payloads ────────────────────────────────────────────────────────
+// ── Session stream event payloads ─────────────────────────────────────────────
 
 export interface StatusChangeData {
   old_state: string;
@@ -270,7 +270,7 @@ export interface SessionStateStreamEvent {
 
 // Discriminated union — exhaustive switch on `.type` is now type-safe.
 // Keep in sync with docs/session-event-types.md.
-export type SSEEvent =
+export type SessionStreamEvent =
   | { event_id: number; type: "status_change"; timestamp: string; session_id: string; data: StatusChangeData; raw?: unknown }
   | { event_id: number; type: "output";        timestamp: string; session_id: string; data: OutputData; raw?: unknown }
   | { event_id: number; type: "metric";        timestamp: string; session_id: string; data: MetricData; raw?: unknown }
@@ -287,10 +287,10 @@ export type SSEEvent =
   | { event_id: number; type: "action_request"; timestamp: string; session_id: string; data: ActionRequestData; raw?: unknown }
   | { event_id: number; type: "artifact_update"; timestamp: string; session_id: string; data: ArtifactUpdateData; raw?: unknown }
 
-export type SSEEventType = SSEEvent["type"]
+export type SessionStreamEventType = SessionStreamEvent["type"]
 
-/** Parse a raw SSE MessageEvent into a typed SSEEvent, or return null on failure. */
-export function parseSSEEvent(sseType: string, event: MessageEvent): SSEEvent | null {
+/** Parse a raw stream MessageEvent into a typed SessionStreamEvent, or return null on failure. */
+export function parseSSEEvent(sseType: string, event: MessageEvent): SessionStreamEvent | null {
   if (typeof event.data !== "string") return null
   let parsed: unknown
   try {
@@ -302,15 +302,15 @@ export function parseSSEEvent(sseType: string, event: MessageEvent): SSEEvent | 
   const obj = parsed as Record<string, unknown>
   // The backend always puts `type` in the JSON body; use it if present,
   // otherwise fall back to the SSE event name (e.g. for older compatibility).
-  const type = (typeof obj["type"] === "string" ? obj["type"] : sseType) as SSEEventType
+  const type = (typeof obj["type"] === "string" ? obj["type"] : sseType) as SessionStreamEventType
   return {
     event_id: typeof obj["event_id"] === "number" ? obj["event_id"] : 0,
     type,
     timestamp: typeof obj["timestamp"] === "string" ? obj["timestamp"] : new Date().toISOString(),
     session_id: typeof obj["session_id"] === "string" ? obj["session_id"] : "",
-    data: (obj["data"] ?? {}) as SSEEvent["data"],
+    data: (obj["data"] ?? {}) as SessionStreamEvent["data"],
     raw: obj["raw"],
-  } as SSEEvent
+  } as SessionStreamEvent
 }
 
 export interface ActivityEntry {
@@ -321,7 +321,7 @@ export interface ActivityEntry {
   rev: number;
   open: boolean;
   data: Record<string, any>;
-  /** SSE event_id that created this entry; 0 / absent when not yet tracked. */
+  /** Stream event_id that created this entry; 0 / absent when not yet tracked. */
   event_id?: number;
 }
 

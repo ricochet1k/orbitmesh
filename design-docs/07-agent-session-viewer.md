@@ -8,7 +8,7 @@ This document outlines the design for the Agent Session Viewer and Controller, p
 ### Live Session Transcript
 - **View**: `/sessions/{id}`
 - **Features**:
-  - Real-time streaming of agent output via SSE.
+  - Real-time streaming of agent output via WebSocket (`/api/realtime`).
   - Automatic scrolling with manual override.
   - Distinct message types (agent, user, system, error).
   - Code block highlighting.
@@ -22,7 +22,7 @@ This document outlines the design for the Agent Session Viewer and Controller, p
 ### PTY Terminal Emulation
 - **Component**: `TerminalView`
 - **Library**: `xterm.js` for robust terminal emulation.
-- **Integration**: Bi-directional communication with the PTY provider via WebSockets or specialized SSE events.
+- **Integration**: Bi-directional communication with the PTY provider via WebSockets.
 
 ### Session Controls
 - **Actions**:
@@ -33,7 +33,7 @@ This document outlines the design for the Agent Session Viewer and Controller, p
 
 ## Interaction Protocol
 - **Input**: User messages are sent via `POST /api/v1/sessions/{id}/input`.
-- **Output**: Agent responses are received via the established SSE stream.
+- **Output**: Agent responses are received via the established WebSocket realtime stream.
 - **PTY Data**: Raw terminal data is streamed as base64-encoded strings within metadata events.
 
 ## User Experience (UX)
