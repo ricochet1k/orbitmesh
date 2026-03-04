@@ -48,3 +48,4 @@ tests/.orbitmesh-e2e
 backend/acp-echo
 backend/orbitmesh
 tooltest
+logs
