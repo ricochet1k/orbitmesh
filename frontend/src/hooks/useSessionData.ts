@@ -2,6 +2,7 @@ import { createEffect, createMemo, createResource, createSignal, on, onCleanup, 
 import type { Accessor } from "solid-js"
 import type {
   ActivityEntry,
+  SessionTranscriptHistoryMessage,
   SessionState,
   TranscriptMessage,
 } from "../types/api"
@@ -56,7 +57,7 @@ export interface SessionData {
   autoScroll: Accessor<boolean>
   setAutoScroll: (v: boolean) => void
   historyLoading: Accessor<boolean>
-  historyCursor: Accessor<string | null>  // null = no more pages
+  historyCursor: Accessor<number | null>  // null = no more pages
   loadEarlier: () => void
 
   // Stream
@@ -625,7 +626,7 @@ export function useSessionData({
         .filter((message): message is TranscriptMessage => message !== null)
       : []
     const transcriptMessages = Array.isArray(snapshot.messages)
-      ? snapshot.messages.map(toTranscriptFromSessionMessage)
+      ? snapshot.messages.map(toTranscriptFromSnapshotMessage)
       : []
     mergeMessages([...entryMessages, ...transcriptMessages], { sort: true })
   }
@@ -640,29 +641,29 @@ export function useSessionData({
 
   // ── Section 2: Pagination signals ─────────────────────────────────────────
 
-  // undefined = not yet ready to fetch; null = fetch latest page; string = fetch that page
-  const [paginationCursor, setPaginationCursor] = createSignal<string | null | undefined>(undefined)
+  // undefined = not yet ready to fetch; null = fetch latest page; number = fetch before cursor
+  const [paginationCursor, setPaginationCursor] = createSignal<number | null | undefined>(undefined)
 
-  const activitySource = createMemo(() => {
+  const historySource = createMemo(() => {
     const id = sessionId()
     const cursor = paginationCursor()
     if (cursor === undefined) return undefined
-    return { id, cursor }
+    return { id, before: cursor }
   })
 
-  const [activityPage] = createResource(
-    activitySource,
-    async ({ id, cursor }) => {
-      const response = await apiClient.getActivityEntries(id, {
+  const [historyPage] = createResource(
+    historySource,
+    async ({ id, before }) => {
+      const response = await apiClient.getSessionMessagesPage(id, {
         limit: 100,
-        cursor: cursor ?? undefined,
+        before,
       })
       return response
     },
   )
 
-  const historyCursor = createMemo(() => activityPage()?.next_cursor ?? null)
-  const historyLoading = createMemo(() => activityPage.loading)
+  const historyCursor = createMemo(() => historyPage()?.next_before ?? null)
+  const historyLoading = createMemo(() => historyPage.loading)
 
   // ── Section 3: Stream + history coordination ───────────────────────────────
 
@@ -855,7 +856,7 @@ export function useSessionData({
     // ── History fetch ────────────────────────────────-
     // Only fetch history when the user has inspect permission.
     // canInspect === false means the stream runs but history is skipped;
-    // in that case leave paginationCursor undefined so activityPage never fires,
+    // in that case leave paginationCursor undefined so historyPage never fires,
     // and mark historySettled immediately so buffered events are applied live.
     if (inspect) {
       setPaginationCursor(null)
@@ -865,37 +866,37 @@ export function useSessionData({
 
     // ── Watch for history page resolution ─────────────────────────────────
     // Nested createEffect is replaced with a top-level effect using on() with
-    // defer:true so it only tracks activityPage and does not re-run on outer
+    // defer:true so it only tracks historyPage and does not re-run on outer
     // signal changes. The outer effect's onCleanup will dispose this when
     // sessionId changes, preventing stale-session page application.
     createEffect(on(
-      () => ({ loading: activityPage.loading, page: activityPage() }),
+      () => ({ loading: historyPage.loading, page: historyPage() }),
       ({ loading, page }) => {
-        // Skip while loading: activityPage() returns the PREVIOUS cached value
+        // Skip while loading: historyPage() returns the PREVIOUS cached value
         // during loading state (stale-while-revalidate), which would apply old
         // session data after a session change. Only process settled pages.
         if (loading) return
         if (!page) return
+        const pageMessages = page.messages ?? []
         if (historySettled) {
-          // Pagination load (loadEarlier): merge new older entries
-          const entries = page.entries ?? []
-          if (entries.length > 0) {
-            mergeMessages(entries.map(toActivityMessage).filter((message): message is TranscriptMessage => message !== null), { sort: true })
+          // Pagination load (loadEarlier): merge older messages.
+          if (pageMessages.length > 0) {
+            mergeMessages(pageMessages.map(toTranscriptFromHistoryMessage), { sort: true })
           }
           return
         }
 
         // First history page settled: compute watermark and drain buffer
-        const entries = page.entries ?? []
         let watermark = 0
-        for (const entry of entries) {
-          if ((entry.event_id ?? 0) > watermark) {
-            watermark = entry.event_id!
+        for (const message of pageMessages) {
+          const eventId = extractEventIdFromHistoryMessage(message)
+          if (eventId > watermark) {
+            watermark = eventId
           }
         }
 
-        if (entries.length > 0) {
-          mergeMessages(entries.map(toActivityMessage).filter((message): message is TranscriptMessage => message !== null), { sort: true })
+        if (pageMessages.length > 0) {
+          mergeMessages(pageMessages.map(toTranscriptFromHistoryMessage), { sort: true })
         }
 
         if (pendingRealtimeSnapshot) {
@@ -948,17 +949,49 @@ export function useSessionData({
 
 // ── Activity entry helpers ────────────────────────────────────────────────────
 
-function toTranscriptFromSessionMessage(message: SessionActivitySnapshot["messages"][number]): TranscriptMessage {
+function toTranscriptFromSnapshotMessage(message: SessionActivitySnapshot["messages"][number]): TranscriptMessage {
   const kind = normalizeMessageKind(message.kind)
   return {
-    id: `message:${message.id || message.timestamp}`,
+    id: message.id || message.timestamp,
     type: mapActivityKindToType(kind),
     kind,
     timestamp: message.timestamp,
     content: message.contents,
-    payload: undefined,
+    payload: (message as { payload?: unknown }).payload,
+    open: (message as { open?: boolean }).open,
     raw: (message as { raw?: unknown }).raw,
   }
+}
+
+function toTranscriptFromHistoryMessage(message: SessionTranscriptHistoryMessage): TranscriptMessage {
+  const kind = normalizeMessageKind(message.kind)
+  return {
+    id: message.id || message.timestamp,
+    type: mapActivityKindToType(kind),
+    kind,
+    timestamp: message.timestamp,
+    content: message.contents,
+    payload: message.payload,
+    open: message.open,
+  }
+}
+
+function extractEventIdFromHistoryMessage(message: SessionTranscriptHistoryMessage): number {
+  const idEvent = extractEventIdFromMessageId(message.id)
+  if (idEvent > 0) return idEvent
+  if (typeof message.payload === "object" && message.payload !== null) {
+    const record = message.payload as Record<string, unknown>
+    const payloadEvent = asFiniteNumber(record.event_id)
+    if (payloadEvent && payloadEvent > 0) return payloadEvent
+  }
+  return 0
+}
+
+function extractEventIdFromMessageId(messageId: string | undefined): number {
+  if (!messageId || !messageId.startsWith("event:")) return 0
+  const raw = messageId.split(":", 3)[1]
+  const parsed = raw ? Number(raw) : 0
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 0
 }
 
 function toActivityMessage(entry: ActivityEntry): TranscriptMessage | null {

@@ -6,6 +6,7 @@ import type {
   SessionInputRequest,
   SessionActionResponseRequest,
   ActivityHistoryResponse,
+  SessionMessagesPageResponse,
   DockMcpRequest,
   DockMcpResponse,
 } from "../types/api";
@@ -139,6 +140,21 @@ export async function getActivityEntries(
   const suffix = search.toString();
   const resp = await fetch(
     `${BASE_URL}/sessions/${id}/activity${suffix ? `?${suffix}` : ""}`,
+  );
+  if (!resp.ok) throw new Error(await readErrorMessage(resp));
+  return resp.json();
+}
+
+export async function getSessionMessagesPage(
+  id: string,
+  params: { limit?: number; before?: number | null } = {},
+): Promise<SessionMessagesPageResponse> {
+  const search = new URLSearchParams();
+  if (params.limit) search.set("limit", String(params.limit));
+  if (params.before && params.before > 0) search.set("before", String(params.before));
+  const suffix = search.toString();
+  const resp = await fetch(
+    `${BASE_URL}/sessions/${id}/messages${suffix ? `?${suffix}` : ""}`,
   );
   if (!resp.ok) throw new Error(await readErrorMessage(resp));
   return resp.json();

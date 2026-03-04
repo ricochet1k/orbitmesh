@@ -73,7 +73,7 @@ vi.mock("../api/client", () => ({
     resumeSession: vi.fn(),
     stopSession: vi.fn(),
     cancelSession: vi.fn(),
-    getActivityEntries: vi.fn(),
+    getSessionMessagesPage: vi.fn(),
     getEventsUrl: vi.fn(),
     getPermissions: vi.fn(),
     getProviderUsageInsights: vi.fn(),
@@ -112,7 +112,7 @@ describe("SessionViewer", () => {
       randomUUID: () => "123e4567-e89b-12d3-a456-426614174000",
     })
        ; (apiClient.getEventsUrl as any).mockReturnValue("/events/session-1")
-       ; (apiClient.getActivityEntries as any).mockResolvedValue({ entries: [], next_cursor: null })
+       ; (apiClient.getSessionMessagesPage as any).mockResolvedValue({ messages: [], next_before: null })
        ; (apiClient.getPermissions as any).mockResolvedValue(defaultPermissions)
        ; (apiClient.getProviderUsageInsights as any).mockResolvedValue({ providers: [] })
        ; (apiClient.listAgents as any).mockResolvedValue({ agents: [] })
@@ -123,20 +123,17 @@ describe("SessionViewer", () => {
 
   it("renders initial output and streams new transcript messages", async () => {
     (apiClient.getSession as any).mockResolvedValue(baseSession)
-    ;(apiClient.getActivityEntries as any).mockResolvedValue({
-      entries: [
+    ;(apiClient.getSessionMessagesPage as any).mockResolvedValue({
+      messages: [
         {
-          id: "entry-1",
-          session_id: "session-1",
+          id: "message-1",
           kind: "assistant",
-          ts: "2026-02-05T12:01:00Z",
-          rev: 1,
+          contents: "Initial output",
           open: false,
-          event_id: 1,
-          data: { content: "Initial output" },
+          timestamp: "2026-02-05T12:01:00Z",
         },
       ],
-      next_cursor: null,
+      next_before: null,
     })
 
     render(() => <SessionViewer sessionId="session-1" />)

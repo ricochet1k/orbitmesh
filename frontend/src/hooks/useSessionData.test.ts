@@ -45,7 +45,7 @@ let realtimeStatusHandler: ((status: "connecting" | "open" | "closed") => void) 
 
 vi.mock("../api/client", () => ({
   apiClient: {
-    getActivityEntries: vi.fn(),
+    getSessionMessagesPage: vi.fn(),
     getEventsUrl: vi.fn((id: string) => `/events/${id}`),
   },
 }))
@@ -76,16 +76,14 @@ vi.mock("../realtime/client", () => ({
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function makeActivityEntry(overrides: Record<string, unknown> = {}) {
+function makeHistoryMessage(overrides: Record<string, unknown> = {}) {
   return {
-    id: "entry-1",
-    session_id: "session-1",
+    id: "event:1:output",
     kind: "assistant",
-    ts: "2026-02-05T12:00:00Z",
-    rev: 1,
+    contents: "history content",
+    payload: undefined,
     open: false,
-    data: {},
-    event_id: 0,
+    timestamp: "2026-02-05T12:00:00Z",
     ...overrides,
   }
 }
@@ -118,9 +116,9 @@ describe("useSessionData", () => {
     realtimeStatusHandler = undefined
     vi.stubGlobal("EventSource", MockEventSource as never)
     vi.stubGlobal("WebSocket", undefined as never)
-    ;(apiClient.getActivityEntries as ReturnType<typeof vi.fn>).mockResolvedValue({
-      entries: [],
-      next_cursor: null,
+    ;(apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      messages: [],
+      next_before: null,
     })
   })
 
@@ -133,7 +131,7 @@ describe("useSessionData", () => {
   it("buffers stream events that arrive before history loads, replays them without duplication", async () => {
     let resolveHistory!: (v: unknown) => void
     const historyPromise = new Promise((resolve) => { resolveHistory = resolve })
-    ;(apiClient.getActivityEntries as ReturnType<typeof vi.fn>).mockReturnValue(historyPromise)
+    ;(apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>).mockReturnValue(historyPromise)
 
     let data: ReturnType<typeof useSessionData> | undefined
 
@@ -175,8 +173,12 @@ describe("useSessionData", () => {
 
     // Resolve history with one entry that has the same event_id as event 1
     resolveHistory({
-      entries: [makeActivityEntry({ id: "entry-1", event_id: 1, ts: "2026-02-05T12:01:00Z" })],
-      next_cursor: null,
+      messages: [makeHistoryMessage({
+        id: "event:1:output",
+        contents: "from stream event 1",
+        timestamp: "2026-02-05T12:01:00Z",
+      })],
+      next_before: null,
     })
 
     // Wait for the resource to settle and buffer to drain
@@ -186,11 +188,11 @@ describe("useSessionData", () => {
     // Should have: 1 history entry + 1 stream event (event_id=2), not 3
     expect(msgs).toHaveLength(2)
     // The activity entry from history (mapped via toActivityMessage)
-    expect(msgs.some((m) => m.id === "activity:entry-1")).toBe(true)
+    expect(msgs.some((m) => m.id === "event:1:output")).toBe(true)
     // The second stream event (event_id=2, not suppressed)
     expect(msgs.some((m) => m.content === "from stream event 2")).toBe(true)
-    // The first stream event should NOT appear as a duplicate
-    expect(msgs.filter((m) => m.content === "from stream event 1")).toHaveLength(0)
+    // The overlapping event should appear once from history, not duplicated from buffer replay
+    expect(msgs.filter((m) => m.content === "from stream event 1")).toHaveLength(1)
   })
 
   // ── canInspect === null ────────────────────────────────────────────────────
@@ -211,7 +213,7 @@ describe("useSessionData", () => {
     await new Promise((r) => setTimeout(r, 10))
 
     expect(mockEventSources).toHaveLength(0)
-    expect(apiClient.getActivityEntries).not.toHaveBeenCalled()
+    expect(apiClient.getSessionMessagesPage).not.toHaveBeenCalled()
   })
 
   // ── canInspect === false ───────────────────────────────────────────────────
@@ -230,7 +232,7 @@ describe("useSessionData", () => {
     })
 
     await vi.waitFor(() => expect(mockEventSources.length).toBeGreaterThan(0))
-    expect(apiClient.getActivityEntries).not.toHaveBeenCalled()
+    expect(apiClient.getSessionMessagesPage).not.toHaveBeenCalled()
   })
 
   it("applies stream events immediately when canInspect is false (history settled)", async () => {
@@ -269,9 +271,9 @@ describe("useSessionData", () => {
     let data: ReturnType<typeof useSessionData> | undefined
     let setCanInspect!: (v: boolean | null) => void
 
-    ;(apiClient.getActivityEntries as ReturnType<typeof vi.fn>).mockResolvedValue({
-      entries: [makeActivityEntry({ id: "entry-1" })],
-      next_cursor: null,
+    ;(apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      messages: [makeHistoryMessage({ id: "entry-1" })],
+      next_before: null,
     })
 
     createRoot((d) => {
@@ -289,7 +291,7 @@ describe("useSessionData", () => {
 
     // Wait for messages to load
     await vi.waitFor(() => expect(data!.messages().length).toBeGreaterThan(0))
-    expect(data!.messages().some((m) => m.id === "activity:entry-1")).toBe(true)
+    expect(data!.messages().some((m) => m.id === "entry-1")).toBe(true)
 
     // Simulate canInspect cycling null → true (as happens when permissions refetch)
     const countBefore = data!.messages().length
@@ -301,7 +303,7 @@ describe("useSessionData", () => {
 
     // Messages must NOT have been wiped
     expect(data!.messages().length).toBe(countBefore)
-    expect(data!.messages().some((m) => m.id === "activity:entry-1")).toBe(true)
+    expect(data!.messages().some((m) => m.id === "entry-1")).toBe(true)
   })
 
   // ── sessionId change ───────────────────────────────────────────────────────
@@ -310,9 +312,9 @@ describe("useSessionData", () => {
     let data: ReturnType<typeof useSessionData> | undefined
     let setSessionId!: (id: string) => void
 
-    ;(apiClient.getActivityEntries as ReturnType<typeof vi.fn>).mockResolvedValue({
-      entries: [makeActivityEntry({ id: "entry-A", ts: "2026-02-05T12:00:00Z" })],
-      next_cursor: null,
+    ;(apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      messages: [makeHistoryMessage({ id: "entry-A", timestamp: "2026-02-05T12:00:00Z" })],
+      next_before: null,
     })
 
     createRoot((d) => {
@@ -330,19 +332,19 @@ describe("useSessionData", () => {
 
     // Wait for first session to load
     await vi.waitFor(() => expect(data!.messages().length).toBeGreaterThan(0))
-    expect(data!.messages().some((m) => m.id === "activity:entry-A")).toBe(true)
+    expect(data!.messages().some((m) => m.id === "entry-A")).toBe(true)
 
     // Switch to a different session with no history
-    ;(apiClient.getActivityEntries as ReturnType<typeof vi.fn>).mockResolvedValue({
-      entries: [],
-      next_cursor: null,
+    ;(apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      messages: [],
+      next_before: null,
     })
     setSessionId("session-2")
 
     // Messages should reset to empty and settle again (no history for session-2)
     await vi.waitFor(() => expect(data!.messages()).toHaveLength(0))
     // Old entry must not remain
-    expect(data!.messages().some((m) => m.id === "activity:entry-A")).toBe(false)
+    expect(data!.messages().some((m) => m.id === "entry-A")).toBe(false)
   })
 
   // ── stale buffer cleanup ───────────────────────────────────────────────────
@@ -353,9 +355,9 @@ describe("useSessionData", () => {
     let setSessionId!: (id: string) => void
 
     const historyPromise = new Promise((resolve) => { resolveHistory = resolve })
-    ;(apiClient.getActivityEntries as ReturnType<typeof vi.fn>)
+    ;(apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>)
       .mockReturnValueOnce(historyPromise)
-      .mockResolvedValue({ entries: [], next_cursor: null })
+      .mockResolvedValue({ messages: [], next_before: null })
 
     createRoot((d) => {
       dispose = d
@@ -389,7 +391,7 @@ describe("useSessionData", () => {
     await vi.waitFor(() => expect(mockEventSources.length).toBeGreaterThan(1))
 
     // Now resolve the OLD history — the buffer should have been cleared on cleanup
-    resolveHistory({ entries: [], next_cursor: null })
+    resolveHistory({ messages: [], next_before: null })
 
     // Allow any effects to settle
     await new Promise((r) => setTimeout(r, 20))
@@ -402,17 +404,25 @@ describe("useSessionData", () => {
   // ── loadEarlier / pagination ───────────────────────────────────────────────
 
   it("applies loadEarlier correctly: fetches previous page and merges in timestamp order", async () => {
-    const newerEntry = makeActivityEntry({ id: "entry-new", ts: "2026-02-05T12:01:00Z" })
-    const olderEntry = makeActivityEntry({ id: "entry-old", ts: "2026-02-05T11:59:00Z" })
+    const newerEntry = makeHistoryMessage({
+      id: "event:200:output",
+      contents: "newer",
+      timestamp: "2026-02-05T12:01:00Z",
+    })
+    const olderEntry = makeHistoryMessage({
+      id: "event:150:output",
+      contents: "older",
+      timestamp: "2026-02-05T11:59:00Z",
+    })
 
-    ;(apiClient.getActivityEntries as ReturnType<typeof vi.fn>)
+    ;(apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({
-        entries: [newerEntry],
-        next_cursor: "50",
+        messages: [newerEntry],
+        next_before: 150,
       })
       .mockResolvedValueOnce({
-        entries: [olderEntry],
-        next_cursor: null,
+        messages: [olderEntry],
+        next_before: null,
       })
 
     let data: ReturnType<typeof useSessionData> | undefined
@@ -430,18 +440,26 @@ describe("useSessionData", () => {
 
     // Wait for initial page load
     await vi.waitFor(() => expect(data!.messages().length).toBeGreaterThan(0))
-    expect(data!.historyCursor()).toBe("50")
+    expect(data!.historyCursor()).toBe(150)
+    expect(apiClient.getSessionMessagesPage).toHaveBeenNthCalledWith(1, "session-1", {
+      limit: 100,
+      before: null,
+    })
 
     // Trigger loadEarlier
     data!.loadEarlier()
 
     // Wait for second page
     await vi.waitFor(() => expect(data!.messages().length).toBe(2))
+    expect(apiClient.getSessionMessagesPage).toHaveBeenNthCalledWith(2, "session-1", {
+      limit: 100,
+      before: 150,
+    })
 
     const msgs = data!.messages()
     // Should be sorted by timestamp: older first
-    expect(msgs[0].id).toBe("activity:entry-old")
-    expect(msgs[1].id).toBe("activity:entry-new")
+    expect(msgs[0].id).toBe("event:150:output")
+    expect(msgs[1].id).toBe("event:200:output")
     // No more pages
     expect(data!.historyCursor()).toBeNull()
   })
@@ -449,9 +467,9 @@ describe("useSessionData", () => {
   // ── Error event handling ───────────────────────────────────────────────────
 
   it("appends error events as error type messages to transcript", async () => {
-    ;(apiClient.getActivityEntries as ReturnType<typeof vi.fn>).mockResolvedValue({
-      entries: [],
-      next_cursor: null,
+    ;(apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      messages: [],
+      next_before: null,
     })
 
     let data: ReturnType<typeof useSessionData> | undefined
@@ -637,14 +655,14 @@ describe("useSessionData", () => {
   })
 
   it("maps persisted activity kinds to the expected transcript types", async () => {
-    ;(apiClient.getActivityEntries as ReturnType<typeof vi.fn>).mockResolvedValue({
-      entries: [
-        makeActivityEntry({ id: "entry-output", kind: "output", data: { content: "assistant output" } }),
-        makeActivityEntry({ id: "entry-user", kind: "user_input", data: { content: "user input" } }),
-        makeActivityEntry({ id: "entry-tool", kind: "tool_use", data: { content: "tool result" } }),
-        makeActivityEntry({ id: "entry-error", kind: "provider_error", data: { content: "boom" } }),
+    ;(apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      messages: [
+        makeHistoryMessage({ id: "entry-output", kind: "output", contents: "assistant output" }),
+        makeHistoryMessage({ id: "entry-user", kind: "user_input", contents: "user input" }),
+        makeHistoryMessage({ id: "entry-tool", kind: "tool_use", contents: "tool result" }),
+        makeHistoryMessage({ id: "entry-error", kind: "provider_error", contents: "boom" }),
       ],
-      next_cursor: null,
+      next_before: null,
     })
 
     let data: ReturnType<typeof useSessionData> | undefined
@@ -663,11 +681,60 @@ describe("useSessionData", () => {
     await vi.waitFor(() => expect(data!.messages().length).toBe(4))
 
     const byId = new Map(data!.messages().map((message) => [message.id, message]))
-    expect(byId.get("activity:entry-output")?.type).toBe("agent")
-    expect(byId.get("activity:entry-output")?.kind).toBe("output")
-    expect(byId.get("activity:entry-user")?.type).toBe("user")
-    expect(byId.get("activity:entry-tool")?.type).toBe("system")
-    expect(byId.get("activity:entry-error")?.type).toBe("error")
+    expect(byId.get("entry-output")?.type).toBe("agent")
+    expect(byId.get("entry-output")?.kind).toBe("output")
+    expect(byId.get("entry-user")?.type).toBe("user")
+    expect(byId.get("entry-tool")?.type).toBe("system")
+    expect(byId.get("entry-error")?.type).toBe("error")
+  })
+
+  it("rehydrates payload/open from paged history messages", async () => {
+    ;(apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      messages: [
+        makeHistoryMessage({
+          id: "tool:rehydrated-1",
+          kind: "tool_call",
+          contents: "Run command(ls): ok",
+          payload: {
+            id: "rehydrated-1",
+            name: "bash",
+            title: "Run command",
+            status: "done",
+            input: "ls",
+            output: "ok",
+          },
+          open: false,
+        }),
+      ],
+      next_before: null,
+    })
+
+    let data: ReturnType<typeof useSessionData> | undefined
+
+    createRoot((d) => {
+      dispose = d
+      const [sessionId] = createSignal("session-1")
+      const [canInspect] = createSignal<boolean | null>(true)
+      data = useSessionData({
+        sessionId,
+        canInspect,
+        eventsUrl: () => `/events/session-1`,
+      })
+    })
+
+    await vi.waitFor(() => expect(data!.messages().length).toBe(1))
+    const message = data!.messages()[0]
+    expect(message?.id).toBe("tool:rehydrated-1")
+    expect(message?.kind).toBe("tool_call")
+    expect(message?.open).toBe(false)
+    expect(message?.payload).toEqual({
+      id: "rehydrated-1",
+      name: "bash",
+      title: "Run command",
+      status: "done",
+      input: "ls",
+      output: "ok",
+    })
   })
 
   it("streams status_change events into transcript and status callback", async () => {
@@ -1178,12 +1245,12 @@ describe("useSessionData", () => {
   // ── filter & autoScroll ───────────────────────────────────────────────────
 
   it("filteredMessages reflects the filter term", async () => {
-    ;(apiClient.getActivityEntries as ReturnType<typeof vi.fn>).mockResolvedValue({
-      entries: [
-        makeActivityEntry({ id: "e1", data: { content: "hello world" } }),
-        makeActivityEntry({ id: "e2", kind: "user_input", data: { content: "goodbye" } }),
+    ;(apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      messages: [
+        makeHistoryMessage({ id: "e1", contents: "hello world" }),
+        makeHistoryMessage({ id: "e2", kind: "user_input", contents: "goodbye" }),
       ],
-      next_cursor: null,
+      next_before: null,
     })
 
     let data: ReturnType<typeof useSessionData> | undefined

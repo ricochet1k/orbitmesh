@@ -24,6 +24,7 @@ export const apiClient = {
   createDockSession: sessionApi.createDockSession,
   getSession: sessionApi.getSession,
   getActivityEntries: sessionApi.getActivityEntries,
+  getSessionMessagesPage: sessionApi.getSessionMessagesPage,
   stopSession: sessionApi.stopSession,
   pauseSession: sessionApi.pauseSession,
   resumeSession: sessionApi.resumeSession,

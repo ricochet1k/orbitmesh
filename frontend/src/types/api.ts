@@ -336,6 +336,20 @@ export interface ActivityHistoryResponse {
   next_cursor?: string | null;
 }
 
+export interface SessionTranscriptHistoryMessage {
+  id: string;
+  kind: string;
+  contents: string;
+  payload?: unknown;
+  open?: boolean;
+  timestamp: string;
+}
+
+export interface SessionMessagesPageResponse {
+  messages: SessionTranscriptHistoryMessage[];
+  next_before?: number | null;
+}
+
 export interface PermissionsResponse {
   role: string;
   can_inspect_sessions: boolean;
