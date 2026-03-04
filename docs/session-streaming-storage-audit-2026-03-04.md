@@ -11,6 +11,12 @@ This audit covers:
 
 The specific question was: why do rich live renders (reasoning, tool cards) degrade after reload, despite tests that appear to guard parity?
 
+Additional design goal (added 2026-03-04):
+
+- Session viewer should not load full transcript eagerly.
+- Viewer should become a virtualized infinite list that initially loads from the end (newest-first fetch window).
+- Storage should support fast backward reads of recent messages while preserving delta-merge semantics.
+
 ---
 
 ## Executive summary
@@ -27,6 +33,8 @@ The core issue is architectural:
 4. **Tests mostly assert text presence, not structural parity**, so they pass while UX regresses.
 
 Result: rich cards appear live, but reload rehydrates with flatter/legacy forms.
+
+With the newest-first infinite-scroll requirement, current architecture has a second major risk: it mixes correctness and storage compaction concerns inside append-time rewriting, which increases complexity and makes paginated backward reads harder to reason about.
 
 ---
 
@@ -277,7 +285,26 @@ These principles are currently missing or inconsistently applied:
 
 ## What to do: robust simplification plan
 
-## Phase 1 (highest ROI): establish one canonical transcript model
+## Design adjustment for newest-first virtualized transcript
+
+The plan should explicitly optimize for:
+
+- deterministic rendering parity,
+- append throughput,
+- cheap "tail" reads,
+- cheap pagination backward,
+- no full-log rewrite on every delta.
+
+Recommended shape:
+
+1. Keep raw event log append-only (immutable).
+2. Maintain a materialized "render-item" log where each line is one renderable transcript item.
+3. Maintain a small sidecar index for byte offsets/page checkpoints to support reverse paging without reading the whole file.
+4. Keep per-stream merge state in memory + durable checkpoint (stream_id/message_id -> current render-item id), then flush finalized item updates as new records (logical upsert), not in-place file edits.
+
+This preserves your goal (one renderable line per item) while avoiding fragile whole-file rewrites.
+
+## Phase 1 (highest ROI): establish one canonical transcript model and paging contract
 
 Define a provider-agnostic **TranscriptEvent/TranscriptItem** shape that includes structured payload for rich cards (tool/progress/action/artifact/thought/output).
 
@@ -285,20 +312,34 @@ Define a provider-agnostic **TranscriptEvent/TranscriptItem** shape that include
 - Persistence stores this model (or deterministic projection input sufficient to re-create it exactly).
 - History/snapshot endpoints return this model directly.
 - Frontend renderer consumes this model without path-specific branching.
+- Add paging contract now: `before`, `after`, `limit`, stable sort key (`seq`), and guaranteed deterministic order.
 
-## Phase 2: stop mixing unrelated history channels
+## Phase 2: stop mixing unrelated history channels and add newest-first API
 
 Do not merge PTY extractor entries with session message projections in the same transcript feed unless they are normalized into the canonical item schema first.
 
 If PTY activity remains useful, expose it as a separate panel/feed.
 
-## Phase 3: replace stringified tool lifecycle persistence
+Implement transcript endpoint for virtual scrolling:
+
+- `GET /api/sessions/{id}/transcript?before=<seq>&limit=<n>` -> returns newest page before cursor.
+- Initial load uses `before` absent and returns last `n` items.
+- Include `next_before` cursor for older pages.
+
+## Phase 3: replace stringified tool lifecycle persistence and remove in-place delta rewrites
 
 Persist structured tool lifecycle records (`id/name/status/input/output`) rather than encoded string payloads.
 
 This directly enables rich card parity on reload.
 
-## Phase 4: simplify frontend hook architecture
+For delta merging, switch from "rewrite previous JSONL line" to one of:
+
+1. **Preferred**: append-only logical upsert records (`item_update` with `target_item_id` + `revision`), resolve to latest revision at query time with short-range index assistance.
+2. **Alternative**: periodic compaction job that rewrites cold segments offline, never on hot append path.
+
+This keeps append path simple and makes reverse pagination/indexing more robust.
+
+## Phase 4: simplify frontend hook architecture for virtualization
 
 Split `useSessionData` into:
 
@@ -306,6 +347,7 @@ Split `useSessionData` into:
 - event reducer (pure)
 - hydration/replay reducer (pure, same reducer)
 - UI selectors (filtering/todo/intel)
+- virtual list data source (`loadRecent`, `loadBefore`, window cache)
 
 Then parity invariant becomes straightforward to test.
 
@@ -337,6 +379,8 @@ Service layer should consume only provider-agnostic event kinds.
    - deep-compare resulting message arrays.
 3. Add backend contract tests that snapshot/history payloads contain enough fields for frontend rich cards.
 4. Add regression test for activity `event_id` propagation or remove that dedupe path if event IDs are unavailable.
+5. Add backend pagination tests proving tail-first transcript reads do not require full file scans.
+6. Add performance test for large transcripts (for example 100k messages) validating bounded-memory first paint and older-page fetch latency.
 
 ---
 
@@ -350,5 +394,7 @@ The fastest path out is:
 
 - canonical transcript schema,
 - single reducer semantics for live + replay,
-- structured persistence,
+- structured append-only persistence with paging index,
 - strict parity tests.
+
+For your specific storage concern: the current JSONL rewrite strategy is understandable, but it is coupling hot-path writes with compaction. A two-log + index design (event log + render-item log with logical upserts and offline compaction) better satisfies your stated goals: exact rendering parity, one-line render items, and efficient newest-first virtual scrolling.
