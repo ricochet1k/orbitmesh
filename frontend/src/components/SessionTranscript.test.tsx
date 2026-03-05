@@ -200,7 +200,7 @@ describe("SessionTranscript", () => {
     expect(screen.getByText("Approve patch")).toBeDefined()
   })
 
-  it("renders action decision controls and emits selected decision", () => {
+  it("renders approve/deny controls and emits stable action response payloads", () => {
     const onRespond = vi.fn()
     renderTranscript([
       {
@@ -216,7 +216,87 @@ describe("SessionTranscript", () => {
           title: "Approve command",
           payload: {
             decisions: [
-              { value: "approve_once", label: "Approve once" },
+              { value: "approve", label: "Approve" },
+              { value: "deny", label: "Deny", input: "safety_blocked" },
+            ],
+          },
+        },
+      },
+    ], null, onRespond)
+
+    expect(screen.getByTestId("action-request-controls")).toBeDefined()
+    fireEvent.click(screen.getByTestId("action-request-approve"))
+    fireEvent.click(screen.getByTestId("action-request-deny"))
+
+    expect(onRespond).toHaveBeenNthCalledWith(1, { actionId: "req_approve", decision: "approve", input: undefined })
+    expect(onRespond).toHaveBeenNthCalledWith(2, { actionId: "req_approve", decision: "deny", input: "safety_blocked" })
+  })
+
+  it("keeps action request controls deterministic between live and reload payloads", () => {
+    const onRespondLive = vi.fn()
+    const onRespondReload = vi.fn()
+    const messagePayload = {
+      id: "req_live_reload",
+      kind: "approval",
+      status: "pending",
+      title: "Apply patch",
+      payload: {
+        decisions: [
+          { value: "approve", label: "Approve" },
+          { value: "deny", label: "Deny", input: "no_review" },
+        ],
+      },
+    }
+
+    const liveRender = renderTranscript([
+      {
+        id: "action-live",
+        type: "system",
+        kind: "action_request",
+        timestamp: "2026-02-05T12:00:02Z",
+        content: "approval needed",
+        payload: messagePayload,
+      },
+    ], null, onRespondLive)
+    fireEvent.click(screen.getByTestId("action-request-approve"))
+
+    const liveSnapshot = captureNormalizedCardSnapshot(liveRender.container)
+    liveRender.unmount()
+
+    const reloadRender = renderTranscript([
+      {
+        id: "event:100:action_request",
+        type: "system",
+        kind: "action_request",
+        timestamp: "2026-02-05T12:00:02Z",
+        content: "Action required (approval): Apply patch",
+        payload: messagePayload,
+      },
+    ], null, onRespondReload)
+    fireEvent.click(screen.getByTestId("action-request-approve"))
+
+    expect(captureNormalizedCardSnapshot(reloadRender.container)).toEqual(liveSnapshot)
+    expect(onRespondLive).toHaveBeenCalledWith({ actionId: "req_live_reload", decision: "approve", input: undefined })
+    expect(onRespondReload).toHaveBeenCalledWith({ actionId: "req_live_reload", decision: "approve", input: undefined })
+  })
+
+  it("hides action request controls once request is not pending", () => {
+    const onRespond = vi.fn()
+    renderTranscript([
+      {
+        id: "action-completed",
+        type: "system",
+        kind: "action_request",
+        timestamp: "2026-02-05T12:00:02Z",
+        content: "approval completed",
+        payload: {
+          id: "req_complete",
+          kind: "approval",
+          status: "completed",
+          title: "Approve command",
+          payload: {
+            decisions: [
+              { value: "approve", label: "Approve" },
               { value: "deny", label: "Deny" },
             ],
           },
@@ -224,9 +304,7 @@ describe("SessionTranscript", () => {
       },
     ], null, onRespond)
 
-    fireEvent.click(screen.getByTestId("action-request-approve_once"))
-
-    expect(onRespond).toHaveBeenCalledWith({ actionId: "req_approve", decision: "approve_once", input: undefined })
+    expect(screen.queryByTestId("action-request-controls")).toBeNull()
   })
 
   it("renders generic tool calls as python-like signatures", () => {

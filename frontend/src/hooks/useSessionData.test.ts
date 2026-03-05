@@ -2,8 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createRoot, createSignal } from "solid-js"
 
 import { apiClient } from "../api/client"
+import type { TranscriptMessage } from "../types/api"
 import type { ServerEnvelope } from "../types/generated/realtime"
 import { useSessionData } from "./useSessionData"
+import parityFixture from "./__fixtures__/codex-replay-parity.fixture.json"
+import actionRequestLifecycleFixture from "./__fixtures__/action-request-lifecycle-parity.fixture.json"
 
 let realtimeHandlers = new Map<string, (message: ServerEnvelope) => void>()
 let realtimeStatusHandler: ((status: "connecting" | "open" | "closed") => void) | undefined
@@ -183,4 +186,160 @@ describe("useSessionData", () => {
 
     expect(onSessionRefetchNeeded).toHaveBeenCalledTimes(1)
   })
+
+  it("reduces real codex-backed stream events to exactly the same transcript shape as reload history", async () => {
+    const fixture = parityFixture as {
+      raw_codex_notifications: unknown[]
+      stream_events: Array<Record<string, unknown>>
+      reload_messages: Array<Record<string, unknown>>
+    }
+    expect(fixture.raw_codex_notifications.length).toBeGreaterThan(0)
+
+    // Live path: empty history, then realtime stream events.
+    ;(apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      messages: [],
+      next_before: null,
+    })
+    let liveData: ReturnType<typeof useSessionData> | undefined
+    createRoot((d) => {
+      dispose = d
+      const [sessionId] = createSignal("session-1")
+      const [canInspect] = createSignal<boolean | null>(true)
+      liveData = useSessionData({ sessionId, canInspect })
+    })
+
+    const activityHandler = realtimeHandlers.get("sessions.activity:session-1")
+    expect(activityHandler).toBeDefined()
+    for (const payload of fixture.stream_events) {
+      activityHandler?.({
+        type: "event",
+        topic: "sessions.activity:session-1",
+        payload,
+      })
+    }
+
+    await vi.waitFor(() => expect(liveData?.messages().length).toBeGreaterThan(0))
+    const liveNormalized = normalizeForParity(liveData?.messages() ?? [])
+    dispose?.()
+
+    // Reload path: no stream events, canonical /messages payload only.
+    ;(apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      messages: fixture.reload_messages,
+      next_before: null,
+    })
+    let reloadData: ReturnType<typeof useSessionData> | undefined
+    createRoot((d) => {
+      dispose = d
+      const [sessionId] = createSignal("session-1")
+      const [canInspect] = createSignal<boolean | null>(true)
+      reloadData = useSessionData({ sessionId, canInspect })
+    })
+
+    await vi.waitFor(() => expect(reloadData?.messages().length).toBeGreaterThan(0))
+    const reloadNormalized = normalizeForParity(reloadData?.messages() ?? [])
+
+    expect(liveNormalized).toStrictEqual(reloadNormalized)
+  })
+
+  it("keeps action_request lifecycle transcript parity across stream and reload fixtures", async () => {
+    const fixture = actionRequestLifecycleFixture as {
+      variants: Array<{
+        name: string
+        stream_events: Array<Record<string, unknown>>
+        reload_messages: Array<Record<string, unknown>>
+      }>
+    }
+
+    expect(fixture.variants.length).toBeGreaterThan(1)
+
+    for (const variant of fixture.variants) {
+      ;(apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        messages: [],
+        next_before: null,
+      })
+      let liveData: ReturnType<typeof useSessionData> | undefined
+      createRoot((d) => {
+        dispose = d
+        const [sessionId] = createSignal("session-1")
+        const [canInspect] = createSignal<boolean | null>(true)
+        liveData = useSessionData({ sessionId, canInspect })
+      })
+
+      const activityHandler = realtimeHandlers.get("sessions.activity:session-1")
+      expect(activityHandler).toBeDefined()
+      for (const payload of variant.stream_events) {
+        activityHandler?.({
+          type: "event",
+          topic: "sessions.activity:session-1",
+          payload,
+        })
+      }
+
+      await vi.waitFor(() => {
+        const messages = liveData?.messages() ?? []
+        expect(messages.filter((m) => m.kind === "action_request").length).toBe(variant.stream_events.length)
+      })
+      const liveNormalized = normalizeStrictTranscriptModel(liveData?.messages() ?? [])
+      dispose?.()
+
+      ;(apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        messages: variant.reload_messages,
+        next_before: null,
+      })
+      let reloadData: ReturnType<typeof useSessionData> | undefined
+      createRoot((d) => {
+        dispose = d
+        const [sessionId] = createSignal("session-1")
+        const [canInspect] = createSignal<boolean | null>(true)
+        reloadData = useSessionData({ sessionId, canInspect })
+      })
+
+      await vi.waitFor(() => {
+        const messages = reloadData?.messages() ?? []
+        expect(messages.filter((m) => m.kind === "action_request").length).toBe(variant.reload_messages.length)
+      })
+      const reloadNormalized = normalizeStrictTranscriptModel(reloadData?.messages() ?? [])
+
+      expect(liveNormalized).toStrictEqual(reloadNormalized)
+    }
+  })
 })
+
+function normalizeForParity(messages: TranscriptMessage[]) {
+  return [...messages]
+    .map((message) => ({
+      type: message.type,
+      kind: message.kind,
+      content: message.content,
+      open: message.open ?? null,
+      payload: stableObject(message.payload ?? null),
+    }))
+    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+}
+
+function normalizeStrictTranscriptModel(messages: TranscriptMessage[]) {
+  return messages.map((message) => ({
+    id: message.id,
+    type: message.type,
+    kind: message.kind,
+    timestamp: message.timestamp,
+    content: message.content,
+    open: message.open ?? null,
+    payload: stableObject(message.payload ?? null),
+  }))
+}
+
+function stableObject(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(stableObject)
+  }
+  if (!value || typeof value !== "object") {
+    return value
+  }
+  const input = value as Record<string, unknown>
+  const out: Record<string, unknown> = {}
+  for (const key of Object.keys(input).sort()) {
+    out[key] = stableObject(input[key])
+  }
+  return out
+}

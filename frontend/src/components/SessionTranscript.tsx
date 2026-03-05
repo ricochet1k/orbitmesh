@@ -326,8 +326,11 @@ function renderRichEventCard(
       )
     }
     case "action_request": {
+      const details = asRecordValue(payload.payload)
       const decisions = getActionDecisionOptions(payload)
-      const actionId = pickString(payload, ["id"])
+      const actionId = pickString(payload, ["id", "action_id"]) ?? pickString(details, ["action_id", "id"])
+      const status = normalizeActionRequestStatus(pickString(payload, ["status"]))
+      const canRespond = status === "pending" || status === ""
       return (
         <div class="transcript-rich-card" data-testid="rich-action-request-card">
           <div class="transcript-rich-meta">
@@ -335,7 +338,7 @@ function renderRichEventCard(
             <span class="transcript-rich-subtle">{String(payload.status ?? "pending")}</span>
           </div>
           <p>{String(payload.title ?? content)}</p>
-          <Show when={decisions.length > 0 && actionId && onRespondActionRequest}>
+          <Show when={canRespond && decisions.length > 0 && actionId && onRespondActionRequest}>
             <div class="transcript-action-buttons" data-testid="action-request-controls">
               <For each={decisions}>
                 {(decision) => (
@@ -413,6 +416,10 @@ function getActionDecisionOptions(payload: Record<string, unknown>): ActionDecis
     ]
   }
   return []
+}
+
+function normalizeActionRequestStatus(status: string | undefined): string {
+  return status?.trim().toLowerCase() ?? ""
 }
 
 function renderToolCallCard(message: TranscriptMessage, payload: Record<string, unknown>) {
