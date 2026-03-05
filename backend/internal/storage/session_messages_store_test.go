@@ -661,6 +661,143 @@ func TestSessionMessagesLogStore_CompactSession_PreservesFinalTranscript(t *test
 	}
 }
 
+func TestSessionMessagesLogStore_LoadPageDescending_LongSessionFixtureTailPaging(t *testing.T) {
+	dir := t.TempDir()
+	store := NewSessionMessagesLogStore(dir)
+
+	sessionID := "test-session-long-fixture-tail"
+	base := loadMessageLogFixture(t, "codex_long_turn_pattern.jsonl")
+	seedSessionLogFromRecords(t, dir, sessionID, replicateFixtureRecords(t, base, 160))
+
+	expected, err := store.Load(sessionID)
+	if err != nil {
+		t.Fatalf("load expected transcript: %v", err)
+	}
+	expectedMsgs := expected.GetMessages()
+	if len(expectedMsgs) == 0 {
+		t.Fatal("expected non-empty transcript for fixture")
+	}
+
+	collected, cursors := walkDescendingPages(t, store, sessionID, 37)
+	if len(cursors) == 0 {
+		t.Fatal("expected at least one pagination cursor for long session")
+	}
+
+	if len(collected) != len(expectedMsgs) {
+		t.Fatalf("collected %d paged messages, expected %d", len(collected), len(expectedMsgs))
+	}
+	for i := range expectedMsgs {
+		want := expectedMsgs[len(expectedMsgs)-1-i]
+		got := collected[i]
+		if got.ID != want.ID || got.Kind != want.Kind || got.Contents != want.Contents || string(got.Payload) != string(want.Payload) {
+			t.Fatalf("paged message mismatch at index %d: got=%+v want=%+v", i, got, want)
+		}
+	}
+
+	secondPass, secondCursors := walkDescendingPages(t, store, sessionID, 37)
+	if len(secondPass) != len(collected) {
+		t.Fatalf("second pass size mismatch: got %d want %d", len(secondPass), len(collected))
+	}
+	for i := range collected {
+		if secondPass[i].ID != collected[i].ID {
+			t.Fatalf("unstable ordering at index %d: first=%s second=%s", i, collected[i].ID, secondPass[i].ID)
+		}
+	}
+	if len(secondCursors) != len(cursors) {
+		t.Fatalf("cursor count mismatch across passes: first=%d second=%d", len(cursors), len(secondCursors))
+	}
+	for i := range cursors {
+		if secondCursors[i] != cursors[i] {
+			t.Fatalf("cursor mismatch at index %d: first=%d second=%d", i, cursors[i], secondCursors[i])
+		}
+	}
+}
+
+func TestSessionMessagesLogStore_CompactSession_LongSessionFixtureEquivalent(t *testing.T) {
+	dir := t.TempDir()
+	store := NewSessionMessagesLogStore(dir)
+
+	sessionID := "test-session-long-fixture-compact"
+	base := loadMessageLogFixture(t, "codex_long_turn_pattern.jsonl")
+	seedSessionLogFromRecords(t, dir, sessionID, replicateFixtureRecords(t, base, 120))
+
+	before, err := store.Load(sessionID)
+	if err != nil {
+		t.Fatalf("load before compaction: %v", err)
+	}
+	beforePaged, beforeCursors := walkDescendingPages(t, store, sessionID, 29)
+
+	if err := store.CompactSession(sessionID); err != nil {
+		t.Fatalf("compact session: %v", err)
+	}
+
+	after, err := store.Load(sessionID)
+	if err != nil {
+		t.Fatalf("load after compaction: %v", err)
+	}
+	afterPaged, afterCursors := walkDescendingPages(t, store, sessionID, 29)
+
+	beforeMsgs := before.GetMessages()
+	afterMsgs := after.GetMessages()
+	if len(beforeMsgs) != len(afterMsgs) {
+		t.Fatalf("message count changed after compaction: before=%d after=%d", len(beforeMsgs), len(afterMsgs))
+	}
+	for i := range beforeMsgs {
+		if beforeMsgs[i].ID != afterMsgs[i].ID ||
+			beforeMsgs[i].Kind != afterMsgs[i].Kind ||
+			beforeMsgs[i].Contents != afterMsgs[i].Contents ||
+			string(beforeMsgs[i].Payload) != string(afterMsgs[i].Payload) {
+			t.Fatalf("message[%d] mismatch after compaction: before=%+v after=%+v", i, beforeMsgs[i], afterMsgs[i])
+		}
+	}
+
+	if len(beforePaged) != len(afterPaged) {
+		t.Fatalf("paged transcript length changed after compaction: before=%d after=%d", len(beforePaged), len(afterPaged))
+	}
+	for i := range beforePaged {
+		if beforePaged[i].ID != afterPaged[i].ID || beforePaged[i].Contents != afterPaged[i].Contents {
+			t.Fatalf("paged message[%d] mismatch after compaction: before=%+v after=%+v", i, beforePaged[i], afterPaged[i])
+		}
+	}
+	if len(beforeCursors) != len(afterCursors) {
+		t.Fatalf("cursor count changed after compaction: before=%d after=%d", len(beforeCursors), len(afterCursors))
+	}
+	for i := range beforeCursors {
+		if beforeCursors[i] != afterCursors[i] {
+			t.Fatalf("cursor[%d] mismatch after compaction: before=%d after=%d", i, beforeCursors[i], afterCursors[i])
+		}
+	}
+
+	for i, rec := range readLogRecordsFromDisk(t, dir, sessionID) {
+		if rec.Projection == MessageProjectionOutputDelta || rec.Projection == MessageProjectionAppendDelta {
+			t.Fatalf("record[%d] still uses delta projection after compaction", i)
+		}
+	}
+}
+
+func BenchmarkSessionMessagesLogStore_LoadPageDescending_LongSessionTail(b *testing.B) {
+	dir := b.TempDir()
+	store := NewSessionMessagesLogStore(dir)
+
+	sessionID := "bench-session-long-fixture"
+	base := loadMessageLogFixture(b, "codex_long_turn_pattern.jsonl")
+	seedSessionLogFromRecords(b, dir, sessionID, replicateFixtureRecords(b, base, 220))
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		page, nextBefore, err := store.LoadPageDescending(sessionID, nil, 50)
+		if err != nil {
+			b.Fatalf("LoadPageDescending tail: %v", err)
+		}
+		if len(page) == 0 {
+			b.Fatal("expected non-empty tail page")
+		}
+		if nextBefore == nil {
+			b.Fatal("expected next_before for benchmark session")
+		}
+	}
+}
+
 func TestSessionMessagesLogStore_LoadNonexistent(t *testing.T) {
 	dir := t.TempDir()
 	store := NewSessionMessagesLogStore(dir)
@@ -680,6 +817,164 @@ func TestSessionMessagesLogStore_LoadNonexistent(t *testing.T) {
 	if len(msgs) != 0 {
 		t.Errorf("expected 0 messages for nonexistent session, got %d", len(msgs))
 	}
+}
+
+func walkDescendingPages(tb testing.TB, store *SessionMessagesLogStore, sessionID string, limit int) ([]domain.Message, []int64) {
+	tb.Helper()
+
+	collected := make([]domain.Message, 0)
+	seen := map[string]struct{}{}
+	cursors := make([]int64, 0)
+	var before *int64
+
+	for pageNumber := 0; pageNumber < 10000; pageNumber++ {
+		page, nextBefore, err := store.LoadPageDescending(sessionID, before, limit)
+		if err != nil {
+			tb.Fatalf("LoadPageDescending page %d before=%v: %v", pageNumber, before, err)
+		}
+		if len(page) > limit {
+			tb.Fatalf("page %d exceeded limit: got %d want <= %d", pageNumber, len(page), limit)
+		}
+
+		var prevSeq int64
+		for i, msg := range page {
+			seq := messageSeqFromID(tb, msg.ID)
+			if before != nil && seq >= *before {
+				tb.Fatalf("page %d returned seq=%d not older than before=%d", pageNumber, seq, *before)
+			}
+			if i > 0 && seq >= prevSeq {
+				tb.Fatalf("page %d not strictly descending: prev=%d curr=%d", pageNumber, prevSeq, seq)
+			}
+			prevSeq = seq
+			if _, exists := seen[msg.ID]; exists {
+				tb.Fatalf("duplicate logical message across pages: %s", msg.ID)
+			}
+			seen[msg.ID] = struct{}{}
+			collected = append(collected, msg)
+		}
+
+		if nextBefore == nil {
+			break
+		}
+		if len(page) == 0 {
+			tb.Fatal("received next_before cursor with empty page")
+		}
+		oldest := messageSeqFromID(tb, page[len(page)-1].ID)
+		if *nextBefore != oldest {
+			tb.Fatalf("cursor mismatch on page %d: got %d want %d", pageNumber, *nextBefore, oldest)
+		}
+		if before != nil && *nextBefore >= *before {
+			tb.Fatalf("cursor did not move backward: before=%d next_before=%d", *before, *nextBefore)
+		}
+		cursors = append(cursors, *nextBefore)
+		before = nextBefore
+	}
+
+	return collected, cursors
+}
+
+func loadMessageLogFixture(tb testing.TB, fixtureName string) []MessageLogRecord {
+	tb.Helper()
+
+	path := filepath.Join("testdata", fixtureName)
+	f, err := os.Open(path)
+	if err != nil {
+		tb.Fatalf("open fixture %s: %v", path, err)
+	}
+	defer f.Close()
+
+	rows := make([]MessageLogRecord, 0, 32)
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var rec MessageLogRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			tb.Fatalf("decode fixture line %q: %v", line, err)
+		}
+		rows = append(rows, rec)
+	}
+	if err := scanner.Err(); err != nil {
+		tb.Fatalf("scan fixture %s: %v", path, err)
+	}
+	if len(rows) == 0 {
+		tb.Fatalf("fixture %s is empty", path)
+	}
+
+	return rows
+}
+
+func replicateFixtureRecords(tb testing.TB, base []MessageLogRecord, turns int) []MessageLogRecord {
+	tb.Helper()
+	if turns <= 0 {
+		tb.Fatal("turns must be > 0")
+	}
+	if len(base) == 0 {
+		tb.Fatal("base fixture must not be empty")
+	}
+
+	replicated := make([]MessageLogRecord, 0, len(base)*turns)
+	baseSize := int64(len(base))
+	for turn := 0; turn < turns; turn++ {
+		seqOffset := int64(turn) * baseSize
+		timeOffset := time.Duration(turn) * 7 * time.Second
+		for _, rec := range base {
+			clone := rec
+			clone.Seq = rec.Seq + seqOffset
+			clone.Timestamp = rec.Timestamp.Add(timeOffset)
+			clone.TargetMessageID = shiftLogMessageID(rec.TargetMessageID, seqOffset)
+			replicated = append(replicated, clone)
+		}
+	}
+
+	return replicated
+}
+
+func seedSessionLogFromRecords(tb testing.TB, dir, sessionID string, records []MessageLogRecord) {
+	tb.Helper()
+
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		tb.Fatalf("mkdir %s: %v", dir, err)
+	}
+
+	path := filepath.Join(dir, sessionID+".jsonl")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		tb.Fatalf("open %s: %v", path, err)
+	}
+	defer f.Close()
+
+	for _, rec := range records {
+		line, err := json.Marshal(rec)
+		if err != nil {
+			tb.Fatalf("marshal record seq=%d: %v", rec.Seq, err)
+		}
+		if _, err := f.Write(append(line, '\n')); err != nil {
+			tb.Fatalf("write %s: %v", path, err)
+		}
+	}
+}
+
+func shiftLogMessageID(id string, offset int64) string {
+	if id == "" || !strings.HasPrefix(id, "log_") {
+		return id
+	}
+	seq, err := strconv.ParseInt(strings.TrimPrefix(id, "log_"), 10, 64)
+	if err != nil {
+		return id
+	}
+	return "log_" + strconv.FormatInt(seq+offset, 10)
+}
+
+func messageSeqFromID(tb testing.TB, id string) int64 {
+	tb.Helper()
+	seq, err := strconv.ParseInt(strings.TrimPrefix(id, "log_"), 10, 64)
+	if err != nil {
+		tb.Fatalf("parse sequence from message id %q: %v", id, err)
+	}
+	return seq
 }
 
 func TestSessionMessagesLogStore_CorruptLinesAreToleratedOnLoad(t *testing.T) {
