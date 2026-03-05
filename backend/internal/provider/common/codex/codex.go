@@ -85,7 +85,9 @@ var codexNotificationHandlers = map[string]codexNotificationHandler{
 	},
 
 	"turn/plan/updated":                     (*CodexProvider).handlePlanUpdateNotification,
+	"codex/event/plan_update":               (*CodexProvider).handlePlanUpdateNotification,
 	"turn/diff/updated":                     (*CodexProvider).handleDiffUpdateNotification,
+	"codex/event/patch_apply_begin":         (*CodexProvider).handlePatchApplyBeginNotification,
 	"codex/event/exec_approval_request":     (*CodexProvider).handleExecApprovalNotification,
 	"item/commandExecution/requestApproval": (*CodexProvider).handleCommandExecutionApprovalNotification,
 }
@@ -164,6 +166,7 @@ type CodexProvider struct {
 	outputDeltaFmt   map[string]string // "codex"|"item": first-wins for tool output deltas
 	reasonDeltaFmt   map[string]string // "codex"|"item": first-wins for reasoning deltas
 	agentDeltaFmt    map[string]string // "codex"|"item": first-wins for agent output deltas
+	planUpdateFmt    map[string]string // "codex"|"turn": first-wins for plan updates
 }
 
 // NewCodexProvider creates a new Codex app-server provider.
@@ -183,6 +186,7 @@ func NewCodexProvider(sessionID string, staticCfg Config) *CodexProvider {
 		outputDeltaFmt:   make(map[string]string),
 		reasonDeltaFmt:   make(map[string]string),
 		agentDeltaFmt:    make(map[string]string),
+		planUpdateFmt:    make(map[string]string),
 	}
 }
 
@@ -669,11 +673,47 @@ func (p *CodexProvider) handleActionRequestNotification(source string, params js
 }
 
 func (p *CodexProvider) handlePlanUpdateNotification(params json.RawMessage, raw json.RawMessage) {
-	plan := parsePlanUpdate(params)
+	method := "turn/plan/updated"
+	if isCodexPlanUpdatePayload(params) {
+		method = "codex/event/plan_update"
+	}
+	plan, turnID := parsePlanUpdateEnvelope(params)
+	if turnID != "" && !p.markOrCheckPlanFmt(turnID, method) {
+		return
+	}
 	if plan == nil {
 		return
 	}
 	p.events.Emit(domain.NewPlanEvent(p.sessionID, *plan, raw))
+}
+
+func (p *CodexProvider) handlePatchApplyBeginNotification(params json.RawMessage, raw json.RawMessage) {
+	var payload struct {
+		Msg struct {
+			CallID       string         `json:"call_id"`
+			AutoApproved bool           `json:"auto_approved"`
+			Changes      map[string]any `json:"changes"`
+			TurnID       string         `json:"turn_id"`
+		} `json:"msg"`
+	}
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return
+	}
+	callID := strings.TrimSpace(payload.Msg.CallID)
+	if callID == "" {
+		return
+	}
+	p.events.Emit(domain.NewArtifactUpdateEvent(p.sessionID, domain.ArtifactUpdateData{
+		ID:    callID,
+		Kind:  "file_change",
+		Title: "Patch apply started",
+		Payload: map[string]any{
+			"status":        "in_progress",
+			"auto_approved": payload.Msg.AutoApproved,
+			"changes":       payload.Msg.Changes,
+			"turn_id":       payload.Msg.TurnID,
+		},
+	}, raw))
 }
 
 func (p *CodexProvider) handleDiffUpdateNotification(params json.RawMessage, raw json.RawMessage) {
@@ -823,6 +863,32 @@ func (p *CodexProvider) handleItemNotification(method string, params json.RawMes
 				"duration_ms":       item["durationMs"],
 			},
 		}, raw))
+
+	case "filechange":
+		status := strings.TrimSpace(asString(item["status"]))
+		if status == "" {
+			if method == "item/completed" {
+				status = "completed"
+			} else {
+				status = "in_progress"
+			}
+		}
+		title := "File change update"
+		if method == "item/completed" {
+			title = "File change completed"
+		} else if method == "item/started" {
+			title = "File change started"
+		}
+		p.events.Emit(domain.NewArtifactUpdateEvent(p.sessionID, domain.ArtifactUpdateData{
+			ID:    itemID,
+			Kind:  "file_change",
+			Title: title,
+			Payload: map[string]any{
+				"status":  status,
+				"changes": item["changes"],
+			},
+		}, raw))
+		return
 
 	default:
 		kind := strings.TrimSpace(itemType)
@@ -1397,19 +1463,49 @@ func parseActionRequest(method string, params json.RawMessage) (*domain.ActionRe
 }
 
 func parsePlanUpdate(params json.RawMessage) *domain.PlanData {
+	plan, _ := parsePlanUpdateEnvelope(params)
+	return plan
+}
+
+func parsePlanUpdateEnvelope(params json.RawMessage) (*domain.PlanData, string) {
 	var payload struct {
+		TurnID      string `json:"turnId"`
 		Explanation string `json:"explanation"`
 		Plan        []struct {
 			Step   string `json:"step"`
 			Status string `json:"status"`
 		} `json:"plan"`
+		Msg *struct {
+			TurnID      string `json:"turn_id"`
+			Explanation string `json:"explanation"`
+			Plan        []struct {
+				Step   string `json:"step"`
+				Status string `json:"status"`
+			} `json:"plan"`
+			Type string `json:"type"`
+		} `json:"msg"`
 	}
 	if err := json.Unmarshal(params, &payload); err != nil {
-		return nil
+		return nil, ""
 	}
 
-	steps := make([]domain.PlanStep, 0, len(payload.Plan))
-	for i, s := range payload.Plan {
+	turnID := strings.TrimSpace(payload.TurnID)
+	explanation := payload.Explanation
+	planItems := payload.Plan
+	if payload.Msg != nil {
+		if strings.TrimSpace(payload.Msg.TurnID) != "" {
+			turnID = strings.TrimSpace(payload.Msg.TurnID)
+		}
+		if strings.TrimSpace(payload.Msg.Explanation) != "" {
+			explanation = payload.Msg.Explanation
+		}
+		if len(payload.Msg.Plan) > 0 {
+			planItems = payload.Msg.Plan
+		}
+	}
+
+	steps := make([]domain.PlanStep, 0, len(planItems))
+	for i, s := range planItems {
 		desc := strings.TrimSpace(s.Step)
 		if desc == "" {
 			continue
@@ -1421,13 +1517,25 @@ func parsePlanUpdate(params json.RawMessage) *domain.PlanData {
 		})
 	}
 
-	if payload.Explanation == "" && len(steps) == 0 {
-		return nil
+	if explanation == "" && len(steps) == 0 {
+		return nil, turnID
 	}
 	return &domain.PlanData{
-		Description: payload.Explanation,
+		Description: explanation,
 		Steps:       steps,
+	}, turnID
+}
+
+func isCodexPlanUpdatePayload(params json.RawMessage) bool {
+	var payload struct {
+		Msg *struct {
+			Type string `json:"type"`
+		} `json:"msg"`
 	}
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return false
+	}
+	return payload.Msg != nil && strings.TrimSpace(payload.Msg.Type) == "plan_update"
 }
 
 func parseDiffUpdate(params json.RawMessage) string {
@@ -1502,6 +1610,20 @@ func (p *CodexProvider) markOrCheckDeltaFmt(formats map[string]string, id, metho
 	} else {
 		return existing == want
 	}
+}
+
+func (p *CodexProvider) markOrCheckPlanFmt(turnID, method string) bool {
+	p.dupMu.Lock()
+	defer p.dupMu.Unlock()
+	want := "turn"
+	if strings.HasPrefix(method, "codex/") {
+		want = "codex"
+	}
+	if existing := p.planUpdateFmt[turnID]; existing == "" {
+		p.planUpdateFmt[turnID] = want
+		return true
+	}
+	return p.planUpdateFmt[turnID] == want
 }
 
 // extractAgentReasoningItemID extracts the item_id from a

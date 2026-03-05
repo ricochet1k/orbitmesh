@@ -1,19 +1,13 @@
 import { fireEvent, render, screen } from "@solidjs/testing-library"
-import { describe, expect, it, vi } from "vitest"
+import { createSignal } from "solid-js"
+import { describe, expect, it } from "vitest"
 import SessionTranscript from "./SessionTranscript"
-import { TRANSCRIPT_KINDS, TRANSCRIPT_MESSAGE_TYPES } from "../transcript/constants"
 import type { TranscriptMessage } from "../types/api"
-import type { TodoWriteState } from "../hooks/useSessionData"
 
-function renderTranscript(
-  messages: TranscriptMessage[],
-  latestTodoWrite: TodoWriteState | null = null,
-  onRespondActionRequest?: (response: { actionId: string; decision: string; input?: string }) => void | Promise<void>,
-) {
+function renderTranscript(messages: TranscriptMessage[]) {
   return render(() => (
     <SessionTranscript
       messages={() => messages}
-      latestTodoWrite={() => latestTodoWrite}
       filter={() => ""}
       setFilter={() => {}}
       autoScroll={() => true}
@@ -21,530 +15,252 @@ function renderTranscript(
       activityCursor={() => null}
       activityHistoryLoading={() => false}
       onLoadEarlier={() => {}}
-      onRespondActionRequest={onRespondActionRequest}
     />
   ))
 }
 
-type NormalizedTranscriptCardSnapshot = {
-  kind: string
-  label: string
-  state: "streaming" | "done" | ""
-  richMarkers: string[]
-  coreContent: string
-}
-
-function captureNormalizedCardSnapshot(container: HTMLElement): NormalizedTranscriptCardSnapshot {
-  const article = container.querySelector("article.transcript-item") as HTMLElement | null
-  if (!article) {
-    throw new Error("transcript item not found")
-  }
-
-  const markerSelectors: Array<{ marker: string; selector: string }> = [
-    { marker: "tool-bash-card", selector: "[data-testid='tool-bash-card']" },
-    { marker: "tool-generic-card", selector: "[data-testid='tool-generic-card']" },
-    { marker: "rich-progress-card", selector: "[data-testid='rich-progress-card']" },
-    { marker: "rich-progress-class", selector: ".transcript-rich-progress" },
-  ]
-
-  const normalizeText = (value: string) => value.replace(/\s+/g, " ").replace(/stream\s+[A-Za-z0-9._:-]+/g, "stream <id>").trim()
-  const clone = article.cloneNode(true) as HTMLElement
-  clone.querySelector(".transcript-item-header")?.remove()
-
-  return {
-    kind: article.dataset.kind ?? "",
-    label: normalizeText(article.querySelector(".transcript-type")?.textContent ?? ""),
-    state: ((article.querySelector(".transcript-status")?.textContent ?? "").trim() as "streaming" | "done" | "") || "",
-    richMarkers: markerSelectors.filter(({ selector }) => article.querySelector(selector)).map(({ marker }) => marker),
-    coreContent: normalizeText(clone.textContent ?? ""),
-  }
-}
-
-describe("SessionTranscript", () => {
-  it("normalizes message kind labels for transcript items", () => {
+describe("SessionTranscript grouping", () => {
+  it("groups consecutive update rows and reveals messages when expanded", () => {
     renderTranscript([
       {
-        id: "m1",
-        type: TRANSCRIPT_MESSAGE_TYPES.AGENT,
-        kind: TRANSCRIPT_KINDS.OUTPUT,
-        timestamp: "2026-02-05T12:00:00Z",
-        content: "assistant output",
-      },
-      {
-        id: "m2",
-        type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
-        kind: TRANSCRIPT_KINDS.TOOL_CALL,
-        timestamp: "2026-02-05T12:00:01Z",
-        content: "tool content",
-      },
-      {
-        id: "m3",
-        type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
-        kind: TRANSCRIPT_KINDS.STATUS_CHANGE,
-        timestamp: "2026-02-05T12:00:02Z",
-        content: "state changed",
-      },
-      {
-        id: "m4",
-        type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
-        kind: TRANSCRIPT_KINDS.UNKNOWN,
-        timestamp: "2026-02-05T12:00:03Z",
-        content: "unhandled event",
-      },
-    ])
-
-    expect(screen.getByText("Assistant")).toBeDefined()
-    expect(screen.getByText("Tool")).toBeDefined()
-    expect(screen.getByText("Status")).toBeDefined()
-    expect(screen.getByText("Unknown")).toBeDefined()
-  })
-
-  it("applies normalized kind class names for style matching", () => {
-    const { container } = renderTranscript([
-      {
-        id: "m1",
-        type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
-        kind: TRANSCRIPT_KINDS.TOOL_CALL,
-        timestamp: "2026-02-05T12:00:00Z",
-        content: "tool output",
-      },
-    ])
-
-    const item = container.querySelector(".transcript-item")
-    expect(item?.className).toContain(`transcript-kind-${TRANSCRIPT_KINDS.TOOL_CALL}`)
-    expect(item?.getAttribute("data-kind")).toBe(TRANSCRIPT_KINDS.TOOL_CALL)
-  })
-
-  it("shows per-message raw json in dev mode", () => {
-    renderTranscript([
-      {
-        id: "m1",
-        type: "system",
-        kind: "tool_call",
-        timestamp: "2026-02-05T12:00:00Z",
-        content: "tool output",
-      },
-    ])
-
-    if (!import.meta.env.DEV) {
-      expect(screen.queryByRole("button", { name: "Show raw JSON" })).toBeNull()
-      return
-    }
-
-    const toggle = screen.getByRole("button", { name: "Show raw JSON" })
-    fireEvent.click(toggle)
-    const inspector = screen.getByTestId("transcript-raw-json")
-    expect(inspector.textContent).toContain('"id": "m1"')
-    expect(inspector.textContent).toContain('"kind": "tool_call"')
-  })
-
-  it("renders rich cards for provider-agnostic event kinds", () => {
-    renderTranscript([
-      {
-        id: "progress-1",
-        type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
-        kind: TRANSCRIPT_KINDS.PROGRESS,
-        timestamp: "2026-02-05T12:00:00Z",
-        content: "Assessing next step",
-        payload: {
-          channel: "reasoning",
-          stream_id: "reasoning-1",
-          is_delta: true,
-          done: false,
-        },
-      },
-      {
-        id: "usage-1",
-        type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
-        kind: TRANSCRIPT_KINDS.RESOURCE_USAGE,
-        timestamp: "2026-02-05T12:00:01Z",
-        content: "usage",
-        payload: {
-          scope: "thread",
-          data: { input_tokens: 100, output_tokens: 20 },
-        },
-      },
-      {
-        id: "action-1",
-        type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
-        kind: TRANSCRIPT_KINDS.ACTION_REQUEST,
-        timestamp: "2026-02-05T12:00:02Z",
-        content: "approval needed",
-        payload: {
-          id: "req_1",
-          kind: "approval",
-          status: "pending",
-          title: "Approve patch",
-          payload: { files: ["a.txt"] },
-        },
-      },
-      {
-        id: "artifact-1",
-        type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
-        kind: TRANSCRIPT_KINDS.ARTIFACT_UPDATE,
-        timestamp: "2026-02-05T12:00:03Z",
-        content: "artifact",
-        payload: {
-          id: "art_1",
-          kind: "file_change",
-          title: "Patch preview",
-          payload: { changes: 1 },
-        },
-      },
-    ])
-
-    expect(screen.getByTestId("rich-progress-card")).toBeDefined()
-    expect(screen.getByTestId("rich-resource-usage-card")).toBeDefined()
-    expect(screen.getByTestId("rich-action-request-card")).toBeDefined()
-    expect(screen.getByTestId("rich-artifact-update-card")).toBeDefined()
-    expect(screen.getByText("reasoning")).toBeDefined()
-    expect(screen.getByText("Approve patch")).toBeDefined()
-  })
-
-  it("renders approve/deny controls and emits stable action response payloads", () => {
-    const onRespond = vi.fn()
-    renderTranscript([
-      {
-        id: "action-approval",
-        type: "system",
-        kind: "action_request",
-        timestamp: "2026-02-05T12:00:02Z",
-        content: "approval needed",
-        payload: {
-          id: "req_approve",
-          kind: "approval",
-          status: "pending",
-          title: "Approve command",
-          payload: {
-            decisions: [
-              { value: "approve", label: "Approve" },
-              { value: "deny", label: "Deny", input: "safety_blocked" },
-            ],
-          },
-        },
-      },
-    ], null, onRespond)
-
-    expect(screen.getByTestId("action-request-controls")).toBeDefined()
-    fireEvent.click(screen.getByTestId("action-request-approve"))
-    fireEvent.click(screen.getByTestId("action-request-deny"))
-
-    expect(onRespond).toHaveBeenNthCalledWith(1, { actionId: "req_approve", decision: "approve", input: undefined })
-    expect(onRespond).toHaveBeenNthCalledWith(2, { actionId: "req_approve", decision: "deny", input: "safety_blocked" })
-  })
-
-  it("keeps action request controls deterministic between live and reload payloads", () => {
-    const onRespondLive = vi.fn()
-    const onRespondReload = vi.fn()
-    const messagePayload = {
-      id: "req_live_reload",
-      kind: "approval",
-      status: "pending",
-      title: "Apply patch",
-      payload: {
-        decisions: [
-          { value: "approve", label: "Approve" },
-          { value: "deny", label: "Deny", input: "no_review" },
-        ],
-      },
-    }
-
-    const liveRender = renderTranscript([
-      {
-        id: "action-live",
-        type: "system",
-        kind: "action_request",
-        timestamp: "2026-02-05T12:00:02Z",
-        content: "approval needed",
-        payload: messagePayload,
-      },
-    ], null, onRespondLive)
-    fireEvent.click(screen.getByTestId("action-request-approve"))
-
-    const liveSnapshot = captureNormalizedCardSnapshot(liveRender.container)
-    liveRender.unmount()
-
-    const reloadRender = renderTranscript([
-      {
-        id: "event:100:action_request",
-        type: "system",
-        kind: "action_request",
-        timestamp: "2026-02-05T12:00:02Z",
-        content: "Action required (approval): Apply patch",
-        payload: messagePayload,
-      },
-    ], null, onRespondReload)
-    fireEvent.click(screen.getByTestId("action-request-approve"))
-
-    expect(captureNormalizedCardSnapshot(reloadRender.container)).toEqual(liveSnapshot)
-    expect(onRespondLive).toHaveBeenCalledWith({ actionId: "req_live_reload", decision: "approve", input: undefined })
-    expect(onRespondReload).toHaveBeenCalledWith({ actionId: "req_live_reload", decision: "approve", input: undefined })
-  })
-
-  it("hides action request controls once request is not pending", () => {
-    const onRespond = vi.fn()
-    renderTranscript([
-      {
-        id: "action-completed",
-        type: "system",
-        kind: "action_request",
-        timestamp: "2026-02-05T12:00:02Z",
-        content: "approval completed",
-        payload: {
-          id: "req_complete",
-          kind: "approval",
-          status: "completed",
-          title: "Approve command",
-          payload: {
-            decisions: [
-              { value: "approve", label: "Approve" },
-              { value: "deny", label: "Deny" },
-            ],
-          },
-        },
-      },
-    ], null, onRespond)
-
-    expect(screen.queryByTestId("action-request-controls")).toBeNull()
-  })
-
-  it("renders generic tool calls as python-like signatures", () => {
-    renderTranscript([
-      {
-        id: "tool-generic",
-        type: "system",
-        kind: "tool_call",
-        timestamp: "2026-02-05T12:00:00Z",
-        content: "legacy",
-        payload: {
-          name: "question",
-          status: "running",
-          input: {
-            questions: [{ header: "Mode", options: [{ label: "Fast" }] }],
-            multiple: false,
-          },
-        },
-      },
-    ])
-
-    expect(screen.getByTestId("tool-generic-card")).toBeDefined()
-    expect(screen.getByText(/question\(/i)).toBeDefined()
-    expect(screen.getByText("running")).toBeDefined()
-  })
-
-  it("renders bash tool calls in a terminal-style block", () => {
-    renderTranscript([
-      {
-        id: "tool-bash",
-        type: "system",
-        kind: "tool_call",
-        timestamp: "2026-02-05T12:00:00Z",
-        content: "fallback content",
-        payload: {
-          name: "bash",
-          status: "done",
-          input: {
-            command: "npm test",
-            description: "Runs frontend test suite",
-          },
-        },
-      },
-    ])
-
-    expect(screen.getByTestId("tool-bash-card")).toBeDefined()
-    expect(screen.getByText("npm test")).toBeDefined()
-    expect(screen.getByText("Runs frontend test suite")).toBeDefined()
-  })
-
-  it("renders read tool calls as compact file cards", () => {
-    renderTranscript([
-      {
-        id: "tool-read",
-        type: "system",
-        kind: "tool_call",
-        timestamp: "2026-02-05T12:00:00Z",
-        content: "line 1\nline 2",
-        payload: {
-          name: "read",
-          status: "done",
-          input: {
-            filePath: "/Users/matt/mycode/orbitmesh/frontend/src/App.tsx",
-          },
-          output: "1: test",
-        },
-      },
-    ])
-
-    expect(screen.getByTestId("tool-read-card")).toBeDefined()
-    const link = screen.getByText("App.tsx") as HTMLAnchorElement
-    expect(link.getAttribute("href")).toBe("/files?path=frontend%2Fsrc%2FApp.tsx")
-    const details = screen.getByText("Show contents").closest("details")
-    expect(details?.open).toBe(false)
-  })
-
-  it("shows only pinned TodoWrite checklist outside message flow", () => {
-    renderTranscript(
-      [
-        {
-          id: "assistant-1",
-          type: "agent",
-          kind: "output",
-          timestamp: "2026-02-05T12:00:00Z",
-          content: "Assistant reply",
-        },
-        {
-          id: "tool-todo-old",
-          type: "system",
-          kind: "tool_call",
-          timestamp: "2026-02-05T12:00:01Z",
-          content: "old todo",
-          payload: {
-            name: "todowrite",
-            input: { todos: [{ content: "Old", status: "pending" }] },
-          },
-        },
-      ],
-      {
-        messageId: "tool-todo-latest",
-        timestamp: "2026-02-05T12:00:02Z",
-        status: "done",
-        items: [
-          { content: "Implement renderer", status: "completed" },
-          { content: "Add tests", status: "in_progress" },
-        ],
-      },
-    )
-
-    const pinned = screen.getByTestId("transcript-pinned-todo")
-    expect(pinned.textContent).toContain("Implement renderer")
-    expect(screen.getByText("Assistant reply")).toBeDefined()
-    expect(screen.queryByText("old todo")).toBeNull()
-  })
-
-  it("renders markdown content for transcript message bodies", () => {
-    const { container } = renderTranscript([
-      {
-        id: "markdown-1",
+        id: "assistant-1",
         type: "agent",
         kind: "output",
-        timestamp: "2026-02-05T12:00:00Z",
-        content: "# Heading\n\n- item one\n- item two\n\nUse `code`.",
+        timestamp: "2026-03-01T00:00:00Z",
+        content: "Top level answer",
       },
-    ])
-
-    expect(container.querySelector(".transcript-markdown-chunk h1")?.textContent).toBe("Heading")
-    const listItems = container.querySelectorAll(".transcript-markdown-chunk li")
-    expect(listItems).toHaveLength(2)
-    expect(container.querySelector(".transcript-markdown-chunk code")?.textContent).toBe("code")
-  })
-
-  it("renders fenced code blocks with codemirror highlighting after message finalization", () => {
-    const { container } = renderTranscript([
       {
-        id: "markdown-code-1",
-        type: "agent",
-        kind: "output",
-        timestamp: "2026-02-05T12:00:00Z",
-        content: "```ts\nconst value: number = 1\n```",
-      },
-    ])
-
-    const codeEditor = container.querySelector(".transcript-code-block .cm-editor")
-    expect(codeEditor).toBeTruthy()
-    expect(codeEditor?.textContent).toContain("const value")
-  })
-
-  it("keeps partial streaming code fences readable before final message", () => {
-    const { container } = renderTranscript([
-      {
-        id: "markdown-code-stream",
-        type: "agent",
-        kind: "output",
-        timestamp: "2026-02-05T12:00:00Z",
-        open: true,
-        content: "```ts\nconst value =",
-      },
-    ])
-
-    expect(container.querySelector(".transcript-code-block .cm-editor")).toBeNull()
-    expect(container.querySelector(".transcript-content")?.textContent).toContain("const value")
-  })
-
-  it("renders the same tool card structure for persisted and live tool_call payloads", () => {
-    const historyRender = renderTranscript([
-      {
-        id: "history-tool-1",
+        id: "tool-read-1",
         type: "system",
         kind: "tool_call",
-        timestamp: "2026-02-05T12:00:00Z",
-        content: "Run command({\"command\":\"pwd\"}): /tmp",
-        open: false,
-        payload: {
-          id: "tool-1",
-          name: "bash",
-          title: "Run command",
-          status: "done",
-          input: { command: "pwd" },
-          output: "/tmp",
-        },
+        timestamp: "2026-03-01T00:00:01Z",
+        content: "read",
+        payload: { name: "read", input: { filePath: "/tmp/one.txt" } },
       },
-    ])
-    const liveRender = renderTranscript([
       {
-        id: "live-tool-1",
+        id: "tool-edit-1",
         type: "system",
         kind: "tool_call",
-        timestamp: "2026-02-05T12:00:05Z",
-        content: "Run command({\"command\":\"pwd\"}): /tmp",
-        open: false,
-        payload: {
-          id: "tool-1",
-          name: "bash",
-          title: "Run command",
-          status: "done",
-          input: { command: "pwd" },
-          output: "/tmp",
-        },
+        timestamp: "2026-03-01T00:00:02Z",
+        content: "edit",
+        payload: { name: "edit", input: { filePath: "/tmp/two.txt" } },
+      },
+      {
+        id: "thought-1",
+        type: "system",
+        kind: "thought",
+        timestamp: "2026-03-01T00:00:03Z",
+        content: "considering next step",
       },
     ])
 
-    expect(captureNormalizedCardSnapshot(historyRender.container)).toEqual(captureNormalizedCardSnapshot(liveRender.container))
+    expect(screen.getByText("Top level answer")).toBeDefined()
+    expect(screen.queryByText("one.txt")).toBeNull()
+
+    const summary = screen.getByTestId("transcript-group-summary")
+    expect(summary.textContent).toContain("1 read")
+
+    fireEvent.click(summary)
+    expect(screen.getByTestId("transcript-group-items")).toBeDefined()
+    expect(screen.getByText(/one.txt/)).toBeDefined()
+    expect(screen.getByText(/two.txt/)).toBeDefined()
+    expect(screen.getByText("considering next step")).toBeDefined()
   })
 
-  it("renders the same reasoning progress card structure for persisted and live messages", () => {
-    const historyRender = renderTranscript([
+  it("summarizes grouped tool series by tool kind counts", () => {
+    renderTranscript([
       {
-        id: "history-progress-1",
+        id: "tool-read-1",
         type: "system",
-        kind: "progress",
-        timestamp: "2026-02-05T12:00:00Z",
-        content: "Assessing next steps",
-        open: false,
-        payload: {
-          channel: "reasoning",
-          stream_id: "reasoning-1",
-          is_delta: true,
-          done: true,
-        },
+        kind: "tool_call",
+        timestamp: "2026-03-01T00:00:01Z",
+        content: "read",
+        payload: { name: "read", input: { filePath: "/tmp/one.txt" } },
       },
-    ])
-    const liveRender = renderTranscript([
       {
-        id: "live-progress-1",
+        id: "tool-read-2",
         type: "system",
-        kind: "progress",
-        timestamp: "2026-02-05T12:00:04Z",
-        content: "Assessing next steps",
-        open: false,
-        payload: {
-          channel: "reasoning",
-          stream_id: "reasoning-2",
-          is_delta: true,
-          done: true,
-        },
+        kind: "tool_call",
+        timestamp: "2026-03-01T00:00:02Z",
+        content: "read",
+        payload: { name: "read", input: { filePath: "/tmp/two.txt" } },
+      },
+      {
+        id: "tool-bash-1",
+        type: "system",
+        kind: "tool_call",
+        timestamp: "2026-03-01T00:00:03Z",
+        content: "bash",
+        payload: { name: "bash", input: { command: "npm test" } },
       },
     ])
 
-    expect(captureNormalizedCardSnapshot(historyRender.container)).toEqual(captureNormalizedCardSnapshot(liveRender.container))
+    const summary = screen.getByTestId("transcript-group-summary")
+    expect(summary.textContent).toContain("2 read")
+    expect(summary.textContent).toContain("1 bash")
+  })
+
+  it("keeps grouped series expanded while new streaming item is appended", () => {
+    const initialMessages: TranscriptMessage[] = [
+      {
+        id: "tool-read-1",
+        type: "system",
+        kind: "tool_call",
+        timestamp: "2026-03-01T00:00:01Z",
+        content: "read",
+        payload: { name: "read", input: { filePath: "/tmp/one.txt" } },
+      },
+      {
+        id: "tool-edit-1",
+        type: "system",
+        kind: "tool_call",
+        timestamp: "2026-03-01T00:00:02Z",
+        content: "edit",
+        payload: { name: "edit", input: { filePath: "/tmp/two.txt" } },
+      },
+    ]
+
+    let setMessages!: (next: TranscriptMessage[]) => void
+    render(() => {
+      const [messages, set] = createSignal(initialMessages)
+      setMessages = set
+      return (
+        <SessionTranscript
+          messages={messages}
+          filter={() => ""}
+          setFilter={() => {}}
+          autoScroll={() => true}
+          setAutoScroll={() => {}}
+          activityCursor={() => null}
+          activityHistoryLoading={() => false}
+          onLoadEarlier={() => {}}
+        />
+      )
+    })
+
+    fireEvent.click(screen.getByTestId("transcript-group-summary"))
+    expect(screen.getByTestId("transcript-group-items")).toBeDefined()
+    expect(screen.getByText(/one.txt/)).toBeDefined()
+
+    setMessages([
+      ...initialMessages,
+      {
+        id: "tool-bash-stream",
+        type: "system",
+        kind: "tool_call",
+        timestamp: "2026-03-01T00:00:03Z",
+        content: "bash",
+        payload: { name: "bash", status: "running", input: { command: "npm test\npnpm lint\npnpm build" } },
+      },
+    ])
+
+    expect(screen.getByTestId("transcript-group-items")).toBeDefined()
+    expect(screen.getByText("bash")).toBeDefined()
+    expect(screen.getByText(/npm test/)).toBeDefined()
+  })
+
+  it("toggles raw json when a row is clicked", () => {
+    renderTranscript([
+      {
+        id: "assistant-1",
+        type: "agent",
+        kind: "output",
+        timestamp: "2026-03-01T00:00:00Z",
+        content: "Hello",
+      },
+    ])
+
+    expect(screen.queryByTestId("transcript-raw-json")).toBeNull()
+    fireEvent.click(screen.getByTestId("transcript-message-row"))
+    expect(screen.getByTestId("transcript-raw-json").textContent).toContain('"id": "assistant-1"')
+    fireEvent.click(screen.getByTestId("transcript-message-row"))
+    expect(screen.queryByTestId("transcript-raw-json")).toBeNull()
+  })
+
+  it("renders actionable accept/reject buttons and emits responses", () => {
+    const responses: Array<{ actionId: string; decision: string; input?: string }> = []
+
+    render(() => (
+      <SessionTranscript
+        messages={() => [
+          {
+            id: "action-1",
+            type: "system",
+            kind: "action_request",
+            timestamp: "2026-03-01T00:00:00Z",
+            content: "Approval required",
+            payload: {
+              kind: "approval",
+              status: "pending",
+              payload: {
+                action_id: "req-123",
+              },
+            },
+          },
+        ]}
+        filter={() => ""}
+        setFilter={() => {}}
+        autoScroll={() => true}
+        setAutoScroll={() => {}}
+        activityCursor={() => null}
+        activityHistoryLoading={() => false}
+        onLoadEarlier={() => {}}
+        onRespondActionRequest={(response) => {
+          responses.push(response)
+        }}
+      />
+    ))
+
+    fireEvent.click(screen.getByTestId("action-request-accept"))
+    fireEvent.click(screen.getByTestId("action-request-reject"))
+
+    expect(screen.queryByTestId("transcript-raw-json")).toBeNull()
+
+    expect(responses).toEqual([
+      { actionId: "req-123", decision: "accept", input: undefined },
+      { actionId: "req-123", decision: "reject", input: undefined },
+    ])
+  })
+
+  it("renders action request detail lines describing approval scope", () => {
+    render(() => (
+      <SessionTranscript
+        messages={() => [
+          {
+            id: "action-2",
+            type: "system",
+            kind: "action_request",
+            timestamp: "2026-03-01T00:00:00Z",
+            content: "Patch apply approval requested",
+            payload: {
+              id: "call_123",
+              kind: "approval",
+              status: "pending",
+              payload: {
+                request: {
+                  call_id: "call_123",
+                  changes: {
+                    "/repo/fileA.ts": { type: "update" },
+                    "/repo/fileB.ts": { type: "create" },
+                  },
+                },
+              },
+            },
+          },
+        ]}
+        filter={() => ""}
+        setFilter={() => {}}
+        autoScroll={() => true}
+        setAutoScroll={() => {}}
+        activityCursor={() => null}
+        activityHistoryLoading={() => false}
+        onLoadEarlier={() => {}}
+        onRespondActionRequest={() => {}}
+      />
+    ))
+
+    const details = screen.getByTestId("action-request-details")
+    expect(details.textContent).toContain("update: /repo/fileA.ts")
+    expect(details.textContent).toContain("create: /repo/fileB.ts")
   })
 })

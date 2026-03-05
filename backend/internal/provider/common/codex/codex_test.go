@@ -353,6 +353,66 @@ func TestKnownCodexNoiseDoesNotEmitUnknownEvents(t *testing.T) {
 	assertNoUnknown("codex/event/terminal_output_delta", json.RawMessage(`{
 	  "msg": {"call_id": "call_legacy", "chunk": "aGVsbG8="}
 	}`))
+	assertNoUnknown("codex/event/plan_update", json.RawMessage(`{
+	  "msg": {"type": "plan_update", "explanation": "x", "plan": []}
+	}`))
+	assertNoUnknown("codex/event/patch_apply_begin", json.RawMessage(`{
+	  "msg": {"type": "patch_apply_begin", "call_id": "call_legacy", "changes": {}}
+	}`))
+	assertNoUnknown("item/started", json.RawMessage(`{
+	  "item": {"type": "fileChange", "id": "call_legacy", "status": "inProgress"}
+	}`))
+}
+
+func TestHandleNotification_CodexPlanUpdateEmitsPlanEvent(t *testing.T) {
+	p := NewCodexProvider("sess_plan_update", Config{})
+	p.handleNotification("codex/event/plan_update", json.RawMessage(`{
+	  "msg": {
+	    "type": "plan_update",
+	    "turn_id": "turn_123",
+	    "explanation": "Plan from codex envelope",
+	    "plan": [{"step": "Do thing", "status": "in_progress"}]
+	  }
+	}`), nil)
+
+	ev := <-p.events.Events()
+	if ev.Type != domain.EventTypePlan {
+		t.Fatalf("expected plan event, got %v", ev.Type)
+	}
+	pl, ok := ev.Plan()
+	if !ok {
+		t.Fatalf("expected plan payload")
+	}
+	if pl.Description != "Plan from codex envelope" {
+		t.Fatalf("expected explanation to propagate, got %q", pl.Description)
+	}
+}
+
+func TestHandleNotification_PatchApplyBeginEmitsArtifactUpdate(t *testing.T) {
+	p := NewCodexProvider("sess_patch_begin", Config{})
+	p.handleNotification("codex/event/patch_apply_begin", json.RawMessage(`{
+	  "msg": {
+	    "type": "patch_apply_begin",
+	    "call_id": "call_patch_1",
+	    "auto_approved": false,
+	    "turn_id": "turn_123",
+	    "changes": {
+	      "/tmp/a.txt": {"type": "update", "unified_diff": ""}
+	    }
+	  }
+	}`), nil)
+
+	ev := <-p.events.Events()
+	if ev.Type != domain.EventTypeArtifactUpdate {
+		t.Fatalf("expected artifact update event, got %v", ev.Type)
+	}
+	artifact, ok := ev.ArtifactUpdate()
+	if !ok {
+		t.Fatalf("expected artifact payload")
+	}
+	if artifact.ID != "call_patch_1" {
+		t.Fatalf("expected call id call_patch_1, got %q", artifact.ID)
+	}
 }
 
 func TestExtractDeltaText_CodexEventWrapper(t *testing.T) {

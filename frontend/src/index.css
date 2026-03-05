@@ -2545,6 +2545,125 @@ tbody tr:hover {
   white-space: pre;
 }
 
+.transcript-group {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.transcript-group-summary {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: var(--radius-2);
+  background: rgba(15, 23, 42, 0.04);
+  color: var(--ink-2);
+  text-align: left;
+  font-size: 0.74rem;
+  padding: 0.35rem 0.55rem;
+  cursor: pointer;
+}
+
+.transcript-group-items {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.transcript-row {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.4rem 0.55rem;
+  border-left: 2px solid rgba(15, 23, 42, 0.16);
+  border-radius: 0;
+  background: rgba(15, 23, 42, 0.03);
+  cursor: pointer;
+}
+
+.transcript-row-reasoning {
+  border: none;
+  background: transparent;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.transcript-row-tool {
+  border: none;
+  background: transparent;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.transcript-row-bash-failed {
+  background: rgba(185, 28, 28, 0.08);
+  border-left: 2px solid rgba(185, 28, 28, 0.22);
+  padding-left: 0.55rem;
+  padding-right: 0.55rem;
+}
+
+.transcript-row-user {
+  border-left: none;
+  border-right: 2px solid rgba(37, 99, 235, 0.26);
+  background: rgba(37, 99, 235, 0.05);
+}
+
+.transcript-row-error {
+  border-left-color: rgba(185, 28, 28, 0.35);
+  background: rgba(185, 28, 28, 0.05);
+}
+
+.transcript-row-event {
+  border-left-color: rgba(15, 23, 42, 0.18);
+  background: rgba(15, 23, 42, 0.045);
+}
+
+.transcript-message-body {
+  min-width: 0;
+}
+
+.transcript-tool-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.transcript-tool-name {
+  font-weight: 700;
+  text-transform: lowercase;
+  color: var(--ink-1);
+}
+
+.transcript-tool-detail {
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  word-break: break-all;
+}
+
+.transcript-tool-preview {
+  margin: 0;
+  color: var(--ink-2);
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  white-space: pre-wrap;
+}
+
+.transcript-action-buttons {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.transcript-action-request-details {
+  margin: 0.45rem 0 0;
+  padding-left: 1.15rem;
+  color: var(--ink-2);
+  font-size: 0.8rem;
+}
+
+.transcript-action-request-details li {
+  margin: 0.1rem 0;
+  word-break: break-word;
+}
+
 /* Wrap for the full transcript section (header + scrollable list) */
 .session-transcript-wrap {
   display: flex;
