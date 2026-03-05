@@ -27,10 +27,10 @@ import (
 )
 
 const (
-	defaultPort              = "8080"
-	shutdownTimeout          = 5 * time.Second
-	drainLogEvery            = 750 * time.Millisecond
-	turnBoundaryDrainTimeout = 5 * time.Minute
+	defaultPort             = "8080"
+	shutdownTimeout         = 5 * time.Second
+	gracefulShutdownTimeout = 15 * time.Minute
+	drainLogEvery           = 750 * time.Millisecond
 )
 
 func listenAddr() string {
@@ -150,16 +150,21 @@ func main() {
 		filepath.Join(baseDir, "evals"),
 		func(s toolcall.EvalSnapshot) string { return s.ID },
 	)
+	sessionRunDeferredStore := storage.NewJSONStore[entity.DeferredOpEnvelope](
+		filepath.Join(baseDir, "session_start_deferred"),
+		func(s entity.DeferredOpEnvelope) string { return s.EnvelopeID },
+	)
 
 	sessionMsgDir := filepath.Join(baseDir, "sessions")
 	sessionMsgStore := storage.NewSessionMessagesLogStore(sessionMsgDir)
 
 	executor := service.NewAgentExecutor(service.ExecutorConfig{
-		Storage:         store,
-		TerminalStorage: store,
-		Broadcaster:     broadcaster,
-		EvalStorage:     evalStore,
-		MessageLogStore: sessionMsgStore,
+		Storage:                     store,
+		TerminalStorage:             store,
+		Broadcaster:                 broadcaster,
+		EvalStorage:                 evalStore,
+		SessionStartDeferredStorage: sessionRunDeferredStore,
+		MessageLogStore:             sessionMsgStore,
 		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
 			return factory.CreateSession(providerType, sessionID, config)
 		},
@@ -214,14 +219,17 @@ func main() {
 	<-ctx.Done()
 	stop()
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-	defer cancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer shutdownCancel()
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
+	defer drainCancel()
 	shutdownStartedAt := time.Now().UTC()
 
-	executor.BeginDrain(shutdownCtx)
+	executor.BeginDrain(drainCtx)
 	initialDrain := executor.DrainStatus()
 	logShutdownEvent("shutdown.drain.start", map[string]any{
-		"timeout":              shutdownTimeout.String(),
+		"timeout":              gracefulShutdownTimeout.String(),
+		"http_timeout":         shutdownTimeout.String(),
 		"session_mode":         initialDrain.SessionRuns.Mode,
 		"eval_mode":            initialDrain.Evals.Mode,
 		"session_waiter_count": len(initialDrain.SessionRuns.WaitOn),
@@ -229,30 +237,12 @@ func main() {
 		"blockers":             blockersFromStatus(initialDrain),
 	})
 
-	// If there are active sessions, wait for each one to reach a turn boundary
-	// before stopping it. This prevents killing process-based providers (codex,
-	// claudews) mid-turn and losing in-progress work. A separate long-lived
-	// context is used so this phase is not constrained by the 5-second
-	// shutdownTimeout.
-	if len(initialDrain.SessionRuns.WaitOn) > 0 {
-		logShutdownEvent("shutdown.turn_boundary.start", map[string]any{
-			"active_sessions": initialDrain.SessionRuns.WaitOn,
-			"timeout":         turnBoundaryDrainTimeout.String(),
-		})
-		tbCtx, tbCancel := context.WithTimeout(context.Background(), turnBoundaryDrainTimeout)
-		executor.DrainActiveSessions(tbCtx)
-		tbCancel()
-		logShutdownEvent("shutdown.turn_boundary.done", map[string]any{
-			"elapsed": time.Since(shutdownStartedAt).String(),
-		})
-	}
-
 	httpShutdownCh := make(chan error, 1)
 	go func() {
 		httpShutdownCh <- srv.Shutdown(shutdownCtx)
 	}()
 
-	drainErr := awaitExecutorDrainWithProgress(shutdownCtx, executor)
+	drainErr := awaitExecutorDrainWithProgress(drainCtx, executor)
 	if drainErr != nil {
 		status := executor.DrainStatus()
 		logShutdownEvent("shutdown.drain.timeout", map[string]any{
