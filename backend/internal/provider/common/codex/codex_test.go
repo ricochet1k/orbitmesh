@@ -704,3 +704,55 @@ done:
 		t.Fatalf("expected exactly one output event, got %d", outputCount)
 	}
 }
+
+func TestHandleNotification_AgentMessageDeltaSuppressesCrossFormatDuplicateDeltas(t *testing.T) {
+	p := NewCodexProvider("sess_cross_format_dedupe", Config{})
+
+	p.handleNotification("item/agentMessage/delta", json.RawMessage(`{
+	  "threadId":"thr_1",
+	  "turnId":"turn_1",
+	  "itemId":"msg_1",
+	  "delta":"Claude"
+	}`), nil)
+	p.handleNotification("codex/event/agent_message_content_delta", json.RawMessage(`{
+	  "msg": {
+	    "type": "agent_message_content_delta",
+	    "item_id": "msg_1",
+	    "delta": "Claude"
+	  }
+	}`), nil)
+
+	events := make([]domain.Event, 0, 4)
+	for {
+		select {
+		case ev := <-p.events.Events():
+			events = append(events, ev)
+		default:
+			goto done
+		}
+	}
+
+done:
+	outputEvents := 0
+	outputText := ""
+	for _, ev := range events {
+		if ev.Type != domain.EventTypeOutput {
+			continue
+		}
+		out, ok := ev.Output()
+		if !ok {
+			continue
+		}
+		if !out.IsDelta {
+			continue
+		}
+		outputEvents++
+		outputText += out.Content
+	}
+	if outputEvents != 1 {
+		t.Fatalf("expected exactly one delta output event, got %d", outputEvents)
+	}
+	if outputText != "Claude" {
+		t.Fatalf("expected single chunk Claude, got %q", outputText)
+	}
+}

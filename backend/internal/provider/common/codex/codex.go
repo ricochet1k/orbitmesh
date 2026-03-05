@@ -162,6 +162,7 @@ type CodexProvider struct {
 	seenExecApproval map[string]bool   // call IDs handled via codex/event/exec_approval_request
 	outputDeltaFmt   map[string]string // "codex"|"item": first-wins for tool output deltas
 	reasonDeltaFmt   map[string]string // "codex"|"item": first-wins for reasoning deltas
+	agentDeltaFmt    map[string]string // "codex"|"item": first-wins for agent output deltas
 }
 
 // NewCodexProvider creates a new Codex app-server provider.
@@ -180,6 +181,7 @@ func NewCodexProvider(sessionID string, staticCfg Config) *CodexProvider {
 		seenExecApproval: make(map[string]bool),
 		outputDeltaFmt:   make(map[string]string),
 		reasonDeltaFmt:   make(map[string]string),
+		agentDeltaFmt:    make(map[string]string),
 	}
 }
 
@@ -523,6 +525,9 @@ func (p *CodexProvider) handleTurnCompletedNotification(params json.RawMessage, 
 
 func (p *CodexProvider) handleAgentMessageDeltaNotification(params json.RawMessage, raw json.RawMessage) {
 	text, itemID := extractDeltaText(params)
+	if itemID != "" && !p.markOrCheckDeltaFmt(p.agentDeltaFmt, itemID, agentDeltaMethodHint(params)) {
+		return
+	}
 	if itemID != "" {
 		p.deltaMu.Lock()
 		p.deltaByItemID[itemID] = true
@@ -533,6 +538,25 @@ func (p *CodexProvider) handleAgentMessageDeltaNotification(params json.RawMessa
 	}
 	p.state.SetOutput(text)
 	p.events.Emit(domain.NewDeltaOutputEventForMessage(p.sessionID, itemID, text, raw))
+}
+
+func agentDeltaMethodHint(params json.RawMessage) string {
+	var payload map[string]any
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return "codex/event/agent_message_content_delta"
+	}
+	if _, ok := payload["itemId"]; ok {
+		return "item/agentMessage/delta"
+	}
+	if _, ok := payload["item_id"]; ok {
+		return "codex/event/agent_message_content_delta"
+	}
+	if msg, ok := payload["msg"].(map[string]any); ok {
+		if _, hasItemID := msg["item_id"]; hasItemID {
+			return "codex/event/agent_message_content_delta"
+		}
+	}
+	return "codex/event/agent_message_content_delta"
 }
 
 func (p *CodexProvider) handleReasoningDeltaNotification(method string, params json.RawMessage, raw json.RawMessage) {
@@ -721,6 +745,11 @@ func (p *CodexProvider) handleItemNotification(method string, params json.RawMes
 			delete(p.deltaByItemID, itemID)
 		}
 		p.deltaMu.Unlock()
+		if itemID != "" {
+			p.dupMu.Lock()
+			delete(p.agentDeltaFmt, itemID)
+			p.dupMu.Unlock()
+		}
 		if hadDelta {
 			return
 		}
