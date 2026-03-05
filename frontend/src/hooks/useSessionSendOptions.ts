@@ -37,8 +37,8 @@ export function useSessionSendOptions(params: {
   const [selectedProviderId, setSelectedProviderId] = createSignal<string | null>(null)
   const [selectedAgentId, setSelectedAgentId] = createSignal<string | null>(null)
   const [selectedModel, setSelectedModel] = createSignal("")
+  const [lastProviderId, setLastProviderId] = createSignal<string | null>(null)
 
-  const [initialProviderId, setInitialProviderId] = createSignal<string | null>(null)
   const [initialAgentId, setInitialAgentId] = createSignal<string | null>(null)
   const [modelDirty, setModelDirty] = createSignal(false)
 
@@ -91,19 +91,23 @@ export function useSessionSendOptions(params: {
     if (fromAgent) set.add(fromAgent)
     const fromProvider = selectedProviderDefaultModel().trim()
     if (fromProvider) set.add(fromProvider)
-    providerList().forEach((provider) => {
-      const value = provider.custom?.["model"]
-      if (typeof value === "string" && value.trim()) set.add(value.trim())
-    })
-    if (selectedModel().trim()) set.add(selectedModel().trim())
-    return Array.from(set)
+    if (modelDirty() && selectedModel().trim()) set.add(selectedModel().trim())
+    return Array.from(set).sort((a, b) => a.localeCompare(b))
+  })
+
+  const providerKnownModels = createMemo(() => {
+    const set = new Set<string>()
+    modelOptionsFromInsight(selectedProviderInsight()).forEach((model) => set.add(model))
+    const fromProvider = selectedProviderDefaultModel().trim()
+    if (fromProvider) set.add(fromProvider)
+    return Array.from(set).sort((a, b) => a.localeCompare(b))
   })
 
   const reset = () => {
     setSelectedProviderId(null)
     setSelectedAgentId(null)
     setSelectedModel("")
-    setInitialProviderId(null)
+    setLastProviderId(null)
     setInitialAgentId(null)
     setModelDirty(false)
   }
@@ -126,8 +130,31 @@ export function useSessionSendOptions(params: {
     const resolved = preferred || matchedByType || first || null
     if (resolved) {
       setSelectedProviderId(resolved)
-      setInitialProviderId(resolved)
     }
+  })
+
+  createEffect(() => {
+    const providerId = selectedProvider()?.id ?? null
+    if (!providerId) return
+
+    const previousProviderId = lastProviderId()
+    if (previousProviderId === null) {
+      setLastProviderId(providerId)
+      return
+    }
+    if (previousProviderId === providerId) return
+
+    setLastProviderId(providerId)
+
+    const current = selectedModel().trim()
+    if (!current) return
+
+    const known = providerKnownModels()
+    if (known.length === 0) return
+    if (known.includes(current)) return
+
+    setModelDirty(false)
+    setSelectedModel(known[0])
   })
 
   createEffect(() => {
@@ -138,7 +165,7 @@ export function useSessionSendOptions(params: {
   })
 
   createEffect(() => {
-    if (selectedModel().trim()) return
+    if (modelDirty()) return
     const fromAgent = selectedAgentDefaultModel().trim()
     if (fromAgent) {
       setSelectedModel(fromAgent)
@@ -157,7 +184,9 @@ export function useSessionSendOptions(params: {
     const fromProvider = selectedProviderDefaultModel().trim()
     if (fromProvider) {
       setSelectedModel(fromProvider)
+      return
     }
+    setSelectedModel("")
   })
 
   const updateModel = (value: string) => {
@@ -167,15 +196,15 @@ export function useSessionSendOptions(params: {
 
   const buildSendOptions = (): SendOptions | undefined => {
     const providerId = selectedProvider()?.id
-    const changedProviderId = providerId && providerId !== initialProviderId() ? providerId : undefined
+    const providerType = selectedProvider()?.type
     const agentId = selectedAgentId() ?? undefined
     const changedAgentId = agentId && agentId !== initialAgentId() ? agentId : undefined
     const model = modelDirty() ? (selectedModel().trim() || undefined) : undefined
 
     const options: SendOptions = {}
-    if (changedProviderId) {
-      options.providerId = changedProviderId
-      options.providerType = selectedProvider()?.type
+    if (providerId) {
+      options.providerId = providerId
+      options.providerType = providerType
     }
     if (changedAgentId) options.agentId = changedAgentId
     if (model) options.model = model
