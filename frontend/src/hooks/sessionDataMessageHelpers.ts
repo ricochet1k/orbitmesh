@@ -3,6 +3,12 @@ import type {
   TranscriptMessage,
 } from "../types/api"
 import type { SessionActivitySnapshot } from "../types/generated/realtime"
+import {
+  normalizeTranscriptKind,
+  TRANSCRIPT_KINDS,
+  TRANSCRIPT_MESSAGE_TYPES,
+} from "../transcript/constants"
+import { coerceTranscriptPayload } from "../transcript/payloadGuards"
 
 export function mergeTranscriptMessages(
   previous: TranscriptMessage[],
@@ -50,7 +56,7 @@ export function toTranscriptFromSnapshotMessage(
     kind,
     timestamp: message.timestamp,
     content: message.contents,
-    payload: message.payload,
+    payload: coerceTranscriptPayload(kind, message.payload),
     open: message.open,
     raw: message.raw,
   }
@@ -66,7 +72,7 @@ export function toTranscriptFromHistoryMessage(
     kind,
     timestamp: message.timestamp,
     content: message.contents,
-    payload: message.payload,
+    payload: coerceTranscriptPayload(kind, message.payload),
     open: message.open,
   }
 }
@@ -83,9 +89,7 @@ export function extractEventIdFromHistoryMessage(message: SessionTranscriptHisto
 }
 
 export function normalizeMessageKind(kind: string | null | undefined): string {
-  return String(kind ?? "")
-    .trim()
-    .toLowerCase()
+  return normalizeTranscriptKind(kind)
 }
 
 function extractEventIdFromMessageId(messageId: string | undefined): number {
@@ -99,14 +103,14 @@ function mapTranscriptKindToType(kind: string): TranscriptMessage["type"] {
   const normalized = normalizeMessageKind(kind)
 
   switch (normalized) {
-    case "error":
-      return "error"
-    case "user":
-      return "user"
-    case "output":
-      return "agent"
+    case TRANSCRIPT_KINDS.ERROR:
+      return TRANSCRIPT_MESSAGE_TYPES.ERROR
+    case TRANSCRIPT_KINDS.USER:
+      return TRANSCRIPT_MESSAGE_TYPES.USER
+    case TRANSCRIPT_KINDS.OUTPUT:
+      return TRANSCRIPT_MESSAGE_TYPES.AGENT
   }
-  return "system"
+  return TRANSCRIPT_MESSAGE_TYPES.SYSTEM
 }
 
 function asFiniteNumber(value: unknown): number | undefined {

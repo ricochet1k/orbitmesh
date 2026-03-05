@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 
+import { TRANSCRIPT_KINDS, TRANSCRIPT_MESSAGE_TYPES } from "../transcript/constants"
 import type { SessionTranscriptHistoryMessage, TranscriptMessage } from "../types/api"
 import {
   extractEventIdFromHistoryMessage,
@@ -13,7 +14,7 @@ describe("sessionDataMessageHelpers", () => {
   it("merges by id and keeps newer revision", () => {
     const previous: TranscriptMessage[] = [{
       id: "message-1",
-      type: "system",
+      type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
       kind: "metadata",
       timestamp: "2026-03-01T10:00:00Z",
       content: "new",
@@ -22,7 +23,7 @@ describe("sessionDataMessageHelpers", () => {
 
     const merged = mergeTranscriptMessages(previous, [{
       id: "message-1",
-      type: "system",
+      type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
       kind: "metadata",
       timestamp: "2026-03-01T09:00:00Z",
       content: "old",
@@ -39,7 +40,7 @@ describe("sessionDataMessageHelpers", () => {
       [
         {
           id: "message-2",
-          type: "agent",
+          type: TRANSCRIPT_MESSAGE_TYPES.AGENT,
           timestamp: "2026-03-01T12:00:02Z",
           content: "b",
         },
@@ -47,7 +48,7 @@ describe("sessionDataMessageHelpers", () => {
       [
         {
           id: "message-1",
-          type: "agent",
+          type: TRANSCRIPT_MESSAGE_TYPES.AGENT,
           timestamp: "2026-03-01T12:00:01Z",
           content: "a",
         },
@@ -61,29 +62,29 @@ describe("sessionDataMessageHelpers", () => {
   it("maps history and snapshot messages to transcript shape", () => {
     const history: SessionTranscriptHistoryMessage = {
       id: "event:9:output",
-      kind: "output",
+      kind: TRANSCRIPT_KINDS.OUTPUT,
       contents: "hello",
       timestamp: "2026-03-01T12:00:00Z",
       payload: { x: 1 },
       open: true,
     }
     const mappedHistory = toTranscriptFromHistoryMessage(history)
-    expect(mappedHistory.type).toBe("agent")
-    expect(mappedHistory.kind).toBe("output")
+    expect(mappedHistory.type).toBe(TRANSCRIPT_MESSAGE_TYPES.AGENT)
+    expect(mappedHistory.kind).toBe(TRANSCRIPT_KINDS.OUTPUT)
     expect(mappedHistory.payload).toEqual({ x: 1 })
     expect(mappedHistory.open).toBe(true)
 
     const mappedSnapshot = toTranscriptFromSnapshotMessage({
       id: "snapshot-1",
-      kind: "error",
+      kind: TRANSCRIPT_KINDS.ERROR,
       contents: "oops",
       timestamp: "2026-03-01T12:00:00Z",
       payload: { y: 1 },
       open: false,
       raw: { z: 1 },
     })
-    expect(mappedSnapshot.type).toBe("error")
-    expect(mappedSnapshot.kind).toBe("error")
+    expect(mappedSnapshot.type).toBe(TRANSCRIPT_MESSAGE_TYPES.ERROR)
+    expect(mappedSnapshot.kind).toBe(TRANSCRIPT_KINDS.ERROR)
     expect(mappedSnapshot.raw).toEqual({ z: 1 })
   })
 

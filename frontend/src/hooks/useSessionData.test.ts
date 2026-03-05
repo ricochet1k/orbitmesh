@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createRoot, createSignal } from "solid-js"
 
 import { apiClient } from "../api/client"
+import { TRANSCRIPT_KINDS } from "../transcript/constants"
 import type { TranscriptMessage } from "../types/api"
 import type { ServerEnvelope } from "../types/generated/realtime"
 import { useSessionData } from "./useSessionData"
@@ -38,7 +39,7 @@ vi.mock("../realtime/client", () => ({
 function makeHistoryMessage(overrides: Record<string, unknown> = {}) {
   return {
     id: "event:1:output",
-    kind: "output",
+    kind: TRANSCRIPT_KINDS.OUTPUT,
     contents: "history content",
     payload: undefined,
     open: false,
@@ -86,7 +87,7 @@ describe("useSessionData", () => {
       type: "event",
       topic: "sessions.activity:session-1",
       payload: {
-        type: "output",
+        type: TRANSCRIPT_KINDS.OUTPUT,
         event_id: 1,
         timestamp: "2026-02-05T12:01:00Z",
         session_id: "session-1",
@@ -97,7 +98,7 @@ describe("useSessionData", () => {
       type: "event",
       topic: "sessions.activity:session-1",
       payload: {
-        type: "output",
+        type: TRANSCRIPT_KINDS.OUTPUT,
         event_id: 2,
         timestamp: "2026-02-05T12:01:01Z",
         session_id: "session-1",
@@ -278,7 +279,7 @@ describe("useSessionData", () => {
 
       await vi.waitFor(() => {
         const messages = liveData?.messages() ?? []
-        expect(messages.filter((m) => m.kind === "action_request").length).toBe(variant.stream_events.length)
+        expect(messages.filter((m) => m.kind === TRANSCRIPT_KINDS.ACTION_REQUEST).length).toBe(variant.stream_events.length)
       })
       const liveNormalized = normalizeStrictTranscriptModel(liveData?.messages() ?? [])
       dispose?.()
@@ -297,7 +298,7 @@ describe("useSessionData", () => {
 
       await vi.waitFor(() => {
         const messages = reloadData?.messages() ?? []
-        expect(messages.filter((m) => m.kind === "action_request").length).toBe(variant.reload_messages.length)
+        expect(messages.filter((m) => m.kind === TRANSCRIPT_KINDS.ACTION_REQUEST).length).toBe(variant.reload_messages.length)
       })
       const reloadNormalized = normalizeStrictTranscriptModel(reloadData?.messages() ?? [])
 
@@ -339,7 +340,7 @@ describe("useSessionData", () => {
     await vi.waitFor(() => {
       const messages = liveData?.messages() ?? []
       expect(messages.find((m) => m.id === "tool:call_v0UXHPNmoD4iwkk3yd3PjTs8")?.open).toBe(false)
-      expect(messages.find((m) => m.id === "progress:reasoning:rs_0dd22145246ef0870169a8aa40a0908193a5b227aec7f274ab")?.kind).toBe("progress")
+      expect(messages.find((m) => m.id === "progress:reasoning:rs_0dd22145246ef0870169a8aa40a0908193a5b227aec7f274ab")?.kind).toBe(TRANSCRIPT_KINDS.PROGRESS)
     })
 
     const liveNormalized = [...normalizeStrictTranscriptModel(liveData?.messages() ?? [])]

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@solidjs/testing-library"
 import { describe, expect, it, vi } from "vitest"
 import SessionTranscript from "./SessionTranscript"
+import { TRANSCRIPT_KINDS, TRANSCRIPT_MESSAGE_TYPES } from "../transcript/constants"
 import type { TranscriptMessage } from "../types/api"
 import type { TodoWriteState } from "../hooks/useSessionData"
 
@@ -64,29 +65,29 @@ describe("SessionTranscript", () => {
     renderTranscript([
       {
         id: "m1",
-        type: "agent",
-        kind: "output",
+        type: TRANSCRIPT_MESSAGE_TYPES.AGENT,
+        kind: TRANSCRIPT_KINDS.OUTPUT,
         timestamp: "2026-02-05T12:00:00Z",
         content: "assistant output",
       },
       {
         id: "m2",
-        type: "system",
-        kind: "tool_call",
+        type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
+        kind: TRANSCRIPT_KINDS.TOOL_CALL,
         timestamp: "2026-02-05T12:00:01Z",
         content: "tool content",
       },
       {
         id: "m3",
-        type: "system",
-        kind: "status_change",
+        type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
+        kind: TRANSCRIPT_KINDS.STATUS_CHANGE,
         timestamp: "2026-02-05T12:00:02Z",
         content: "state changed",
       },
       {
         id: "m4",
-        type: "system",
-        kind: "unknown",
+        type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
+        kind: TRANSCRIPT_KINDS.UNKNOWN,
         timestamp: "2026-02-05T12:00:03Z",
         content: "unhandled event",
       },
@@ -102,16 +103,16 @@ describe("SessionTranscript", () => {
     const { container } = renderTranscript([
       {
         id: "m1",
-        type: "system",
-        kind: "tool_call",
+        type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
+        kind: TRANSCRIPT_KINDS.TOOL_CALL,
         timestamp: "2026-02-05T12:00:00Z",
         content: "tool output",
       },
     ])
 
     const item = container.querySelector(".transcript-item")
-    expect(item?.className).toContain("transcript-kind-tool_call")
-    expect(item?.getAttribute("data-kind")).toBe("tool_call")
+    expect(item?.className).toContain(`transcript-kind-${TRANSCRIPT_KINDS.TOOL_CALL}`)
+    expect(item?.getAttribute("data-kind")).toBe(TRANSCRIPT_KINDS.TOOL_CALL)
   })
 
   it("shows per-message raw json in dev mode", () => {
@@ -141,8 +142,8 @@ describe("SessionTranscript", () => {
     renderTranscript([
       {
         id: "progress-1",
-        type: "system",
-        kind: "progress",
+        type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
+        kind: TRANSCRIPT_KINDS.PROGRESS,
         timestamp: "2026-02-05T12:00:00Z",
         content: "Assessing next step",
         payload: {
@@ -154,8 +155,8 @@ describe("SessionTranscript", () => {
       },
       {
         id: "usage-1",
-        type: "system",
-        kind: "resource_usage",
+        type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
+        kind: TRANSCRIPT_KINDS.RESOURCE_USAGE,
         timestamp: "2026-02-05T12:00:01Z",
         content: "usage",
         payload: {
@@ -165,8 +166,8 @@ describe("SessionTranscript", () => {
       },
       {
         id: "action-1",
-        type: "system",
-        kind: "action_request",
+        type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
+        kind: TRANSCRIPT_KINDS.ACTION_REQUEST,
         timestamp: "2026-02-05T12:00:02Z",
         content: "approval needed",
         payload: {
@@ -179,8 +180,8 @@ describe("SessionTranscript", () => {
       },
       {
         id: "artifact-1",
-        type: "system",
-        kind: "artifact_update",
+        type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
+        kind: TRANSCRIPT_KINDS.ARTIFACT_UPDATE,
         timestamp: "2026-02-05T12:00:03Z",
         content: "artifact",
         payload: {

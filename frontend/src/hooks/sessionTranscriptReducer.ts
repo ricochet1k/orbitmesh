@@ -5,6 +5,8 @@ import type {
   TranscriptMessage,
 } from "../types/api"
 import type { SessionActivitySnapshot } from "../types/generated/realtime"
+import { TRANSCRIPT_KINDS, TRANSCRIPT_MESSAGE_TYPES } from "../transcript/constants"
+import { isToolCallPayload } from "../transcript/payloadGuards"
 import {
   mergeTranscriptMessages,
   toTranscriptFromHistoryMessage,
@@ -79,7 +81,7 @@ export function applyCanonicalActivityStreamEvent(
         ],
       }
     }
-    case "output": {
+    case TRANSCRIPT_KINDS.OUTPUT: {
       const { content, is_delta, message_id } = payload.data
       if (!content) return { messages: previous }
       if (is_delta) {
@@ -87,7 +89,7 @@ export function applyCanonicalActivityStreamEvent(
           const idx = previous.findIndex(
             (message) => message.id === message_id || message.id === `message:${message_id}`,
           )
-          if (idx >= 0 && previous[idx].type === "agent") {
+          if (idx >= 0 && previous[idx].type === TRANSCRIPT_MESSAGE_TYPES.AGENT) {
             const existing = previous[idx]
             return {
               messages: [
@@ -105,7 +107,7 @@ export function applyCanonicalActivityStreamEvent(
           }
         }
         const last = previous[previous.length - 1]
-        if (last && last.type === "agent" && last.open) {
+        if (last && last.type === TRANSCRIPT_MESSAGE_TYPES.AGENT && last.open) {
           return {
             messages: [
               ...previous.slice(0, -1),
@@ -121,8 +123,8 @@ export function applyCanonicalActivityStreamEvent(
             ...previous,
             {
               id: message_id || stableId("output"),
-              type: "agent",
-              kind: "output",
+              type: TRANSCRIPT_MESSAGE_TYPES.AGENT,
+              kind: TRANSCRIPT_KINDS.OUTPUT,
               timestamp: payload.timestamp,
               content,
               open: true,
@@ -137,8 +139,8 @@ export function applyCanonicalActivityStreamEvent(
           [
             {
               id: message_id || stableId("output"),
-              type: "agent",
-              kind: "output",
+              type: TRANSCRIPT_MESSAGE_TYPES.AGENT,
+              kind: TRANSCRIPT_KINDS.OUTPUT,
               timestamp: payload.timestamp,
               content,
               open: false,
@@ -152,14 +154,14 @@ export function applyCanonicalActivityStreamEvent(
     case "metric": {
       return { messages: previous }
     }
-    case "error": {
+    case TRANSCRIPT_KINDS.ERROR: {
       return {
         messages: [
           ...previous,
           {
             id: stableId("error"),
-            type: "error",
-            kind: "error",
+            type: TRANSCRIPT_MESSAGE_TYPES.ERROR,
+            kind: TRANSCRIPT_KINDS.ERROR,
             timestamp: payload.timestamp,
             content: payload.data.message ?? "Unknown error",
             raw: payload.raw,
@@ -227,8 +229,8 @@ export function applyCanonicalActivityStreamEvent(
         ],
       }
     }
-    case "thought": {
-      const thoughtId = payload.data.message_id?.trim() || stableId("thought")
+    case TRANSCRIPT_KINDS.THOUGHT: {
+      const thoughtId = payload.data.message_id?.trim() || stableId(TRANSCRIPT_KINDS.THOUGHT)
       if (payload.data.is_delta) {
         const idx = previous.findIndex((message) => message.id === thoughtId)
         if (idx >= 0) {
@@ -238,8 +240,8 @@ export function applyCanonicalActivityStreamEvent(
               ...previous.slice(0, idx),
               {
                 ...existing,
-                type: "system",
-                kind: "thought",
+                type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
+                kind: TRANSCRIPT_KINDS.THOUGHT,
                 timestamp: payload.timestamp,
                 content: `${existing.content}${payload.data.content}`,
                 open: true,
@@ -254,8 +256,8 @@ export function applyCanonicalActivityStreamEvent(
             ...previous,
             {
               id: thoughtId,
-              type: "system",
-              kind: "thought",
+              type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
+              kind: TRANSCRIPT_KINDS.THOUGHT,
               timestamp: payload.timestamp,
               content: payload.data.content,
               open: true,
@@ -270,8 +272,8 @@ export function applyCanonicalActivityStreamEvent(
           [
             {
               id: thoughtId,
-              type: "system",
-              kind: "thought",
+              type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
+              kind: TRANSCRIPT_KINDS.THOUGHT,
               timestamp: payload.timestamp,
               content: payload.data.content,
               open: false,
@@ -282,14 +284,12 @@ export function applyCanonicalActivityStreamEvent(
         ),
       }
     }
-    case "tool_call": {
+    case TRANSCRIPT_KINDS.TOOL_CALL: {
       const { id: toolId, name, status, title, input, output } = payload.data
-      const msgId = toolId ? `tool:${toolId}` : stableId("tool_call")
+      const msgId = toolId ? `tool:${toolId}` : stableId(TRANSCRIPT_KINDS.TOOL_CALL)
       const idx = previous.findIndex((message) => message.id === msgId)
       const existing = idx >= 0 ? previous[idx] : undefined
-      const existingPayload = (existing?.payload && typeof existing.payload === "object")
-        ? existing.payload as Record<string, unknown>
-        : {}
+      const existingPayload: Record<string, unknown> = isToolCallPayload(existing?.payload) ? existing.payload : {}
 
       const mergedTitle = title ?? (typeof existingPayload.title === "string" ? existingPayload.title : undefined)
       const mergedName = name ?? (typeof existingPayload.name === "string" ? existingPayload.name : undefined)
@@ -308,8 +308,8 @@ export function applyCanonicalActivityStreamEvent(
 
       const nextMessage: TranscriptMessage = {
         id: msgId,
-        type: "system",
-        kind: "tool_call",
+        type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
+        kind: TRANSCRIPT_KINDS.TOOL_CALL,
         timestamp: payload.timestamp,
         content,
         open,
@@ -337,7 +337,7 @@ export function applyCanonicalActivityStreamEvent(
         ),
       }
     }
-    case "plan": {
+    case TRANSCRIPT_KINDS.PLAN: {
       const { description, steps } = payload.data
       const lines = [
         description,
@@ -360,7 +360,7 @@ export function applyCanonicalActivityStreamEvent(
         ),
       }
     }
-    case "user_message": {
+    case TRANSCRIPT_KINDS.USER_MESSAGE: {
       const { content } = payload.data
       if (!content) return { messages: previous }
       return {
@@ -368,8 +368,8 @@ export function applyCanonicalActivityStreamEvent(
           ...previous,
           {
             id: stableId("user_message"),
-            type: "user",
-            kind: "user",
+            type: TRANSCRIPT_MESSAGE_TYPES.USER,
+            kind: TRANSCRIPT_KINDS.USER,
             timestamp: payload.timestamp,
             content,
             raw: payload.raw,
@@ -377,7 +377,7 @@ export function applyCanonicalActivityStreamEvent(
         ],
       }
     }
-    case "system_message": {
+    case TRANSCRIPT_KINDS.SYSTEM_MESSAGE: {
       const { content } = payload.data
       if (!content) return { messages: previous }
       return {
@@ -385,8 +385,8 @@ export function applyCanonicalActivityStreamEvent(
           ...previous,
           {
             id: stableId("system_message"),
-            type: "system",
-            kind: "system_message",
+            type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
+            kind: TRANSCRIPT_KINDS.SYSTEM_MESSAGE,
             timestamp: payload.timestamp,
             content,
             raw: payload.raw,
@@ -394,9 +394,9 @@ export function applyCanonicalActivityStreamEvent(
         ],
       }
     }
-    case "progress": {
-      const streamID = payload.data.stream_id?.trim() || stableId("progress")
-      const channel = payload.data.channel?.trim() || "progress"
+    case TRANSCRIPT_KINDS.PROGRESS: {
+      const streamID = payload.data.stream_id?.trim() || stableId(TRANSCRIPT_KINDS.PROGRESS)
+      const channel = payload.data.channel?.trim() || TRANSCRIPT_KINDS.PROGRESS
       const content = payload.data.content ?? ""
       const msgId = `progress:${channel}:${streamID}`
       if (payload.data.is_delta) {
@@ -426,8 +426,8 @@ export function applyCanonicalActivityStreamEvent(
             [
               {
                 id: msgId,
-                type: "system",
-                kind: "progress",
+                type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
+                kind: TRANSCRIPT_KINDS.PROGRESS,
                 timestamp: payload.timestamp,
                 content,
                 open: !payload.data.done,
@@ -445,8 +445,8 @@ export function applyCanonicalActivityStreamEvent(
           [
             {
               id: msgId,
-              type: "system",
-              kind: "progress",
+              type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
+              kind: TRANSCRIPT_KINDS.PROGRESS,
               timestamp: payload.timestamp,
               content,
               open: !payload.data.done,
@@ -461,14 +461,14 @@ export function applyCanonicalActivityStreamEvent(
     case "resource_usage": {
       return { messages: previous }
     }
-    case "action_request": {
+    case TRANSCRIPT_KINDS.ACTION_REQUEST: {
       return {
         messages: [
           ...previous,
           {
-            id: stableId("action_request"),
-            type: "system",
-            kind: "action_request",
+            id: stableId(TRANSCRIPT_KINDS.ACTION_REQUEST),
+            type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
+            kind: TRANSCRIPT_KINDS.ACTION_REQUEST,
             timestamp: payload.timestamp,
             content: `Action required${payload.data.kind ? ` (${payload.data.kind})` : ""}: ${payload.data.title ?? payload.data.id ?? "request"}`,
             payload: payload.data,
@@ -477,14 +477,14 @@ export function applyCanonicalActivityStreamEvent(
         ],
       }
     }
-    case "artifact_update": {
+    case TRANSCRIPT_KINDS.ARTIFACT_UPDATE: {
       return {
         messages: [
           ...previous,
           {
-            id: stableId("artifact_update"),
-            type: "system",
-            kind: "artifact_update",
+            id: stableId(TRANSCRIPT_KINDS.ARTIFACT_UPDATE),
+            type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
+            kind: TRANSCRIPT_KINDS.ARTIFACT_UPDATE,
             timestamp: payload.timestamp,
             content: `Artifact update${payload.data.kind ? ` (${payload.data.kind})` : ""}: ${payload.data.title ?? payload.data.id ?? "artifact"}`,
             payload: payload.data,

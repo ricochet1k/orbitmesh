@@ -6,6 +6,16 @@ import { EditorView, basicSetup } from "codemirror"
 import { oneDark } from "@codemirror/theme-one-dark"
 import type { TranscriptMessage } from "../types/api"
 import type { TodoWriteState } from "../hooks/useSessionData"
+import { normalizeTranscriptKind, TRANSCRIPT_KINDS } from "../transcript/constants"
+import {
+  isActionRequestPayload,
+  isArtifactUpdatePayload,
+  isProgressPayload,
+  isToolCallPayload,
+  coerceTranscriptPayload,
+  type ActionRequestTranscriptPayload,
+  type ToolCallTranscriptPayload,
+} from "../transcript/payloadGuards"
 import { getLanguageSupportForFence } from "./code/languageSupport"
 import { createCommonmarkMarkdownIt } from "./markdown/markdownIt"
 
@@ -68,12 +78,12 @@ function TranscriptItem(props: {
   const markdownBlocks = createMemo(() => splitIntoBlocks(props.message.content))
   const lineCount = createMemo(() => props.message.content.split("\n").length)
   const isLong = createMemo(() => lineCount() > COLLAPSE_LINE_THRESHOLD)
-  const normalizedKind = createMemo(() => normalizeKind(props.message.kind))
+  const normalizedKind = createMemo(() => normalizeTranscriptKind(props.message.kind))
   const displayLabel = createMemo(() => formatMessageLabel(props.message.type, normalizedKind()))
   const rawJson = createMemo(() => JSON.stringify(props.message, null, 2))
   const richPayload = createMemo(() => getRichPayload(props.message))
 
-  if (normalizedKind() === "tool_call" && isTodoWriteTool(richPayload())) {
+  if (normalizedKind() === TRANSCRIPT_KINDS.TOOL_CALL && isTodoWriteTool(richPayload())) {
     return null
   }
 
@@ -233,41 +243,35 @@ function HighlightedCodeBlock(props: { code: string; language?: string }) {
   return <div class="transcript-code-block" data-language={props.language ?? "plain"} ref={containerRef} />
 }
 
-function normalizeKind(kind: string | undefined) {
-  return (kind ?? "")
-    .trim()
-    .toLowerCase()
-}
-
 function formatMessageLabel(type: TranscriptMessage["type"], kind: string) {
   if (!kind) return titleCase(type)
 
   switch (kind) {
-    case "output":
+    case TRANSCRIPT_KINDS.OUTPUT:
       return "Assistant"
-    case "tool_call":
+    case TRANSCRIPT_KINDS.TOOL_CALL:
       return "Tool"
-    case "status_change":
+    case TRANSCRIPT_KINDS.STATUS_CHANGE:
       return "Status"
-    case "thought":
+    case TRANSCRIPT_KINDS.THOUGHT:
       return "Thought"
-    case "plan":
+    case TRANSCRIPT_KINDS.PLAN:
       return "Plan"
-    case "progress":
+    case TRANSCRIPT_KINDS.PROGRESS:
       return "Progress"
-    case "turn_completed":
+    case TRANSCRIPT_KINDS.TURN_COMPLETED:
       return "Turn"
-    case "resource_usage":
+    case TRANSCRIPT_KINDS.RESOURCE_USAGE:
       return "Usage"
-    case "action_request":
+    case TRANSCRIPT_KINDS.ACTION_REQUEST:
       return "Action"
-    case "artifact_update":
+    case TRANSCRIPT_KINDS.ARTIFACT_UPDATE:
       return "Artifact"
-    case "metric":
+    case TRANSCRIPT_KINDS.METRIC:
       return "Metric"
-    case "metadata":
+    case TRANSCRIPT_KINDS.METADATA:
       return "Metadata"
-    case "unknown":
+    case TRANSCRIPT_KINDS.UNKNOWN:
       return "Unknown"
     default:
       return titleCase(kind)
@@ -285,16 +289,18 @@ function renderRichEventCard(
   message: TranscriptMessage,
   kind: string,
   content: string,
-  payload: Record<string, unknown> | null,
+  payload: unknown,
   onRespondActionRequest?: (response: { actionId: string; decision: string; input?: string }) => void | Promise<void>,
 ) {
   if (!payload) return null
 
   switch (kind) {
-    case "tool_call": {
+    case TRANSCRIPT_KINDS.TOOL_CALL: {
+      if (!isToolCallPayload(payload)) return null
       return renderToolCallCard(message, payload)
     }
-    case "progress": {
+    case TRANSCRIPT_KINDS.PROGRESS: {
+      if (!isProgressPayload(payload)) return null
       return (
         <div class="transcript-rich-card transcript-rich-progress" data-testid="rich-progress-card">
           <div class="transcript-rich-meta">
@@ -310,17 +316,20 @@ function renderRichEventCard(
         </div>
       )
     }
-    case "resource_usage": {
+    case TRANSCRIPT_KINDS.RESOURCE_USAGE: {
+      const usagePayload = asRecordValue(payload)
+      if (!usagePayload) return null
       return (
         <div class="transcript-rich-card" data-testid="rich-resource-usage-card">
           <div class="transcript-rich-meta">
-            <span class="transcript-rich-chip">{String(payload.scope ?? "usage")}</span>
+            <span class="transcript-rich-chip">{String(usagePayload.scope ?? "usage")}</span>
           </div>
-          <pre class="transcript-rich-json"><code>{safeStringify(payload.data)}</code></pre>
+          <pre class="transcript-rich-json"><code>{safeStringify(usagePayload.data)}</code></pre>
         </div>
       )
     }
-    case "action_request": {
+    case TRANSCRIPT_KINDS.ACTION_REQUEST: {
+      if (!isActionRequestPayload(payload)) return null
       const details = asRecordValue(payload.payload)
       const decisions = getActionDecisionOptions(payload)
       const actionId = pickString(payload, ["id", "action_id"]) ?? pickString(details, ["action_id", "id"])
@@ -360,7 +369,8 @@ function renderRichEventCard(
         </div>
       )
     }
-    case "artifact_update": {
+    case TRANSCRIPT_KINDS.ARTIFACT_UPDATE: {
+      if (!isArtifactUpdatePayload(payload)) return null
       return (
         <div class="transcript-rich-card" data-testid="rich-artifact-update-card">
           <div class="transcript-rich-meta">
@@ -386,7 +396,7 @@ type ActionDecisionOption = {
   input?: string
 }
 
-function getActionDecisionOptions(payload: Record<string, unknown>): ActionDecisionOption[] {
+function getActionDecisionOptions(payload: ActionRequestTranscriptPayload): ActionDecisionOption[] {
   const details = asRecordValue(payload.payload)
   const raw = details?.decisions
   if (Array.isArray(raw)) {
@@ -417,7 +427,7 @@ function normalizeActionRequestStatus(status: string | undefined): string {
   return status?.trim().toLowerCase() ?? ""
 }
 
-function renderToolCallCard(message: TranscriptMessage, payload: Record<string, unknown>) {
+function renderToolCallCard(message: TranscriptMessage, payload: ToolCallTranscriptPayload) {
   const toolName = pickString(payload, ["name", "title", "tool", "tool_name"]) ?? "Tool"
   const normalizedTool = toolName.trim().toLowerCase()
   const status = pickString(payload, ["status"]) ?? (message.open ? "running" : undefined)
@@ -561,11 +571,8 @@ function PinnedTodoWrite(props: { todo: TodoWriteState }) {
   )
 }
 
-function getRichPayload(message: TranscriptMessage): Record<string, unknown> | null {
-  if (message.payload && typeof message.payload === "object") {
-    return message.payload as Record<string, unknown>
-  }
-  return null
+function getRichPayload(message: TranscriptMessage): unknown {
+  return coerceTranscriptPayload(message.kind, message.payload) ?? null
 }
 
 function formatToolSignature(name: string, input: unknown): string {
@@ -626,7 +633,8 @@ function pickString(value: Record<string, unknown> | null, keys: string[]): stri
   return undefined
 }
 
-function isTodoWriteTool(payload: Record<string, unknown> | null): boolean {
+function isTodoWriteTool(payload: unknown): boolean {
+  if (!isToolCallPayload(payload)) return false
   const name = pickString(payload, ["name", "title", "tool", "tool_name"])
   return (name ?? "").toLowerCase() === "todowrite"
 }

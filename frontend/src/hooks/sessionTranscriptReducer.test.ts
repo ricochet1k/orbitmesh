@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import type { SessionStreamEvent, SessionTranscriptHistoryMessage, TranscriptMessage } from "../types/api"
+import { TRANSCRIPT_KINDS, TRANSCRIPT_MESSAGE_TYPES } from "../transcript/constants"
 import {
   applyCanonicalActivityStreamEvent,
   applyHistoryReloadMessages,
@@ -11,8 +12,8 @@ describe("sessionTranscriptReducer", () => {
     const previous: TranscriptMessage[] = [
       {
         id: "message:agent-1",
-        type: "agent",
-        kind: "output",
+        type: TRANSCRIPT_MESSAGE_TYPES.AGENT,
+        kind: TRANSCRIPT_KINDS.OUTPUT,
         timestamp: "2026-03-01T12:00:00Z",
         content: "Hello",
         open: true,
@@ -20,7 +21,7 @@ describe("sessionTranscriptReducer", () => {
     ]
 
     const event = makeEvent({
-      type: "output",
+      type: TRANSCRIPT_KINDS.OUTPUT,
       data: {
         content: " world",
         is_delta: true,
@@ -36,7 +37,7 @@ describe("sessionTranscriptReducer", () => {
 
   it("merges tool_call lifecycle updates into one entry", () => {
     const started = makeEvent({
-      type: "tool_call",
+      type: TRANSCRIPT_KINDS.TOOL_CALL,
       data: {
         id: "call-1",
         name: "fetch",
@@ -45,7 +46,7 @@ describe("sessionTranscriptReducer", () => {
       },
     })
     const finished = makeEvent({
-      type: "tool_call",
+      type: TRANSCRIPT_KINDS.TOOL_CALL,
       timestamp: "2026-03-01T12:00:02Z",
       data: {
         id: "call-1",
@@ -71,7 +72,7 @@ describe("sessionTranscriptReducer", () => {
 
   it("applies progress delta close/open semantics", () => {
     const openDelta = makeEvent({
-      type: "progress",
+      type: TRANSCRIPT_KINDS.PROGRESS,
       data: {
         channel: "reasoning",
         stream_id: "stream-1",
@@ -81,7 +82,7 @@ describe("sessionTranscriptReducer", () => {
       },
     })
     const closeDelta = makeEvent({
-      type: "progress",
+      type: TRANSCRIPT_KINDS.PROGRESS,
       timestamp: "2026-03-01T12:00:02Z",
       data: {
         channel: "reasoning",
@@ -105,8 +106,8 @@ describe("sessionTranscriptReducer", () => {
     const previous: TranscriptMessage[] = [
       {
         id: "event:2:output",
-        type: "agent",
-        kind: "output",
+        type: TRANSCRIPT_MESSAGE_TYPES.AGENT,
+        kind: TRANSCRIPT_KINDS.OUTPUT,
         timestamp: "2026-03-01T12:00:02Z",
         content: "newer",
       },
@@ -114,13 +115,13 @@ describe("sessionTranscriptReducer", () => {
     const history: SessionTranscriptHistoryMessage[] = [
       {
         id: "event:1:output",
-        kind: "output",
+        kind: TRANSCRIPT_KINDS.OUTPUT,
         contents: "older",
         timestamp: "2026-03-01T12:00:01Z",
       },
       {
         id: "event:2:output",
-        kind: "output",
+        kind: TRANSCRIPT_KINDS.OUTPUT,
         contents: "updated newer",
         timestamp: "2026-03-01T12:00:02Z",
       },
@@ -136,7 +137,7 @@ describe("sessionTranscriptReducer", () => {
 function makeEvent(overrides: Partial<SessionStreamEvent>): SessionStreamEvent {
   return {
     event_id: 10,
-    type: "output",
+    type: TRANSCRIPT_KINDS.OUTPUT,
     timestamp: "2026-03-01T12:00:01Z",
     session_id: "session-1",
     data: {},

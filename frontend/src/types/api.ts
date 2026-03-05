@@ -5,6 +5,7 @@ import type {
   ProgressPayload,
   ToolCallPayload,
 } from "./generated/transcript"
+import type { TranscriptMessageType } from "../transcript/constants"
 
 export type SessionState = "idle" | "running" | "suspended";
 
@@ -746,11 +747,9 @@ export interface TranscriptMessage {
   kind?: string;
 }
 
-export type TranscriptMessageType = "agent" | "user" | "system" | "error";
-
 export type TranscriptPayload =
-  | OutputThoughtPayload
-  | ToolCallPayload
-  | ProgressPayload
-  | ActionRequestPayload
-  | ArtifactUpdatePayload;
+  | (Partial<OutputThoughtPayload> & Record<string, unknown>)
+  | (Partial<ToolCallPayload> & Record<string, unknown>)
+  | (Partial<ProgressPayload> & Record<string, unknown>)
+  | (Partial<ActionRequestPayload> & Record<string, unknown>)
+  | (Partial<ArtifactUpdatePayload> & Record<string, unknown>);

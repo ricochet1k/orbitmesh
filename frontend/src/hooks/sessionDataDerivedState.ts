@@ -1,4 +1,6 @@
 import type { TranscriptMessage } from "../types/api"
+import { TRANSCRIPT_KINDS } from "../transcript/constants"
+import { isToolCallPayload } from "../transcript/payloadGuards"
 import { normalizeMessageKind } from "./sessionDataMessageHelpers"
 
 export interface TodoWriteItem {
@@ -111,9 +113,9 @@ export function isTodoWriteMessage(message: TranscriptMessage): boolean {
 }
 
 export function extractTodoWriteState(message: TranscriptMessage): TodoWriteState | null {
-  if (normalizeMessageKind(message.kind) !== "tool_call") return null
-  const payload = asRecord(message.payload)
-  if (!payload) return null
+  if (normalizeMessageKind(message.kind) !== TRANSCRIPT_KINDS.TOOL_CALL) return null
+  const payload = message.payload
+  if (!isToolCallPayload(payload)) return null
   const toolName = pickString(payload, ["name", "title", "tool", "tool_name"])
   if (!toolName || toolName.trim().toLowerCase() !== "todowrite") return null
 
