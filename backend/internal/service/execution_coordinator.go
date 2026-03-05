@@ -148,6 +148,18 @@ func (e *AgentExecutor) checkpointSession(sc *sessionContext) {
 	e.touchRunAttempt(sc)
 }
 
+// compactSessionMessageLog runs after a provider turn finishes and before we
+// transition the session back to idle. This is the most reliable completion
+// point common to both initial and resumed turns.
+func (e *AgentExecutor) compactSessionMessageLog(sessionID string) {
+	if e.messageLogStore == nil {
+		return
+	}
+	if err := e.messageLogStore.CompactSession(sessionID); err != nil {
+		log.Printf("message-log compaction failed for session %s: %v", sessionID, err)
+	}
+}
+
 func (e *AgentExecutor) StopSession(ctx context.Context, id string) error {
 	e.mu.RLock()
 	sc, exists := e.sessions[id]
@@ -544,6 +556,7 @@ func (e *AgentExecutor) executeSessionStart(runCtx context.Context, sc *sessionC
 	}
 
 	if run.Ctx.Err() == nil {
+		e.compactSessionMessageLog(sc.session.ID)
 		e.finalizeRunAttempt(sc, "completed", "")
 		e.transitionWithSave(sc, domain.SessionStateIdle, "session run completed")
 	}
@@ -708,6 +721,7 @@ func (e *AgentExecutor) resumeSessionWithToolResults(sessionID string, results [
 		e.handleEvents(resumeRun.Ctx, sc, resumeRun, events)
 
 		if resumeRun.Ctx.Err() == nil {
+			e.compactSessionMessageLog(sc.session.ID)
 			e.finalizeRunAttempt(sc, "completed", "")
 			e.transitionWithSave(sc, domain.SessionStateIdle, "session run completed")
 		}

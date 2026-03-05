@@ -2,12 +2,10 @@ package storage
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,22 +118,6 @@ func (s *JSONLLogStorage) Append(id string, record MessageLogRecord) (MessageLog
 	idx, err := s.streamIndexLocked(id)
 	if err != nil {
 		return MessageLogRecord{}, err
-	}
-
-	if record.Projection == MessageProjectionOutputDelta || record.Projection == MessageProjectionAppendDelta {
-		merged, handled, err := s.tryApplyDeltaLocked(id, idx, record)
-		if err != nil {
-			return MessageLogRecord{}, err
-		}
-		if handled {
-			return merged, nil
-		}
-
-		if len(record.Raw) > 0 {
-			record.Projection = MessageProjectionAppendRaw
-		} else {
-			record.Projection = MessageProjectionAppend
-		}
 	}
 
 	// Ensure the directory exists before opening the file.
@@ -285,54 +267,161 @@ func (s *JSONLLogStorage) ReadPageDescending(id string, before *int64, limit int
 		return nil, nil, err
 	}
 
-	maxSeq := int64(0)
-	if before != nil {
-		maxSeq = *before - 1
+	records := make([]MessageLogRecord, 0, len(idx.lines))
+	for _, line := range idx.lines {
+		if line.record == nil || line.record.Seq <= 0 || line.record.Timestamp.IsZero() {
+			continue
+		}
+		records = append(records, *line.record)
 	}
 
+	projected := projectMessagesFromExportedRecords(records)
+	if len(projected) == 0 {
+		return []MessageLogRecord{}, nil, nil
+	}
+
+	seen := make(map[string]struct{}, len(projected))
 	page := make([]MessageLogRecord, 0, limit)
-	for i := len(idx.lines) - 1; i >= 0; i-- {
-		rec := idx.lines[i].record
-		if rec == nil || rec.Seq <= 0 {
+	hasOlder := false
+	oldestSeq := int64(0)
+
+	for i := len(projected) - 1; i >= 0; i-- {
+		entry := projected[i]
+		if before != nil && entry.Seq >= *before {
 			continue
 		}
-		if before != nil && rec.Seq > maxSeq {
+		if _, exists := seen[entry.Message.ID]; exists {
 			continue
 		}
-		if rec.Projection == MessageProjectionOutputDelta || rec.Projection == MessageProjectionAppendDelta {
+		seen[entry.Message.ID] = struct{}{}
+
+		rec := MessageLogRecord{
+			Seq:             entry.Seq,
+			Timestamp:       entry.Message.Timestamp,
+			Projection:      MessageProjectionAppend,
+			Kind:            entry.Message.Kind,
+			Contents:        entry.Message.Contents,
+			Payload:         entry.Message.Payload,
+			Open:            entry.Message.Open,
+			Raw:             entry.Message.Raw,
+			TargetMessageID: entry.Message.ID,
+		}
+
+		if len(page) < limit {
+			page = append(page, rec)
+			oldestSeq = rec.Seq
 			continue
 		}
-		page = append(page, *rec)
-		if len(page) == limit {
-			break
-		}
+
+		hasOlder = true
+		break
 	}
 
 	if len(page) == 0 {
 		return page, nil, nil
 	}
-
-	oldestSeq := page[len(page)-1].Seq
-	hasOlder := false
-	for i := len(idx.lines) - 1; i >= 0; i-- {
-		rec := idx.lines[i].record
-		if rec == nil || rec.Seq <= 0 {
-			continue
-		}
-		if rec.Projection == MessageProjectionOutputDelta || rec.Projection == MessageProjectionAppendDelta {
-			continue
-		}
-		if rec.Seq < oldestSeq {
-			hasOlder = true
-			break
-		}
-	}
-
 	if !hasOlder {
 		return page, nil, nil
 	}
 	nextBefore := oldestSeq
 	return page, &nextBefore, nil
+}
+
+// Compact rewrites a session log by folding immutable delta rows into
+// canonical append rows while preserving the final transcript state.
+func (s *JSONLLogStorage) Compact(id string) (bool, error) {
+	if err := validateSessionID(id); err != nil {
+		return false, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	idx, err := s.streamIndexLocked(id)
+	if err != nil {
+		return false, err
+	}
+
+	records := make([]MessageLogRecord, 0, len(idx.lines))
+	hasDelta := false
+	for _, line := range idx.lines {
+		if line.record == nil || line.record.Seq <= 0 || line.record.Timestamp.IsZero() {
+			continue
+		}
+		records = append(records, *line.record)
+		if line.record.Projection == MessageProjectionOutputDelta || line.record.Projection == MessageProjectionAppendDelta {
+			hasDelta = true
+		}
+	}
+
+	if !hasDelta {
+		return false, nil
+	}
+
+	projected := projectMessagesFromExportedRecords(records)
+	path := s.logPath(id)
+	tmpPath := path + ".tmp"
+
+	tmp, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return false, fmt.Errorf("jsonl_log_storage: open temp %s: %w", tmpPath, err)
+	}
+
+	var offset int64
+	compactedLines := make([]indexedLine, 0, len(projected))
+	maxSeq := int64(0)
+	for _, entry := range projected {
+		rec := MessageLogRecord{
+			Seq:             entry.Seq,
+			Timestamp:       entry.Message.Timestamp,
+			Projection:      MessageProjectionAppend,
+			Kind:            entry.Message.Kind,
+			Contents:        entry.Message.Contents,
+			Payload:         entry.Message.Payload,
+			Open:            entry.Message.Open,
+			Raw:             entry.Message.Raw,
+			TargetMessageID: entry.Message.ID,
+		}
+		if len(rec.Raw) > 0 {
+			rec.Projection = MessageProjectionAppendRaw
+		}
+
+		line, err := json.Marshal(rec)
+		if err != nil {
+			tmp.Close()
+			return false, fmt.Errorf("jsonl_log_storage: marshal compacted record: %w", err)
+		}
+		line = append(line, '\n')
+
+		if _, err := tmp.Write(line); err != nil {
+			tmp.Close()
+			return false, fmt.Errorf("jsonl_log_storage: write temp %s: %w", tmpPath, err)
+		}
+
+		recCopy := rec
+		compactedLines = append(compactedLines, indexedLine{offset: offset, length: len(line), record: &recCopy})
+		offset += int64(len(line))
+		if rec.Seq > maxSeq {
+			maxSeq = rec.Seq
+		}
+	}
+
+	if s.shouldSyncLocked() {
+		if err := tmp.Sync(); err != nil {
+			tmp.Close()
+			return false, fmt.Errorf("jsonl_log_storage: sync temp %s: %w", tmpPath, err)
+		}
+	}
+	if err := tmp.Close(); err != nil {
+		return false, fmt.Errorf("jsonl_log_storage: close temp %s: %w", tmpPath, err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return false, fmt.Errorf("jsonl_log_storage: replace %s: %w", path, err)
+	}
+
+	idx.lines = compactedLines
+	idx.maxSeq = maxSeq
+	return true, nil
 }
 
 // Delete removes <dir>/<id>.jsonl. Returns nil if the file does not exist.
@@ -402,132 +491,6 @@ func (s *JSONLLogStorage) streamIndexLocked(id string) (*streamIndex, error) {
 
 	s.indices[id] = idx
 	return idx, nil
-}
-
-func (s *JSONLLogStorage) tryApplyDeltaLocked(id string, idx *streamIndex, delta MessageLogRecord) (MessageLogRecord, bool, error) {
-	lineIdx, scannedBackwards := findDeltaTargetLine(idx, delta.TargetMessageID, delta.Kind)
-	if lineIdx < 0 {
-		return MessageLogRecord{}, false, nil
-	}
-	if scannedBackwards {
-		target := "<latest-output>"
-		if delta.TargetMessageID != "" {
-			target = delta.TargetMessageID
-		}
-		log.Printf("jsonl_log_storage: session %s delta required backward scan for target %s", id, target)
-	}
-
-	line := idx.lines[lineIdx]
-	if line.record == nil {
-		return MessageLogRecord{}, false, nil
-	}
-
-	merged := *line.record
-	merged.Contents += delta.Contents
-	if merged.TargetMessageID == "" && delta.TargetMessageID != "" {
-		merged.TargetMessageID = delta.TargetMessageID
-	}
-	if len(delta.Payload) > 0 {
-		merged.Payload = append(json.RawMessage(nil), delta.Payload...)
-	}
-	if delta.Open != nil {
-		merged.Open = delta.Open
-	}
-	if len(delta.Raw) > 0 {
-		merged.Raw = append(json.RawMessage(nil), delta.Raw...)
-	}
-	if !delta.Timestamp.IsZero() {
-		merged.Timestamp = delta.Timestamp
-	}
-
-	marshaled, err := json.Marshal(merged)
-	if err != nil {
-		return MessageLogRecord{}, false, fmt.Errorf("jsonl_log_storage: marshal merged record: %w", err)
-	}
-	marshaled = append(marshaled, '\n')
-
-	path := s.logPath(id)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return MessageLogRecord{}, false, fmt.Errorf("jsonl_log_storage: read %s for rewrite: %w", path, err)
-	}
-
-	start := line.offset
-	if start < 0 || start > int64(len(data)) {
-		return MessageLogRecord{}, false, fmt.Errorf("jsonl_log_storage: invalid rewrite offset for %s", path)
-	}
-
-	var out bytes.Buffer
-	out.Grow(len(data) - line.length + len(marshaled))
-	out.Write(data[:start])
-	out.Write(marshaled)
-	for i := lineIdx + 1; i < len(idx.lines); i++ {
-		entry := idx.lines[i]
-		entryStart := entry.offset
-		entryEnd := entry.offset + int64(entry.length)
-		if entryStart < 0 || entryEnd < entryStart || entryEnd > int64(len(data)) {
-			return MessageLogRecord{}, false, fmt.Errorf("jsonl_log_storage: invalid line bounds while rewriting %s", path)
-		}
-		out.Write(data[entryStart:entryEnd])
-	}
-
-	tmpPath := path + ".tmp"
-	tmp, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
-	if err != nil {
-		return MessageLogRecord{}, false, fmt.Errorf("jsonl_log_storage: open temp %s: %w", tmpPath, err)
-	}
-	if _, err := tmp.Write(out.Bytes()); err != nil {
-		tmp.Close()
-		return MessageLogRecord{}, false, fmt.Errorf("jsonl_log_storage: write temp %s: %w", tmpPath, err)
-	}
-	if s.shouldSyncLocked() {
-		if err := tmp.Sync(); err != nil {
-			tmp.Close()
-			return MessageLogRecord{}, false, fmt.Errorf("jsonl_log_storage: sync temp %s: %w", tmpPath, err)
-		}
-	}
-	if err := tmp.Close(); err != nil {
-		return MessageLogRecord{}, false, fmt.Errorf("jsonl_log_storage: close temp %s: %w", tmpPath, err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return MessageLogRecord{}, false, fmt.Errorf("jsonl_log_storage: replace %s: %w", path, err)
-	}
-
-	shift := len(marshaled) - line.length
-	idx.lines[lineIdx].length = len(marshaled)
-	idx.lines[lineIdx].record = &merged
-	if shift != 0 {
-		for i := lineIdx + 1; i < len(idx.lines); i++ {
-			idx.lines[i].offset += int64(shift)
-		}
-	}
-
-	return merged, true, nil
-}
-
-func findDeltaTargetLine(idx *streamIndex, targetID string, kind domain.MessageKind) (int, bool) {
-	if idx == nil || len(idx.lines) == 0 {
-		return -1, false
-	}
-
-	last := len(idx.lines) - 1
-	if rec := idx.lines[last].record; rec != nil && rec.Kind == kind && rec.Projection != MessageProjectionOutputDelta && rec.Projection != MessageProjectionAppendDelta {
-		if targetID == "" || recordMessageID(*rec) == targetID {
-			return last, false
-		}
-	}
-
-	for i := last - 1; i >= 0; i-- {
-		rec := idx.lines[i].record
-		if rec == nil || rec.Kind != kind || rec.Projection == MessageProjectionOutputDelta || rec.Projection == MessageProjectionAppendDelta {
-			continue
-		}
-		if targetID == "" || recordMessageID(*rec) == targetID {
-			return i, true
-		}
-	}
-
-	return -1, false
 }
 
 func recordMessageID(rec MessageLogRecord) string {

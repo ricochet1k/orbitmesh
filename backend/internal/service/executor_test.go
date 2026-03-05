@@ -1,10 +1,13 @@
 package service
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -1151,6 +1154,36 @@ func TestAgentExecutor_DrainStatus_TracksEvalWaitersAndClearsOnInterrupt(t *test
 	}
 }
 
+func readMessageLogRecordsFromDisk(t *testing.T, dir, sessionID string) []storage.MessageLogRecord {
+	t.Helper()
+
+	path := filepath.Join(dir, sessionID+".jsonl")
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open %s: %v", path, err)
+	}
+	defer f.Close()
+
+	var records []storage.MessageLogRecord
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var rec storage.MessageLogRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("decode message log line %q: %v", line, err)
+		}
+		records = append(records, rec)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan %s: %v", path, err)
+	}
+
+	return records
+}
+
 func TestAgentExecutor_SendMessage_DuringDrain_ReturnsShutdown(t *testing.T) {
 	prov := newMockProvider()
 	executor, _ := createTestExecutor(prov)
@@ -1825,6 +1858,75 @@ func TestAgentExecutor_SendMessage_TransitionsToIdleAfterTurnCompletion(t *testi
 
 	if _, err := executor.SendMessage(context.Background(), "turn-complete", "second", "", ""); err != nil {
 		t.Fatalf("expected second message to be accepted after completion, got: %v", err)
+	}
+}
+
+func TestAgentExecutor_TurnCompletionCompactsMessageLog(t *testing.T) {
+	prov := newMockProvider()
+	store := newMockStorage()
+	broadcaster := NewEventBroadcaster(100)
+	logDir := t.TempDir()
+	msgStore := storage.NewSessionMessagesLogStore(logDir)
+
+	executor := NewAgentExecutor(ExecutorConfig{
+		Storage:          store,
+		Broadcaster:      broadcaster,
+		ProviderFactory:  func(providerType, sessionID string, config session.Config) (session.Session, error) { return prov, nil },
+		OperationTimeout: 5 * time.Second,
+		MessageLogStore:  msgStore,
+	})
+	defer executor.Shutdown(context.Background())
+
+	if _, err := executor.StartSession(context.Background(), "turn-compact", session.Config{
+		ProviderType: "mock",
+		WorkingDir:   "/tmp/test",
+	}); err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	if _, err := executor.SendMessage(context.Background(), "turn-compact", "hello", "", ""); err != nil {
+		t.Fatalf("failed to send message: %v", err)
+	}
+
+	runningDeadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(runningDeadline) {
+		sess, err := executor.GetSession("turn-compact")
+		if err == nil && sess.GetState() == domain.SessionStateRunning {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	prov.SendEvent(domain.NewOutputEvent("turn-compact", "ok", nil))
+	prov.SendEvent(domain.NewDeltaOutputEvent("turn-compact", "!", nil))
+	prov.SendEvent(domain.NewMetadataEvent("turn-compact", "turn_completed", map[string]any{"subtype": "success"}, nil))
+
+	idleDeadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(idleDeadline) {
+		sess, err := executor.GetSession("turn-compact")
+		if err == nil && sess.GetState() == domain.SessionStateIdle {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	sm, err := msgStore.Load("turn-compact")
+	if err != nil {
+		t.Fatalf("load messages: %v", err)
+	}
+	msgs := sm.GetMessages()
+	if len(msgs) != 2 {
+		t.Fatalf("expected user+output messages, got %d", len(msgs))
+	}
+	if msgs[1].Contents != "ok!" {
+		t.Fatalf("expected compacted output content ok!, got %q", msgs[1].Contents)
+	}
+
+	records := readMessageLogRecordsFromDisk(t, logDir, "turn-compact")
+	for i, rec := range records {
+		if rec.Projection == storage.MessageProjectionOutputDelta || rec.Projection == storage.MessageProjectionAppendDelta {
+			t.Fatalf("record[%d] still has delta projection after turn completion compaction", i)
+		}
 	}
 }
 

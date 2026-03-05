@@ -404,10 +404,10 @@ func TestSessionMessagesLogStore_PayloadAndOpenPersistOnLoad(t *testing.T) {
 	}
 }
 
-func TestSessionMessagesLogStore_DeltaMutatesLatestLogEntry(t *testing.T) {
+func TestSessionMessagesLogStore_DeltaAppendsImmutableLogRow(t *testing.T) {
 	dir := t.TempDir()
 	store := NewSessionMessagesLogStore(dir)
-	sessionID := "test-session-delta-mutate-latest"
+	sessionID := "test-session-delta-immutable"
 	ts := time.Now().UTC()
 
 	_, err := store.Append(sessionID, MessageLogRecord{
@@ -431,21 +431,21 @@ func TestSessionMessagesLogStore_DeltaMutatesLatestLogEntry(t *testing.T) {
 	}
 
 	records := readLogRecordsFromDisk(t, dir, sessionID)
-	if len(records) != 1 {
-		t.Fatalf("expected a single rewritten log entry, got %d", len(records))
+	if len(records) != 2 {
+		t.Fatalf("expected 2 immutable rows, got %d", len(records))
 	}
-	if records[0].Projection == MessageProjectionOutputDelta {
-		t.Fatalf("delta projection should not be persisted, got %q", records[0].Projection)
+	if records[0].Contents != "hello" {
+		t.Fatalf("expected base row contents to remain unchanged, got %q", records[0].Contents)
 	}
-	if records[0].Contents != "hello world" {
-		t.Fatalf("expected merged contents, got %q", records[0].Contents)
+	if records[1].Projection != MessageProjectionOutputDelta {
+		t.Fatalf("expected second row to persist delta projection, got %q", records[1].Projection)
 	}
 }
 
-func TestSessionMessagesLogStore_DeltaTargetRewritesMatchingEntry(t *testing.T) {
+func TestSessionMessagesLogStore_DeltaTargetAppendsImmutableLogRow(t *testing.T) {
 	dir := t.TempDir()
 	store := NewSessionMessagesLogStore(dir)
-	sessionID := "test-session-delta-target-rewrite"
+	sessionID := "test-session-delta-target-immutable"
 	ts := time.Now().UTC()
 
 	first, err := store.Append(sessionID, MessageLogRecord{
@@ -480,26 +480,24 @@ func TestSessionMessagesLogStore_DeltaTargetRewritesMatchingEntry(t *testing.T) 
 	}
 
 	records := readLogRecordsFromDisk(t, dir, sessionID)
-	if len(records) != 2 {
-		t.Fatalf("expected 2 records after rewrite, got %d", len(records))
+	if len(records) != 3 {
+		t.Fatalf("expected 3 immutable rows, got %d", len(records))
 	}
-	if records[0].Contents != "first+" {
-		t.Fatalf("expected first record to be rewritten, got %q", records[0].Contents)
+	if records[0].Contents != "first" {
+		t.Fatalf("expected first record to remain unchanged, got %q", records[0].Contents)
 	}
 	if records[1].Contents != "second" {
 		t.Fatalf("expected second record unchanged, got %q", records[1].Contents)
 	}
-	for i, rec := range records {
-		if rec.Projection == MessageProjectionOutputDelta {
-			t.Fatalf("record[%d] unexpectedly stored delta projection", i)
-		}
+	if records[2].Projection != MessageProjectionOutputDelta {
+		t.Fatalf("expected targeted delta row to be persisted, got %q", records[2].Projection)
 	}
 }
 
-func TestSessionMessagesLogStore_GenericDeltaRewritesMatchingKind(t *testing.T) {
+func TestSessionMessagesLogStore_GenericDeltaAppendsImmutableLogRow(t *testing.T) {
 	dir := t.TempDir()
 	store := NewSessionMessagesLogStore(dir)
-	sessionID := "test-session-generic-delta-rewrite"
+	sessionID := "test-session-generic-delta-immutable"
 	ts := time.Now().UTC()
 
 	first, err := store.Append(sessionID, MessageLogRecord{
@@ -524,14 +522,142 @@ func TestSessionMessagesLogStore_GenericDeltaRewritesMatchingKind(t *testing.T) 
 	}
 
 	records := readLogRecordsFromDisk(t, dir, sessionID)
-	if len(records) != 1 {
-		t.Fatalf("expected a single rewritten thought entry, got %d", len(records))
+	if len(records) != 2 {
+		t.Fatalf("expected 2 immutable rows, got %d", len(records))
 	}
-	if records[0].Contents != "Assessing next steps" {
-		t.Fatalf("expected merged thought contents, got %q", records[0].Contents)
+	if records[0].Contents != "Assessing" {
+		t.Fatalf("expected base thought row to remain unchanged, got %q", records[0].Contents)
 	}
-	if records[0].Projection == MessageProjectionAppendDelta {
-		t.Fatalf("generic delta projection should not be persisted after rewrite")
+	if records[1].Projection != MessageProjectionAppendDelta {
+		t.Fatalf("expected second row to store generic delta, got %q", records[1].Projection)
+	}
+}
+
+func TestSessionMessagesLogStore_LoadPageDescending_DedupesImmutableRevisions(t *testing.T) {
+	dir := t.TempDir()
+	store := NewSessionMessagesLogStore(dir)
+	sessionID := "test-session-page-dedupe"
+	ts := time.Now().UTC()
+
+	first, err := store.Append(sessionID, MessageLogRecord{
+		Timestamp:  ts,
+		Projection: MessageProjectionAppend,
+		Kind:       domain.MessageKindOutput,
+		Contents:   "first",
+	})
+	if err != nil {
+		t.Fatalf("append first: %v", err)
+	}
+
+	_, err = store.Append(sessionID, MessageLogRecord{
+		Timestamp:       ts.Add(time.Second),
+		Projection:      MessageProjectionOutputDelta,
+		Kind:            domain.MessageKindOutput,
+		Contents:        "+delta",
+		TargetMessageID: "log_" + strconv.FormatInt(first.Seq, 10),
+	})
+	if err != nil {
+		t.Fatalf("append targeted delta: %v", err)
+	}
+
+	_, err = store.Append(sessionID, MessageLogRecord{
+		Timestamp:  ts.Add(2 * time.Second),
+		Projection: MessageProjectionAppend,
+		Kind:       domain.MessageKindSystem,
+		Contents:   "second",
+	})
+	if err != nil {
+		t.Fatalf("append second: %v", err)
+	}
+
+	page, _, err := store.LoadPageDescending(sessionID, nil, 4)
+	if err != nil {
+		t.Fatalf("LoadPageDescending: %v", err)
+	}
+	if len(page) != 2 {
+		t.Fatalf("expected 2 unique messages, got %d", len(page))
+	}
+	if page[0].Contents != "second" {
+		t.Fatalf("expected newest message first, got %q", page[0].Contents)
+	}
+	if page[1].ID != "log_"+strconv.FormatInt(first.Seq, 10) {
+		t.Fatalf("unexpected deduped message id: %q", page[1].ID)
+	}
+	if page[1].Contents != "first+delta" {
+		t.Fatalf("expected folded contents, got %q", page[1].Contents)
+	}
+}
+
+func TestSessionMessagesLogStore_CompactSession_PreservesFinalTranscript(t *testing.T) {
+	dir := t.TempDir()
+	store := NewSessionMessagesLogStore(dir)
+	sessionID := "test-session-compact"
+	ts := time.Now().UTC()
+
+	first, err := store.Append(sessionID, MessageLogRecord{
+		Timestamp:  ts,
+		Projection: MessageProjectionAppend,
+		Kind:       domain.MessageKindOutput,
+		Contents:   "hello",
+	})
+	if err != nil {
+		t.Fatalf("append first: %v", err)
+	}
+
+	_, err = store.Append(sessionID, MessageLogRecord{
+		Timestamp:       ts.Add(time.Second),
+		Projection:      MessageProjectionOutputDelta,
+		Kind:            domain.MessageKindOutput,
+		Contents:        " world",
+		TargetMessageID: "log_" + strconv.FormatInt(first.Seq, 10),
+	})
+	if err != nil {
+		t.Fatalf("append delta: %v", err)
+	}
+
+	_, err = store.Append(sessionID, MessageLogRecord{
+		Timestamp:  ts.Add(2 * time.Second),
+		Projection: MessageProjectionAppend,
+		Kind:       domain.MessageKindSystem,
+		Contents:   "done",
+	})
+	if err != nil {
+		t.Fatalf("append system: %v", err)
+	}
+
+	before, err := store.Load(sessionID)
+	if err != nil {
+		t.Fatalf("load before compaction: %v", err)
+	}
+
+	if err := store.CompactSession(sessionID); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+
+	after, err := store.Load(sessionID)
+	if err != nil {
+		t.Fatalf("load after compaction: %v", err)
+	}
+
+	beforeMsgs := before.GetMessages()
+	afterMsgs := after.GetMessages()
+	if len(beforeMsgs) != len(afterMsgs) {
+		t.Fatalf("message count changed after compaction: before=%d after=%d", len(beforeMsgs), len(afterMsgs))
+	}
+	for i := range beforeMsgs {
+		if beforeMsgs[i].ID != afterMsgs[i].ID ||
+			beforeMsgs[i].Kind != afterMsgs[i].Kind ||
+			beforeMsgs[i].Contents != afterMsgs[i].Contents ||
+			string(beforeMsgs[i].Payload) != string(afterMsgs[i].Payload) {
+			t.Fatalf("message[%d] mismatch after compaction: before=%+v after=%+v", i, beforeMsgs[i], afterMsgs[i])
+		}
+	}
+
+	records := readLogRecordsFromDisk(t, dir, sessionID)
+	for i, rec := range records {
+		if rec.Projection == MessageProjectionOutputDelta || rec.Projection == MessageProjectionAppendDelta {
+			t.Fatalf("record[%d] still contains delta projection after compaction", i)
+		}
 	}
 }
 

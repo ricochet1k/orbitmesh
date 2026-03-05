@@ -98,3 +98,10 @@ func (s *SessionMessagesLogStore) LoadPageDescending(sessionID string, before *i
 func (s *SessionMessagesLogStore) Delete(sessionID string) error {
 	return s.store.Delete(sessionID)
 }
+
+// CompactSession folds immutable delta rows into canonical latest records.
+// It is lossless with respect to the reconstructed final transcript.
+func (s *SessionMessagesLogStore) CompactSession(sessionID string) error {
+	_, err := s.jsonlStore.Compact(sessionID)
+	return err
+}
