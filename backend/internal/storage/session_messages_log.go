@@ -28,7 +28,6 @@ func rebuildMessagesFromExportedRecords(records []MessageLogRecord) []domain.Mes
 	messages := make([]domain.Message, 0, len(records))
 
 	for _, rec := range records {
-		rec = normalizeRecordForTranscript(rec)
 		if rec.Projection == MessageProjectionOutputDelta || rec.Projection == MessageProjectionAppendDelta {
 			if applyDeltaRecord(&messages, rec) {
 				continue

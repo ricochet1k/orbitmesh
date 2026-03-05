@@ -427,6 +427,18 @@ func (s *JSONLLogStorage) tryApplyDeltaLocked(id string, idx *streamIndex, delta
 	if merged.TargetMessageID == "" && delta.TargetMessageID != "" {
 		merged.TargetMessageID = delta.TargetMessageID
 	}
+	if len(delta.Payload) > 0 {
+		merged.Payload = append(json.RawMessage(nil), delta.Payload...)
+	}
+	if delta.Open != nil {
+		merged.Open = delta.Open
+	}
+	if len(delta.Raw) > 0 {
+		merged.Raw = append(json.RawMessage(nil), delta.Raw...)
+	}
+	if !delta.Timestamp.IsZero() {
+		merged.Timestamp = delta.Timestamp
+	}
 
 	marshaled, err := json.Marshal(merged)
 	if err != nil {

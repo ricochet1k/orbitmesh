@@ -1,0 +1,149 @@
+{
+  "name": "codex real-log parity subset",
+  "raw_codex_notifications": [
+    {
+      "method": "codex/event/reasoning_content_delta",
+      "params": {
+        "id": "019cbad8-c4f6-7bd1-bb2d-8d0f8ea9c9a4",
+        "msg": {
+          "type": "reasoning_content_delta",
+          "item_id": "rs_0dd22145246ef0870169a8aa312a4081938625f8995e727246",
+          "delta": "**Clar"
+        }
+      }
+    },
+    {
+      "method": "codex/event/exec_command_begin",
+      "params": {
+        "id": "019cbad8-c4f6-7bd1-bb2d-8d0f8ea9c9a4",
+        "msg": {
+          "type": "exec_command_begin",
+          "call_id": "call_skT7smx4Ch6h8D5jR5SvKJUr",
+          "command": [
+            "/bin/zsh",
+            "-lc",
+            "cd /Users/matt/mycode/orbitmesh && roam understand"
+          ]
+        }
+      }
+    },
+    {
+      "method": "codex/event/exec_command_end",
+      "params": {
+        "id": "019cbad8-c4f6-7bd1-bb2d-8d0f8ea9c9a4",
+        "msg": {
+          "type": "exec_command_end",
+          "call_id": "call_skT7smx4Ch6h8D5jR5SvKJUr",
+          "aggregated_output": "VERDICT: unhealthy project"
+        }
+      }
+    }
+  ],
+  "stream_events": [
+    {
+      "type": "progress",
+      "event_id": 635,
+      "timestamp": "2026-03-04T14:54:58.91595-07:00",
+      "session_id": "session-1",
+      "data": {
+        "channel": "reasoning",
+        "stream_id": "rs_0dd22145246ef0870169a8aa312a4081938625f8995e727246",
+        "content": "**Clar",
+        "is_delta": true,
+        "done": false,
+        "status": ""
+      }
+    },
+    {
+      "type": "tool_call",
+      "event_id": 636,
+      "timestamp": "2026-03-04T14:54:59.31314-07:00",
+      "session_id": "session-1",
+      "data": {
+        "id": "call_skT7smx4Ch6h8D5jR5SvKJUr",
+        "name": "command/exec",
+        "status": "running",
+        "title": "/bin/zsh -lc cd /Users/matt/mycode/orbitmesh && roam understand",
+        "input": [
+          "/bin/zsh",
+          "-lc",
+          "cd /Users/matt/mycode/orbitmesh && roam understand"
+        ]
+      }
+    },
+    {
+      "type": "tool_call",
+      "event_id": 638,
+      "timestamp": "2026-03-04T14:54:59.887791-07:00",
+      "session_id": "session-1",
+      "data": {
+        "id": "call_skT7smx4Ch6h8D5jR5SvKJUr",
+        "name": "command/exec",
+        "status": "completed",
+        "title": "/bin/zsh -lc cd /Users/matt/mycode/orbitmesh && roam understand",
+        "input": [
+          "/bin/zsh",
+          "-lc",
+          "cd /Users/matt/mycode/orbitmesh && roam understand"
+        ],
+        "output": {
+          "aggregated_output": "VERDICT: unhealthy project",
+          "exit_code": 0
+        }
+      }
+    },
+    {
+      "type": "progress",
+      "event_id": 672,
+      "timestamp": "2026-03-04T14:55:48.082587-07:00",
+      "session_id": "session-1",
+      "data": {
+        "channel": "reasoning",
+        "stream_id": "rs_0dd22145246ef0870169a8aa312a4081938625f8995e727246",
+        "content": "",
+        "is_delta": true,
+        "done": true,
+        "status": ""
+      }
+    }
+  ],
+  "reload_messages": [
+    {
+      "id": "progress:reasoning:rs_0dd22145246ef0870169a8aa312a4081938625f8995e727246",
+      "kind": "progress",
+      "contents": "**Clar",
+      "payload": {
+        "channel": "reasoning",
+        "stream_id": "rs_0dd22145246ef0870169a8aa312a4081938625f8995e727246",
+        "content": "",
+        "is_delta": true,
+        "done": true,
+        "status": ""
+      },
+      "open": false,
+      "timestamp": "2026-03-04T14:55:48.082587-07:00"
+    },
+    {
+      "id": "tool:call_skT7smx4Ch6h8D5jR5SvKJUr",
+      "kind": "tool_call",
+      "contents": "/bin/zsh -lc cd /Users/matt/mycode/orbitmesh && roam understand([\"/bin/zsh\",\"-lc\",\"cd /Users/matt/mycode/orbitmesh && roam understand\"]): {\"aggregated_output\":\"VERDICT: unhealthy project\",\"exit_code\":0}",
+      "payload": {
+        "id": "call_skT7smx4Ch6h8D5jR5SvKJUr",
+        "name": "command/exec",
+        "status": "completed",
+        "title": "/bin/zsh -lc cd /Users/matt/mycode/orbitmesh && roam understand",
+        "input": [
+          "/bin/zsh",
+          "-lc",
+          "cd /Users/matt/mycode/orbitmesh && roam understand"
+        ],
+        "output": {
+          "aggregated_output": "VERDICT: unhealthy project",
+          "exit_code": 0
+        }
+      },
+      "open": false,
+      "timestamp": "2026-03-04T14:54:59.887791-07:00"
+    }
+  ]
+}
