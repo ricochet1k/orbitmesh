@@ -2,25 +2,25 @@ import { createEffect, createMemo, createResource, createSignal, on, onCleanup, 
 import type { Accessor } from "solid-js"
 import type {
   SessionState,
+  SessionStreamEvent,
   TranscriptMessage,
 } from "../types/api"
-import { parseSSEEvent } from "../types/api"
 import { apiClient } from "../api/client"
 import { realtimeClient } from "../realtime/client"
 import type {
   ServerEnvelope,
-  SessionActivityEvent,
   SessionActivitySnapshot,
   SessionStateEvent,
 } from "../types/generated/realtime"
 import {
-  appendTranscriptMessage,
   extractEventIdFromHistoryMessage,
-  mergeTranscriptMessages,
   normalizeMessageKind,
-  toTranscriptFromHistoryMessage,
-  toTranscriptFromSnapshotMessage,
 } from "./sessionDataMessageHelpers"
+import {
+  applyActivitySnapshotMessages,
+  applyCanonicalActivityStreamEvent,
+  applyHistoryReloadMessages,
+} from "./sessionTranscriptReducer"
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -60,7 +60,7 @@ export interface SessionData {
   // Stream
   streamStatus: Accessor<StreamStatus>
   /** Last parsed stream event (dock-specific UI state can read from here). */
-  lastEvent: Accessor<ReturnType<typeof parseSSEEvent>>
+  lastEvent: Accessor<SessionStreamEvent | null>
   /** Session/provider metadata derived from stream metadata events. */
   sessionIntel: Accessor<SessionStreamIntel>
 }
@@ -117,7 +117,7 @@ export function useSessionData({
   const [messages, setMessages] = createSignal<TranscriptMessage[]>([])
   const [filter, setFilter] = createSignal("")
   const [autoScroll, setAutoScroll] = createSignal(true)
-  const [lastEvent, setLastEvent] = createSignal<ReturnType<typeof parseSSEEvent>>(null)
+  const [lastEvent, setLastEvent] = createSignal<SessionStreamEvent | null>(null)
   const [sessionIntel, setSessionIntel] = createSignal<SessionStreamIntel>({
     tools: [],
     mcpServers: [],
@@ -143,15 +143,6 @@ export function useSessionData({
     )
   })
 
-  const mergeMessages = (incoming: TranscriptMessage[], opts: { sort?: boolean } = {}) => {
-    if (incoming.length === 0) return
-    setMessages((prev) => mergeTranscriptMessages(prev, incoming, { sortByTimestamp: opts.sort }))
-  }
-
-  const pushMessage = (message: TranscriptMessage) => {
-    setMessages((prev) => appendTranscriptMessage(prev, message))
-  }
-
   const updateSessionIntel = (next: Partial<SessionStreamIntel>) => {
     setSessionIntel((prev) => ({
       ...prev,
@@ -161,415 +152,33 @@ export function useSessionData({
     }))
   }
 
-  const applyStreamEvent = (eventType: string, event: MessageEvent) => {
-    const payload = parseSSEEvent(eventType, event)
+  const applyCanonicalEvent = (payload: SessionStreamEvent) => {
     setLastEvent(payload)
 
-    if (!payload) {
-      pushMessage({
-        id: `parse-error:${Date.now()}`,
-        type: "error",
-        timestamp: new Date().toISOString(),
-        content: "Failed to parse stream event payload.",
-        raw: typeof event.data === "string" ? event.data : undefined,
-      })
-      return
+    if (payload.type === "resource_usage") {
+      ingestResourceUsageForSessionIntel(payload.data, updateSessionIntel)
     }
 
-    // Stable ID derived from the backend's monotonic event sequence number.
-    // Falls back to a timestamp-based string only when event_id is absent (0).
-    const stableId = (suffix: string) =>
-      payload.event_id > 0
-        ? `event:${payload.event_id}:${suffix}`
-        : `event:${payload.timestamp}:${suffix}`
+    let nextStatus: SessionState | undefined
+    setMessages((prev) => {
+      const reduced = applyCanonicalActivityStreamEvent(prev, payload)
+      nextStatus = reduced.statusChange
+      return reduced.messages
+    })
 
-    switch (payload.type) {
-      case "status_change": {
-        const { old_state, new_state, reason } = payload.data
-        onStatusChange?.((new_state as SessionState) ?? "idle")
-        pushMessage({
-          id: stableId("status_change"),
-          type: "system",
-          kind: "status_change",
-          timestamp: payload.timestamp,
-          content: reason
-            ? reason
-            : `Session state changed: ${old_state ?? "unknown"} -> ${new_state ?? "unknown"}`,
-          raw: payload.raw,
-        })
-        break
-      }
-      case "output": {
-        const { content, is_delta, message_id } = payload.data
-        if (!content) break
-        if (is_delta) {
-          setMessages((prev) => {
-            // If the provider supplied a stable message_id, target that message
-            // directly so interleaved events (tool calls, metadata, etc.) don't
-            // cause each delta to open a new bubble.
-            if (message_id) {
-              const idx = prev.findIndex(
-                (m) => m.id === message_id || m.id === `message:${message_id}`,
-              )
-              if (idx >= 0 && prev[idx].type === "agent") {
-                const existing = prev[idx]
-                return [
-                  ...prev.slice(0, idx),
-                  {
-                    ...existing,
-                    content: existing.content + content,
-                    open: true,
-                    timestamp: payload.timestamp,
-                    raw: payload.raw,
-                  },
-                  ...prev.slice(idx + 1),
-                ]
-              }
-            }
-            // Fallback: only append to the last message if it is already an open
-            // output message. Searching backward for any open agent message causes
-            // out-of-order display when a tool_call or other event has been pushed
-            // since the output started.
-            const last = prev[prev.length - 1]
-            if (last && last.type === "agent" && last.open) {
-              const updated = { ...last, content: last.content + content }
-              return [...prev.slice(0, -1), updated]
-            }
-            return [
-              ...prev,
-              {
-                id: message_id || stableId("output"),
-                type: "agent",
-                kind: "output",
-                timestamp: payload.timestamp,
-                content,
-                open: true,
-                raw: payload.raw,
-              },
-            ]
-          })
-        } else {
-          mergeMessages(
-            [{
-              id: message_id || stableId("output"),
-              type: "agent",
-              kind: "output",
-              timestamp: payload.timestamp,
-              content,
-              open: false,
-              raw: payload.raw,
-            }],
-            { sort: false },
-          )
-        }
-        break
-      }
-      case "metric": {
-        break
-      }
-      case "error": {
-        pushMessage({
-          id: stableId("error"),
-          type: "error",
-          kind: "error",
-          timestamp: payload.timestamp,
-          content: payload.data.message ?? "Unknown error",
-          raw: payload.raw,
-        })
-        break
-      }
-      case "metadata": {
-        const { key, value } = payload.data
-        if (key === "stderr" || key === "provider_stderr") {
-          const line = typeof value === "string"
-            ? value
-            : (value && typeof value === "object" && typeof (value as { stderr?: unknown }).stderr === "string")
-              ? (value as { stderr: string }).stderr
-              : JSON.stringify(value)
-          pushMessage({
-            id: stableId("provider_stderr"),
-            type: "system",
-            kind: "provider_stderr",
-            timestamp: payload.timestamp,
-            content: `stderr: ${line}`,
-            raw: payload.raw,
-          })
-          break
-        }
-        if (key === "assistant_snapshot") {
-          break
-        }
-
-        pushMessage({
-          id: stableId("metadata"),
-          type: "system",
-          kind: "metadata",
-          timestamp: payload.timestamp,
-          content: `Metadata - ${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`,
-          raw: payload.raw,
-        })
-        break
-      }
-      case "unknown": {
-        const source = payload.data.source?.trim() || "provider"
-        const summary = payload.data.summary?.trim() || "Unhandled event"
-        const payloadText = payload.data.payload === undefined
-          ? ""
-          : `: ${typeof payload.data.payload === "string" ? payload.data.payload : JSON.stringify(payload.data.payload)}`
-        pushMessage({
-          id: stableId("unknown"),
-          type: "system",
-          kind: "unknown",
-          timestamp: payload.timestamp,
-          content: `${summary} (${source})${payloadText}`,
-          payload: payload.data,
-          raw: payload.raw,
-        })
-        break
-      }
-      case "thought": {
-        const thoughtId = payload.data.message_id?.trim() || stableId("thought")
-        if (payload.data.is_delta) {
-          setMessages((prev) => {
-            const idx = prev.findIndex((msg) => msg.id === thoughtId)
-            if (idx >= 0) {
-              const existing = prev[idx]
-              const updated: TranscriptMessage = {
-                ...existing,
-                type: "system",
-                kind: "thought",
-                timestamp: payload.timestamp,
-                content: `${existing.content}${payload.data.content}`,
-                open: true,
-                raw: payload.raw,
-              }
-              return [...prev.slice(0, idx), updated, ...prev.slice(idx + 1)]
-            }
-            return [
-              ...prev,
-              {
-                id: thoughtId,
-                type: "system",
-                kind: "thought",
-                timestamp: payload.timestamp,
-                content: payload.data.content,
-                open: true,
-                raw: payload.raw,
-              },
-            ]
-          })
-          break
-        }
-        mergeMessages(
-          [{
-            id: thoughtId,
-            type: "system",
-            kind: "thought",
-            timestamp: payload.timestamp,
-            content: payload.data.content,
-            open: false,
-            raw: payload.raw,
-          }],
-          { sort: false },
-        )
-        break
-      }
-      case "tool_call": {
-        const { id: toolId, name, status, title, input, output } = payload.data
-        const msgId = toolId ? `tool:${toolId}` : stableId("tool_call")
-        const stringifyValue = (value: unknown) =>
-          typeof value === "string" ? value : JSON.stringify(value)
-
-        setMessages((prev) => {
-          const idx = prev.findIndex((msg) => msg.id === msgId)
-          const existing = idx >= 0 ? prev[idx] : undefined
-          const existingPayload = (existing?.payload && typeof existing.payload === "object")
-            ? existing.payload as Record<string, unknown>
-            : {}
-
-          const mergedTitle = title ?? (typeof existingPayload.title === "string" ? existingPayload.title : undefined)
-          const mergedName = name ?? (typeof existingPayload.name === "string" ? existingPayload.name : undefined)
-          const mergedInput = input !== undefined ? input : existingPayload.input
-          const mergedOutput = output !== undefined ? output : existingPayload.output
-          const mergedStatus = status ?? (typeof existingPayload.status === "string" ? existingPayload.status : undefined)
-
-          const label = mergedTitle || mergedName || "Tool"
-          const detail = mergedInput != null
-            ? `${label}(${stringifyValue(mergedInput)})`
-            : label
-          const content = mergedOutput != null
-            ? `${detail}: ${stringifyValue(mergedOutput)}`
-            : detail
-          const open = mergedOutput == null && mergedStatus === "running"
-
-          const nextMessage: TranscriptMessage = {
-            id: msgId,
-            type: "system",
-            kind: "tool_call",
-            timestamp: payload.timestamp,
-            content,
-            open,
-            payload: {
-              id: toolId ?? (typeof existingPayload.id === "string" ? existingPayload.id : undefined),
-              name: mergedName,
-              title: mergedTitle,
-              status: mergedStatus,
-              input: mergedInput,
-              output: mergedOutput,
-            },
-            raw: payload.raw,
-          }
-
-          if (idx < 0) {
-            return [...prev, nextMessage]
-          }
-
-          const next = [...prev]
-          next[idx] = {
-            ...existing,
-            ...nextMessage,
-          }
-          return next
-        })
-        break
-      }
-      case "plan": {
-        const { description, steps } = payload.data
-        const lines = [
-          description,
-          ...(steps ?? []).map((s) => `  ${s.status ?? "?"} ${s.description}`),
-        ].filter(Boolean)
-        mergeMessages(
-          [{
-            id: stableId("plan"),
-            type: "system",
-            kind: "plan",
-            timestamp: payload.timestamp,
-            content: lines.join("\n"),
-            raw: payload.raw,
-          }],
-          { sort: false },
-        )
-        break
-      }
-      case "user_message": {
-        const { content } = payload.data
-        if (!content) break
-        pushMessage({
-          id: stableId("user_message"),
-          type: "user",
-          kind: "user",
-          timestamp: payload.timestamp,
-          content,
-          raw: payload.raw,
-        })
-        break
-      }
-      case "system_message": {
-        const { content } = payload.data
-        if (!content) break
-        pushMessage({
-          id: stableId("system_message"),
-          type: "system",
-          kind: "system_message",
-          timestamp: payload.timestamp,
-          content,
-          raw: payload.raw,
-        })
-        break
-      }
-      case "progress": {
-        const streamID = payload.data.stream_id?.trim() || stableId("progress")
-        const channel = payload.data.channel?.trim() || "progress"
-        const content = payload.data.content ?? ""
-        const msgId = `progress:${channel}:${streamID}`
-        if (payload.data.is_delta) {
-          setMessages((prev) => {
-            const idx = prev.findIndex((msg) => msg.id === msgId)
-            if (idx >= 0) {
-              const existing = prev[idx]
-              const updated: TranscriptMessage = {
-                ...existing,
-                timestamp: payload.timestamp,
-                content: `${existing.content}${content}`,
-                open: !payload.data.done,
-                payload: payload.data,
-                raw: payload.raw,
-              }
-              return [...prev.slice(0, idx), updated, ...prev.slice(idx + 1)]
-            }
-            return [...prev, {
-              id: msgId,
-              type: "system",
-              kind: "progress",
-              timestamp: payload.timestamp,
-              content,
-              open: !payload.data.done,
-              payload: payload.data,
-              raw: payload.raw,
-            }]
-          })
-          break
-        }
-        mergeMessages([
-          {
-            id: msgId,
-            type: "system",
-            kind: "progress",
-            timestamp: payload.timestamp,
-            content,
-            open: !payload.data.done,
-            payload: payload.data,
-            raw: payload.raw,
-          },
-        ], { sort: false })
-        break
-      }
-      case "resource_usage": {
-        ingestResourceUsageForSessionIntel(payload.data, updateSessionIntel)
-        break
-      }
-      case "action_request": {
-        pushMessage({
-          id: stableId("action_request"),
-          type: "system",
-          kind: "action_request",
-          timestamp: payload.timestamp,
-          content: `Action required${payload.data.kind ? ` (${payload.data.kind})` : ""}: ${payload.data.title ?? payload.data.id ?? "request"}`,
-          payload: payload.data,
-          raw: payload.raw,
-        })
-        break
-      }
-      case "artifact_update": {
-        pushMessage({
-          id: stableId("artifact_update"),
-          type: "system",
-          kind: "artifact_update",
-          timestamp: payload.timestamp,
-          content: `Artifact update${payload.data.kind ? ` (${payload.data.kind})` : ""}: ${payload.data.title ?? payload.data.id ?? "artifact"}`,
-          payload: payload.data,
-          raw: payload.raw,
-        })
-        break
-      }
+    if (nextStatus) {
+      onStatusChange?.(nextStatus)
     }
   }
 
   const applyRealtimeSnapshot = (snapshot: SessionActivitySnapshot) => {
     if (!snapshot) return
-    const transcriptMessages = Array.isArray(snapshot.messages)
-      ? snapshot.messages.map(toTranscriptFromSnapshotMessage)
-      : []
-    mergeMessages(transcriptMessages, { sort: true })
+    setMessages((prev) => applyActivitySnapshotMessages(prev, snapshot))
   }
 
-  const applyRealtimeEvent = (payload: SessionActivityEvent) => {
+  const applyRealtimeEvent = (payload: SessionStreamEvent) => {
     if (!payload || typeof payload.type !== "string") return
-    const event = new MessageEvent("message", {
-      data: JSON.stringify(payload),
-    })
-    applyStreamEvent(payload.type, event)
+    applyCanonicalEvent(payload)
   }
 
   // ── Section 2: Pagination signals ─────────────────────────────────────────
@@ -651,7 +260,7 @@ export function useSessionData({
   function openStream(id: string, inspect: boolean) {
     // ── Per-run coordination variables ─────────────────────────────────────
     let historySettled = false
-    let buffer: Array<{ type: string; event: MessageEvent }> = []
+    let buffer: SessionStreamEvent[] = []
     let pendingRealtimeSnapshot: SessionActivitySnapshot | null = null
 
     onCleanup(() => {
@@ -689,13 +298,14 @@ export function useSessionData({
         return
       }
       if (message.type !== "event") return
-      const payload = message.payload as SessionActivityEvent
-      const event = new MessageEvent("message", { data: JSON.stringify(payload) })
+      const payload = message.payload as SessionStreamEvent
+      if (!payload || typeof payload.type !== "string") return
+      const canonicalPayload = payload
       if (!historySettled) {
-        buffer.push({ type: payload.type, event })
+        buffer.push(canonicalPayload)
         return
       }
-      applyRealtimeEvent(payload)
+      applyRealtimeEvent(canonicalPayload)
     })
     const unsubscribeState = realtimeClient.subscribe("sessions.state", (message: ServerEnvelope) => {
       if (message.type !== "event") return
@@ -744,9 +354,7 @@ export function useSessionData({
         const pageMessages = page.messages ?? []
         if (historySettled) {
           // Pagination load (loadEarlier): merge older messages.
-          if (pageMessages.length > 0) {
-            mergeMessages(pageMessages.map(toTranscriptFromHistoryMessage), { sort: true })
-          }
+          setMessages((prev) => applyHistoryReloadMessages(prev, pageMessages))
           return
         }
 
@@ -759,9 +367,7 @@ export function useSessionData({
           }
         }
 
-        if (pageMessages.length > 0) {
-          mergeMessages(pageMessages.map(toTranscriptFromHistoryMessage), { sort: true })
-        }
+        setMessages((prev) => applyHistoryReloadMessages(prev, pageMessages))
 
         if (pendingRealtimeSnapshot) {
           applyRealtimeSnapshot(pendingRealtimeSnapshot)
@@ -773,14 +379,12 @@ export function useSessionData({
         // Drain buffer: replay events whose event_id > watermark
         const buffered = buffer
         buffer = []
-        for (const { type, event } of buffered) {
-          // Parse event_id from the buffered event to compare against watermark
-          const parsed = parseSSEEvent(type, event)
-          if (parsed && watermark > 0 && parsed.event_id > 0 && parsed.event_id <= watermark) {
+        for (const bufferedEvent of buffered) {
+          if (watermark > 0 && bufferedEvent.event_id > 0 && bufferedEvent.event_id <= watermark) {
             // Already represented in history; skip
             continue
           }
-          applyStreamEvent(type, event)
+          applyCanonicalEvent(bufferedEvent)
         }
       },
     ))
