@@ -31,6 +31,80 @@ const (
 	codexTurnRequestTimeout = 8 * time.Second
 )
 
+type codexNotificationHandler func(*CodexProvider, json.RawMessage, json.RawMessage)
+
+var codexNotificationHandlers = map[string]codexNotificationHandler{
+	"turn/started":   (*CodexProvider).handleTurnStartedNotification,
+	"turn/completed": (*CodexProvider).handleTurnCompletedNotification,
+
+	"item/agentMessage/delta":                 (*CodexProvider).handleAgentMessageDeltaNotification,
+	"codex/event/agent_message_content_delta": (*CodexProvider).handleAgentMessageDeltaNotification,
+
+	"codex/event/agent_reasoning_delta": func(p *CodexProvider, params, raw json.RawMessage) {
+		p.handleReasoningDeltaNotification("codex/event/agent_reasoning_delta", params, raw)
+	},
+	"codex/event/reasoning_content_delta": func(p *CodexProvider, params, raw json.RawMessage) {
+		p.handleReasoningDeltaNotification("codex/event/reasoning_content_delta", params, raw)
+	},
+	"item/reasoning/summaryTextDelta": func(p *CodexProvider, params, raw json.RawMessage) {
+		p.handleReasoningDeltaNotification("item/reasoning/summaryTextDelta", params, raw)
+	},
+	"codex/event/agent_reasoning":           (*CodexProvider).handleAgentReasoningDoneNotification,
+	"codex/event/exec_command_begin":        (*CodexProvider).handleExecCommandBeginNotification,
+	"codex/event/exec_command_end":          (*CodexProvider).handleExecCommandEndNotification,
+	"codex/event/exec_command_output_delta": (*CodexProvider).handleExecCommandOutputDeltaNotification,
+	"item/commandExecution/outputDelta":     (*CodexProvider).handleItemCommandOutputDeltaNotification,
+
+	"codex/event/token_count": func(p *CodexProvider, params, raw json.RawMessage) {
+		p.handleResourceUsageNotification("codex/event/token_count", params, raw)
+	},
+	"thread/tokenUsage/updated": func(p *CodexProvider, params, raw json.RawMessage) {
+		p.handleResourceUsageNotification("thread/tokenUsage/updated", params, raw)
+	},
+	"account/rateLimits/updated": func(p *CodexProvider, params, raw json.RawMessage) {
+		p.handleResourceUsageNotification("account/rateLimits/updated", params, raw)
+	},
+	"item/fileChange/requestApproval": func(p *CodexProvider, params, raw json.RawMessage) {
+		p.handleActionRequestNotification("item/fileChange/requestApproval", params, raw)
+	},
+	"codex/event/apply_patch_approval_request": func(p *CodexProvider, params, raw json.RawMessage) {
+		p.handleActionRequestNotification("codex/event/apply_patch_approval_request", params, raw)
+	},
+
+	"item/started": func(p *CodexProvider, params, raw json.RawMessage) {
+		p.handleItemNotification("item/started", params, raw)
+	},
+	"item/completed": func(p *CodexProvider, params, raw json.RawMessage) {
+		p.handleItemNotification("item/completed", params, raw)
+	},
+	"codex/event/item_started": func(p *CodexProvider, params, raw json.RawMessage) {
+		p.handleCodexEventItemNotification("codex/event/item_started", params, raw)
+	},
+	"codex/event/item_completed": func(p *CodexProvider, params, raw json.RawMessage) {
+		p.handleCodexEventItemNotification("codex/event/item_completed", params, raw)
+	},
+
+	"turn/plan/updated":                     (*CodexProvider).handlePlanUpdateNotification,
+	"turn/diff/updated":                     (*CodexProvider).handleDiffUpdateNotification,
+	"codex/event/exec_approval_request":     (*CodexProvider).handleExecApprovalNotification,
+	"item/commandExecution/requestApproval": (*CodexProvider).handleCommandExecutionApprovalNotification,
+}
+
+var suppressedCodexNotificationMethods = map[string]struct{}{
+	"thread/started":                            {},
+	"thread/status/changed":                     {},
+	"codex/event/mcp_startup_complete":          {},
+	"codex/event/task_started":                  {},
+	"codex/event/task_complete":                 {},
+	"codex/event/agent_message_delta":           {},
+	"codex/event/user_message":                  {},
+	"codex/event/agent_reasoning_section_break": {},
+	"codex/event/terminal_interaction":          {},
+	"codex/event/terminal_output_delta":         {},
+	"item/commandExecution/terminalInteraction": {},
+	"item/reasoning/summaryPartAdded":           {},
+}
+
 type rpcError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
@@ -395,207 +469,225 @@ func (p *CodexProvider) readStderr() {
 }
 
 func (p *CodexProvider) handleNotification(method string, params json.RawMessage, raw json.RawMessage) {
-	switch method {
-	case "turn/started":
-		var payload struct {
-			Turn struct {
-				ID string `json:"id"`
-			} `json:"turn"`
-		}
-		_ = json.Unmarshal(params, &payload)
-		if payload.Turn.ID != "" {
-			p.mu.Lock()
-			p.activeTurnID = payload.Turn.ID
-			p.turnActive = true
-			p.turnBoundaryCh = make(chan struct{})
-			p.mu.Unlock()
-		}
-
-	case "turn/completed":
-		var payload struct {
-			Turn struct {
-				ID     string `json:"id"`
-				Status string `json:"status"`
-				Error  *struct {
-					Message string `json:"message"`
-				} `json:"error"`
-			} `json:"turn"`
-		}
-		_ = json.Unmarshal(params, &payload)
-		p.mu.Lock()
-		p.turnActive = false
-		p.activeTurnID = ""
-		ch := p.turnBoundaryCh
-		p.turnBoundaryCh = nil
-		p.mu.Unlock()
-		if ch != nil {
-			close(ch)
-		}
-		if payload.Turn.Error != nil && payload.Turn.Error.Message != "" {
-			p.events.Emit(domain.NewErrorEvent(p.sessionID, payload.Turn.Error.Message, "CODEX_TURN_FAILED", raw))
-		}
-
-	case "item/agentMessage/delta", "codex/event/agent_message_content_delta":
-		text, itemID := extractDeltaText(params)
-		if itemID != "" {
-			p.deltaMu.Lock()
-			p.deltaByItemID[itemID] = true
-			p.deltaMu.Unlock()
-		}
-		if text != "" {
-			p.state.SetOutput(text)
-			p.events.Emit(domain.NewDeltaOutputEventForMessage(p.sessionID, itemID, text, raw))
-		}
-
-	case "codex/event/agent_reasoning_delta", "codex/event/reasoning_content_delta", "item/reasoning/summaryTextDelta":
-		text, itemID := extractReasoningDelta(method, params)
-		if text != "" && itemID != "" && p.markOrCheckDeltaFmt(p.reasonDeltaFmt, itemID, method) {
-			p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
-				Channel:  "reasoning",
-				StreamID: itemID,
-				Content:  text,
-				IsDelta:  true,
-			}, raw))
-		}
-
-	case "codex/event/agent_reasoning":
-		// Emit a done signal to close the delta stream for this reasoning section.
-		// Avoid re-emitting the full text since deltas already carry the content.
-		if itemID := extractAgentReasoningItemID(params); itemID != "" {
-			p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
-				Channel:  "reasoning",
-				StreamID: itemID,
-				IsDelta:  true,
-				Done:     true,
-			}, raw))
-		}
-
-	case "codex/event/exec_command_begin":
-		if call, ok := parseExecCommandBegin(params); ok {
-			p.dupMu.Lock()
-			p.seenExecBegin[call.ID] = true
-			p.dupMu.Unlock()
-			p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
-				ID:     call.ID,
-				Name:   "command/exec",
-				Status: "running",
-				Title:  call.Title,
-				Input:  call.Input,
-			}, raw))
-		}
-
-	case "codex/event/exec_command_end":
-		if call, ok := parseExecCommandEnd(params); ok {
-			p.dupMu.Lock()
-			p.seenExecEnd[call.ID] = true
-			p.dupMu.Unlock()
-			p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
-				ID:     call.ID,
-				Name:   "command/exec",
-				Status: "completed",
-				Title:  call.Title,
-				Input:  call.Input,
-				Output: call.Output,
-			}, raw))
-		}
-
-	case "codex/event/exec_command_output_delta":
-		if chunk, callID, ok := parseExecOutputDelta(params); ok {
-			if p.markOrCheckDeltaFmt(p.outputDeltaFmt, callID, method) {
-				p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
-					Channel:  "tool_output",
-					StreamID: callID,
-					Content:  chunk,
-					IsDelta:  true,
-				}, raw))
-			}
-		}
-
-	case "item/commandExecution/outputDelta":
-		if chunk, callID, ok := parseItemCommandOutputDelta(params); ok {
-			if p.markOrCheckDeltaFmt(p.outputDeltaFmt, callID, method) {
-				p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
-					Channel:  "tool_output",
-					StreamID: callID,
-					Content:  chunk,
-					IsDelta:  true,
-				}, raw))
-			}
-		}
-
-	case "codex/event/token_count", "thread/tokenUsage/updated", "account/rateLimits/updated":
-		if usage := parseResourceUsage(method, params); usage != nil {
-			p.events.Emit(domain.NewResourceUsageEvent(p.sessionID, *usage, raw))
-		}
-
-	case "item/fileChange/requestApproval", "codex/event/apply_patch_approval_request":
-		if req, artifact := parseActionRequest(method, params); req != nil {
-			p.events.Emit(domain.NewActionRequestEvent(p.sessionID, *req, raw))
-			if artifact != nil {
-				p.events.Emit(domain.NewArtifactUpdateEvent(p.sessionID, *artifact, raw))
-			}
-		}
-
-	case "item/started", "item/completed":
-		p.handleItemNotification(method, params, raw)
-
-	case "codex/event/item_started", "codex/event/item_completed":
-		p.handleCodexEventItemNotification(method, params, raw)
-
-	case "turn/plan/updated":
-		if plan := parsePlanUpdate(params); plan != nil {
-			p.events.Emit(domain.NewPlanEvent(p.sessionID, *plan, raw))
-		}
-
-	case "turn/diff/updated":
-		if diff := parseDiffUpdate(params); diff != "" {
-			p.events.Emit(domain.NewArtifactUpdateEvent(p.sessionID, domain.ArtifactUpdateData{
-				Kind:  "turn_diff",
-				Title: "Turn diff updated",
-				Payload: map[string]any{
-					"diff": diff,
-				},
-			}, raw))
-		}
-
-	// ── Lifecycle noise ─────────────────────────────────────────────────────────
-	// These carry no actionable UI information; their content is already
-	// delivered via the dedicated delta/item/* paths above.
-	case "thread/started",
-		"thread/status/changed",
-		"codex/event/mcp_startup_complete",
-		"codex/event/task_started",
-		"codex/event/task_complete",
-		"codex/event/agent_message_delta",
-		"codex/event/user_message",
-		"codex/event/agent_reasoning_section_break",
-		"codex/event/terminal_interaction",
-		"codex/event/terminal_output_delta",
-		"item/commandExecution/terminalInteraction",
-		"item/reasoning/summaryPartAdded":
-		// Suppress.
-
-	case "codex/event/exec_approval_request":
-		if req := parseExecApprovalRequest(params); req != nil {
-			p.dupMu.Lock()
-			p.seenExecApproval[req.ID] = true
-			p.dupMu.Unlock()
-			p.events.Emit(domain.NewActionRequestEvent(p.sessionID, *req, raw))
-		}
-
-	case "item/commandExecution/requestApproval":
-		if req := parseCommandExecutionApprovalRequest(params); req != nil {
-			p.dupMu.Lock()
-			seen := p.seenExecApproval[req.ID]
-			p.dupMu.Unlock()
-			if !seen {
-				p.events.Emit(domain.NewActionRequestEvent(p.sessionID, *req, raw))
-			}
-		}
-
-	default:
-		p.emitUnhandledNotification(method, params, raw)
+	if handler, ok := codexNotificationHandlers[method]; ok {
+		handler(p, params, raw)
+		return
 	}
+	if _, suppressed := suppressedCodexNotificationMethods[method]; suppressed {
+		return
+	}
+	p.emitUnhandledNotification(method, params, raw)
+}
+
+func (p *CodexProvider) handleTurnStartedNotification(params json.RawMessage, _ json.RawMessage) {
+	var payload struct {
+		Turn struct {
+			ID string `json:"id"`
+		} `json:"turn"`
+	}
+	_ = json.Unmarshal(params, &payload)
+	if payload.Turn.ID == "" {
+		return
+	}
+	p.mu.Lock()
+	p.activeTurnID = payload.Turn.ID
+	p.turnActive = true
+	p.turnBoundaryCh = make(chan struct{})
+	p.mu.Unlock()
+}
+
+func (p *CodexProvider) handleTurnCompletedNotification(params json.RawMessage, raw json.RawMessage) {
+	var payload struct {
+		Turn struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+			Error  *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		} `json:"turn"`
+	}
+	_ = json.Unmarshal(params, &payload)
+	p.mu.Lock()
+	p.turnActive = false
+	p.activeTurnID = ""
+	ch := p.turnBoundaryCh
+	p.turnBoundaryCh = nil
+	p.mu.Unlock()
+	if ch != nil {
+		close(ch)
+	}
+	if payload.Turn.Error != nil && payload.Turn.Error.Message != "" {
+		p.events.Emit(domain.NewErrorEvent(p.sessionID, payload.Turn.Error.Message, "CODEX_TURN_FAILED", raw))
+	}
+}
+
+func (p *CodexProvider) handleAgentMessageDeltaNotification(params json.RawMessage, raw json.RawMessage) {
+	text, itemID := extractDeltaText(params)
+	if itemID != "" {
+		p.deltaMu.Lock()
+		p.deltaByItemID[itemID] = true
+		p.deltaMu.Unlock()
+	}
+	if text == "" {
+		return
+	}
+	p.state.SetOutput(text)
+	p.events.Emit(domain.NewDeltaOutputEventForMessage(p.sessionID, itemID, text, raw))
+}
+
+func (p *CodexProvider) handleReasoningDeltaNotification(method string, params json.RawMessage, raw json.RawMessage) {
+	text, itemID := extractReasoningDelta(method, params)
+	if text == "" || itemID == "" || !p.markOrCheckDeltaFmt(p.reasonDeltaFmt, itemID, method) {
+		return
+	}
+	p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
+		Channel:  "reasoning",
+		StreamID: itemID,
+		Content:  text,
+		IsDelta:  true,
+	}, raw))
+}
+
+func (p *CodexProvider) handleAgentReasoningDoneNotification(params json.RawMessage, raw json.RawMessage) {
+	// Emit a done signal to close the delta stream for this reasoning section.
+	// Avoid re-emitting the full text since deltas already carry the content.
+	itemID := extractAgentReasoningItemID(params)
+	if itemID == "" {
+		return
+	}
+	p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
+		Channel:  "reasoning",
+		StreamID: itemID,
+		IsDelta:  true,
+		Done:     true,
+	}, raw))
+}
+
+func (p *CodexProvider) handleExecCommandBeginNotification(params json.RawMessage, raw json.RawMessage) {
+	call, ok := parseExecCommandBegin(params)
+	if !ok {
+		return
+	}
+	p.dupMu.Lock()
+	p.seenExecBegin[call.ID] = true
+	p.dupMu.Unlock()
+	p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+		ID:     call.ID,
+		Name:   "command/exec",
+		Status: "running",
+		Title:  call.Title,
+		Input:  call.Input,
+	}, raw))
+}
+
+func (p *CodexProvider) handleExecCommandEndNotification(params json.RawMessage, raw json.RawMessage) {
+	call, ok := parseExecCommandEnd(params)
+	if !ok {
+		return
+	}
+	p.dupMu.Lock()
+	p.seenExecEnd[call.ID] = true
+	p.dupMu.Unlock()
+	p.events.Emit(domain.NewToolCallEvent(p.sessionID, domain.ToolCallData{
+		ID:     call.ID,
+		Name:   "command/exec",
+		Status: "completed",
+		Title:  call.Title,
+		Input:  call.Input,
+		Output: call.Output,
+	}, raw))
+}
+
+func (p *CodexProvider) handleExecCommandOutputDeltaNotification(params json.RawMessage, raw json.RawMessage) {
+	chunk, callID, ok := parseExecOutputDelta(params)
+	if !ok || !p.markOrCheckDeltaFmt(p.outputDeltaFmt, callID, "codex/event/exec_command_output_delta") {
+		return
+	}
+	p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
+		Channel:  "tool_output",
+		StreamID: callID,
+		Content:  chunk,
+		IsDelta:  true,
+	}, raw))
+}
+
+func (p *CodexProvider) handleItemCommandOutputDeltaNotification(params json.RawMessage, raw json.RawMessage) {
+	chunk, callID, ok := parseItemCommandOutputDelta(params)
+	if !ok || !p.markOrCheckDeltaFmt(p.outputDeltaFmt, callID, "item/commandExecution/outputDelta") {
+		return
+	}
+	p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
+		Channel:  "tool_output",
+		StreamID: callID,
+		Content:  chunk,
+		IsDelta:  true,
+	}, raw))
+}
+
+func (p *CodexProvider) handleResourceUsageNotification(source string, params json.RawMessage, raw json.RawMessage) {
+	usage := parseResourceUsage(source, params)
+	if usage == nil {
+		return
+	}
+	p.events.Emit(domain.NewResourceUsageEvent(p.sessionID, *usage, raw))
+}
+
+func (p *CodexProvider) handleActionRequestNotification(source string, params json.RawMessage, raw json.RawMessage) {
+	req, artifact := parseActionRequest(source, params)
+	if req == nil {
+		return
+	}
+	p.events.Emit(domain.NewActionRequestEvent(p.sessionID, *req, raw))
+	if artifact != nil {
+		p.events.Emit(domain.NewArtifactUpdateEvent(p.sessionID, *artifact, raw))
+	}
+}
+
+func (p *CodexProvider) handlePlanUpdateNotification(params json.RawMessage, raw json.RawMessage) {
+	plan := parsePlanUpdate(params)
+	if plan == nil {
+		return
+	}
+	p.events.Emit(domain.NewPlanEvent(p.sessionID, *plan, raw))
+}
+
+func (p *CodexProvider) handleDiffUpdateNotification(params json.RawMessage, raw json.RawMessage) {
+	diff := parseDiffUpdate(params)
+	if diff == "" {
+		return
+	}
+	p.events.Emit(domain.NewArtifactUpdateEvent(p.sessionID, domain.ArtifactUpdateData{
+		Kind:  "turn_diff",
+		Title: "Turn diff updated",
+		Payload: map[string]any{
+			"diff": diff,
+		},
+	}, raw))
+}
+
+func (p *CodexProvider) handleExecApprovalNotification(params json.RawMessage, raw json.RawMessage) {
+	req := parseExecApprovalRequest(params)
+	if req == nil {
+		return
+	}
+	p.dupMu.Lock()
+	p.seenExecApproval[req.ID] = true
+	p.dupMu.Unlock()
+	p.events.Emit(domain.NewActionRequestEvent(p.sessionID, *req, raw))
+}
+
+func (p *CodexProvider) handleCommandExecutionApprovalNotification(params json.RawMessage, raw json.RawMessage) {
+	req := parseCommandExecutionApprovalRequest(params)
+	if req == nil {
+		return
+	}
+	p.dupMu.Lock()
+	seen := p.seenExecApproval[req.ID]
+	p.dupMu.Unlock()
+	if seen {
+		return
+	}
+	p.events.Emit(domain.NewActionRequestEvent(p.sessionID, *req, raw))
 }
 
 func (p *CodexProvider) handleItemNotification(method string, params json.RawMessage, raw json.RawMessage) {

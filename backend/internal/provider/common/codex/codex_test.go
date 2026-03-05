@@ -189,6 +189,55 @@ func TestHandleNotification_UnknownNotificationEmitsUnknownEvent(t *testing.T) {
 	}
 }
 
+func TestHandleNotification_KnownMethodDispatchesToCodexItemHandler(t *testing.T) {
+	p := NewCodexProvider("sess_known_dispatch", Config{})
+	params := json.RawMessage(`{
+	  "msg": {
+	    "item": {
+	      "id": "plan_1",
+	      "type": "plan",
+	      "text": "Inspect logs"
+	    }
+	  }
+	}`)
+
+	p.handleNotification("codex/event/item_completed", params, nil)
+
+	e := <-p.events.Events()
+	if e.Type != domain.EventTypePlan {
+		t.Fatalf("expected plan event, got %v", e.Type)
+	}
+	plan, ok := e.Plan()
+	if !ok {
+		t.Fatalf("expected plan payload")
+	}
+	if plan.Description != "Inspect logs" {
+		t.Fatalf("unexpected plan description: %q", plan.Description)
+	}
+}
+
+func TestHandleNotification_SuppressedMethodsEmitNothing(t *testing.T) {
+	tests := []struct {
+		method string
+		params json.RawMessage
+	}{
+		{method: "thread/status/changed", params: json.RawMessage(`{"thread":{"id":"thr_1"}}`)},
+		{method: "codex/event/task_complete", params: json.RawMessage(`{"msg":{"type":"task_complete"}}`)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.method, func(t *testing.T) {
+			p := NewCodexProvider("sess_suppressed", Config{})
+			p.handleNotification(tt.method, tt.params, nil)
+			select {
+			case e := <-p.events.Events():
+				t.Fatalf("expected no event for suppressed method, got %v", e.Type)
+			default:
+			}
+		})
+	}
+}
+
 func TestSession44MethodsEmitNoUnknownEvents(t *testing.T) {
 	p := NewCodexProvider("sess_session44", Config{})
 
