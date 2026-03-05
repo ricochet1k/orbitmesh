@@ -62,8 +62,7 @@ func (e *LogCorruptionError) Error() string {
 
 // JSONLLogStorage implements entity.LogStorage[MessageLogRecord] for session
 // message logs. Files are stored at <dir>/<id>.jsonl. Each line is a
-// JSON-encoded MessageLogRecord. The file format is identical to the legacy
-// AppendMessageLog output for backward compatibility.
+// JSON-encoded MessageLogRecord.
 type JSONLLogStorage struct {
 	dir string // e.g. <baseDir>/sessions
 	mu  sync.RWMutex
@@ -493,13 +492,6 @@ func (s *JSONLLogStorage) streamIndexLocked(id string) (*streamIndex, error) {
 	return idx, nil
 }
 
-func recordMessageID(rec MessageLogRecord) string {
-	if rec.TargetMessageID != "" && rec.Projection != MessageProjectionOutputDelta {
-		return rec.TargetMessageID
-	}
-	return fmt.Sprintf("log_%d", rec.Seq)
-}
-
 func (s *JSONLLogStorage) shouldSyncLocked() bool {
 	if s.syncInterval <= 0 {
 		return true
@@ -510,45 +502,4 @@ func (s *JSONLLogStorage) shouldSyncLocked() bool {
 		return true
 	}
 	return false
-}
-
-// nextSeqLocked scans the log file to find the current maximum sequence number
-// and returns max+1 (or 1 for an empty/missing file). Caller must hold mu.Lock.
-func (s *JSONLLogStorage) nextSeqLocked(id string) (int64, error) {
-	path := s.logPath(id)
-	file, err := os.Open(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return 1, nil
-		}
-		return 0, fmt.Errorf("jsonl_log_storage: open %s for seq: %w", path, err)
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
-
-	var maxSeq int64
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		// Only unmarshal the seq field for efficiency.
-		var rec struct {
-			Seq int64 `json:"seq"`
-		}
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			continue
-		}
-		if rec.Seq > maxSeq {
-			maxSeq = rec.Seq
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return 0, fmt.Errorf("jsonl_log_storage: scan %s for seq: %w", path, err)
-	}
-
-	return maxSeq + 1, nil
 }

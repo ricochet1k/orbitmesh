@@ -80,7 +80,7 @@ func (s *SessionMessagesLogStore) LoadPageDescending(sessionID string, before *i
 	messages := make([]domain.Message, 0, len(records))
 	for _, rec := range records {
 		messages = append(messages, domain.Message{
-			ID:        recordMessageID(rec),
+			ID:        messageIDForRecord(rec),
 			Kind:      rec.Kind,
 			Contents:  rec.Contents,
 			Payload:   rec.Payload,

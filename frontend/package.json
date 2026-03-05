@@ -8,6 +8,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:transcript-parity": "vitest run src/hooks/sessionTranscriptParity.test.ts",
+    "test:transcript-correctness": "npm run check:realtime-types && npm run test:transcript-parity && sh -c 'cd ../backend && go test ./internal/storage -run \"TestSessionMessagesLogStore_LoadPageDescending_LongSessionFixtureTailPaging|TestSessionMessagesLogStore_CompactSession_LongSessionFixtureEquivalent\"'",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:ui-mock": "playwright test -c playwright.config.ts",

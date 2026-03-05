@@ -1,7 +1,8 @@
 {
 	"scripts": {
 		"generate:realtime-types": "go run ./backend/cmd/typegen-realtime",
-		"check:realtime-types": "go run ./backend/cmd/typegen-realtime && git diff --exit-code -- frontend/src/types/generated/realtime.ts frontend/src/types/generated/transcript.ts"
+		"check:realtime-types": "go run ./backend/cmd/typegen-realtime && git diff --exit-code -- frontend/src/types/generated/realtime.ts frontend/src/types/generated/transcript.ts",
+		"test:transcript-correctness": "npm --prefix frontend run test:transcript-correctness"
 	},
 	"dependencies": {
 		"@tanstack/solid-router": "^1.159.1",
