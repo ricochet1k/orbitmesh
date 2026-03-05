@@ -7,6 +7,7 @@ import type { ServerEnvelope } from "../types/generated/realtime"
 import { useSessionData } from "./useSessionData"
 import parityFixture from "./__fixtures__/codex-replay-parity.fixture.json"
 import actionRequestLifecycleFixture from "./__fixtures__/action-request-lifecycle-parity.fixture.json"
+import interleavedReasoningToolFixture from "./__fixtures__/codex-interleaved-reasoning-tool.fixture.json"
 
 let realtimeHandlers = new Map<string, (message: ServerEnvelope) => void>()
 let realtimeStatusHandler: ((status: "connecting" | "open" | "closed") => void) | undefined
@@ -302,6 +303,69 @@ describe("useSessionData", () => {
 
       expect(liveNormalized).toStrictEqual(reloadNormalized)
     }
+  })
+
+  it("keeps strict transcript parity when reasoning progress interleaves with a running tool call", async () => {
+    const fixture = interleavedReasoningToolFixture as {
+      stream_events: Array<Record<string, unknown>>
+      reload_messages: Array<Record<string, unknown>>
+      observed_in: { sequence: number[] }
+    }
+
+    expect(fixture.observed_in.sequence).toEqual([650, 651, 655])
+
+    ;(apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      messages: [],
+      next_before: null,
+    })
+    let liveData: ReturnType<typeof useSessionData> | undefined
+    createRoot((d) => {
+      dispose = d
+      const [sessionId] = createSignal("session-1")
+      const [canInspect] = createSignal<boolean | null>(true)
+      liveData = useSessionData({ sessionId, canInspect })
+    })
+
+    const activityHandler = realtimeHandlers.get("sessions.activity:session-1")
+    expect(activityHandler).toBeDefined()
+    for (const payload of fixture.stream_events) {
+      activityHandler?.({
+        type: "event",
+        topic: "sessions.activity:session-1",
+        payload,
+      })
+    }
+
+    await vi.waitFor(() => {
+      const messages = liveData?.messages() ?? []
+      expect(messages.find((m) => m.id === "tool:call_v0UXHPNmoD4iwkk3yd3PjTs8")?.open).toBe(false)
+      expect(messages.find((m) => m.id === "progress:reasoning:rs_0dd22145246ef0870169a8aa40a0908193a5b227aec7f274ab")?.kind).toBe("progress")
+    })
+
+    const liveNormalized = [...normalizeStrictTranscriptModel(liveData?.messages() ?? [])]
+      .sort((a, b) => `${a.id}:${a.timestamp}`.localeCompare(`${b.id}:${b.timestamp}`))
+    dispose?.()
+
+    ;(apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      messages: fixture.reload_messages,
+      next_before: null,
+    })
+    let reloadData: ReturnType<typeof useSessionData> | undefined
+    createRoot((d) => {
+      dispose = d
+      const [sessionId] = createSignal("session-1")
+      const [canInspect] = createSignal<boolean | null>(true)
+      reloadData = useSessionData({ sessionId, canInspect })
+    })
+
+    await vi.waitFor(() => {
+      const messages = reloadData?.messages() ?? []
+      expect(messages.length).toBe(fixture.reload_messages.length)
+    })
+    const reloadNormalized = [...normalizeStrictTranscriptModel(reloadData?.messages() ?? [])]
+      .sort((a, b) => `${a.id}:${a.timestamp}`.localeCompare(`${b.id}:${b.timestamp}`))
+
+    expect(liveNormalized).toStrictEqual(reloadNormalized)
   })
 })
 

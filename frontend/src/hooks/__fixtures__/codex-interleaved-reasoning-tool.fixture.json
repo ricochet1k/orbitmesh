@@ -1,0 +1,140 @@
+{
+  "name": "codex reasoning delta interleaves with tool lifecycle",
+  "observed_in": {
+    "session_log": "~/.orbitmesh/sessions/fafda3e6603231e047c0fce9ddce939d.jsonl",
+    "sequence": [650, 651, 655]
+  },
+  "raw_codex_notifications": [
+    {
+      "method": "codex/event/exec_command_begin",
+      "params": {
+        "id": "019cbad8-c4f6-7bd1-bb2d-8d0f8ea9c9a4",
+        "msg": {
+          "type": "exec_command_begin",
+          "call_id": "call_v0UXHPNmoD4iwkk3yd3PjTs8",
+          "command": [
+            "/bin/zsh",
+            "-lc",
+            "cd /Users/matt/mycode/orbitmesh && strand list"
+          ]
+        }
+      }
+    },
+    {
+      "method": "codex/event/reasoning_content_delta",
+      "params": {
+        "id": "019cbad8-c4f6-7bd1-bb2d-8d0f8ea9c9a4",
+        "msg": {
+          "type": "reasoning_content_delta",
+          "item_id": "rs_0dd22145246ef0870169a8aa40a0908193a5b227aec7f274ab",
+          "delta": "**Checking"
+        }
+      }
+    },
+    {
+      "method": "codex/event/exec_command_end",
+      "params": {
+        "id": "019cbad8-c4f6-7bd1-bb2d-8d0f8ea9c9a4",
+        "msg": {
+          "type": "exec_command_end",
+          "call_id": "call_v0UXHPNmoD4iwkk3yd3PjTs8",
+          "aggregated_output": "ID       TITLE ...",
+          "exit_code": 0
+        }
+      }
+    }
+  ],
+  "stream_events": [
+    {
+      "type": "tool_call",
+      "event_id": 650,
+      "timestamp": "2026-03-04T14:55:11.071027-07:00",
+      "session_id": "session-1",
+      "data": {
+        "id": "call_v0UXHPNmoD4iwkk3yd3PjTs8",
+        "name": "command/exec",
+        "status": "running",
+        "title": "/bin/zsh -lc cd /Users/matt/mycode/orbitmesh && strand list",
+        "input": [
+          "/bin/zsh",
+          "-lc",
+          "cd /Users/matt/mycode/orbitmesh && strand list"
+        ]
+      }
+    },
+    {
+      "type": "progress",
+      "event_id": 651,
+      "timestamp": "2026-03-04T14:55:13.180061-07:00",
+      "session_id": "session-1",
+      "data": {
+        "channel": "reasoning",
+        "stream_id": "rs_0dd22145246ef0870169a8aa40a0908193a5b227aec7f274ab",
+        "content": "**Checking",
+        "is_delta": true,
+        "done": false,
+        "status": ""
+      }
+    },
+    {
+      "type": "tool_call",
+      "event_id": 655,
+      "timestamp": "2026-03-04T14:55:14.978932-07:00",
+      "session_id": "session-1",
+      "data": {
+        "id": "call_v0UXHPNmoD4iwkk3yd3PjTs8",
+        "name": "command/exec",
+        "status": "completed",
+        "title": "/bin/zsh -lc cd /Users/matt/mycode/orbitmesh && strand list",
+        "input": [
+          "/bin/zsh",
+          "-lc",
+          "cd /Users/matt/mycode/orbitmesh && strand list"
+        ],
+        "output": {
+          "aggregated_output": "ID       TITLE ...",
+          "exit_code": 0
+        }
+      }
+    }
+  ],
+  "reload_messages": [
+    {
+      "id": "tool:call_v0UXHPNmoD4iwkk3yd3PjTs8",
+      "kind": "tool_call",
+      "contents": "/bin/zsh -lc cd /Users/matt/mycode/orbitmesh && strand list([\"/bin/zsh\",\"-lc\",\"cd /Users/matt/mycode/orbitmesh && strand list\"]): {\"aggregated_output\":\"ID       TITLE ...\",\"exit_code\":0}",
+      "payload": {
+        "id": "call_v0UXHPNmoD4iwkk3yd3PjTs8",
+        "name": "command/exec",
+        "status": "completed",
+        "title": "/bin/zsh -lc cd /Users/matt/mycode/orbitmesh && strand list",
+        "input": [
+          "/bin/zsh",
+          "-lc",
+          "cd /Users/matt/mycode/orbitmesh && strand list"
+        ],
+        "output": {
+          "aggregated_output": "ID       TITLE ...",
+          "exit_code": 0
+        }
+      },
+      "open": false,
+      "timestamp": "2026-03-04T14:55:14.978932-07:00"
+    },
+    {
+      "id": "progress:reasoning:rs_0dd22145246ef0870169a8aa40a0908193a5b227aec7f274ab",
+      "kind": "progress",
+      "contents": "**Checking",
+      "payload": {
+        "channel": "reasoning",
+        "stream_id": "rs_0dd22145246ef0870169a8aa40a0908193a5b227aec7f274ab",
+        "content": "**Checking",
+        "is_delta": true,
+        "done": false,
+        "status": ""
+      },
+      "open": true,
+      "timestamp": "2026-03-04T14:55:13.180061-07:00"
+    }
+  ]
+}
