@@ -79,7 +79,7 @@ describe("SessionTranscript", () => {
       {
         id: "m3",
         type: "system",
-        kind: "status-change",
+        kind: "status_change",
         timestamp: "2026-02-05T12:00:02Z",
         content: "state changed",
       },
@@ -103,15 +103,15 @@ describe("SessionTranscript", () => {
       {
         id: "m1",
         type: "system",
-        kind: "tool-use",
+        kind: "tool_call",
         timestamp: "2026-02-05T12:00:00Z",
         content: "tool output",
       },
     ])
 
     const item = container.querySelector(".transcript-item")
-    expect(item?.className).toContain("transcript-kind-tool_use")
-    expect(item?.getAttribute("data-kind")).toBe("tool_use")
+    expect(item?.className).toContain("transcript-kind-tool_call")
+    expect(item?.getAttribute("data-kind")).toBe("tool_call")
   })
 
   it("shows per-message raw json in dev mode", () => {

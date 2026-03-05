@@ -92,7 +92,7 @@ describe("SessionViewer", () => {
       messages: [
         {
           id: "message-1",
-          kind: "assistant",
+          kind: "output",
           contents: "Initial output",
           open: false,
           timestamp: "2026-02-05T12:01:00Z",
@@ -128,7 +128,7 @@ describe("SessionViewer", () => {
         messages: [
           {
             id: "message-new",
-            kind: "assistant",
+            kind: "output",
             contents: "Newest output",
             open: false,
             timestamp: "2026-02-05T12:01:00Z",
@@ -140,7 +140,7 @@ describe("SessionViewer", () => {
         messages: [
           {
             id: "message-old",
-            kind: "assistant",
+            kind: "output",
             contents: "Older output",
             open: false,
             timestamp: "2026-02-05T12:00:00Z",
@@ -184,7 +184,7 @@ describe("SessionViewer", () => {
         messages: [
           {
             id: "message-new",
-            kind: "assistant",
+            kind: "output",
             contents: "Newest output",
             open: false,
             timestamp: "2026-02-05T12:01:00Z",

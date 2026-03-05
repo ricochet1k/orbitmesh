@@ -38,7 +38,7 @@ vi.mock("../realtime/client", () => ({
 function makeHistoryMessage(overrides: Record<string, unknown> = {}) {
   return {
     id: "event:1:output",
-    kind: "assistant",
+    kind: "output",
     contents: "history content",
     payload: undefined,
     open: false,

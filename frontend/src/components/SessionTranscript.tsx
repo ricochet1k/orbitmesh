@@ -237,7 +237,6 @@ function normalizeKind(kind: string | undefined) {
   return (kind ?? "")
     .trim()
     .toLowerCase()
-    .replace(/[\s-]+/g, "_")
 }
 
 function formatMessageLabel(type: TranscriptMessage["type"], kind: string) {
@@ -245,9 +244,7 @@ function formatMessageLabel(type: TranscriptMessage["type"], kind: string) {
 
   switch (kind) {
     case "output":
-    case "assistant":
       return "Assistant"
-    case "tool_use":
     case "tool_call":
       return "Tool"
     case "status_change":
@@ -272,8 +269,6 @@ function formatMessageLabel(type: TranscriptMessage["type"], kind: string) {
       return "Metadata"
     case "unknown":
       return "Unknown"
-    case "user_input":
-      return "User"
     default:
       return titleCase(kind)
   }

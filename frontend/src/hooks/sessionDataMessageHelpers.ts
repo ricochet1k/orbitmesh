@@ -4,13 +4,6 @@ import type {
 } from "../types/api"
 import type { SessionActivitySnapshot } from "../types/generated/realtime"
 
-export function appendTranscriptMessage(
-  previous: TranscriptMessage[],
-  message: TranscriptMessage,
-): TranscriptMessage[] {
-  return [...previous, message]
-}
-
 export function mergeTranscriptMessages(
   previous: TranscriptMessage[],
   incoming: TranscriptMessage[],
@@ -93,7 +86,6 @@ export function normalizeMessageKind(kind: string | null | undefined): string {
   return String(kind ?? "")
     .trim()
     .toLowerCase()
-    .replace(/[\s-]+/g, "_")
 }
 
 function extractEventIdFromMessageId(messageId: string | undefined): number {
@@ -108,19 +100,12 @@ function mapTranscriptKindToType(kind: string): TranscriptMessage["type"] {
 
   switch (normalized) {
     case "error":
-    case "tool_error":
-    case "provider_error":
       return "error"
     case "user":
-    case "user_input":
       return "user"
-    case "assistant":
-    case "agent":
     case "output":
       return "agent"
   }
-
-  if (normalized.endsWith("_error")) return "error"
   return "system"
 }
 

@@ -114,13 +114,13 @@ describe("sessionTranscriptReducer", () => {
     const history: SessionTranscriptHistoryMessage[] = [
       {
         id: "event:1:output",
-        kind: "assistant",
+        kind: "output",
         contents: "older",
         timestamp: "2026-03-01T12:00:01Z",
       },
       {
         id: "event:2:output",
-        kind: "assistant",
+        kind: "output",
         contents: "updated newer",
         timestamp: "2026-03-01T12:00:02Z",
       },
