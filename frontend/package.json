@@ -7,6 +7,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:transcript-parity": "vitest run src/hooks/sessionTranscriptParity.test.ts",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:ui-mock": "playwright test -c playwright.config.ts",

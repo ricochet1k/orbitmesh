@@ -69,6 +69,12 @@ Drain/deferred replay behavior is part of the reliability contract and must stay
 - Smoke includes a mock-provider ACP echo transcript parity guard (`acp-echo-transcript-parity` tool-rendering check) to catch regressions where live stream rendering diverges from post-reload transcript rendering.
 - E2E full suite (real backend, scheduled/on-demand): `cd frontend && npm run test:e2e:full`
 
+## Transcript Parity Gate
+
+- Required PR gate: `cd frontend && npm run test:transcript-parity`
+- Scope: fixture-driven reducer invariants for codex replay, action request lifecycle, and interleaved reasoning/tool transcripts.
+- Why required: it catches stream-vs-reload drift by asserting the fully reduced stream transcript state is exactly equal to the fully reduced reload transcript state.
+
 ## Timeouts and Reliability
 
 - All tests must use short, explicit timeouts to avoid hangs.

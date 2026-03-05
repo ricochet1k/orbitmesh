@@ -324,16 +324,18 @@ export function applyCanonicalActivityStreamEvent(
         raw: payload.raw,
       }
 
-      if (idx < 0) {
-        return { messages: [...previous, nextMessage] }
+      return {
+        messages: mergeSortDedupeTranscriptMessages(
+          previous,
+          [
+            {
+              ...existing,
+              ...nextMessage,
+            },
+          ],
+          { sortByTimestamp: true },
+        ),
       }
-
-      const next = [...previous]
-      next[idx] = {
-        ...existing,
-        ...nextMessage,
-      }
-      return { messages: next }
     }
     case "plan": {
       const { description, steps } = payload.data
@@ -402,34 +404,39 @@ export function applyCanonicalActivityStreamEvent(
         if (idx >= 0) {
           const existing = previous[idx]
           return {
-            messages: [
-              ...previous.slice(0, idx),
+            messages: mergeSortDedupeTranscriptMessages(
+              previous,
+              [
+                {
+                  ...existing,
+                  timestamp: payload.timestamp,
+                  content: `${existing.content}${content}`,
+                  open: !payload.data.done,
+                  payload: payload.data,
+                  raw: payload.raw,
+                },
+              ],
+              { sortByTimestamp: true },
+            ),
+          }
+        }
+        return {
+          messages: mergeSortDedupeTranscriptMessages(
+            previous,
+            [
               {
-                ...existing,
+                id: msgId,
+                type: "system",
+                kind: "progress",
                 timestamp: payload.timestamp,
-                content: `${existing.content}${content}`,
+                content,
                 open: !payload.data.done,
                 payload: payload.data,
                 raw: payload.raw,
               },
-              ...previous.slice(idx + 1),
             ],
-          }
-        }
-        return {
-          messages: [
-            ...previous,
-            {
-              id: msgId,
-              type: "system",
-              kind: "progress",
-              timestamp: payload.timestamp,
-              content,
-              open: !payload.data.done,
-              payload: payload.data,
-              raw: payload.raw,
-            },
-          ],
+            { sortByTimestamp: true },
+          ),
         }
       }
       return {
