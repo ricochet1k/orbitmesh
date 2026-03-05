@@ -341,6 +341,15 @@ func TestKnownCodexNoiseDoesNotEmitUnknownEvents(t *testing.T) {
 	assertNoUnknown("codex/event/agent_message_delta", json.RawMessage(`{
 	  "msg": {"item_id": "msg_legacy", "delta": "draft"}
 	}`))
+	assertNoUnknown("codex/event/agent_message", json.RawMessage(`{
+	  "conversationId": "conv_1",
+	  "id": "turn_1",
+	  "msg": {
+	    "type": "agent_message",
+	    "item_id": "msg_legacy",
+	    "text": "draft"
+	  }
+	}`))
 	assertNoUnknown("codex/event/terminal_output_delta", json.RawMessage(`{
 	  "msg": {"call_id": "call_legacy", "chunk": "aGVsbG8="}
 	}`))

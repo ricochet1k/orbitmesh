@@ -96,6 +96,7 @@ var suppressedCodexNotificationMethods = map[string]struct{}{
 	"codex/event/mcp_startup_complete":          {},
 	"codex/event/task_started":                  {},
 	"codex/event/task_complete":                 {},
+	"codex/event/agent_message":                 {},
 	"codex/event/agent_message_delta":           {},
 	"codex/event/user_message":                  {},
 	"codex/event/agent_reasoning_section_break": {},
