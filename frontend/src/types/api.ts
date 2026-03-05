@@ -1,3 +1,11 @@
+import type {
+  ActionRequestPayload,
+  ArtifactUpdatePayload,
+  OutputThoughtPayload,
+  ProgressPayload,
+  ToolCallPayload,
+} from "./generated/transcript"
+
 export type SessionState = "idle" | "running" | "suspended";
 
 export interface MCPServerConfig {
@@ -335,7 +343,7 @@ export interface SessionTranscriptHistoryMessage {
   id: string;
   kind: string;
   contents: string;
-  payload?: unknown;
+  payload?: TranscriptPayload | Record<string, unknown>;
   open?: boolean;
   timestamp: string;
 }
@@ -726,7 +734,7 @@ export interface TranscriptMessage {
   timestamp: string;
   content: string;
   /** Optional structured event payload for rich transcript rendering. */
-  payload?: unknown;
+  payload?: TranscriptPayload | Record<string, unknown>;
   raw?: unknown;
   /** Activity entry identifier (used in SessionViewer for merge dedup) */
   entryId?: string;
@@ -739,3 +747,10 @@ export interface TranscriptMessage {
 }
 
 export type TranscriptMessageType = "agent" | "user" | "system" | "error";
+
+export type TranscriptPayload =
+  | OutputThoughtPayload
+  | ToolCallPayload
+  | ProgressPayload
+  | ActionRequestPayload
+  | ArtifactUpdatePayload;

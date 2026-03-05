@@ -15,10 +15,12 @@ func main() {
 		panic(err)
 	}
 
-	outputPath := filepath.Join(repoRoot, "frontend", "src", "types", "generated", "realtime.ts")
-	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+	generatedDir := filepath.Join(repoRoot, "frontend", "src", "types", "generated")
+	if err := os.MkdirAll(generatedDir, 0o755); err != nil {
 		panic(err)
 	}
+	realtimePath := filepath.Join(generatedDir, "realtime.ts")
+	transcriptPath := filepath.Join(generatedDir, "transcript.ts")
 
 	gen := tygo.New(&tygo.Config{
 		TypeMappings: map[string]string{
@@ -27,7 +29,12 @@ func main() {
 		Packages: []*tygo.PackageConfig{
 			{
 				Path:             "github.com/ricochet1k/orbitmesh/pkg/realtime",
-				OutputPath:       outputPath,
+				OutputPath:       realtimePath,
+				PreserveComments: "none",
+			},
+			{
+				Path:             "github.com/ricochet1k/orbitmesh/pkg/transcript",
+				OutputPath:       transcriptPath,
 				PreserveComments: "none",
 			},
 		},
@@ -37,7 +44,8 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Printf("wrote %s\n", outputPath)
+	fmt.Printf("wrote %s\n", realtimePath)
+	fmt.Printf("wrote %s\n", transcriptPath)
 }
 
 func findRepoRoot() (string, error) {

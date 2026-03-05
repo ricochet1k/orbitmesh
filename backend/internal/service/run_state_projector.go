@@ -7,6 +7,7 @@ import (
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
+	transcript "github.com/ricochet1k/orbitmesh/pkg/transcript"
 )
 
 // updateSessionFromEvent projects a single provider event onto the session's
@@ -354,65 +355,24 @@ func formatArtifactUpdateContent(data domain.ArtifactUpdateData) string {
 	return fmt.Sprintf("artifact_update(%s): %s", data.Kind, title)
 }
 
-type outputThoughtPayload struct {
-	Content   string `json:"content"`
-	IsDelta   bool   `json:"is_delta"`
-	MessageID string `json:"message_id"`
-}
-
-type toolCallPayload struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Status    string `json:"status"`
-	Title     string `json:"title"`
-	Input     any    `json:"input"`
-	Output    any    `json:"output"`
-	Arguments string `json:"arguments,omitempty"`
-}
-
-type progressPayload struct {
-	Channel  string `json:"channel"`
-	StreamID string `json:"stream_id"`
-	Content  string `json:"content"`
-	IsDelta  bool   `json:"is_delta"`
-	Done     bool   `json:"done"`
-	Status   string `json:"status"`
-}
-
-type actionRequestPayload struct {
-	ID      string `json:"id"`
-	Kind    string `json:"kind"`
-	Title   string `json:"title"`
-	Status  string `json:"status"`
-	Payload any    `json:"payload"`
-}
-
-type artifactUpdatePayload struct {
-	ID      string `json:"id"`
-	Kind    string `json:"kind"`
-	Title   string `json:"title"`
-	IsDelta bool   `json:"is_delta"`
-	Payload any    `json:"payload"`
-}
-
-func canonicalOutputPayload(data domain.OutputData) outputThoughtPayload {
-	return outputThoughtPayload{
+func canonicalOutputPayload(data domain.OutputData) transcript.OutputThoughtPayload {
+	return transcript.OutputThoughtPayload{
 		Content:   data.Content,
 		IsDelta:   data.IsDelta,
 		MessageID: data.MessageID,
 	}
 }
 
-func canonicalThoughtPayload(data domain.ThoughtData) outputThoughtPayload {
-	return outputThoughtPayload{
+func canonicalThoughtPayload(data domain.ThoughtData) transcript.OutputThoughtPayload {
+	return transcript.OutputThoughtPayload{
 		Content:   data.Content,
 		IsDelta:   data.IsDelta,
 		MessageID: data.MessageID,
 	}
 }
 
-func canonicalToolCallPayload(data domain.ToolCallData, arguments string) toolCallPayload {
-	return toolCallPayload{
+func canonicalToolCallPayload(data domain.ToolCallData, arguments string) transcript.ToolCallPayload {
+	return transcript.ToolCallPayload{
 		ID:        data.ID,
 		Name:      data.Name,
 		Status:    data.Status,
@@ -423,8 +383,8 @@ func canonicalToolCallPayload(data domain.ToolCallData, arguments string) toolCa
 	}
 }
 
-func canonicalProgressPayload(data domain.ProgressData) progressPayload {
-	return progressPayload{
+func canonicalProgressPayload(data domain.ProgressData) transcript.ProgressPayload {
+	return transcript.ProgressPayload{
 		Channel:  data.Channel,
 		StreamID: data.StreamID,
 		Content:  data.Content,
@@ -434,8 +394,8 @@ func canonicalProgressPayload(data domain.ProgressData) progressPayload {
 	}
 }
 
-func canonicalActionRequestPayload(data domain.ActionRequestData) actionRequestPayload {
-	return actionRequestPayload{
+func canonicalActionRequestPayload(data domain.ActionRequestData) transcript.ActionRequestPayload {
+	return transcript.ActionRequestPayload{
 		ID:      data.ID,
 		Kind:    data.Kind,
 		Title:   data.Title,
@@ -444,8 +404,8 @@ func canonicalActionRequestPayload(data domain.ActionRequestData) actionRequestP
 	}
 }
 
-func canonicalArtifactUpdatePayload(data domain.ArtifactUpdateData) artifactUpdatePayload {
-	return artifactUpdatePayload{
+func canonicalArtifactUpdatePayload(data domain.ArtifactUpdateData) transcript.ArtifactUpdatePayload {
+	return transcript.ArtifactUpdatePayload{
 		ID:      data.ID,
 		Kind:    data.Kind,
 		Title:   data.Title,
