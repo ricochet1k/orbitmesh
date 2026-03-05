@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -104,6 +105,28 @@ func resolveProjectPath(w http.ResponseWriter, projectPath, requestedPath string
 	return abs, rel, true
 }
 
+func wildcardPath(r *http.Request) string {
+	requestedPath := chi.URLParam(r, "*")
+
+	escapedPath := r.URL.EscapedPath()
+	idx := strings.Index(escapedPath, "/files/")
+	if idx == -1 {
+		return requestedPath
+	}
+
+	escapedWildcard := escapedPath[idx+len("/files/"):]
+	if escapedWildcard == "" {
+		return requestedPath
+	}
+
+	decodedWildcard, err := url.PathUnescape(escapedWildcard)
+	if err != nil {
+		return requestedPath
+	}
+
+	return decodedWildcard
+}
+
 // listProjectFiles handles GET /api/v1/projects/{id}/files
 // Optional query param: path (default ".")
 func (h *Handler) listProjectFiles(w http.ResponseWriter, r *http.Request) {
@@ -185,7 +208,7 @@ func (h *Handler) readProjectFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// chi wildcard param for routes registered with /*path
-	requestedPath := chi.URLParam(r, "*")
+	requestedPath := wildcardPath(r)
 
 	absPath, relPath, ok := resolveProjectPath(w, project.Path, requestedPath)
 	if !ok {
@@ -267,7 +290,7 @@ func (h *Handler) writeProjectFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requestedPath := chi.URLParam(r, "*")
+	requestedPath := wildcardPath(r)
 
 	absPath, _, ok := resolveProjectPath(w, project.Path, requestedPath)
 	if !ok {
