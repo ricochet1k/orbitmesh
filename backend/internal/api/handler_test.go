@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -1439,32 +1440,32 @@ func TestGetSessionMessages_ProjectsCanonicalKindsAndPayloadShapes(t *testing.T)
 	if _, err := env.messageStore.Append(sessionID, storage.MessageLogRecord{
 		Timestamp:  time.Now().Add(-3 * time.Second),
 		Projection: storage.MessageProjectionAppend,
-		Kind:       domain.MessageKindSystem,
+		Kind:       domain.MessageKindProgress,
 		Contents:   "tool: working",
-		Payload:    json.RawMessage(`{"Channel":"tool","StreamID":"stream-1","Status":"running","IsDelta":true}`),
+		Payload:    json.RawMessage(`{"channel":"tool","stream_id":"stream-1","status":"running","is_delta":true}`),
 		Open:       &open,
 	}); err != nil {
-		t.Fatalf("append progress-like system message: %v", err)
+		t.Fatalf("append progress message: %v", err)
 	}
 	if _, err := env.messageStore.Append(sessionID, storage.MessageLogRecord{
 		Timestamp:  time.Now().Add(-2 * time.Second),
 		Projection: storage.MessageProjectionAppend,
-		Kind:       domain.MessageKindSystem,
+		Kind:       domain.MessageKindActionRequest,
 		Contents:   "action_request(permission): Need approval",
-		Payload:    json.RawMessage(`{"ID":"action-1","Kind":"permission","Status":"pending","Payload":{"scope":"workspace"}}`),
+		Payload:    json.RawMessage(`{"id":"action-1","kind":"permission","status":"pending","payload":{"scope":"workspace"}}`),
 		Open:       &open,
 	}); err != nil {
-		t.Fatalf("append action-request-like system message: %v", err)
+		t.Fatalf("append action-request message: %v", err)
 	}
 	if _, err := env.messageStore.Append(sessionID, storage.MessageLogRecord{
 		Timestamp:  time.Now().Add(-1 * time.Second),
 		Projection: storage.MessageProjectionAppend,
-		Kind:       domain.MessageKindSystem,
+		Kind:       domain.MessageKindArtifactUpdate,
 		Contents:   "artifact_update(file): main.go",
-		Payload:    json.RawMessage(`{"ID":"artifact-1","Kind":"file","IsDelta":true,"Payload":{"path":"main.go"}}`),
+		Payload:    json.RawMessage(`{"id":"artifact-1","kind":"file","is_delta":true,"payload":{"path":"main.go"}}`),
 		Open:       &open,
 	}); err != nil {
-		t.Fatalf("append artifact-update-like system message: %v", err)
+		t.Fatalf("append artifact-update message: %v", err)
 	}
 
 	getReq := httptest.NewRequest("GET", fmt.Sprintf("/api/sessions/%s/messages", sessionID), nil)
@@ -1479,7 +1480,7 @@ func TestGetSessionMessages_ProjectsCanonicalKindsAndPayloadShapes(t *testing.T)
 		t.Fatalf("decode response: %v", err)
 	}
 
-	assertMessage := func(kind string, canonicalKeys []string, forbiddenKeys []string) {
+	assertMessage := func(kind string, expected map[string]any, forbiddenKeys []string) {
 		t.Helper()
 		for _, msg := range messagesResp.Messages {
 			if msg.Kind != kind {
@@ -1489,10 +1490,8 @@ func TestGetSessionMessages_ProjectsCanonicalKindsAndPayloadShapes(t *testing.T)
 			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 				t.Fatalf("unmarshal payload for %s: %v", kind, err)
 			}
-			for _, key := range canonicalKeys {
-				if _, ok := payload[key]; !ok {
-					t.Fatalf("expected canonical key %q in %s payload, got %v", key, kind, payload)
-				}
+			if !reflect.DeepEqual(payload, expected) {
+				t.Fatalf("unexpected payload for %s\n got: %#v\nwant: %#v", kind, payload, expected)
 			}
 			for _, key := range forbiddenKeys {
 				if _, ok := payload[key]; ok {
@@ -1504,9 +1503,9 @@ func TestGetSessionMessages_ProjectsCanonicalKindsAndPayloadShapes(t *testing.T)
 		t.Fatalf("missing %s message in API response", kind)
 	}
 
-	assertMessage("progress", []string{"channel", "stream_id", "status"}, []string{"Channel", "StreamID", "Status"})
-	assertMessage("action_request", []string{"id", "kind", "status", "payload"}, []string{"ID", "Kind", "Status", "Payload"})
-	assertMessage("artifact_update", []string{"id", "kind", "is_delta", "payload"}, []string{"ID", "Kind", "IsDelta", "Payload"})
+	assertMessage("progress", map[string]any{"channel": "tool", "stream_id": "stream-1", "status": "running", "is_delta": true}, []string{"Channel", "StreamID", "Status"})
+	assertMessage("action_request", map[string]any{"id": "action-1", "kind": "permission", "status": "pending", "payload": map[string]any{"scope": "workspace"}}, []string{"ID", "Kind", "Status", "Payload"})
+	assertMessage("artifact_update", map[string]any{"id": "artifact-1", "kind": "file", "is_delta": true, "payload": map[string]any{"path": "main.go"}}, []string{"ID", "Kind", "IsDelta", "Payload"})
 }
 
 func TestGetSessionMessagesNotFound(t *testing.T) {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
@@ -176,12 +177,19 @@ func TestResourceUsageEvent_NormalizesScopesForSessionAndProviderUsage(t *testin
 	}
 }
 
-func TestToolCallFailed_ProjectsToolResponseRecord(t *testing.T) {
+func TestToolCallFailed_UpdatesCanonicalToolCallRecord(t *testing.T) {
 	msgStore := storage.NewSessionMessagesLogStore(t.TempDir())
 	exec := &AgentExecutor{messageLogStore: msgStore}
 	sess := domain.NewSession("s1", "codex", "/tmp")
 	sc := &sessionContext{session: sess}
 	pending := []DispatchOptions{}
+
+	exec.updateSessionFromEvent(sc, domain.NewToolCallEvent(sess.ID, domain.ToolCallData{
+		ID:     "call-1",
+		Name:   "lookup",
+		Status: "running",
+		Input:  map[string]any{"query": "abc"},
+	}, nil), &pending)
 
 	exec.updateSessionFromEvent(sc, domain.NewToolCallEvent(sess.ID, domain.ToolCallData{
 		ID:     "call-1",
@@ -198,18 +206,25 @@ func TestToolCallFailed_ProjectsToolResponseRecord(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(got))
 	}
-	if got[0].Kind != domain.MessageKindToolResponse {
-		t.Fatalf("expected kind %q, got %q", domain.MessageKindToolResponse, got[0].Kind)
+	if got[0].Kind != domain.MessageKindToolCall {
+		t.Fatalf("expected kind %q, got %q", domain.MessageKindToolCall, got[0].Kind)
 	}
-	var payload map[string]string
-	if err := json.Unmarshal([]byte(got[0].Contents), &payload); err != nil {
-		t.Fatalf("unmarshal tool response payload: %v", err)
+	if got[0].Open == nil || *got[0].Open {
+		t.Fatalf("expected failed tool call to be closed, got id=%s open=%v payload=%s contents=%s", got[0].ID, got[0].Open, string(got[0].Payload), got[0].Contents)
 	}
-	if payload["tool_call_id"] != "call-1" {
-		t.Fatalf("expected tool_call_id call-1, got %q", payload["tool_call_id"])
+	var payload map[string]any
+	if err := json.Unmarshal(got[0].Payload, &payload); err != nil {
+		t.Fatalf("unmarshal tool call payload: %v", err)
 	}
-	if payload["content"] != `{"error":"boom"}` {
-		t.Fatalf("expected marshaled output content, got %q", payload["content"])
+	if payload["id"] != "call-1" {
+		t.Fatalf("expected id call-1, got %v", payload["id"])
+	}
+	if payload["status"] != "failed" {
+		t.Fatalf("expected status failed, got %v", payload["status"])
+	}
+	output, ok := payload["output"].(map[string]any)
+	if !ok || output["error"] != "boom" {
+		t.Fatalf("expected output.error boom, got %v", payload["output"])
 	}
 }
 
@@ -322,7 +337,7 @@ func TestUpdateSessionFromEvent_PersistsCanonicalTranscriptKindsAndPayloadKeys(t
 		t.Fatal("expected persisted messages")
 	}
 
-	assertHasOpenPayload := func(kind domain.MessageKind, payloadKeys []string, forbiddenKeys []string) {
+	assertHasOpenPayload := func(kind domain.MessageKind, expected map[string]any, forbiddenKeys []string) {
 		t.Helper()
 		for _, msg := range got {
 			if msg.Kind != kind {
@@ -331,20 +346,16 @@ func TestUpdateSessionFromEvent_PersistsCanonicalTranscriptKindsAndPayloadKeys(t
 			if msg.Open == nil || !*msg.Open {
 				t.Fatalf("expected %s message to be open", kind)
 			}
-			if len(payloadKeys) > 0 {
-				var payload map[string]any
-				if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-					t.Fatalf("unmarshal payload for %s: %v", kind, err)
-				}
-				for _, key := range payloadKeys {
-					if _, ok := payload[key]; !ok {
-						t.Fatalf("expected payload key %q for %s, got %v", key, kind, payload)
-					}
-				}
-				for _, key := range forbiddenKeys {
-					if _, ok := payload[key]; ok {
-						t.Fatalf("did not expect Go-style payload key %q for %s, got %v", key, kind, payload)
-					}
+			var payload map[string]any
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				t.Fatalf("unmarshal payload for %s: %v", kind, err)
+			}
+			if !reflect.DeepEqual(payload, expected) {
+				t.Fatalf("unexpected payload for %s\n got: %#v\nwant: %#v", kind, payload, expected)
+			}
+			for _, key := range forbiddenKeys {
+				if _, ok := payload[key]; ok {
+					t.Fatalf("did not expect Go-style payload key %q for %s, got %v", key, kind, payload)
 				}
 			}
 			return
@@ -352,10 +363,45 @@ func TestUpdateSessionFromEvent_PersistsCanonicalTranscriptKindsAndPayloadKeys(t
 		t.Fatalf("missing %s message", kind)
 	}
 
-	assertHasOpenPayload(domain.MessageKindToolCall, []string{"id", "name", "arguments"}, []string{"ID", "Name", "Input"})
-	assertHasOpenPayload(domain.MessageKindOutput, []string{"content", "is_delta"}, []string{"Content", "IsDelta"})
-	assertHasOpenPayload(domain.MessageKindThought, []string{"content", "is_delta", "message_id"}, []string{"Content", "IsDelta", "MessageID"})
-	assertHasOpenPayload(domain.MessageKind("progress"), []string{"stream_id", "channel", "status", "is_delta"}, []string{"StreamID", "Channel", "Status", "IsDelta"})
-	assertHasOpenPayload(domain.MessageKind("action_request"), []string{"id", "kind", "status", "payload"}, []string{"ID", "Kind", "Status", "Payload"})
-	assertHasOpenPayload(domain.MessageKind("artifact_update"), []string{"id", "kind", "is_delta", "payload"}, []string{"ID", "Kind", "IsDelta", "Payload"})
+	assertHasOpenPayload(domain.MessageKindToolCall, map[string]any{
+		"id":        "call-1",
+		"name":      "lookup",
+		"status":    "started",
+		"title":     "",
+		"input":     map[string]any{"query": "abc"},
+		"output":    nil,
+		"arguments": `{"query":"abc"}`,
+	}, []string{"ID", "Name", "Input"})
+	assertHasOpenPayload(domain.MessageKindOutput, map[string]any{
+		"content":    "delta",
+		"is_delta":   true,
+		"message_id": "out-1",
+	}, []string{"Content", "IsDelta"})
+	assertHasOpenPayload(domain.MessageKindThought, map[string]any{
+		"content":    "thinking",
+		"is_delta":   true,
+		"message_id": "thought-1",
+	}, []string{"Content", "IsDelta", "MessageID"})
+	assertHasOpenPayload(domain.MessageKind("progress"), map[string]any{
+		"channel":   "tool",
+		"stream_id": "stream-1",
+		"content":   "working",
+		"is_delta":  true,
+		"done":      false,
+		"status":    "running",
+	}, []string{"StreamID", "Channel", "Status", "IsDelta"})
+	assertHasOpenPayload(domain.MessageKind("action_request"), map[string]any{
+		"id":      "action-1",
+		"kind":    "permission",
+		"title":   "Need approval",
+		"status":  "pending",
+		"payload": map[string]any{"scope": "workspace"},
+	}, []string{"ID", "Kind", "Status", "Payload"})
+	assertHasOpenPayload(domain.MessageKind("artifact_update"), map[string]any{
+		"id":       "artifact-1",
+		"kind":     "file",
+		"title":    "main.go",
+		"is_delta": true,
+		"payload":  map[string]any{"path": "main.go"},
+	}, []string{"ID", "Kind", "IsDelta", "Payload"})
 }

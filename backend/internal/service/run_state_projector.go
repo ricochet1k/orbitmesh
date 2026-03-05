@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/storage"
 )
 
 // updateSessionFromEvent projects a single provider event onto the session's
@@ -16,173 +17,206 @@ import (
 func (e *AgentExecutor) updateSessionFromEvent(sc *sessionContext, event domain.Event, pendingToolCalls *[]DispatchOptions) {
 	switch data := event.Data.(type) {
 	case domain.OutputData:
-		if data.IsDelta {
-			open := true
-			if data.MessageID != "" {
-				e.appendMessageDelta(sc.session, domain.MessageKindOutput, data.MessageID, data.Content, canonicalOutputPayload(data), &open, event.Raw, event.Timestamp)
-			} else {
-				e.appendMessageDelta(sc.session, domain.MessageKindOutput, "", data.Content, canonicalOutputPayload(data), &open, event.Raw, event.Timestamp)
-			}
-		} else {
-			open := false
-			e.appendSessionMessageRawWithState(sc.session, domain.MessageKindOutput, data.Content, canonicalOutputPayload(data), &open, event.Raw, event.Timestamp)
-		}
+		e.projectOutputEvent(sc, data, event)
 	case domain.ThoughtData:
-		if data.IsDelta {
-			open := true
-			e.appendMessageDelta(sc.session, domain.MessageKindThought, data.MessageID, data.Content, canonicalThoughtPayload(data), &open, event.Raw, event.Timestamp)
-		} else {
-			open := false
-			e.appendSessionMessageRawWithState(sc.session, domain.MessageKindThought, data.Content, canonicalThoughtPayload(data), &open, event.Raw, event.Timestamp)
-		}
+		e.projectThoughtEvent(sc, data, event)
 	case domain.ErrorData:
-		e.appendSessionMessageRaw(sc.session, domain.MessageKindError, data.Message, event.Raw, event.Timestamp)
+		e.projectErrorEvent(sc, data, event)
 	case domain.ToolCallData:
-		switch data.Status {
-		case "started", "running":
-			// Persist the tool call record immediately so it appears in the log.
-			// JSON format matches what openai/session.go newSession reads back:
-			//   {"id":"...","name":"...","arguments":"..."}
-			arguments := ""
-			switch v := data.Input.(type) {
-			case string:
-				arguments = v
-			case nil:
-				// no input yet (e.g. Claude "started" before delta arrives)
-			default:
-				if b, err := json.Marshal(v); err == nil {
-					arguments = string(b)
-				}
-			}
-			legacyPayload, _ := json.Marshal(map[string]string{
-				"id":        data.ID,
-				"name":      data.Name,
-				"arguments": arguments,
-			})
-			open := data.Status != "completed" && data.Status != "failed"
-			e.appendSessionMessageRawWithState(sc.session, domain.MessageKindToolCall, string(legacyPayload), canonicalToolCallPayload(data, arguments), &open, event.Raw, event.Timestamp)
-
-			// Accumulate for batch dispatch at stream close. Only "running"
-			// carries a complete input; "started" is a streaming preamble.
-			if data.Status == "running" && e.evalCoordinator != nil {
-				var inputJSON json.RawMessage
-				switch v := data.Input.(type) {
-				case string:
-					inputJSON = json.RawMessage(v)
-				case nil:
-					inputJSON = json.RawMessage(`{}`)
-				default:
-					if b, err := json.Marshal(v); err == nil {
-						inputJSON = b
-					} else {
-						inputJSON = json.RawMessage(`{}`)
-					}
-				}
-
-				sc.amMu.Lock()
-				attemptID := ""
-				if sc.attempt != nil {
-					attemptID = sc.attempt.AttemptID
-				}
-				sc.amMu.Unlock()
-
-				*pendingToolCalls = append(*pendingToolCalls, DispatchOptions{
-					ToolName:           data.Name,
-					Input:              inputJSON,
-					SessionID:          sc.session.ID,
-					AttemptID:          attemptID,
-					ProviderToolCallID: data.ID,
-				})
-			}
-
-		case "completed", "failed":
-			// Persist a MKToolResponse message with the result payload.
-			// JSON format matches what openai/session.go newSession reads back:
-			//   {"tool_call_id":"...","content":"..."}
-			content := ""
-			switch v := data.Output.(type) {
-			case string:
-				content = v
-			case nil:
-				// empty result
-			default:
-				if b, err := json.Marshal(v); err == nil {
-					content = string(b)
-				}
-			}
-			payload, _ := json.Marshal(map[string]string{
-				"tool_call_id": data.ID,
-				"content":      content,
-			})
-			e.appendSessionMessageRaw(sc.session, domain.MessageKindToolResponse, string(payload), event.Raw, event.Timestamp)
-
-		default:
-			// For pending/waiting/permission_request/etc. use the legacy ToolUse record
-			// and suspend the session immediately (no async eval involved).
-			e.appendSessionMessageRaw(sc.session, domain.MessageKindToolUse, fmt.Sprintf("%s: %s", data.Name, data.ID), event.Raw, event.Timestamp)
-			if data.Status == "pending" || data.Status == "waiting" {
-				e.suspendSession(sc, data.ID, nil)
-			}
-		}
+		e.projectToolCallEvent(sc, data, event, pendingToolCalls)
 
 	case domain.MetadataData:
-		if data.Key == "current_task" {
-			if task, ok := data.Value.(string); ok {
-				sc.session.SetCurrentTask(task)
-			}
-		}
-		if !isInternalMetadataKey(data.Key) {
-			e.appendSessionMessageRaw(sc.session, domain.MessageKindSystem, formatMetadataContent(data), event.Raw, event.Timestamp)
-		}
+		e.projectMetadataEvent(sc, data, event)
 	case domain.UnknownData:
-		if isSuppressedUnknownSource(data.Source) {
-			break
-		}
-		e.appendSessionMessageRaw(sc.session, domain.MessageKindSystem, formatUnknownContent(data), event.Raw, event.Timestamp)
+		e.projectUnknownEvent(sc, data, event)
 	case domain.MetricData:
-		e.appendSessionMessageRaw(sc.session, domain.MessageKindMetric,
-			fmt.Sprintf("in=%d out=%d requests=%d", data.TokensIn, data.TokensOut, data.RequestCount), event.Raw, event.Timestamp)
+		e.projectMetricEvent(sc, data, event)
 	case domain.PlanData:
-		steps := make([]string, 0, len(data.Steps))
-		for _, step := range data.Steps {
-			steps = append(steps, fmt.Sprintf("%s: %s", step.ID, step.Description))
-		}
-		content := data.Description
-		if len(steps) > 0 {
-			content = fmt.Sprintf("%s\n%s", data.Description, strings.Join(steps, "\n"))
-		}
-		e.appendSessionMessageRaw(sc.session, domain.MessageKindPlan, content, event.Raw, event.Timestamp)
+		e.projectPlanEvent(sc, data, event)
 	case domain.ProgressData:
-		streamMessageID := ""
-		if id := strings.TrimSpace(data.StreamID); id != "" {
-			if ch := strings.TrimSpace(data.Channel); ch != "" {
-				streamMessageID = "progress:" + ch + ":" + id
-			} else {
-				streamMessageID = "progress:" + id
-			}
-		}
-		if data.IsDelta {
-			open := progressOpenState(data)
-			e.appendMessageDelta(sc.session, domain.MessageKindProgress, streamMessageID, data.Content, canonicalProgressPayload(data), &open, event.Raw, event.Timestamp)
-			break
-		}
-		open := progressOpenState(data)
-		e.appendSessionMessageRawWithState(sc.session, domain.MessageKindProgress, formatProgressContent(data), canonicalProgressPayload(data), &open, event.Raw, event.Timestamp)
+		e.projectProgressEvent(sc, data, event)
 	case domain.ResourceUsageData:
-		e.updateSessionCustomDataFromResourceUsage(sc.session, data)
-		e.applyResourceUsage(sc, data.Scope, data.Data, data.Metadata, event.Timestamp)
+		e.projectResourceUsageEvent(sc, data, event)
 	case domain.ActionRequestData:
-		open := actionRequestOpenState(data.Status)
-		e.appendSessionMessageRawWithState(sc.session, domain.MessageKindActionRequest, formatActionRequestContent(data), canonicalActionRequestPayload(data), &open, event.Raw, event.Timestamp)
+		e.projectActionRequestEvent(sc, data, event)
 	case domain.ArtifactUpdateData:
-		open := data.IsDelta
-		e.appendSessionMessageRawWithState(sc.session, domain.MessageKindArtifactUpdate, formatArtifactUpdateContent(data), canonicalArtifactUpdatePayload(data), &open, event.Raw, event.Timestamp)
+		e.projectArtifactUpdateEvent(sc, data, event)
 	}
 
 	if e.storage != nil {
 		_ = e.storage.Save(sc.session)
 	}
 	e.touchRunAttempt(sc)
+}
+
+func (e *AgentExecutor) projectOutputEvent(sc *sessionContext, data domain.OutputData, event domain.Event) {
+	payload := canonicalOutputPayload(data)
+	if data.IsDelta {
+		open := true
+		e.appendMessageDelta(sc.session, domain.MessageKindOutput, data.MessageID, data.Content, payload, &open, event.Raw, event.Timestamp)
+		return
+	}
+	open := false
+	e.appendSessionMessageRawWithState(sc.session, domain.MessageKindOutput, data.Content, payload, &open, event.Raw, event.Timestamp)
+}
+
+func (e *AgentExecutor) projectThoughtEvent(sc *sessionContext, data domain.ThoughtData, event domain.Event) {
+	payload := canonicalThoughtPayload(data)
+	if data.IsDelta {
+		open := true
+		e.appendMessageDelta(sc.session, domain.MessageKindThought, data.MessageID, data.Content, payload, &open, event.Raw, event.Timestamp)
+		return
+	}
+	open := false
+	e.appendSessionMessageRawWithState(sc.session, domain.MessageKindThought, data.Content, payload, &open, event.Raw, event.Timestamp)
+}
+
+func (e *AgentExecutor) projectErrorEvent(sc *sessionContext, data domain.ErrorData, event domain.Event) {
+	e.appendSessionMessageRaw(sc.session, domain.MessageKindError, data.Message, event.Raw, event.Timestamp)
+}
+
+func (e *AgentExecutor) projectToolCallEvent(sc *sessionContext, data domain.ToolCallData, event domain.Event, pendingToolCalls *[]DispatchOptions) {
+	messageID := ""
+	if strings.TrimSpace(data.ID) != "" {
+		messageID = "tool:" + strings.TrimSpace(data.ID)
+	}
+
+	switch data.Status {
+	case "started", "running":
+		arguments := toolCallArguments(data.Input)
+		detail := formatToolCallDetail(data)
+		open := data.Status != "completed" && data.Status != "failed"
+		e.appendToMessageLog(sc.session.ID, storage.MessageProjectionAppendRaw, domain.MessageKindToolCall, detail, canonicalToolCallPayload(data, arguments), &open, event.Raw, event.Timestamp, messageID)
+
+		if data.Status == "running" && e.evalCoordinator != nil {
+			*pendingToolCalls = append(*pendingToolCalls, DispatchOptions{
+				ToolName:           data.Name,
+				Input:              toolCallDispatchInput(data.Input),
+				SessionID:          sc.session.ID,
+				AttemptID:          sessionAttemptID(sc),
+				ProviderToolCallID: data.ID,
+			})
+		}
+
+	case "completed", "failed":
+		open := false
+		e.appendMessageDelta(sc.session, domain.MessageKindToolCall, messageID, formatToolCallCompletionSuffix(data.Output), canonicalToolCallPayload(data, ""), &open, event.Raw, event.Timestamp)
+
+	default:
+		e.appendSessionMessageRaw(sc.session, domain.MessageKindToolUse, fmt.Sprintf("%s: %s", data.Name, data.ID), event.Raw, event.Timestamp)
+		if data.Status == "pending" || data.Status == "waiting" {
+			e.suspendSession(sc, data.ID, nil)
+		}
+	}
+}
+
+func (e *AgentExecutor) projectMetadataEvent(sc *sessionContext, data domain.MetadataData, event domain.Event) {
+	if data.Key == "current_task" {
+		if task, ok := data.Value.(string); ok {
+			sc.session.SetCurrentTask(task)
+		}
+	}
+	if !isInternalMetadataKey(data.Key) {
+		e.appendSessionMessageRaw(sc.session, domain.MessageKindSystem, formatMetadataContent(data), event.Raw, event.Timestamp)
+	}
+}
+
+func (e *AgentExecutor) projectUnknownEvent(sc *sessionContext, data domain.UnknownData, event domain.Event) {
+	if isSuppressedUnknownSource(data.Source) {
+		return
+	}
+	e.appendSessionMessageRaw(sc.session, domain.MessageKindSystem, formatUnknownContent(data), event.Raw, event.Timestamp)
+}
+
+func (e *AgentExecutor) projectMetricEvent(sc *sessionContext, data domain.MetricData, event domain.Event) {
+	e.appendSessionMessageRaw(sc.session, domain.MessageKindMetric,
+		fmt.Sprintf("in=%d out=%d requests=%d", data.TokensIn, data.TokensOut, data.RequestCount), event.Raw, event.Timestamp)
+}
+
+func (e *AgentExecutor) projectPlanEvent(sc *sessionContext, data domain.PlanData, event domain.Event) {
+	steps := make([]string, 0, len(data.Steps))
+	for _, step := range data.Steps {
+		steps = append(steps, fmt.Sprintf("%s: %s", step.ID, step.Description))
+	}
+	content := data.Description
+	if len(steps) > 0 {
+		content = fmt.Sprintf("%s\n%s", data.Description, strings.Join(steps, "\n"))
+	}
+	e.appendSessionMessageRaw(sc.session, domain.MessageKindPlan, content, event.Raw, event.Timestamp)
+}
+
+func (e *AgentExecutor) projectProgressEvent(sc *sessionContext, data domain.ProgressData, event domain.Event) {
+	payload := canonicalProgressPayload(data)
+	if data.IsDelta {
+		open := progressOpenState(data)
+		e.appendMessageDelta(sc.session, domain.MessageKindProgress, progressStreamMessageID(data), data.Content, payload, &open, event.Raw, event.Timestamp)
+		return
+	}
+	open := progressOpenState(data)
+	e.appendSessionMessageRawWithState(sc.session, domain.MessageKindProgress, formatProgressContent(data), payload, &open, event.Raw, event.Timestamp)
+}
+
+func (e *AgentExecutor) projectResourceUsageEvent(sc *sessionContext, data domain.ResourceUsageData, event domain.Event) {
+	e.updateSessionCustomDataFromResourceUsage(sc.session, data)
+	e.applyResourceUsage(sc, data.Scope, data.Data, data.Metadata, event.Timestamp)
+}
+
+func (e *AgentExecutor) projectActionRequestEvent(sc *sessionContext, data domain.ActionRequestData, event domain.Event) {
+	open := actionRequestOpenState(data.Status)
+	e.appendSessionMessageRawWithState(sc.session, domain.MessageKindActionRequest, formatActionRequestContent(data), canonicalActionRequestPayload(data), &open, event.Raw, event.Timestamp)
+}
+
+func (e *AgentExecutor) projectArtifactUpdateEvent(sc *sessionContext, data domain.ArtifactUpdateData, event domain.Event) {
+	open := data.IsDelta
+	e.appendSessionMessageRawWithState(sc.session, domain.MessageKindArtifactUpdate, formatArtifactUpdateContent(data), canonicalArtifactUpdatePayload(data), &open, event.Raw, event.Timestamp)
+}
+
+func sessionAttemptID(sc *sessionContext) string {
+	sc.amMu.Lock()
+	defer sc.amMu.Unlock()
+	if sc.attempt == nil {
+		return ""
+	}
+	return sc.attempt.AttemptID
+}
+
+func toolCallDispatchInput(input any) json.RawMessage {
+	switch v := input.(type) {
+	case string:
+		return json.RawMessage(v)
+	case nil:
+		return json.RawMessage(`{}`)
+	default:
+		if b, err := json.Marshal(v); err == nil {
+			return b
+		}
+		return json.RawMessage(`{}`)
+	}
+}
+
+func toolCallArguments(input any) string {
+	switch v := input.(type) {
+	case string:
+		return v
+	case nil:
+		return ""
+	default:
+		if b, err := json.Marshal(v); err == nil {
+			return string(b)
+		}
+		return ""
+	}
+}
+
+func progressStreamMessageID(data domain.ProgressData) string {
+	id := strings.TrimSpace(data.StreamID)
+	if id == "" {
+		return ""
+	}
+	if ch := strings.TrimSpace(data.Channel); ch != "" {
+		return "progress:" + ch + ":" + id
+	}
+	return "progress:" + id
 }
 
 func progressOpenState(data domain.ProgressData) bool {
@@ -320,63 +354,136 @@ func formatArtifactUpdateContent(data domain.ArtifactUpdateData) string {
 	return fmt.Sprintf("artifact_update(%s): %s", data.Kind, title)
 }
 
-func canonicalOutputPayload(data domain.OutputData) map[string]any {
-	return map[string]any{
-		"content":    data.Content,
-		"is_delta":   data.IsDelta,
-		"message_id": data.MessageID,
+type outputThoughtPayload struct {
+	Content   string `json:"content"`
+	IsDelta   bool   `json:"is_delta"`
+	MessageID string `json:"message_id"`
+}
+
+type toolCallPayload struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Status    string `json:"status"`
+	Title     string `json:"title"`
+	Input     any    `json:"input"`
+	Output    any    `json:"output"`
+	Arguments string `json:"arguments,omitempty"`
+}
+
+type progressPayload struct {
+	Channel  string `json:"channel"`
+	StreamID string `json:"stream_id"`
+	Content  string `json:"content"`
+	IsDelta  bool   `json:"is_delta"`
+	Done     bool   `json:"done"`
+	Status   string `json:"status"`
+}
+
+type actionRequestPayload struct {
+	ID      string `json:"id"`
+	Kind    string `json:"kind"`
+	Title   string `json:"title"`
+	Status  string `json:"status"`
+	Payload any    `json:"payload"`
+}
+
+type artifactUpdatePayload struct {
+	ID      string `json:"id"`
+	Kind    string `json:"kind"`
+	Title   string `json:"title"`
+	IsDelta bool   `json:"is_delta"`
+	Payload any    `json:"payload"`
+}
+
+func canonicalOutputPayload(data domain.OutputData) outputThoughtPayload {
+	return outputThoughtPayload{
+		Content:   data.Content,
+		IsDelta:   data.IsDelta,
+		MessageID: data.MessageID,
 	}
 }
 
-func canonicalThoughtPayload(data domain.ThoughtData) map[string]any {
-	return map[string]any{
-		"content":    data.Content,
-		"is_delta":   data.IsDelta,
-		"message_id": data.MessageID,
+func canonicalThoughtPayload(data domain.ThoughtData) outputThoughtPayload {
+	return outputThoughtPayload{
+		Content:   data.Content,
+		IsDelta:   data.IsDelta,
+		MessageID: data.MessageID,
 	}
 }
 
-func canonicalToolCallPayload(data domain.ToolCallData, arguments string) map[string]any {
-	return map[string]any{
-		"id":        data.ID,
-		"name":      data.Name,
-		"status":    data.Status,
-		"title":     data.Title,
-		"arguments": arguments,
-		"input":     data.Input,
-		"output":    data.Output,
+func canonicalToolCallPayload(data domain.ToolCallData, arguments string) toolCallPayload {
+	return toolCallPayload{
+		ID:        data.ID,
+		Name:      data.Name,
+		Status:    data.Status,
+		Title:     data.Title,
+		Input:     data.Input,
+		Output:    data.Output,
+		Arguments: arguments,
 	}
 }
 
-func canonicalProgressPayload(data domain.ProgressData) map[string]any {
-	return map[string]any{
-		"channel":   data.Channel,
-		"stream_id": data.StreamID,
-		"content":   data.Content,
-		"is_delta":  data.IsDelta,
-		"done":      data.Done,
-		"status":    data.Status,
+func canonicalProgressPayload(data domain.ProgressData) progressPayload {
+	return progressPayload{
+		Channel:  data.Channel,
+		StreamID: data.StreamID,
+		Content:  data.Content,
+		IsDelta:  data.IsDelta,
+		Done:     data.Done,
+		Status:   data.Status,
 	}
 }
 
-func canonicalActionRequestPayload(data domain.ActionRequestData) map[string]any {
-	return map[string]any{
-		"id":      data.ID,
-		"kind":    data.Kind,
-		"title":   data.Title,
-		"status":  data.Status,
-		"payload": data.Payload,
+func canonicalActionRequestPayload(data domain.ActionRequestData) actionRequestPayload {
+	return actionRequestPayload{
+		ID:      data.ID,
+		Kind:    data.Kind,
+		Title:   data.Title,
+		Status:  data.Status,
+		Payload: data.Payload,
 	}
 }
 
-func canonicalArtifactUpdatePayload(data domain.ArtifactUpdateData) map[string]any {
-	return map[string]any{
-		"id":       data.ID,
-		"kind":     data.Kind,
-		"title":    data.Title,
-		"is_delta": data.IsDelta,
-		"payload":  data.Payload,
+func canonicalArtifactUpdatePayload(data domain.ArtifactUpdateData) artifactUpdatePayload {
+	return artifactUpdatePayload{
+		ID:      data.ID,
+		Kind:    data.Kind,
+		Title:   data.Title,
+		IsDelta: data.IsDelta,
+		Payload: data.Payload,
 	}
+}
+
+func formatToolCallDetail(data domain.ToolCallData) string {
+	label := strings.TrimSpace(data.Title)
+	if label == "" {
+		label = strings.TrimSpace(data.Name)
+	}
+	if label == "" {
+		label = "Tool"
+	}
+	if data.Input == nil {
+		return label
+	}
+	return fmt.Sprintf("%s(%s)", label, stringifyToolValue(data.Input))
+}
+
+func formatToolCallCompletionSuffix(output any) string {
+	if output == nil {
+		return ""
+	}
+	return ": " + stringifyToolValue(output)
+}
+
+func stringifyToolValue(value any) string {
+	if s, ok := value.(string); ok {
+		return s
+	}
+	b, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 func isSuppressedUnknownSource(source string) bool {
