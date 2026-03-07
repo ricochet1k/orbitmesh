@@ -424,13 +424,16 @@ func TestSessionLifecycle(t *testing.T) {
 		defer resp.Body.Close()
 
 		// Give provider time to start
-		time.Sleep(500 * time.Millisecond)
-
-		resp, _ = http.Get(server.URL + "/api/sessions/" + sessionID)
-		defer resp.Body.Close()
-
 		var statusResp apiTypes.SessionStatusResponse
-		json.NewDecoder(resp.Body).Decode(&statusResp)
+		for i := 0; i < 30; i++ {
+			time.Sleep(100 * time.Millisecond)
+			resp, _ = http.Get(server.URL + "/api/sessions/" + sessionID)
+			json.NewDecoder(resp.Body).Decode(&statusResp)
+			resp.Body.Close()
+			if statusResp.State == "running" {
+				break
+			}
+		}
 
 		if statusResp.State != "running" {
 			t.Fatalf("Expected running, got %s", statusResp.State)
