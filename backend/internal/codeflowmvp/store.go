@@ -18,12 +18,17 @@ const (
 	NodeLabelCallSite      = "CallSite"
 	NodeLabelExecutionUnit = "ExecutionUnit"
 	NodeLabelFinding       = "Finding"
+	NodeLabelAPIRequest    = "APIRequest"
+	NodeLabelAPIHandler    = "APIHandler"
 
-	EdgeLabelDefines    = "DEFINES"
-	EdgeLabelCalls      = "CALLS"
-	EdgeLabelAtCallsite = "AT_CALLSITE"
-	EdgeLabelSpawns     = "SPAWNS"
-	EdgeLabelFindingAt  = "FINDING_AT"
+	EdgeLabelDefines        = "DEFINES"
+	EdgeLabelCalls          = "CALLS"
+	EdgeLabelAtCallsite     = "AT_CALLSITE"
+	EdgeLabelSpawns         = "SPAWNS"
+	EdgeLabelFindingAt      = "FINDING_AT"
+	EdgeLabelEmitsRequest   = "EMITS_REQUEST"
+	EdgeLabelHandlesRoute   = "HANDLES_ROUTE"
+	EdgeLabelRequestsHandle = "REQUESTS_HANDLER"
 
 	defaultAnalyzerVersion = "codeflow-mvp-step2"
 	defaultDBPath          = ".codeflow-mvp.goraphdb"
@@ -40,21 +45,26 @@ type PersistOptions struct {
 }
 
 type PersistenceSummary struct {
-	Enabled         bool   `json:"enabled"`
-	DBPath          string `json:"db_path"`
-	Nodes           int    `json:"nodes"`
-	Edges           int    `json:"edges"`
-	Files           int    `json:"files"`
-	Functions       int    `json:"functions"`
-	CallSites       int    `json:"call_sites"`
-	ExecutionUnits  int    `json:"execution_units"`
-	Findings        int    `json:"findings"`
-	DefinesEdges    int    `json:"defines_edges"`
-	CallEdges       int    `json:"call_edges"`
-	AtCallsiteEdges int    `json:"at_callsite_edges"`
-	SpawnEdges      int    `json:"spawn_edges"`
-	FindingAtEdges  int    `json:"finding_at_edges"`
-	UnresolvedCalls int    `json:"unresolved_calls"`
+	Enabled              bool   `json:"enabled"`
+	DBPath               string `json:"db_path"`
+	Nodes                int    `json:"nodes"`
+	Edges                int    `json:"edges"`
+	Files                int    `json:"files"`
+	Functions            int    `json:"functions"`
+	CallSites            int    `json:"call_sites"`
+	ExecutionUnits       int    `json:"execution_units"`
+	Findings             int    `json:"findings"`
+	APIRequests          int    `json:"api_requests"`
+	APIHandlers          int    `json:"api_handlers"`
+	DefinesEdges         int    `json:"defines_edges"`
+	CallEdges            int    `json:"call_edges"`
+	AtCallsiteEdges      int    `json:"at_callsite_edges"`
+	SpawnEdges           int    `json:"spawn_edges"`
+	FindingAtEdges       int    `json:"finding_at_edges"`
+	EmitsRequestEdges    int    `json:"emits_request_edges"`
+	HandlesRouteEdges    int    `json:"handles_route_edges"`
+	RequestsHandlerEdges int    `json:"requests_handler_edges"`
+	UnresolvedCalls      int    `json:"unresolved_calls"`
 }
 
 func PersistExtraction(summary ExtractionSummary, opts PersistOptions) (PersistenceSummary, error) {
@@ -93,7 +103,7 @@ func PersistExtraction(summary ExtractionSummary, opts PersistOptions) (Persiste
 	}
 	defer db.Close()
 
-	for _, label := range []string{NodeLabelFile, NodeLabelFunction, NodeLabelCallSite, NodeLabelExecutionUnit, NodeLabelFinding} {
+	for _, label := range []string{NodeLabelFile, NodeLabelFunction, NodeLabelCallSite, NodeLabelExecutionUnit, NodeLabelFinding, NodeLabelAPIRequest, NodeLabelAPIHandler} {
 		if err := ensureUniqueConstraint(db, label, "id"); err != nil {
 			return PersistenceSummary{}, err
 		}
@@ -213,6 +223,69 @@ func PersistExtraction(summary ExtractionSummary, opts PersistOptions) (Persiste
 		execNodes[spawn.ID] = nodeID
 	}
 
+	resolvedAPIRoutes := make([]APIHandlerFact, 0, len(summary.APIRoutes))
+	for _, route := range summary.APIRoutes {
+		resolved := route
+		if resolved.FunctionID == "" {
+			resolved.FunctionID = resolveRouteTarget(route.PackageID, route.HandlerExpr, plainByPackage, methodsByPackage)
+		}
+		resolvedAPIRoutes = append(resolvedAPIRoutes, resolved)
+	}
+
+	apiRequestNodes := make(map[string]graphdb.NodeID, len(summary.APIReqs))
+	for _, req := range summary.APIReqs {
+		nodeID, err := upsertNode(db, NodeLabelAPIRequest, req.ID, graphdb.Props{
+			"id":               req.ID,
+			"kind":             NodeLabelAPIRequest,
+			"file_id":          req.FileID,
+			"caller_id":        req.CallerID,
+			"method":           req.Method,
+			"path":             req.Path,
+			"normalized_path":  req.NormalizedPath,
+			"line":             req.Start.Line,
+			"column":           req.Start.Column,
+			"end_line":         req.End.Line,
+			"end_column":       req.End.Column,
+			"semantic_hash":    hashString(req.ID),
+			"analyzer_version": analyzerVersion,
+			"scan_epoch":       scanEpoch,
+			"producer":         producer,
+			"producer_version": producerVersion,
+		})
+		if err != nil {
+			return PersistenceSummary{}, fmt.Errorf("upsert api request node %q: %w", req.ID, err)
+		}
+		apiRequestNodes[req.ID] = nodeID
+	}
+
+	apiHandlerNodes := make(map[string]graphdb.NodeID, len(resolvedAPIRoutes))
+	for _, route := range resolvedAPIRoutes {
+		nodeID, err := upsertNode(db, NodeLabelAPIHandler, route.ID, graphdb.Props{
+			"id":               route.ID,
+			"kind":             NodeLabelAPIHandler,
+			"file_id":          route.FileID,
+			"package_id":       route.PackageID,
+			"function_id":      route.FunctionID,
+			"handler_expr":     route.HandlerExpr,
+			"method":           route.Method,
+			"path":             route.Path,
+			"normalized_path":  route.NormalizedPath,
+			"line":             route.Start.Line,
+			"column":           route.Start.Column,
+			"end_line":         route.End.Line,
+			"end_column":       route.End.Column,
+			"semantic_hash":    hashString(route.ID),
+			"analyzer_version": analyzerVersion,
+			"scan_epoch":       scanEpoch,
+			"producer":         producer,
+			"producer_version": producerVersion,
+		})
+		if err != nil {
+			return PersistenceSummary{}, fmt.Errorf("upsert api handler node %q: %w", route.ID, err)
+		}
+		apiHandlerNodes[route.ID] = nodeID
+	}
+
 	findingNodes := make(map[string]graphdb.NodeID, len(summary.Findings))
 	for _, finding := range summary.Findings {
 		findingID := findingNodeID(finding.Fingerprint)
@@ -257,8 +330,10 @@ func PersistExtraction(summary ExtractionSummary, opts PersistOptions) (Persiste
 		CallSites:      len(summary.Calls),
 		ExecutionUnits: len(summary.Spawns),
 		Findings:       len(summary.Findings),
+		APIRequests:    len(summary.APIReqs),
+		APIHandlers:    len(resolvedAPIRoutes),
 	}
-	summaryOut.Nodes = summaryOut.Files + summaryOut.Functions + summaryOut.CallSites + summaryOut.ExecutionUnits + summaryOut.Findings
+	summaryOut.Nodes = summaryOut.Files + summaryOut.Functions + summaryOut.CallSites + summaryOut.ExecutionUnits + summaryOut.Findings + summaryOut.APIRequests + summaryOut.APIHandlers
 
 	for _, fn := range summary.Functions {
 		from, okFrom := fileNodes[fn.FileID]
@@ -386,11 +461,118 @@ func PersistExtraction(summary ExtractionSummary, opts PersistOptions) (Persiste
 		}
 	}
 
+	for _, req := range summary.APIReqs {
+		to, okTo := apiRequestNodes[req.ID]
+		if !okTo {
+			continue
+		}
+
+		var from graphdb.NodeID
+		var okFrom bool
+		if req.CallerID != "" {
+			from, okFrom = functionNodes[req.CallerID]
+		}
+		if !okFrom {
+			from, okFrom = fileNodes[req.FileID]
+		}
+		if !okFrom {
+			continue
+		}
+
+		created, err := upsertEdge(db, from, to, EdgeLabelEmitsRequest, graphdb.Props{
+			"method":           req.Method,
+			"path":             req.Path,
+			"normalized_path":  req.NormalizedPath,
+			"analyzer_version": analyzerVersion,
+			"scan_epoch":       scanEpoch,
+			"producer":         producer,
+			"producer_version": producerVersion,
+		})
+		if err != nil {
+			return PersistenceSummary{}, fmt.Errorf("persist EMITS_REQUEST edge -> %q: %w", req.ID, err)
+		}
+		if created {
+			summaryOut.EmitsRequestEdges++
+		}
+	}
+
+	for _, route := range resolvedAPIRoutes {
+		to, okTo := apiHandlerNodes[route.ID]
+		if !okTo {
+			continue
+		}
+
+		var from graphdb.NodeID
+		var okFrom bool
+		if route.FunctionID != "" {
+			from, okFrom = functionNodes[route.FunctionID]
+		}
+		if !okFrom {
+			from, okFrom = fileNodes[route.FileID]
+		}
+		if !okFrom {
+			continue
+		}
+
+		created, err := upsertEdge(db, from, to, EdgeLabelHandlesRoute, graphdb.Props{
+			"method":           route.Method,
+			"path":             route.Path,
+			"normalized_path":  route.NormalizedPath,
+			"handler_expr":     route.HandlerExpr,
+			"analyzer_version": analyzerVersion,
+			"scan_epoch":       scanEpoch,
+			"producer":         producer,
+			"producer_version": producerVersion,
+		})
+		if err != nil {
+			return PersistenceSummary{}, fmt.Errorf("persist HANDLES_ROUTE edge -> %q: %w", route.ID, err)
+		}
+		if created {
+			summaryOut.HandlesRouteEdges++
+		}
+
+	}
+
+	for _, req := range summary.APIReqs {
+		from, okFrom := apiRequestNodes[req.ID]
+		if !okFrom {
+			continue
+		}
+		candidate := bestMatchingRoute(req, resolvedAPIRoutes)
+		if candidate == nil {
+			continue
+		}
+		to, okTo := apiHandlerNodes[candidate.ID]
+		if !okTo {
+			continue
+		}
+		created, err := upsertEdge(db, from, to, EdgeLabelRequestsHandle, graphdb.Props{
+			"method":              req.Method,
+			"request_path":        req.Path,
+			"handler_path":        candidate.Path,
+			"normalized_path":     req.NormalizedPath,
+			"request_file_id":     req.FileID,
+			"handler_file_id":     candidate.FileID,
+			"handler_expr":        candidate.HandlerExpr,
+			"handler_function_id": candidate.FunctionID,
+			"analyzer_version":    analyzerVersion,
+			"scan_epoch":          scanEpoch,
+			"producer":            producer,
+			"producer_version":    producerVersion,
+		})
+		if err != nil {
+			return PersistenceSummary{}, fmt.Errorf("persist REQUESTS_HANDLER edge %q -> %q: %w", req.ID, candidate.ID, err)
+		}
+		if created {
+			summaryOut.RequestsHandlerEdges++
+		}
+	}
+
 	if err := retirePriorEpochFacts(db, touchedFiles, scanEpoch, producer); err != nil {
 		return PersistenceSummary{}, err
 	}
 
-	summaryOut.Edges = summaryOut.DefinesEdges + summaryOut.CallEdges + summaryOut.AtCallsiteEdges + summaryOut.SpawnEdges + summaryOut.FindingAtEdges
+	summaryOut.Edges = summaryOut.DefinesEdges + summaryOut.CallEdges + summaryOut.AtCallsiteEdges + summaryOut.SpawnEdges + summaryOut.FindingAtEdges + summaryOut.EmitsRequestEdges + summaryOut.HandlesRouteEdges + summaryOut.RequestsHandlerEdges
 	return summaryOut, nil
 }
 
@@ -472,6 +654,111 @@ func resolveCallTarget(packageID string, calleeExpr string, plainByPackage map[s
 	return ""
 }
 
+func resolveRouteTarget(packageID string, handlerExpr string, plainByPackage map[string]map[string][]string, methodsByPackage map[string]map[string][]string) string {
+	handlerExpr = strings.TrimSpace(handlerExpr)
+	if handlerExpr == "" {
+		return ""
+	}
+	name := tailIdentifier(handlerExpr)
+	if name == "" {
+		return ""
+	}
+	if id := resolveUniqueName(methodsByPackage, packageID, name); id != "" {
+		return id
+	}
+	if id := resolveUniqueName(plainByPackage, packageID, name); id != "" {
+		return id
+	}
+	return ""
+}
+
+func bestMatchingRoute(req APIRequestFact, routes []APIHandlerFact) *APIHandlerFact {
+	method := normalizeHTTPMethod(req.Method)
+	if method == "" {
+		return nil
+	}
+
+	bestIdx := -1
+	bestScore := -1
+	bestTied := false
+	for idx := range routes {
+		route := routes[idx]
+		if normalizeHTTPMethod(route.Method) != method {
+			continue
+		}
+		if !pathsCompatible(req.NormalizedPath, route.NormalizedPath) {
+			continue
+		}
+		score := pathSpecificityScore(route.NormalizedPath)
+		if score > bestScore {
+			bestScore = score
+			bestIdx = idx
+			bestTied = false
+			continue
+		}
+		if score == bestScore {
+			bestTied = true
+		}
+	}
+
+	if bestIdx < 0 || bestTied {
+		return nil
+	}
+	return &routes[bestIdx]
+}
+
+func pathsCompatible(requestPath string, routePath string) bool {
+	reqParts := normalizedPathParts(requestPath)
+	routeParts := normalizedPathParts(routePath)
+	if len(reqParts) != len(routeParts) {
+		return false
+	}
+	for i := range reqParts {
+		r := reqParts[i]
+		h := routeParts[i]
+		if r == h {
+			continue
+		}
+		if isPathParamToken(r) || isPathParamToken(h) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func pathSpecificityScore(path string) int {
+	score := 0
+	for _, part := range normalizedPathParts(path) {
+		if !isPathParamToken(part) {
+			score++
+		}
+	}
+	return score
+}
+
+func normalizedPathParts(path string) []string {
+	normalized := normalizeAPIPath(path)
+	normalized = strings.Trim(normalized, "/")
+	if normalized == "" {
+		return nil
+	}
+	parts := strings.Split(normalized, "/")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		out = append(out, part)
+	}
+	return out
+}
+
+func isPathParamToken(part string) bool {
+	part = strings.TrimSpace(part)
+	return part == "{param}" || strings.HasPrefix(part, ":") || strings.HasPrefix(part, "{")
+}
+
 func resolveUniqueName(index map[string]map[string][]string, packageID string, name string) string {
 	byName, ok := index[packageID]
 	if !ok {
@@ -509,7 +796,7 @@ func retirePriorEpochFacts(db *graphdb.DB, touchedFiles map[string]struct{}, cur
 		return nil
 	}
 
-	labels := []string{NodeLabelFile, NodeLabelFunction, NodeLabelCallSite, NodeLabelExecutionUnit, NodeLabelFinding}
+	labels := []string{NodeLabelFile, NodeLabelFunction, NodeLabelCallSite, NodeLabelExecutionUnit, NodeLabelFinding, NodeLabelAPIRequest, NodeLabelAPIHandler}
 	touchedNodeIDs := map[graphdb.NodeID]struct{}{}
 	staleNodeIDs := map[graphdb.NodeID]struct{}{}
 

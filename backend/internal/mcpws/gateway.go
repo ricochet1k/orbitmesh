@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -16,9 +17,22 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/ricochet1k/orbitmesh/internal/mcpclient"
+	"github.com/ricochet1k/orbitmesh/internal/storage"
 	"github.com/ricochet1k/orbitmesh/internal/tools"
 	api "github.com/ricochet1k/orbitmesh/pkg/api"
 )
+
+// ProxyResolver resolves session → agent → MCP server references so the
+// gateway can dynamically proxy external MCP server tools per connection.
+type ProxyResolver interface {
+	// GetSessionAgentID returns the agent ID for a given session.
+	GetSessionAgentID(sessionID string) string
+	// GetAgentMCPServerRefs returns the MCP server refs configured on an agent.
+	GetAgentMCPServerRefs(agentID string) []storage.AgentMCPRef
+	// GetMCPServerEntry returns a globally-configured MCP server entry.
+	GetMCPServerEntry(serverID string) (*storage.MCPServerEntry, error)
+}
 
 type otpEntry struct {
 	SessionID string
@@ -74,6 +88,7 @@ type Gateway struct {
 	reg      tools.Registry
 	otpStore *OTPStore
 	apiBase  string
+	resolver ProxyResolver
 
 	mu       sync.Mutex
 	settings api.MCPGatewaySettings
@@ -82,6 +97,14 @@ type Gateway struct {
 
 func NewGateway(reg tools.Registry, otpStore *OTPStore) *Gateway {
 	return &Gateway{reg: reg, otpStore: otpStore, apiBase: "http://127.0.0.1:8080"}
+}
+
+// SetProxyResolver wires the resolver used to look up session/agent/server
+// data for per-connection tool proxying.
+func (g *Gateway) SetProxyResolver(r ProxyResolver) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.resolver = r
 }
 
 func (g *Gateway) SetAPIBaseURL(baseURL string) {
@@ -183,10 +206,117 @@ func (g *Gateway) handleWS(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// Proxy external MCP servers based on agent config.
+	var proxyClients []*mcpclient.Client
+	g.mu.Lock()
+	resolver := g.resolver
+	g.mu.Unlock()
+	if resolver != nil {
+		proxyClients = g.setupProxyTools(ctx, server, resolver, sessionID)
+	}
+	defer func() {
+		for _, c := range proxyClients {
+			c.Close()
+		}
+	}()
+
 	reader := &wsReader{conn: conn}
 	writer := &wsWriter{conn: conn}
 	transport := &mcp.IOTransport{Reader: reader, Writer: writer}
 	_ = server.Run(ctx, transport)
+}
+
+// setupProxyTools connects to external MCP servers referenced by the session's
+// agent config, discovers their tools, and registers proxy handlers on the
+// given MCP server. Returns the list of clients (caller must defer Close).
+func (g *Gateway) setupProxyTools(ctx context.Context, server *mcp.Server, resolver ProxyResolver, sessionID string) []*mcpclient.Client {
+	agentID := resolver.GetSessionAgentID(sessionID)
+	if agentID == "" {
+		return nil
+	}
+	refs := resolver.GetAgentMCPServerRefs(agentID)
+	if len(refs) == 0 {
+		return nil
+	}
+
+	var clients []*mcpclient.Client
+	for _, ref := range refs {
+		entry, err := resolver.GetMCPServerEntry(ref.ServerID)
+		if err != nil {
+			log.Printf("mcp proxy: server %s not found: %v", ref.ServerID, err)
+			continue
+		}
+
+		client, err := mcpclient.Connect(ctx, *entry)
+		if err != nil {
+			log.Printf("mcp proxy: connect to %s (%s): %v", entry.Name, entry.ID, err)
+			continue
+		}
+
+		remoteTools, err := client.ListTools(ctx)
+		if err != nil {
+			log.Printf("mcp proxy: list tools from %s: %v", entry.Name, err)
+			client.Close()
+			continue
+		}
+
+		clients = append(clients, client)
+
+		// Build allow/disallow sets for filtering.
+		allowed := toSet(ref.AllowedTools)
+		disallowed := toSet(ref.DisallowedTools)
+
+		for _, rt := range remoteTools {
+			if !isToolPermitted(rt.Name, allowed, disallowed) {
+				continue
+			}
+
+			// Namespace the tool to avoid collisions: serverName__toolName
+			proxyName := entry.Name + "__" + rt.Name
+			originalName := rt.Name
+			proxyClient := client
+
+			var schema any
+			if len(rt.InputSchema) > 0 {
+				_ = json.Unmarshal(rt.InputSchema, &schema)
+			}
+
+			server.AddTool(
+				&mcp.Tool{Name: proxyName, Description: rt.Description, InputSchema: schema},
+				func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+					inputJSON, _ := json.Marshal(req.Params.Arguments)
+					result, isErr, err := proxyClient.CallTool(ctx, originalName, inputJSON)
+					if err != nil {
+						return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}}, nil
+					}
+					return &mcp.CallToolResult{IsError: isErr, Content: []mcp.Content{&mcp.TextContent{Text: result}}}, nil
+				},
+			)
+		}
+		log.Printf("mcp proxy: registered %d tools from %s for session %s", len(remoteTools), entry.Name, sessionID)
+	}
+	return clients
+}
+
+func toSet(items []string) map[string]bool {
+	if len(items) == 0 {
+		return nil
+	}
+	s := make(map[string]bool, len(items))
+	for _, item := range items {
+		s[item] = true
+	}
+	return s
+}
+
+func isToolPermitted(name string, allowed, disallowed map[string]bool) bool {
+	if len(disallowed) > 0 && disallowed[name] {
+		return false
+	}
+	if len(allowed) > 0 {
+		return allowed[name]
+	}
+	return true
 }
 
 type wsReader struct {

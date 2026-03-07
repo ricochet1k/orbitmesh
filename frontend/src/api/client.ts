@@ -9,6 +9,7 @@ import * as taskApi from "./tasks";
 import * as projectApi from "./projects";
 import * as fileApi from "./files";
 import * as dashboardApi from "./dashboard";
+import * as mcpServerApi from "./mcpServers";
 
 /**
  * Unified API client. All methods are grouped by domain in separate modules
@@ -74,6 +75,16 @@ export const apiClient = {
   // Dashboard
   getDashboardSummary: dashboardApi.getDashboardSummary,
   triggerCodeflowScan: dashboardApi.triggerCodeflowScan,
+
+  // MCP Servers
+  listMCPServers: mcpServerApi.listMCPServers,
+  getMCPServer: mcpServerApi.getMCPServer,
+  createMCPServer: mcpServerApi.createMCPServer,
+  updateMCPServer: mcpServerApi.updateMCPServer,
+  deleteMCPServer: mcpServerApi.deleteMCPServer,
+  getMCPServerCapabilities: mcpServerApi.getMCPServerCapabilities,
+  startMCPOAuth: mcpServerApi.startMCPOAuth,
+  revokeMCPOAuthToken: mcpServerApi.revokeMCPOAuthToken,
 
   // Tasks, commits, permissions, extractors
   getPermissions: taskApi.getPermissions,

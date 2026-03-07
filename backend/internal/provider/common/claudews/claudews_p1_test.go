@@ -228,6 +228,40 @@ func TestHandleResultMsg_EmitsTurnCompletionSystemMessageAfterOutput(t *testing.
 	}
 }
 
+func TestDrainAtTurnBoundary_WaitsUntilAllInFlightTurnsComplete(t *testing.T) {
+	p := NewClaudeWSProvider("s1", nil)
+	p.turnSeq = 2
+	p.turnInFlight = 2
+	p.turnBoundaryCh = make(chan struct{})
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- p.DrainAtTurnBoundary(ctx)
+	}()
+
+	p.handleResultMsg(RawMessage{Raw: []byte(`{"type":"result","subtype":"success","is_error":false,"result":"first","duration_ms":1,"duration_api_ms":1,"num_turns":1,"total_cost_usd":0,"usage":{"input_tokens":1,"output_tokens":1}}`)})
+
+	select {
+	case err := <-done:
+		t.Fatalf("drain returned after first completion: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	p.handleResultMsg(RawMessage{Raw: []byte(`{"type":"result","subtype":"success","is_error":false,"result":"second","duration_ms":1,"duration_api_ms":1,"num_turns":2,"total_cost_usd":0,"usage":{"input_tokens":1,"output_tokens":1}}`)})
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("drain returned error: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for drain completion")
+	}
+}
+
 func TestProcessInput_TwoTurnReentryUsesSessionIDAfterInit(t *testing.T) {
 	wc, outbound, cleanup := newTestWSConn(t)
 	defer cleanup()

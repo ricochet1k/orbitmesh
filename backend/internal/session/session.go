@@ -47,6 +47,8 @@ type MCPServerConfig struct {
 
 type Config struct {
 	ProviderType string
+	// PreferredProviderID is the selected provider config to resolve on send/input.
+	PreferredProviderID string
 	// AgentID is the ID of the AgentConfig applied to this session (if any).
 	AgentID         string
 	WorkingDir      string

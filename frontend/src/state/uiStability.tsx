@@ -23,7 +23,7 @@ type ActiveWindow = {
 }
 
 type UiStabilityAnomaly = {
-  kind: "probe_remount" | "animation_replay"
+  kind: "probe_remount" | "animation_replay" | "debug_trace"
   probe_id: string
   route_path: string
   source: string
@@ -55,6 +55,7 @@ let toastCounter = 0
 let panelObserverInstalled = false
 
 const recentPanelRemovals = new Map<string, RecentUnmount>()
+const UI_TRACE_STORAGE_KEY = "orbitmesh.uiTrace"
 
 const [toastMessages, setToastMessages] = createRoot(() => createSignal<ToastMessage[]>([]))
 
@@ -63,6 +64,15 @@ const nowMs = () => Date.now()
 const currentRoutePath = () => {
   if (typeof window === "undefined") return "unknown"
   return `${window.location.pathname}${window.location.search}`
+}
+
+const isUiTraceEnabled = () => {
+  if (typeof window === "undefined") return false
+  try {
+    return window.localStorage.getItem(UI_TRACE_STORAGE_KEY) === "1"
+  } catch {
+    return false
+  }
 }
 
 const readCookie = (name: string) => {
@@ -394,4 +404,17 @@ export function UiStabilityRuntime() {
       </For>
     </div>
   )
+}
+
+export function reportUiStabilityTrace(probeId: string, message: string, metadata?: Record<string, any>) {
+  if (!isUiTraceEnabled()) return
+  emitAnomaly({
+    kind: "debug_trace",
+    probe_id: probeId,
+    route_path: currentRoutePath(),
+    source: currentWindowSource(),
+    message,
+    metadata,
+    detected_at: new Date().toISOString(),
+  })
 }

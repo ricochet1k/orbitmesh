@@ -41,6 +41,8 @@ type Handler struct {
 	projectStorage     *storage.ProjectStorage
 	mcpConfigStore     *storage.MCPGatewayConfigStorage
 	mcpGateway         *mcpws.Gateway
+	mcpServerStorage   *storage.MCPServerRegistry
+	oauthStates        *oauthStateStore
 	providerTester     ProviderTester
 	gitDir             string
 	dockBridge         *DockBridge
@@ -58,6 +60,7 @@ func NewHandler(executor *service.AgentExecutor, broadcaster *service.EventBroad
 		providerStorage: providerStorage,
 		agentStorage:    agentStorage,
 		projectStorage:  projectStorage,
+		oauthStates:     newOAuthStateStore(),
 		gitDir:          resolveGitDir(),
 		dockBridge:      NewDockBridge(),
 		realtimeHub:     realtime.NewHub(),
@@ -73,6 +76,12 @@ func NewHandler(executor *service.AgentExecutor, broadcaster *service.EventBroad
 func (h *Handler) SetMCPGateway(configStore *storage.MCPGatewayConfigStorage, gateway *mcpws.Gateway) {
 	h.mcpConfigStore = configStore
 	h.mcpGateway = gateway
+}
+
+// SetMCPServerStorage wires the global MCP server registry for the
+// /api/v1/mcp-servers endpoints.
+func (h *Handler) SetMCPServerStorage(s *storage.MCPServerRegistry) {
+	h.mcpServerStorage = s
 }
 
 // SetProviderTester wires the provider factory so the handler can serve the
@@ -131,6 +140,15 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/v1/agents/{id}", h.getAgent)
 	r.Put("/api/v1/agents/{id}", h.updateAgent)
 	r.Delete("/api/v1/agents/{id}", h.deleteAgent)
+	r.Get("/api/v1/mcp-servers", h.listMCPServers)
+	r.Post("/api/v1/mcp-servers", h.createMCPServer)
+	r.Get("/api/v1/mcp-servers/{id}", h.getMCPServer)
+	r.Put("/api/v1/mcp-servers/{id}", h.updateMCPServer)
+	r.Delete("/api/v1/mcp-servers/{id}", h.deleteMCPServer)
+	r.Get("/api/v1/mcp-servers/{id}/capabilities", h.getMCPServerCapabilities)
+	r.Post("/api/v1/mcp-servers/{id}/oauth/start", h.startMCPOAuth)
+	r.Get("/api/v1/mcp/oauth/callback", h.handleMCPOAuthCallback)
+	r.Delete("/api/v1/mcp-servers/{id}/oauth/token", h.revokeMCPOAuthToken)
 	r.Get("/api/v1/projects", h.listProjects)
 	r.Post("/api/v1/projects", h.createProject)
 	r.Get("/api/v1/projects/{id}", h.getProject)
@@ -319,7 +337,14 @@ func (h *Handler) sendSessionInput(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.executor.SendInput(r.Context(), id, req.Input, req.ProviderID, req.ProviderType); err != nil {
+	resolvedProviderID, resolvedProviderType, custom, environment := h.resolveProviderRuntimeConfig(id, req.ProviderID, req.ProviderType)
+
+	if err := h.executor.SendInput(r.Context(), id, req.Input, service.SessionRuntimeOptions{
+		ProviderID:   resolvedProviderID,
+		ProviderType: resolvedProviderType,
+		Custom:       custom,
+		Environment:  environment,
+	}); err != nil {
 		if errors.Is(err, service.ErrSessionNotFound) {
 			writeError(w, http.StatusNotFound, "session not found", err.Error())
 			return
@@ -349,12 +374,19 @@ func (h *Handler) respondSessionAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	resolvedProviderID, resolvedProviderType, custom, environment := h.resolveProviderRuntimeConfig(id, req.ProviderID, req.ProviderType)
+
 	err := h.executor.RespondAction(r.Context(), id, session.ActionResponse{
 		ActionID: strings.TrimSpace(req.ActionID),
 		Decision: strings.TrimSpace(req.Decision),
 		Input:    req.Input,
 		Metadata: req.Metadata,
-	}, req.ProviderID, req.ProviderType)
+	}, service.SessionRuntimeOptions{
+		ProviderID:   resolvedProviderID,
+		ProviderType: resolvedProviderType,
+		Custom:       custom,
+		Environment:  environment,
+	})
 	if err != nil {
 		if errors.Is(err, service.ErrSessionNotFound) {
 			writeError(w, http.StatusNotFound, "session not found", err.Error())
@@ -367,27 +399,12 @@ func (h *Handler) respondSessionAction(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) sendSessionMessage(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-
-	var req apiTypes.SendMessageRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body", err.Error())
-		return
-	}
-
-	if strings.TrimSpace(req.Content) == "" {
-		writeError(w, http.StatusBadRequest, "content is required", "")
-		return
-	}
-
-	agentID := strings.TrimSpace(req.AgentID)
-	model := strings.TrimSpace(req.Model)
-	resolvedProviderID := strings.TrimSpace(req.ProviderID)
-	resolvedProviderType := strings.TrimSpace(req.ProviderType)
+func (h *Handler) resolveProviderRuntimeConfig(sessionID, requestedProviderID, requestedProviderType string) (string, string, map[string]any, map[string]string) {
+	resolvedProviderID := strings.TrimSpace(requestedProviderID)
+	resolvedProviderType := strings.TrimSpace(requestedProviderType)
 
 	if resolvedProviderID == "" {
-		if sess, err := h.executor.GetSession(id); err == nil {
+		if sess, err := h.executor.GetSession(sessionID); err == nil {
 			if sess.PreferredProviderID != "" {
 				resolvedProviderID = strings.TrimSpace(sess.PreferredProviderID)
 			}
@@ -400,8 +417,6 @@ func (h *Handler) sendSessionMessage(w http.ResponseWriter, r *http.Request) {
 	var custom map[string]any
 	var environment map[string]string
 
-	// Look up stored provider config so its Custom and Env values are applied
-	// to every message send, not just the initial session creation.
 	if resolvedProviderID != "" && h.providerStorage != nil {
 		if provCfg, err := h.providerStorage.Get(resolvedProviderID); err == nil {
 			if resolvedProviderType == "" {
@@ -413,14 +428,12 @@ func (h *Handler) sendSessionMessage(w http.ResponseWriter, r *http.Request) {
 					custom[k] = v
 				}
 			}
-			// Merge Env from stored config (API key, etc.).
 			if len(provCfg.Env) > 0 {
 				environment = make(map[string]string, len(provCfg.Env))
 				for k, v := range provCfg.Env {
 					environment[k] = v
 				}
 			}
-			// Migrate legacy api_key field into the appropriate env var.
 			if provCfg.APIKey != "" {
 				if environment == nil {
 					environment = make(map[string]string, 1)
@@ -442,6 +455,27 @@ func (h *Handler) sendSessionMessage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+
+	return resolvedProviderID, resolvedProviderType, custom, environment
+}
+
+func (h *Handler) sendSessionMessage(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var req apiTypes.SendMessageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", err.Error())
+		return
+	}
+
+	if strings.TrimSpace(req.Content) == "" {
+		writeError(w, http.StatusBadRequest, "content is required", "")
+		return
+	}
+
+	agentID := strings.TrimSpace(req.AgentID)
+	model := strings.TrimSpace(req.Model)
+	resolvedProviderID, resolvedProviderType, custom, environment := h.resolveProviderRuntimeConfig(id, req.ProviderID, req.ProviderType)
 
 	allowedTools := append([]string(nil), req.AllowedTools...)
 	disallowedTools := append([]string(nil), req.DisallowedTools...)
@@ -479,7 +513,7 @@ func (h *Handler) sendSessionMessage(w http.ResponseWriter, r *http.Request) {
 		custom["model"] = model
 	}
 
-	sess, err := h.executor.SendMessageWithOptions(r.Context(), id, req.Content, service.SendMessageOptions{
+	result, err := h.executor.SendMessageWithOptionsResult(r.Context(), id, req.Content, service.SendMessageOptions{
 		ProviderID:      resolvedProviderID,
 		ProviderType:    resolvedProviderType,
 		AgentID:         agentID,
@@ -499,8 +533,7 @@ func (h *Handler) sendSessionMessage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
-	snap := sess.Snapshot()
-	if err := json.NewEncoder(w).Encode(sessionToResponse(snap)); err != nil {
+	if err := writeSessionResponseWithDeferred(w, result.Session.Snapshot(), result.Deferred); err != nil {
 		fmt.Fprintf(w, `{"error":"failed to encode response"}`)
 	}
 }
@@ -569,19 +602,20 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	id := generateID()
 
 	config := session.Config{
-		ProviderType:    req.ProviderType,
-		AgentID:         req.AgentID,
-		WorkingDir:      workingDir,
-		ProjectID:       projectID,
-		Environment:     req.Environment,
-		SystemPrompt:    req.SystemPrompt,
-		Custom:          req.Custom,
-		TaskID:          req.TaskID,
-		TaskTitle:       req.TaskTitle,
-		SessionKind:     sessionKind,
-		Title:           req.Title,
-		AllowedTools:    req.AllowedTools,
-		DisallowedTools: req.DisallowedTools,
+		ProviderType:        req.ProviderType,
+		PreferredProviderID: strings.TrimSpace(req.ProviderID),
+		AgentID:             req.AgentID,
+		WorkingDir:          workingDir,
+		ProjectID:           projectID,
+		Environment:         req.Environment,
+		SystemPrompt:        req.SystemPrompt,
+		Custom:              req.Custom,
+		TaskID:              req.TaskID,
+		TaskTitle:           req.TaskTitle,
+		SessionKind:         sessionKind,
+		Title:               req.Title,
+		AllowedTools:        req.AllowedTools,
+		DisallowedTools:     req.DisallowedTools,
 	}
 
 	// Apply agent config defaults (agent values only fill gaps left by the request).
@@ -860,7 +894,7 @@ func (h *Handler) resumeSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, err := h.executor.ResumeSessionWithToken(r.Context(), id, req.TokenID)
+	result, err := h.executor.ResumeSessionWithTokenResult(r.Context(), id, req.TokenID)
 	if err != nil {
 		writeSessionError(w, err)
 		return
@@ -868,7 +902,7 @@ func (h *Handler) resumeSession(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(sessionToResponse(sess.Snapshot()))
+	_ = writeSessionResponseWithDeferred(w, result.Session.Snapshot(), result.Deferred)
 }
 
 // writeSessionError maps common executor errors to HTTP responses.
@@ -884,6 +918,8 @@ func writeSessionError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusGone, "expired resume token", "")
 	case errors.Is(err, service.ErrRevokedResumeToken):
 		writeError(w, http.StatusGone, "revoked resume token", "")
+	case errors.Is(err, service.ErrExecutorShutdown):
+		writeError(w, http.StatusServiceUnavailable, "executor is shutting down", err.Error())
 	default:
 		writeError(w, http.StatusInternalServerError, err.Error(), "")
 	}
@@ -897,6 +933,12 @@ func generateID() string {
 
 func sessionToResponse(s domain.SessionSnapshot) apiTypes.SessionResponse {
 	return presentation.SessionResponseFromSnapshot(s)
+}
+
+func writeSessionResponseWithDeferred(w http.ResponseWriter, s domain.SessionSnapshot, deferred bool) error {
+	resp := sessionToResponse(s)
+	resp.Deferred = deferred
+	return json.NewEncoder(w).Encode(resp)
 }
 
 func terminalToResponse(t *domain.Terminal) apiTypes.TerminalResponse {

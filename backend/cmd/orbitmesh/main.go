@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/ricochet1k/orbitmesh/internal/api"
+	"github.com/ricochet1k/orbitmesh/internal/domain"
 	"github.com/ricochet1k/orbitmesh/internal/entity"
 	"github.com/ricochet1k/orbitmesh/internal/mcpws"
 	"github.com/ricochet1k/orbitmesh/internal/service"
@@ -165,6 +166,9 @@ func main() {
 		EvalStorage:                 evalStore,
 		SessionStartDeferredStorage: sessionRunDeferredStore,
 		MessageLogStore:             sessionMsgStore,
+		ResumeMessageBuilder: func(providerType string, history []domain.Message) []session.Message {
+			return factory.BuildResumeMessages(providerType, history)
+		},
 		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
 			return factory.CreateSession(providerType, sessionID, config)
 		},
@@ -180,8 +184,15 @@ func main() {
 	r.Use(api.CSRFMiddleware)
 	addr := listenAddr()
 
+	mcpServerRegistry := storage.NewMCPServerRegistry(baseDir)
+
 	mcpGateway := mcpws.NewGateway(tools.Global(), mcpws.NewOTPStore(2*time.Minute))
 	mcpGateway.SetAPIBaseURL("http://127.0.0.1" + addr)
+	mcpGateway.SetProxyResolver(&mcpws.DefaultProxyResolver{
+		Executor:       executor,
+		AgentStorage:   agentStorage,
+		MCPServerStore: mcpServerRegistry,
+	})
 	if cfg, err := mcpConfigStore.Get(); err != nil {
 		log.Fatalf("mcp gateway config: %v", err)
 	} else if err := mcpGateway.ApplySettings(context.Background(), cfg); err != nil {
@@ -190,6 +201,7 @@ func main() {
 
 	handler := api.NewHandler(executor, broadcaster, store, providerStorage, agentStorage, projectStorage)
 	handler.SetMCPGateway(mcpConfigStore, mcpGateway)
+	handler.SetMCPServerStorage(mcpServerRegistry)
 	handler.SetProviderTester(factory)
 	handler.Mount(r)
 

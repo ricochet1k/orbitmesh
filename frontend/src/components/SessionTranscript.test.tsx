@@ -263,4 +263,135 @@ describe("SessionTranscript grouping", () => {
     expect(details.textContent).toContain("update: /repo/fileA.ts")
     expect(details.textContent).toContain("create: /repo/fileB.ts")
   })
+
+  it("renders permission hint and tool input details without noisy request ids", () => {
+    render(() => (
+      <SessionTranscript
+        messages={() => [
+          {
+            id: "action-3",
+            type: "system",
+            kind: "action_request",
+            timestamp: "2026-03-01T00:00:00Z",
+            content: "Tool permission request: Write",
+            payload: {
+              id: "toolu_01Jdd8jxLKBJ1KqfNUizsWg3",
+              kind: "permission",
+              status: "pending",
+              payload: {
+                request: {
+                  id: "toolu_01Jdd8jxLKBJ1KqfNUizsWg3",
+                  tool_name: "Write",
+                  hint: "Need approval to create project notes file",
+                  input: {
+                    file_path: "/Users/matt/mycode/orbitmesh/docs/notes.md",
+                    content: "hello world",
+                  },
+                },
+              },
+            },
+          },
+        ]}
+        filter={() => ""}
+        setFilter={() => {}}
+        autoScroll={() => true}
+        setAutoScroll={() => {}}
+        activityCursor={() => null}
+        activityHistoryLoading={() => false}
+        onLoadEarlier={() => {}}
+        onRespondActionRequest={() => {}}
+      />
+    ))
+
+    const details = screen.getByTestId("action-request-details")
+    expect(details.textContent).toContain("Hint: Need approval to create project notes file")
+    expect(details.textContent).toContain("Path: docs/notes.md")
+    expect(details.textContent).toContain("Content: 11 chars")
+    expect(details.textContent).not.toContain("Request:")
+    expect(details.textContent).not.toContain("toolu_01Jdd8jxLKBJ1KqfNUizsWg3")
+  })
+
+  it("formats tool_use permission echo rows with file path context", () => {
+    renderTranscript([
+      {
+        id: "action-ctx-1",
+        type: "system",
+        kind: "action_request",
+        timestamp: "2026-03-01T00:00:00Z",
+        content: "Tool permission request: Write",
+        payload: {
+          kind: "permission",
+          status: "pending",
+          payload: {
+            request: {
+              id: "37d1307a-a975-45de-8b8b-51a064b640ba",
+              tool_name: "Write",
+              input: {
+                file_path: "/Users/matt/mycode/orbitmesh/docs/README.md",
+              },
+            },
+          },
+        },
+      },
+      {
+        id: "tool-use-1",
+        type: "system",
+        kind: "tool_use",
+        timestamp: "2026-03-01T00:00:00Z",
+        content: "Write: 37d1307a-a975-45de-8b8b-51a064b640ba",
+      },
+    ])
+
+    const rows = screen.getAllByTestId("transcript-message-row")
+    expect(rows.length).toBe(2)
+    expect(rows[1].textContent).toContain("write docs/README.md")
+    expect(rows[1].textContent).not.toContain("37d1307a-a975-45de-8b8b-51a064b640ba")
+  })
+
+  it("shows decision policy and allow always decision", () => {
+    render(() => (
+      <SessionTranscript
+        messages={() => [
+          {
+            id: "action-dup-1",
+            type: "system",
+            kind: "action_request",
+            timestamp: "2026-03-01T00:00:00Z",
+            content: "Tool permission request: Read",
+            payload: {
+              id: "req-read-1",
+              kind: "approval",
+              status: "pending",
+              payload: {
+                request: {
+                  request_id: "req-read-1",
+                  tool_name: "Read",
+                  decision_reason: "classifier",
+                  input: { file_path: "/Users/matt/mycode/orbitmesh/README.md" },
+                },
+                decisions: [
+                  { value: "accept", label: "Accept" },
+                  { value: "allow_always", label: "Allow Always" },
+                  { value: "reject", label: "Reject" },
+                ],
+              },
+            },
+          },
+        ]}
+        filter={() => ""}
+        setFilter={() => {}}
+        autoScroll={() => true}
+        setAutoScroll={() => {}}
+        activityCursor={() => null}
+        activityHistoryLoading={() => false}
+        onLoadEarlier={() => {}}
+        onRespondActionRequest={() => {}}
+      />
+    ))
+
+    const details = screen.getByTestId("action-request-details")
+    expect(details.textContent).toContain("Decision policy: classifier")
+    expect(details.textContent).toContain("Path: README.md")
+    expect(screen.getByTestId("action-request-allow_always")).toBeDefined()
+  })
 })

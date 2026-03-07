@@ -75,8 +75,11 @@ export async function readErrorMessage(resp: Response): Promise<string> {
   const text = await resp.text();
   if (!text) return "Request failed.";
   try {
-    const payload = JSON.parse(text) as ErrorResponse;
+    const payload = JSON.parse(text) as ErrorResponse & { details?: string };
     if (payload && typeof payload.error === "string" && payload.error.trim().length > 0) {
+      if (payload.details) {
+        return `${payload.error}: ${payload.details}`;
+      }
       return payload.error;
     }
   } catch {

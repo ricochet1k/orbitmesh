@@ -164,7 +164,12 @@ func (e *AgentExecutor) projectResourceUsageEvent(sc *sessionContext, data domai
 
 func (e *AgentExecutor) projectActionRequestEvent(sc *sessionContext, data domain.ActionRequestData, event domain.Event) {
 	open := actionRequestOpenState(data.Status)
-	e.appendSessionMessageRawWithState(sc.session, domain.MessageKindActionRequest, formatActionRequestContent(data), canonicalActionRequestPayload(data), &open, event.Raw, event.Timestamp)
+	messageID := actionRequestMessageID(data)
+	if messageID != "" && !open {
+		e.appendMessageDelta(sc.session, domain.MessageKindActionRequest, messageID, "", canonicalActionRequestPayload(data), &open, event.Raw, event.Timestamp)
+		return
+	}
+	e.appendToMessageLog(sc.session.ID, storage.MessageProjectionAppendRaw, domain.MessageKindActionRequest, formatActionRequestContent(data), canonicalActionRequestPayload(data), &open, event.Raw, event.Timestamp, messageID)
 }
 
 func (e *AgentExecutor) projectArtifactUpdateEvent(sc *sessionContext, data domain.ArtifactUpdateData, event domain.Event) {
@@ -241,6 +246,14 @@ func actionRequestOpenState(status string) bool {
 	default:
 		return true
 	}
+}
+
+func actionRequestMessageID(data domain.ActionRequestData) string {
+	id := strings.TrimSpace(data.ID)
+	if id == "" {
+		return ""
+	}
+	return "action:" + id
 }
 
 func (e *AgentExecutor) updateSessionCustomDataFromResourceUsage(sess *domain.Session, data domain.ResourceUsageData) {

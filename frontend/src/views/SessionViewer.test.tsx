@@ -366,6 +366,36 @@ describe("SessionViewer", () => {
     expect(apiClient.cancelSession).toHaveBeenCalledWith("session-1")
   })
 
+  it("stop button cancels run for non-PTY providers", async () => {
+    ; (apiClient.getSession as any).mockResolvedValue(baseSession)
+
+    render(() => <SessionViewer sessionId="session-1" />)
+
+    await waitFor(() => expect(screen.getByTestId("session-state-badge").textContent).toContain("running"))
+
+    fireEvent.click(screen.getByTestId("session-composer-primary"))
+
+    await waitFor(() => {
+      expect(apiClient.cancelSession).toHaveBeenCalledWith("session-1")
+    })
+    expect(apiClient.sendSessionInput).not.toHaveBeenCalled()
+  })
+
+  it("stop button sends Ctrl+C for PTY providers", async () => {
+    ; (apiClient.getSession as any).mockResolvedValue(makeSession({ provider_type: "pty" }))
+
+    render(() => <SessionViewer sessionId="session-1" />)
+
+    await waitFor(() => expect(screen.getByTestId("session-state-badge").textContent).toContain("running"))
+
+    fireEvent.click(screen.getByTestId("session-composer-primary"))
+
+    await waitFor(() => {
+      expect(apiClient.sendSessionInput).toHaveBeenCalledWith("session-1", "\x03")
+    })
+    expect(apiClient.cancelSession).not.toHaveBeenCalled()
+  })
+
   it("calls onClose when close button is clicked", async () => {
     (apiClient.getSession as any).mockResolvedValue(baseSession)
     const onClose = vi.fn()

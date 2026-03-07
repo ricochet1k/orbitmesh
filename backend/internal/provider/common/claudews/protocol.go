@@ -167,11 +167,15 @@ type OutboundControlRequest struct {
 
 // CanUseToolRequest is the payload for subtype "can_use_tool".
 type CanUseToolRequest struct {
-	Subtype     string         `json:"subtype"` // "can_use_tool"
-	ToolName    string         `json:"tool_name"`
-	Input       map[string]any `json:"input"`
-	ToolUseID   string         `json:"tool_use_id"`
-	Description string         `json:"description,omitempty"`
+	Subtype               string           `json:"subtype"` // "can_use_tool"
+	ToolName              string           `json:"tool_name"`
+	Input                 map[string]any   `json:"input"`
+	PermissionSuggestions []map[string]any `json:"permission_suggestions,omitempty"`
+	Hint                  string           `json:"hint,omitempty"`
+	DecisionReason        string           `json:"decision_reason,omitempty"`
+	BlockedPath           string           `json:"blocked_path,omitempty"`
+	ToolUseID             string           `json:"tool_use_id"`
+	Description           string           `json:"description,omitempty"`
 }
 
 // HookCallbackRequest is the payload for subtype "hook_callback".
@@ -212,15 +216,23 @@ const (
 // AllowResponse builds a control_response that permits the tool with
 // (optionally modified) input.
 func AllowResponse(requestID string, updatedInput map[string]any) ControlResponse {
+	return AllowResponseWithPermissions(requestID, updatedInput, nil)
+}
+
+func AllowResponseWithPermissions(requestID string, updatedInput map[string]any, updatedPermissions []map[string]any) ControlResponse {
+	response := map[string]any{
+		"behavior":     "allow",
+		"updatedInput": updatedInput,
+	}
+	if len(updatedPermissions) > 0 {
+		response["updatedPermissions"] = updatedPermissions
+	}
 	return ControlResponse{
 		Type: "control_response",
 		Response: ControlResponsePayload{
 			Subtype:   "success",
 			RequestID: requestID,
-			Response: map[string]any{
-				"behavior":     "allow",
-				"updatedInput": updatedInput,
-			},
+			Response:  response,
 		},
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ricochet1k/orbitmesh/internal/domain"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 )
 
@@ -13,6 +14,12 @@ import (
 type Provider interface {
 	CreateSession(sessionID string, config session.Config) (session.Session, error)
 	TestConfig(ctx context.Context, config session.Config) error
+}
+
+// ResumeMessagePolicy is an optional provider hook for selecting and shaping
+// persisted transcript history when a session run switches to this provider.
+type ResumeMessagePolicy interface {
+	BuildResumeMessages(history []domain.Message) []session.Message
 }
 
 type DefaultFactory struct {
@@ -35,6 +42,18 @@ func (f *DefaultFactory) CreateSession(providerType, sessionID string, config se
 		return nil, fmt.Errorf("unknown provider type: %s", providerType)
 	}
 	return p.CreateSession(sessionID, config)
+}
+
+func (f *DefaultFactory) BuildResumeMessages(providerType string, history []domain.Message) []session.Message {
+	p, ok := f.providers[providerType]
+	if !ok {
+		return nil
+	}
+	policy, ok := p.(ResumeMessagePolicy)
+	if !ok {
+		return nil
+	}
+	return policy.BuildResumeMessages(history)
 }
 
 // TestConfig validates the configuration for the given provider type.

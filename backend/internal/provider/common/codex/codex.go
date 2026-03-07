@@ -87,9 +87,12 @@ var codexNotificationHandlers = map[string]codexNotificationHandler{
 	"turn/plan/updated":                     (*CodexProvider).handlePlanUpdateNotification,
 	"codex/event/plan_update":               (*CodexProvider).handlePlanUpdateNotification,
 	"turn/diff/updated":                     (*CodexProvider).handleDiffUpdateNotification,
+	"codex/event/turn_diff":                 (*CodexProvider).handleDiffUpdateNotification,
 	"codex/event/patch_apply_begin":         (*CodexProvider).handlePatchApplyBeginNotification,
+	"codex/event/patch_apply_end":           (*CodexProvider).handlePatchApplyEndNotification,
 	"codex/event/exec_approval_request":     (*CodexProvider).handleExecApprovalNotification,
 	"item/commandExecution/requestApproval": (*CodexProvider).handleCommandExecutionApprovalNotification,
+	"item/fileChange/outputDelta":           (*CodexProvider).handleItemFileChangeOutputDeltaNotification,
 }
 
 var suppressedCodexNotificationMethods = map[string]struct{}{
@@ -146,6 +149,7 @@ type CodexProvider struct {
 	threadID     string
 	activeTurnID string
 	turnActive   bool
+	resumeSeeded bool
 	started      bool
 
 	// turnBoundaryCh is replaced for each new turn and closed when that turn's
@@ -167,6 +171,10 @@ type CodexProvider struct {
 	reasonDeltaFmt   map[string]string // "codex"|"item": first-wins for reasoning deltas
 	agentDeltaFmt    map[string]string // "codex"|"item": first-wins for agent output deltas
 	planUpdateFmt    map[string]string // "codex"|"turn": first-wins for plan updates
+	fileChangeFmt    map[string]string // "codex"|"item": first-wins for file change lifecycle
+	reasonDoneSeen   map[string]bool   // reasoning stream IDs already marked done
+	turnDiffSeen     map[string]bool   // turn IDs/diff signatures already emitted
+	fileChangeDone   map[string]bool   // file change call IDs already emitted completed
 }
 
 // NewCodexProvider creates a new Codex app-server provider.
@@ -187,6 +195,10 @@ func NewCodexProvider(sessionID string, staticCfg Config) *CodexProvider {
 		reasonDeltaFmt:   make(map[string]string),
 		agentDeltaFmt:    make(map[string]string),
 		planUpdateFmt:    make(map[string]string),
+		fileChangeFmt:    make(map[string]string),
+		reasonDoneSeen:   make(map[string]bool),
+		turnDiffSeen:     make(map[string]bool),
+		fileChangeDone:   make(map[string]bool),
 	}
 }
 
@@ -377,6 +389,7 @@ func (p *CodexProvider) processInput() {
 			threadID := p.threadID
 			turnActive := p.turnActive
 			activeTurnID := p.activeTurnID
+			resumeSeeded := p.resumeSeeded
 			cfg := p.config
 			p.mu.RUnlock()
 
@@ -400,10 +413,16 @@ func (p *CodexProvider) processInput() {
 				continue
 			}
 
-			res, err := p.sendRequestCtx(p.ctx, "turn/start", buildTurnStartParams(threadID, input, cfg), codexTurnRequestTimeout)
+			includeResumeSeed := !resumeSeeded && len(cfg.ResumeMessages) > 0
+			res, err := p.sendRequestCtx(p.ctx, "turn/start", buildTurnStartParams(threadID, input, cfg, includeResumeSeed), codexTurnRequestTimeout)
 			if err != nil {
 				p.events.Emit(domain.NewErrorEvent(p.sessionID, err.Error(), "CODEX_TURN_START_ERROR", nil))
 				continue
+			}
+			if includeResumeSeed {
+				p.mu.Lock()
+				p.resumeSeeded = true
+				p.mu.Unlock()
 			}
 			if turnID, ok := parseTurnID(res); ok {
 				p.mu.Lock()
@@ -581,7 +600,7 @@ func (p *CodexProvider) handleAgentReasoningDoneNotification(params json.RawMess
 	// Emit a done signal to close the delta stream for this reasoning section.
 	// Avoid re-emitting the full text since deltas already carry the content.
 	itemID := extractAgentReasoningItemID(params)
-	if itemID == "" {
+	if itemID == "" || !p.markReasoningDoneOnce(itemID) {
 		return
 	}
 	p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
@@ -703,6 +722,7 @@ func (p *CodexProvider) handlePatchApplyBeginNotification(params json.RawMessage
 	if callID == "" {
 		return
 	}
+	p.markFileChangeFormat(callID, "codex")
 	p.events.Emit(domain.NewArtifactUpdateEvent(p.sessionID, domain.ArtifactUpdateData{
 		ID:    callID,
 		Kind:  "file_change",
@@ -717,8 +737,11 @@ func (p *CodexProvider) handlePatchApplyBeginNotification(params json.RawMessage
 }
 
 func (p *CodexProvider) handleDiffUpdateNotification(params json.RawMessage, raw json.RawMessage) {
-	diff := parseDiffUpdate(params)
+	diff, turnID := parseDiffUpdate(params)
 	if diff == "" {
+		return
+	}
+	if !p.markTurnDiffOnce(turnID, diff) {
 		return
 	}
 	p.events.Emit(domain.NewArtifactUpdateEvent(p.sessionID, domain.ArtifactUpdateData{
@@ -727,6 +750,38 @@ func (p *CodexProvider) handleDiffUpdateNotification(params json.RawMessage, raw
 		Payload: map[string]any{
 			"diff": diff,
 		},
+	}, raw))
+}
+
+func (p *CodexProvider) handlePatchApplyEndNotification(params json.RawMessage, raw json.RawMessage) {
+	callID, turnID, changes, ok := parsePatchApplyEnd(params)
+	if !ok {
+		return
+	}
+	p.markFileChangeFormat(callID, "codex")
+	p.markFileChangeDone(callID)
+	p.events.Emit(domain.NewArtifactUpdateEvent(p.sessionID, domain.ArtifactUpdateData{
+		ID:    callID,
+		Kind:  "file_change",
+		Title: "File change completed",
+		Payload: map[string]any{
+			"status":  "completed",
+			"changes": changes,
+			"turn_id": turnID,
+		},
+	}, raw))
+}
+
+func (p *CodexProvider) handleItemFileChangeOutputDeltaNotification(params json.RawMessage, raw json.RawMessage) {
+	chunk, callID, ok := parseItemFileChangeOutputDelta(params)
+	if !ok || !p.markOrCheckDeltaFmt(p.outputDeltaFmt, callID, "item/fileChange/outputDelta") {
+		return
+	}
+	p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
+		Channel:  "tool_output",
+		StreamID: callID,
+		Content:  chunk,
+		IsDelta:  true,
 	}, raw))
 }
 
@@ -809,7 +864,7 @@ func (p *CodexProvider) handleItemNotification(method string, params json.RawMes
 		// Reasoning content arrives via delta events; the full-text echo from
 		// item lifecycle events would create duplicate messages.  Only emit a
 		// done signal on item/completed to close the delta stream.
-		if method == "item/completed" {
+		if method == "item/completed" && p.markReasoningDoneOnce(itemID) {
 			p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
 				Channel:  "reasoning",
 				StreamID: itemID,
@@ -865,6 +920,9 @@ func (p *CodexProvider) handleItemNotification(method string, params json.RawMes
 		}, raw))
 
 	case "filechange":
+		if !p.markOrCheckFileChangeFormat(itemID, "item") {
+			return
+		}
 		status := strings.TrimSpace(asString(item["status"]))
 		if status == "" {
 			if method == "item/completed" {
@@ -876,6 +934,7 @@ func (p *CodexProvider) handleItemNotification(method string, params json.RawMes
 		title := "File change update"
 		if method == "item/completed" {
 			title = "File change completed"
+			p.markFileChangeDone(itemID)
 		} else if method == "item/started" {
 			title = "File change started"
 		}
@@ -1098,13 +1157,10 @@ func buildThreadStartParams(config session.Config) map[string]any {
 	return params
 }
 
-func buildTurnStartParams(threadID, input string, config session.Config) map[string]any {
+func buildTurnStartParams(threadID, input string, config session.Config, includeResumeSeed bool) map[string]any {
 	params := map[string]any{
 		"threadId": threadID,
-		"input": []map[string]any{{
-			"type": "text",
-			"text": input,
-		}},
+		"input":    buildTurnInput(input, config.ResumeMessages, includeResumeSeed),
 	}
 	if model := customStr(config.Custom, "model"); model != "" {
 		params["model"] = model
@@ -1125,6 +1181,50 @@ func buildTurnStartParams(threadID, input string, config session.Config) map[str
 		params["sandboxPolicy"] = buildSandboxPolicy(sandbox, config.WorkingDir, config.Custom)
 	}
 	return params
+}
+
+func buildTurnInput(input string, resume []session.Message, includeResumeSeed bool) []map[string]any {
+	parts := make([]map[string]any, 0, 2)
+	if includeResumeSeed {
+		if resumeSeed := formatResumeSeed(resume); resumeSeed != "" {
+			parts = append(parts, map[string]any{
+				"type": "text",
+				"text": resumeSeed,
+			})
+		}
+	}
+	parts = append(parts, map[string]any{
+		"type": "text",
+		"text": input,
+	})
+	return parts
+}
+
+func formatResumeSeed(messages []session.Message) string {
+	if len(messages) == 0 {
+		return ""
+	}
+
+	b := strings.Builder{}
+	b.WriteString("Previous conversation context from earlier provider run. Continue naturally from this context:\n")
+	for _, msg := range messages {
+		content := strings.TrimSpace(msg.Contents)
+		if content == "" {
+			continue
+		}
+		role := "System"
+		switch msg.Kind {
+		case session.MKUser:
+			role = "User"
+		case session.MKAssistant:
+			role = "Assistant"
+		}
+		b.WriteString(role)
+		b.WriteString(": ")
+		b.WriteString(content)
+		b.WriteString("\n")
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func buildSandboxPolicy(mode, workingDir string, custom map[string]any) map[string]any {
@@ -1366,6 +1466,38 @@ func parseItemCommandOutputDelta(params json.RawMessage) (chunk string, callID s
 	return payload.Delta, payload.ItemID, true
 }
 
+func parseItemFileChangeOutputDelta(params json.RawMessage) (chunk string, callID string, ok bool) {
+	var payload struct {
+		Delta  string `json:"delta"`
+		ItemID string `json:"itemId"`
+	}
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return "", "", false
+	}
+	if strings.TrimSpace(payload.ItemID) == "" || payload.Delta == "" {
+		return "", "", false
+	}
+	return payload.Delta, strings.TrimSpace(payload.ItemID), true
+}
+
+func parsePatchApplyEnd(params json.RawMessage) (callID, turnID string, changes map[string]any, ok bool) {
+	var payload struct {
+		Msg struct {
+			CallID  string         `json:"call_id"`
+			TurnID  string         `json:"turn_id"`
+			Changes map[string]any `json:"changes"`
+		} `json:"msg"`
+	}
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return "", "", nil, false
+	}
+	callID = strings.TrimSpace(payload.Msg.CallID)
+	if callID == "" {
+		return "", "", nil, false
+	}
+	return callID, strings.TrimSpace(payload.Msg.TurnID), payload.Msg.Changes, true
+}
+
 func parseResourceUsage(method string, params json.RawMessage) *domain.ResourceUsageData {
 	var value any
 	if err := json.Unmarshal(params, &value); err != nil {
@@ -1538,14 +1670,29 @@ func isCodexPlanUpdatePayload(params json.RawMessage) bool {
 	return payload.Msg != nil && strings.TrimSpace(payload.Msg.Type) == "plan_update"
 }
 
-func parseDiffUpdate(params json.RawMessage) string {
-	var payload struct {
-		Diff string `json:"diff"`
+func parseDiffUpdate(params json.RawMessage) (diff string, turnID string) {
+	var turnPayload struct {
+		Diff   string `json:"diff"`
+		TurnID string `json:"turnId"`
 	}
-	if err := json.Unmarshal(params, &payload); err != nil {
-		return ""
+	if err := json.Unmarshal(params, &turnPayload); err == nil {
+		diff = strings.TrimSpace(turnPayload.Diff)
+		turnID = strings.TrimSpace(turnPayload.TurnID)
+		if diff != "" {
+			return diff, turnID
+		}
 	}
-	return strings.TrimSpace(payload.Diff)
+
+	var codexPayload struct {
+		Msg struct {
+			UnifiedDiff string `json:"unified_diff"`
+			TurnID      string `json:"turn_id"`
+		} `json:"msg"`
+	}
+	if err := json.Unmarshal(params, &codexPayload); err != nil {
+		return "", ""
+	}
+	return strings.TrimSpace(codexPayload.Msg.UnifiedDiff), strings.TrimSpace(codexPayload.Msg.TurnID)
 }
 
 func asString(v any) string {
@@ -1624,6 +1771,74 @@ func (p *CodexProvider) markOrCheckPlanFmt(turnID, method string) bool {
 		return true
 	}
 	return p.planUpdateFmt[turnID] == want
+}
+
+func (p *CodexProvider) markReasoningDoneOnce(itemID string) bool {
+	itemID = strings.TrimSpace(itemID)
+	if itemID == "" {
+		return false
+	}
+	p.dupMu.Lock()
+	defer p.dupMu.Unlock()
+	if p.reasonDoneSeen[itemID] {
+		return false
+	}
+	p.reasonDoneSeen[itemID] = true
+	return true
+}
+
+func (p *CodexProvider) markTurnDiffOnce(turnID, diff string) bool {
+	key := strings.TrimSpace(turnID)
+	if key == "" {
+		key = strings.TrimSpace(diff)
+	}
+	if key == "" {
+		return true
+	}
+	p.dupMu.Lock()
+	defer p.dupMu.Unlock()
+	if p.turnDiffSeen[key] {
+		return false
+	}
+	p.turnDiffSeen[key] = true
+	return true
+}
+
+func (p *CodexProvider) markFileChangeFormat(callID, format string) {
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return
+	}
+	p.dupMu.Lock()
+	if p.fileChangeFmt[callID] == "" {
+		p.fileChangeFmt[callID] = format
+	}
+	p.dupMu.Unlock()
+}
+
+func (p *CodexProvider) markOrCheckFileChangeFormat(callID, format string) bool {
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return true
+	}
+	p.dupMu.Lock()
+	defer p.dupMu.Unlock()
+	if existing := p.fileChangeFmt[callID]; existing == "" {
+		p.fileChangeFmt[callID] = format
+		return true
+	} else {
+		return existing == format
+	}
+}
+
+func (p *CodexProvider) markFileChangeDone(callID string) {
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return
+	}
+	p.dupMu.Lock()
+	p.fileChangeDone[callID] = true
+	p.dupMu.Unlock()
 }
 
 // extractAgentReasoningItemID extracts the item_id from a

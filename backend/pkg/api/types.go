@@ -96,6 +96,7 @@ type SessionResponse struct {
 	CreatedAt   time.Time    `json:"created_at"`
 	UpdatedAt   time.Time    `json:"updated_at"`
 	CurrentTask string       `json:"current_task,omitempty"`
+	Deferred    bool         `json:"deferred,omitempty"`
 }
 
 // ProjectRequest is the body for create/update project endpoints.
@@ -724,6 +725,7 @@ type AgentConfigRequest struct {
 	Name            string            `json:"name"`
 	SystemPrompt    string            `json:"system_prompt,omitempty"`
 	MCPServers      []MCPServerConfig `json:"mcp_servers,omitempty"`
+	MCPServerRefs   []AgentMCPRef     `json:"mcp_server_refs,omitempty"`
 	Custom          map[string]any    `json:"custom,omitempty"`
 	AllowedTools    []string          `json:"allowed_tools,omitempty"`
 	DisallowedTools []string          `json:"disallowed_tools,omitempty"`
@@ -735,6 +737,7 @@ type AgentConfigResponse struct {
 	Name            string            `json:"name"`
 	SystemPrompt    string            `json:"system_prompt,omitempty"`
 	MCPServers      []MCPServerConfig `json:"mcp_servers,omitempty"`
+	MCPServerRefs   []AgentMCPRef     `json:"mcp_server_refs,omitempty"`
 	Custom          map[string]any    `json:"custom,omitempty"`
 	AllowedTools    []string          `json:"allowed_tools,omitempty"`
 	DisallowedTools []string          `json:"disallowed_tools,omitempty"`
@@ -770,4 +773,97 @@ type FileReadResponse struct {
 	MimeType string `json:"mime_type"`
 	Encoding string `json:"encoding"` // "utf8" or "base64"
 	Content  string `json:"content"`
+}
+
+// ---- MCP Server Registry types ----
+
+// AgentMCPRef links an agent to a globally-configured MCP server entry.
+type AgentMCPRef struct {
+	ServerID        string   `json:"server_id"`
+	AllowedTools    []string `json:"allowed_tools,omitempty"`
+	DisallowedTools []string `json:"disallowed_tools,omitempty"`
+}
+
+// MCPServerAuthRequest carries credential data for creating/updating a server.
+// Sensitive fields are accepted on write but never returned.
+type MCPServerAuthRequest struct {
+	Token        string   `json:"token,omitempty"`
+	APIKey       string   `json:"api_key,omitempty"`
+	ClientID     string   `json:"client_id,omitempty"`
+	ClientSecret string   `json:"client_secret,omitempty"`
+	AuthURL      string   `json:"auth_url,omitempty"`
+	TokenURL     string   `json:"token_url,omitempty"`
+	Scopes       []string `json:"scopes,omitempty"`
+}
+
+// MCPServerEntryRequest is the body for create/update MCP server endpoints.
+type MCPServerEntryRequest struct {
+	ID       string                `json:"id,omitempty"`
+	Name     string                `json:"name"`
+	Type     string                `json:"type"` // "command" | "sse"
+	Command  string                `json:"command,omitempty"`
+	Args     []string              `json:"args,omitempty"`
+	Env      map[string]string     `json:"env,omitempty"`
+	URL      string                `json:"url,omitempty"`
+	AuthType string                `json:"auth_type,omitempty"` // "none" | "bearer" | "api_key" | "oauth2"
+	Auth     *MCPServerAuthRequest `json:"auth,omitempty"`
+}
+
+// MCPServerEntryResponse is returned by MCP server endpoints.
+// Raw credential values are never included; HasToken indicates a token is stored.
+type MCPServerEntryResponse struct {
+	ID       string            `json:"id"`
+	Name     string            `json:"name"`
+	Type     string            `json:"type"`
+	Command  string            `json:"command,omitempty"`
+	Args     []string          `json:"args,omitempty"`
+	Env      map[string]string `json:"env,omitempty"`
+	URL      string            `json:"url,omitempty"`
+	AuthType string            `json:"auth_type,omitempty"`
+	// OAuth2 public fields (safe to expose)
+	ClientID string   `json:"client_id,omitempty"`
+	AuthURL  string   `json:"auth_url,omitempty"`
+	TokenURL string   `json:"token_url,omitempty"`
+	Scopes              []string `json:"scopes,omitempty"`
+	HasToken            bool     `json:"has_token"`
+	DynamicRegistration bool     `json:"dynamic_registration,omitempty"`
+}
+
+// MCPServerEntryListResponse wraps a list of MCP server entries.
+type MCPServerEntryListResponse struct {
+	Servers []MCPServerEntryResponse `json:"servers"`
+}
+
+// MCPToolInfo describes a single tool offered by an MCP server.
+type MCPToolInfo struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	InputSchema json.RawMessage `json:"input_schema,omitempty"`
+}
+
+// MCPResourceInfo describes a single resource offered by an MCP server.
+type MCPResourceInfo struct {
+	URI         string `json:"uri"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	MimeType    string `json:"mime_type,omitempty"`
+}
+
+// MCPPromptInfo describes a single prompt offered by an MCP server.
+type MCPPromptInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// MCPServerCapabilities is returned by the capabilities endpoint.
+type MCPServerCapabilities struct {
+	Tools     []MCPToolInfo     `json:"tools"`
+	Resources []MCPResourceInfo `json:"resources,omitempty"`
+	Prompts   []MCPPromptInfo   `json:"prompts,omitempty"`
+}
+
+// MCPOAuthStartResponse is returned when initiating an OAuth flow.
+type MCPOAuthStartResponse struct {
+	AuthURL string `json:"auth_url"`
+	State   string `json:"state"`
 }

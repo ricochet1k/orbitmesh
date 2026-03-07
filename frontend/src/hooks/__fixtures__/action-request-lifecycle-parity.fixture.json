@@ -74,41 +74,7 @@
       ],
       "reload_messages": [
         {
-          "id": "event:810:action_request",
-          "kind": "action_request",
-          "contents": "Action required (approval): Apply migration",
-          "payload": {
-            "id": "act_approve_1",
-            "kind": "approval",
-            "status": "pending",
-            "title": "Apply migration",
-            "payload": {
-              "command": "npm run db:migrate",
-              "decisions": [
-                { "value": "approve", "label": "Approve" },
-                { "value": "deny", "label": "Deny", "input": "not_safe" }
-              ]
-            }
-          },
-          "timestamp": "2026-03-04T15:10:00.000Z"
-        },
-        {
-          "id": "event:811:action_request",
-          "kind": "action_request",
-          "contents": "Action required (approval): Apply migration",
-          "payload": {
-            "id": "act_approve_1",
-            "kind": "approval",
-            "status": "approved",
-            "title": "Apply migration",
-            "payload": {
-              "decision": { "value": "approve" }
-            }
-          },
-          "timestamp": "2026-03-04T15:10:01.000Z"
-        },
-        {
-          "id": "event:812:action_request",
+          "id": "action:act_approve_1",
           "kind": "action_request",
           "contents": "Action required (approval): Apply migration",
           "payload": {
@@ -121,6 +87,7 @@
               "result": "migration applied"
             }
           },
+          "open": false,
           "timestamp": "2026-03-04T15:10:02.000Z"
         }
       ]
@@ -198,41 +165,7 @@
       ],
       "reload_messages": [
         {
-          "id": "event:820:action_request",
-          "kind": "action_request",
-          "contents": "Action required (approval): Run production script",
-          "payload": {
-            "id": "act_deny_1",
-            "kind": "approval",
-            "status": "pending",
-            "title": "Run production script",
-            "payload": {
-              "command": "./scripts/prod-cleanup.sh",
-              "decisions": [
-                { "value": "approve", "label": "Approve" },
-                { "value": "deny", "label": "Deny", "input": "not_approved" }
-              ]
-            }
-          },
-          "timestamp": "2026-03-04T15:11:00.000Z"
-        },
-        {
-          "id": "event:821:action_request",
-          "kind": "action_request",
-          "contents": "Action required (approval): Run production script",
-          "payload": {
-            "id": "act_deny_1",
-            "kind": "approval",
-            "status": "denied",
-            "title": "Run production script",
-            "payload": {
-              "decision": { "value": "deny", "input": "not_approved" }
-            }
-          },
-          "timestamp": "2026-03-04T15:11:01.000Z"
-        },
-        {
-          "id": "event:822:action_request",
+          "id": "action:act_deny_1",
           "kind": "action_request",
           "contents": "Action required (approval): Run production script",
           "payload": {
@@ -245,6 +178,7 @@
               "result": "execution skipped"
             }
           },
+          "open": false,
           "timestamp": "2026-03-04T15:11:02.000Z"
         }
       ]

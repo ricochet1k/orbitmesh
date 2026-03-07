@@ -1,7 +1,8 @@
-import { createEffect, createMemo, createResource, createSignal, on, onCleanup, untrack } from "solid-js"
+import { createEffect, createMemo, createSignal, on, onCleanup, untrack } from "solid-js"
 import type { Accessor } from "solid-js"
 import type {
   SessionState,
+  SessionMessagesPageResponse,
   SessionStreamEvent,
   TranscriptMessage,
 } from "../types/api"
@@ -26,6 +27,7 @@ import {
 } from "./sessionDataDerivedState"
 import type { SessionStreamIntel, TodoWriteState } from "./sessionDataDerivedState"
 import { createSessionStreamHistorySettleCoordinator } from "./sessionStreamHistorySettle"
+import { reportUiStabilityTrace } from "../state/uiStability"
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -151,6 +153,10 @@ export function useSessionData({
 
   // undefined = not yet ready to fetch; null = fetch latest page; number = fetch before cursor
   const [paginationCursor, setPaginationCursor] = createSignal<number | null | undefined>(undefined)
+  const [historyPage, setHistoryPage] = createSignal<SessionMessagesPageResponse | null>(null)
+  const [historyLoading, setHistoryLoading] = createSignal(false)
+  const [historyError, setHistoryError] = createSignal<string | null>(null)
+  let historyRequestID = 0
 
   const historySource = createMemo(() => {
     const id = sessionId()
@@ -159,19 +165,32 @@ export function useSessionData({
     return { id, before: cursor }
   })
 
-  const [historyPage] = createResource(
-    historySource,
-    async ({ id, before }) => {
-      const response = await apiClient.getSessionMessagesPage(id, {
+  createEffect(on(historySource, async (source) => {
+    if (!source) return
+
+    const requestID = ++historyRequestID
+    setHistoryLoading(true)
+    setHistoryError(null)
+
+    try {
+      const response = await apiClient.getSessionMessagesPage(source.id, {
         limit: 100,
-        before,
+        before: source.before,
       })
-      return response
-    },
-  )
+
+      if (requestID !== historyRequestID) return
+      setHistoryPage(response)
+    } catch (error) {
+      if (requestID !== historyRequestID) return
+      setHistoryError(error instanceof Error ? error.message : String(error))
+    } finally {
+      if (requestID === historyRequestID) {
+        setHistoryLoading(false)
+      }
+    }
+  }))
 
   const historyCursor = createMemo(() => historyPage()?.next_before ?? null)
-  const historyLoading = createMemo(() => historyPage.loading)
 
   // ── Section 3: Stream + history coordination ───────────────────────────────
 
@@ -191,8 +210,15 @@ export function useSessionData({
     // will re-run once canInspect becomes non-null.
     if (inspect === null) return
 
+    reportUiStabilityTrace("sessions/viewer/history", "session reset + stream open", {
+      session_id: id,
+      can_inspect: inspect,
+    })
+
     setMessages([])
     setPaginationCursor(undefined)
+    setHistoryPage(null)
+    setHistoryError(null)
     setStreamStatus("connecting")
     setLastEvent(null)
     setSessionIntel(createInitialSessionIntel())
@@ -214,8 +240,15 @@ export function useSessionData({
 
     if (untrack(streamStatus) !== "idle") return
 
+    reportUiStabilityTrace("sessions/viewer/history", "deferred stream open after permission resolution", {
+      session_id: id,
+      can_inspect: inspect,
+    })
+
     setMessages([])
     setPaginationCursor(undefined)
+    setHistoryPage(null)
+    setHistoryError(null)
     setStreamStatus("connecting")
     setLastEvent(null)
     setSessionIntel(createInitialSessionIntel())
@@ -224,6 +257,10 @@ export function useSessionData({
   })
 
   function openStream(id: string, inspect: boolean) {
+    reportUiStabilityTrace("sessions/viewer/history", "openStream begin", {
+      session_id: id,
+      can_inspect: inspect,
+    })
     const settleCoordinator = createSessionStreamHistorySettleCoordinator()
 
     // ── Start stream ───────────────────────────────────────────────────────
@@ -272,6 +309,9 @@ export function useSessionData({
     })
 
     const closeStream = () => {
+      reportUiStabilityTrace("sessions/viewer/history", "openStream cleanup", {
+        session_id: id,
+      })
       unsubscribeTopic()
       unsubscribeState()
       unsubscribeStatus()
@@ -288,8 +328,14 @@ export function useSessionData({
     // and mark historySettled immediately so buffered events are applied live.
     if (inspect) {
       setPaginationCursor(null)
+      reportUiStabilityTrace("sessions/viewer/history", "history initial fetch queued", {
+        session_id: id,
+      })
     } else {
       settleCoordinator.settleWithoutHistory()
+      reportUiStabilityTrace("sessions/viewer/history", "history skipped due to permissions", {
+        session_id: id,
+      })
     }
 
     // ── Watch for history page resolution ─────────────────────────────────
@@ -298,13 +344,24 @@ export function useSessionData({
     // signal changes. The outer effect's onCleanup will dispose this when
     // sessionId changes, preventing stale-session page application.
     createEffect(on(
-      () => ({ loading: historyPage.loading, page: historyPage() }),
-      ({ loading, page }) => {
-        // Skip while loading: historyPage() returns the PREVIOUS cached value
-        // during loading state (stale-while-revalidate), which would apply old
-        // session data after a session change. Only process settled pages.
+      () => ({ loading: historyLoading(), page: historyPage(), error: historyError() }),
+      ({ loading, page, error }) => {
+        // Skip while loading so we only process settled history pages.
         if (loading) return
+        if (error) {
+          reportUiStabilityTrace("sessions/viewer/history", "history fetch errored", {
+            session_id: id,
+            error: error instanceof Error ? error.message : String(error),
+          })
+          return
+        }
         if (!page) return
+        reportUiStabilityTrace("sessions/viewer/history", "history page settled", {
+          session_id: id,
+          message_count: page.messages?.length ?? 0,
+          next_before: page.next_before ?? null,
+          already_settled: settleCoordinator.isSettled(),
+        })
         const pageMessages = page.messages ?? []
         if (settleCoordinator.isSettled()) {
           // Pagination load (loadEarlier): merge older messages.
@@ -332,6 +389,10 @@ export function useSessionData({
   const loadEarlier = () => {
     const cursor = historyCursor()
     if (!cursor) return
+    reportUiStabilityTrace("sessions/viewer/history", "loadEarlier requested", {
+      session_id: sessionId(),
+      cursor,
+    })
     setPaginationCursor(cursor)
   }
 

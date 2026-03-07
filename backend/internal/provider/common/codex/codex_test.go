@@ -39,6 +39,29 @@ func TestBuildCodexCommand_CustomOverrides(t *testing.T) {
 	}
 }
 
+func TestProvider_BuildResumeMessages_FiltersAndMapsConversationHistory(t *testing.T) {
+	p := NewProvider(Config{})
+	resume := p.BuildResumeMessages([]domain.Message{
+		{ID: "u1", Kind: domain.MessageKindUser, Contents: "user asks"},
+		{ID: "p1", Kind: domain.MessageKindProgress, Contents: "tool output"},
+		{ID: "a1", Kind: domain.MessageKindOutput, Contents: "assistant replies"},
+		{ID: "e1", Kind: domain.MessageKindError, Contents: "rate limited"},
+	})
+
+	if len(resume) != 3 {
+		t.Fatalf("expected 3 mapped messages, got %d", len(resume))
+	}
+	if resume[0].Kind != session.MKUser || resume[0].Contents != "user asks" {
+		t.Fatalf("unexpected first resume message: %+v", resume[0])
+	}
+	if resume[1].Kind != session.MKAssistant || resume[1].Contents != "assistant replies" {
+		t.Fatalf("unexpected second resume message: %+v", resume[1])
+	}
+	if resume[2].Kind != session.MKSystem || resume[2].Contents != "rate limited" {
+		t.Fatalf("unexpected third resume message: %+v", resume[2])
+	}
+}
+
 func TestBuildTurnStartParams_MapsCustomFields(t *testing.T) {
 	params := buildTurnStartParams("thr_123", "hello", session.Config{
 		WorkingDir: "/tmp/work",
@@ -50,7 +73,7 @@ func TestBuildTurnStartParams_MapsCustomFields(t *testing.T) {
 			"sandbox_mode":    "workspaceWrite",
 			"network_access":  true,
 		},
-	})
+	}, false)
 
 	if params["threadId"] != "thr_123" {
 		t.Fatalf("expected threadId to be set")
@@ -74,6 +97,36 @@ func TestBuildTurnStartParams_MapsCustomFields(t *testing.T) {
 	}
 	if policy["networkAccess"] != true {
 		t.Fatalf("expected networkAccess=true")
+	}
+}
+
+func TestBuildTurnStartParams_IncludeResumeSeedOnFirstTurn(t *testing.T) {
+	params := buildTurnStartParams("thr_123", "what next?", session.Config{
+		ResumeMessages: []session.Message{
+			{Kind: session.MKUser, Contents: "Help me debug the crash"},
+			{Kind: session.MKAssistant, Contents: "The crash is from a nil pointer in worker.go"},
+		},
+	}, true)
+
+	input, ok := params["input"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected input payload array, got %T", params["input"])
+	}
+	if len(input) != 2 {
+		t.Fatalf("expected context seed + user input, got %d parts", len(input))
+	}
+	seedText, _ := input[0]["text"].(string)
+	if !strings.Contains(seedText, "Previous conversation context") {
+		t.Fatalf("expected seed preamble, got %q", seedText)
+	}
+	if !strings.Contains(seedText, "User: Help me debug the crash") {
+		t.Fatalf("expected prior user message in seed, got %q", seedText)
+	}
+	if !strings.Contains(seedText, "Assistant: The crash is from a nil pointer in worker.go") {
+		t.Fatalf("expected prior assistant message in seed, got %q", seedText)
+	}
+	if input[1]["text"] != "what next?" {
+		t.Fatalf("expected latest input to be appended as second part")
 	}
 }
 
@@ -113,9 +166,12 @@ func TestParsePlanUpdate(t *testing.T) {
 
 func TestParseDiffUpdate(t *testing.T) {
 	raw := json.RawMessage(`{"threadId":"thr_1","turnId":"turn_2","diff":"diff --git a/x b/x\n+hi"}`)
-	d := parseDiffUpdate(raw)
+	d, turnID := parseDiffUpdate(raw)
 	if d == "" {
 		t.Fatalf("expected non-empty diff")
+	}
+	if turnID != "turn_2" {
+		t.Fatalf("expected turn id turn_2, got %q", turnID)
 	}
 }
 
@@ -362,6 +418,88 @@ func TestKnownCodexNoiseDoesNotEmitUnknownEvents(t *testing.T) {
 	assertNoUnknown("item/started", json.RawMessage(`{
 	  "item": {"type": "fileChange", "id": "call_legacy", "status": "inProgress"}
 	}`))
+}
+
+func TestSemanticCanonicalization_TableDriven(t *testing.T) {
+	tests := []struct {
+		name             string
+		notify           func(p *CodexProvider)
+		expectedCounts   map[domain.EventType]int
+		expectedUnknowns int
+	}{
+		{
+			name: "reasoning done emits once across dual formats",
+			notify: func(p *CodexProvider) {
+				p.handleNotification("codex/event/agent_reasoning", json.RawMessage(`{"msg":{"item_id":"rs_1","text":"done"}}`), nil)
+				p.handleNotification("item/completed", json.RawMessage(`{"item":{"type":"reasoning","id":"rs_1","summary":[],"content":[]}}`), nil)
+			},
+			expectedCounts: map[domain.EventType]int{
+				domain.EventTypeProgress: 1,
+			},
+		},
+		{
+			name: "turn diff dual formats collapse to one artifact",
+			notify: func(p *CodexProvider) {
+				p.handleNotification("codex/event/turn_diff", json.RawMessage(`{"msg":{"turn_id":"turn_1","unified_diff":"diff --git a/x b/x\n+hi"}}`), nil)
+				p.handleNotification("turn/diff/updated", json.RawMessage(`{"turnId":"turn_1","diff":"diff --git a/x b/x\n+hi"}`), nil)
+			},
+			expectedCounts: map[domain.EventType]int{
+				domain.EventTypeArtifactUpdate: 1,
+			},
+		},
+		{
+			name: "file change lifecycle prefers codex format",
+			notify: func(p *CodexProvider) {
+				p.handleNotification("codex/event/patch_apply_begin", json.RawMessage(`{"msg":{"call_id":"call_fc_1","turn_id":"turn_1","changes":{}}}`), nil)
+				p.handleNotification("item/started", json.RawMessage(`{"item":{"type":"fileChange","id":"call_fc_1","status":"inProgress","changes":[]}}`), nil)
+				p.handleNotification("codex/event/patch_apply_end", json.RawMessage(`{"msg":{"call_id":"call_fc_1","turn_id":"turn_1","changes":{},"success":true}}`), nil)
+				p.handleNotification("item/completed", json.RawMessage(`{"item":{"type":"fileChange","id":"call_fc_1","status":"completed","changes":[]}}`), nil)
+				p.handleNotification("item/fileChange/outputDelta", json.RawMessage(`{"itemId":"call_fc_1","delta":"done\n"}`), nil)
+			},
+			expectedCounts: map[domain.EventType]int{
+				domain.EventTypeArtifactUpdate: 2,
+				domain.EventTypeProgress:       1,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := NewCodexProvider("sess_semantic", Config{})
+			tc.notify(p)
+
+			events := collectProviderEvents(p)
+			counts := make(map[domain.EventType]int)
+			unknowns := 0
+			for _, ev := range events {
+				counts[ev.Type]++
+				if ev.Type == domain.EventTypeUnknown {
+					unknowns++
+				}
+			}
+
+			for typ, want := range tc.expectedCounts {
+				if got := counts[typ]; got != want {
+					t.Fatalf("expected %d %s event(s), got %d (all counts=%v)", want, typ, got, counts)
+				}
+			}
+			if unknowns != tc.expectedUnknowns {
+				t.Fatalf("expected %d unknown event(s), got %d", tc.expectedUnknowns, unknowns)
+			}
+		})
+	}
+}
+
+func collectProviderEvents(p *CodexProvider) []domain.Event {
+	events := make([]domain.Event, 0, 8)
+	for {
+		select {
+		case ev := <-p.events.Events():
+			events = append(events, ev)
+		default:
+			return events
+		}
+	}
 }
 
 func TestHandleNotification_CodexPlanUpdateEmitsPlanEvent(t *testing.T) {

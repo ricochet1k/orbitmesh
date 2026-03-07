@@ -77,10 +77,10 @@ type ClaudeWSProvider struct {
 	starting bool
 	started  bool
 
-	// turnActive and turnBoundaryCh track whether a Claude turn is currently
-	// executing. turnBoundaryCh is replaced for each turn and closed when that
-	// turn's result message arrives. Both are guarded by mu.
-	turnActive    bool
+	// turnInFlight and turnBoundaryCh track whether Claude has any in-flight
+	// turn. turnBoundaryCh is created when the first in-flight turn starts and is
+	// closed once the last in-flight turn completes. Both are guarded by mu.
+	turnInFlight   int
 	turnBoundaryCh chan struct{}
 
 	stderrMu   sync.Mutex
@@ -101,6 +101,8 @@ type pendingPermission struct {
 	cancelReason string
 	cancel       context.CancelFunc
 	done         bool
+	toolReq      CanUseToolRequest
+	raw          []byte
 }
 
 type toolCallContext struct {
@@ -161,6 +163,82 @@ func (p *ClaudeWSProvider) SendInput(ctx context.Context, config session.Config,
 		return nil, err
 	}
 	return p.events.Events(), nil
+}
+
+// RespondAction handles UI approval responses for pending can_use_tool requests.
+func (p *ClaudeWSProvider) RespondAction(_ context.Context, _ session.Config, response session.ActionResponse) (<-chan domain.Event, error) {
+	requestID := strings.TrimSpace(response.ActionID)
+	if requestID == "" {
+		return nil, fmt.Errorf("claudews action response requires action_id")
+	}
+
+	pending, ok := p.resolvePendingPermission(requestID)
+	if !ok {
+		return nil, fmt.Errorf("no pending permission request for action_id %q", requestID)
+	}
+
+	pending.cancelMu.Lock()
+	pending.cancelReason = "permission request resolved by action response"
+	pending.cancelMu.Unlock()
+	pending.cancel()
+
+	decision := strings.ToLower(strings.TrimSpace(response.Decision))
+	if decision == "" {
+		decision = strings.ToLower(strings.TrimSpace(response.Input))
+	}
+
+	if isApproveDecision(decision) {
+		_ = p.sendWS(p.wsConn, AllowResponse(requestID, pending.toolReq.Input))
+		p.emitPermissionActionRequest(requestID, pending.toolReq, "approved", "approved by user", pending.raw)
+		return p.events.Events(), nil
+	}
+
+	reason := "denied by user"
+	if input := strings.TrimSpace(response.Input); input != "" && !isApproveDecision(strings.ToLower(input)) && !isRejectDecision(strings.ToLower(input)) {
+		reason = input
+	}
+	if isAllowAlwaysDecision(decision) {
+		_ = p.sendWS(p.wsConn, AllowResponseWithPermissions(requestID, pending.toolReq.Input, pending.toolReq.PermissionSuggestions))
+		p.emitPermissionActionRequest(requestID, pending.toolReq, "approved", "approved and saved as rule", pending.raw)
+		return p.events.Events(), nil
+	}
+	_ = p.sendWS(p.wsConn, DenyResponse(requestID, reason))
+	p.emitPermissionActionRequest(requestID, pending.toolReq, "rejected", reason, pending.raw)
+	return p.events.Events(), nil
+}
+
+func isApproveDecision(decision string) bool {
+	switch strings.TrimSpace(strings.ToLower(decision)) {
+	case "accept", "accepted", "approve", "approved", "allow", "allowed", "yes", "y", "true", "1":
+		return true
+	default:
+		return false
+	}
+}
+
+func isRejectDecision(decision string) bool {
+	switch strings.TrimSpace(strings.ToLower(decision)) {
+	case "reject", "rejected", "deny", "denied", "block", "blocked", "no", "n", "false", "0":
+		return true
+	default:
+		return false
+	}
+}
+
+func isAllowAlwaysDecision(decision string) bool {
+	switch strings.TrimSpace(strings.ToLower(decision)) {
+	case "allow_always", "always_allow", "allow-always":
+		return true
+	default:
+		return false
+	}
+}
+
+type manualPermissionHandler struct{}
+
+func (manualPermissionHandler) RequestPermission(ctx context.Context, _ tools.PermissionRequest) (tools.PermissionDecision, error) {
+	<-ctx.Done()
+	return tools.PermissionDecision{Granted: false}, ctx.Err()
 }
 
 // start launches the WebSocket server and the Claude subprocess.
@@ -335,11 +413,11 @@ func (p *ClaudeWSProvider) start(ctx context.Context, config session.Config) (er
 // is active it returns immediately.
 func (p *ClaudeWSProvider) DrainAtTurnBoundary(ctx context.Context) error {
 	p.mu.RLock()
-	active := p.turnActive
+	inFlight := p.turnInFlight
 	ch := p.turnBoundaryCh
 	p.mu.RUnlock()
 
-	if !active || ch == nil {
+	if inFlight <= 0 || ch == nil {
 		return nil
 	}
 	select {
@@ -743,24 +821,13 @@ func (p *ClaudeWSProvider) handleAssistantMsg(rm RawMessage) {
 					continue
 				}
 				p.events.Emit(domain.NewThoughtEvent(p.sessionID, thinking, rm.Raw))
-				p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
-					Channel:  "reasoning",
-					StreamID: "claudews_reasoning",
-					Content:  thinking,
-					Status:   "running",
-				}, rm.Raw))
 			case "text":
 				text, _ := block["text"].(string)
 				text = strings.TrimSpace(text)
 				if text == "" {
 					continue
 				}
-				p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
-					Channel:  "assistant",
-					StreamID: "claudews_assistant",
-					Content:  text,
-					Status:   "running",
-				}, rm.Raw))
+				p.emitEvent(domain.NewDeltaOutputEvent(p.sessionID, text, rm.Raw), rm.Raw)
 			}
 		}
 	}
@@ -932,6 +999,9 @@ func (p *ClaudeWSProvider) handleResultMsg(rm RawMessage) {
 	p.mu.RLock()
 	turnIndex := p.turnSeq
 	p.mu.RUnlock()
+	if msg.NumTurns > 0 {
+		turnIndex = msg.NumTurns
+	}
 
 	// Emit final token metrics.
 	if msg.Usage.InputTokens > 0 || msg.Usage.OutputTokens > 0 {
@@ -968,11 +1038,16 @@ func (p *ClaudeWSProvider) handleResultMsg(rm RawMessage) {
 	}
 	p.events.Emit(domain.NewStatusChangeEvent(p.sessionID, domain.SessionStateRunning, domain.SessionStateIdle, reason, rm.Raw))
 
-	// Signal any DrainAtTurnBoundary waiter that the turn is done.
+	// Signal any DrainAtTurnBoundary waiter once all in-flight turns are done.
 	p.mu.Lock()
-	ch := p.turnBoundaryCh
-	p.turnActive = false
-	p.turnBoundaryCh = nil
+	var ch chan struct{}
+	if p.turnInFlight > 0 {
+		p.turnInFlight--
+	}
+	if p.turnInFlight == 0 {
+		ch = p.turnBoundaryCh
+		p.turnBoundaryCh = nil
+	}
 	p.mu.Unlock()
 	if ch != nil {
 		close(ch)
@@ -1056,23 +1131,18 @@ func (p *ClaudeWSProvider) handleCanUseTool(req ControlRequest, raw []byte) {
 		return
 	}
 
-	// Emit the permission request as a metadata event so callers can observe it.
-	p.emitToolCall(domain.ToolCallData{
-		ID:     req.RequestID,
-		Name:   toolReq.ToolName,
-		Status: "permission_request",
-		Title:  "tool permission request",
-		Input:  toolReq.Input,
-	}, raw)
+	// Emit a provider-agnostic approval request event so the UI can render
+	// permission hints consistently across providers.
+	p.emitPermissionActionRequest(req.RequestID, toolReq, "pending", "", raw)
 
 	handler := p.permHandler
 	if handler == nil {
-		handler = tools.AutoApprovePermissionHandler{}
+		handler = manualPermissionHandler{}
 	}
 
 	timeout := p.permissionRequestTimeout()
 	permCtx, cancel := context.WithTimeout(p.ctx, timeout)
-	pending := &pendingPermission{cancel: cancel}
+	pending := &pendingPermission{cancel: cancel, toolReq: toolReq, raw: append([]byte(nil), raw...)}
 	p.setPendingPermission(req.RequestID, pending)
 
 	p.wg.Go(func() {
@@ -1112,22 +1182,12 @@ func (p *ClaudeWSProvider) handleCanUseTool(req ControlRequest, raw []byte) {
 					}
 				}
 				_ = p.sendWS(p.wsConn, DenyResponse(req.RequestID, reason))
-				p.emitToolCall(domain.ToolCallData{
-					ID:     req.RequestID,
-					Name:   toolReq.ToolName,
-					Status: "permission_denied",
-					Title:  reason,
-				}, raw)
+				p.emitPermissionActionRequest(req.RequestID, toolReq, "rejected", reason, raw)
 				return
 			}
 
 			_ = p.sendWS(p.wsConn, AllowResponse(req.RequestID, toolReq.Input))
-			p.emitToolCall(domain.ToolCallData{
-				ID:     req.RequestID,
-				Name:   toolReq.ToolName,
-				Status: "permission_granted",
-				Title:  "tool permission granted",
-			}, raw)
+			p.emitPermissionActionRequest(req.RequestID, toolReq, "approved", "", raw)
 
 		case <-permCtx.Done():
 			if !p.completePendingPermission(req.RequestID, pending) {
@@ -1142,14 +1202,63 @@ func (p *ClaudeWSProvider) handleCanUseTool(req ControlRequest, raw []byte) {
 				}
 			}
 			_ = p.sendWS(p.wsConn, DenyResponse(req.RequestID, reason))
-			p.emitToolCall(domain.ToolCallData{
-				ID:     req.RequestID,
-				Name:   toolReq.ToolName,
-				Status: "permission_denied",
-				Title:  reason,
-			}, raw)
+			p.emitPermissionActionRequest(req.RequestID, toolReq, "rejected", reason, raw)
 		}
 	})
+}
+
+func (p *ClaudeWSProvider) emitPermissionActionRequest(requestID string, toolReq CanUseToolRequest, status string, outcome string, raw []byte) {
+	actionID := requestID
+
+	requestPayload := map[string]any{
+		"id":         strings.TrimSpace(toolReq.ToolUseID),
+		"request_id": requestID,
+		"tool_name":  toolReq.ToolName,
+		"input":      toolReq.Input,
+	}
+
+	hint := strings.TrimSpace(toolReq.Hint)
+	if hint != "" {
+		requestPayload["hint"] = hint
+		requestPayload["reason"] = hint
+	}
+	if desc := strings.TrimSpace(toolReq.Description); desc != "" {
+		requestPayload["description"] = desc
+		if _, hasReason := requestPayload["reason"]; !hasReason {
+			requestPayload["reason"] = desc
+		}
+	}
+	if decisionReason := strings.TrimSpace(toolReq.DecisionReason); decisionReason != "" {
+		requestPayload["decision_reason"] = decisionReason
+	}
+	if blockedPath := strings.TrimSpace(toolReq.BlockedPath); blockedPath != "" {
+		requestPayload["blocked_path"] = blockedPath
+	}
+	if outcome = strings.TrimSpace(outcome); outcome != "" {
+		requestPayload["outcome"] = outcome
+	}
+
+	p.events.Emit(domain.NewActionRequestEvent(p.sessionID, domain.ActionRequestData{
+		ID:     actionID,
+		Kind:   "approval",
+		Title:  fmt.Sprintf("Tool permission request: %s", toolReq.ToolName),
+		Status: status,
+		Payload: map[string]any{
+			"request":   requestPayload,
+			"decisions": permissionDecisions(toolReq),
+		},
+	}, raw))
+}
+
+func permissionDecisions(toolReq CanUseToolRequest) []map[string]string {
+	decisions := []map[string]string{
+		{"value": "accept", "label": "Accept"},
+		{"value": "reject", "label": "Reject"},
+	}
+	if len(toolReq.PermissionSuggestions) > 0 {
+		decisions = append(decisions, map[string]string{"value": "allow_always", "label": "Allow Always"})
+	}
+	return decisions
 }
 
 func (p *ClaudeWSProvider) handleControlCancelRequest(rm RawMessage) {
@@ -1241,12 +1350,6 @@ func (p *ClaudeWSProvider) handleToolUseSummary(rm RawMessage) {
 	}
 	if v.Summary != "" {
 		p.events.Emit(domain.NewThoughtEvent(p.sessionID, v.Summary, rm.Raw))
-		p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
-			Channel:  "reasoning",
-			StreamID: "claudews_reasoning",
-			Content:  v.Summary,
-			Status:   "running",
-		}, rm.Raw))
 	}
 }
 
@@ -1276,12 +1379,6 @@ func (p *ClaudeWSProvider) handleStreamlinedToolUseSummary(rm RawMessage) {
 		return
 	}
 	p.events.Emit(domain.NewThoughtEvent(p.sessionID, v.ToolSummary, rm.Raw))
-	p.events.Emit(domain.NewProgressEvent(p.sessionID, domain.ProgressData{
-		Channel:  "reasoning",
-		StreamID: "claudews_reasoning",
-		Content:  v.ToolSummary,
-		Status:   "running",
-	}, rm.Raw))
 }
 
 func (p *ClaudeWSProvider) handleAuthStatus(rm RawMessage) {
@@ -1330,8 +1427,10 @@ func (p *ClaudeWSProvider) processInput() {
 			isFirstTurn := firstUserMessage
 			p.mu.Lock()
 			p.turnSeq++
-			p.turnActive = true
-			p.turnBoundaryCh = make(chan struct{})
+			if p.turnInFlight == 0 || p.turnBoundaryCh == nil {
+				p.turnBoundaryCh = make(chan struct{})
+			}
+			p.turnInFlight++
 			p.mu.Unlock()
 
 			p.mu.RLock()
@@ -1451,6 +1550,18 @@ func (p *ClaudeWSProvider) completePendingPermission(requestID string, pending *
 	current.done = true
 	delete(p.pendingPerm, requestID)
 	return true
+}
+
+func (p *ClaudeWSProvider) resolvePendingPermission(requestID string) (*pendingPermission, bool) {
+	p.pendingPermMu.Lock()
+	defer p.pendingPermMu.Unlock()
+	pending, ok := p.pendingPerm[requestID]
+	if !ok || pending.done {
+		return nil, false
+	}
+	pending.done = true
+	delete(p.pendingPerm, requestID)
+	return pending, true
 }
 
 func (p *ClaudeWSProvider) cancelPendingPermission(requestID, reason string) bool {
@@ -1911,9 +2022,8 @@ func (p *ClaudeWSProvider) emitEvent(event domain.Event, raw []byte) {
 	case domain.EventTypeOutput:
 		if data, ok := event.Output(); ok {
 			p.state.SetOutput(data.Content)
-			// Preserve IsDelta flag via the appropriate constructor.
 			if data.IsDelta {
-				p.events.Emit(domain.NewMetadataEvent(p.sessionID, "delta_output", map[string]any{"content": data.Content}, raw))
+				p.events.Emit(domain.NewDeltaOutputEvent(p.sessionID, data.Content, raw))
 			} else {
 				p.events.Emit(domain.NewOutputEvent(p.sessionID, data.Content, raw))
 			}

@@ -1199,6 +1199,146 @@ func TestRebuildSessionMessages_SessionID(t *testing.T) {
 	}
 }
 
+func TestRebuildSessionMessages_SuppressesPermissionEchoAndProgressDuplicates(t *testing.T) {
+	ts := time.Now().UTC()
+	pendingPayload := map[string]any{
+		"id":     "req-1",
+		"kind":   "approval",
+		"status": "pending",
+		"payload": map[string]any{
+			"request": map[string]any{
+				"request_id": "req-1",
+				"tool_name":  "Edit",
+			},
+		},
+	}
+	approvedPayload := map[string]any{
+		"id":     "req-1",
+		"kind":   "approval",
+		"status": "approved",
+		"payload": map[string]any{
+			"request": map[string]any{
+				"request_id": "req-1",
+				"tool_name":  "Edit",
+			},
+		},
+	}
+	reasoningPayload := map[string]any{
+		"channel": "reasoning",
+		"content": "Let me inspect the file first",
+	}
+
+	pendingRaw, _ := json.Marshal(pendingPayload)
+	approvedRaw, _ := json.Marshal(approvedPayload)
+	reasoningRaw, _ := json.Marshal(reasoningPayload)
+
+	records := []MessageLogRecord{
+		{Seq: 1, Timestamp: ts, Projection: MessageProjectionAppendRaw, Kind: domain.MessageKindThought, Contents: "Let me inspect the file first"},
+		{Seq: 2, Timestamp: ts.Add(time.Second), Projection: MessageProjectionAppendRaw, Kind: domain.MessageKindProgress, Contents: "reasoning: Let me inspect the file first", Payload: reasoningRaw},
+		{Seq: 3, Timestamp: ts.Add(2 * time.Second), Projection: MessageProjectionAppendRaw, Kind: domain.MessageKindActionRequest, Contents: "action_request(approval): Tool permission request: Edit", Payload: pendingRaw},
+		{Seq: 4, Timestamp: ts.Add(3 * time.Second), Projection: MessageProjectionAppendRaw, Kind: domain.MessageKindActionRequest, Contents: "action_request(approval): Tool permission request: Edit", Payload: approvedRaw},
+		{Seq: 5, Timestamp: ts.Add(4 * time.Second), Projection: MessageProjectionAppendRaw, Kind: domain.MessageKindToolUse, Contents: "Edit: req-1"},
+	}
+
+	sm := RebuildSessionMessages("sess-dedup", records)
+	msgs := sm.GetMessages()
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages (thought + action_request), got %d: %+v", len(msgs), msgs)
+	}
+	if msgs[0].Kind != domain.MessageKindThought {
+		t.Fatalf("expected first message thought, got %q", msgs[0].Kind)
+	}
+	if msgs[1].Kind != domain.MessageKindActionRequest {
+		t.Fatalf("expected second message action_request, got %q", msgs[1].Kind)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(msgs[1].Payload, &payload); err != nil {
+		t.Fatalf("unmarshal action payload: %v", err)
+	}
+	if status, _ := payload["status"].(string); status != "approved" {
+		t.Fatalf("expected approved status, got %q", status)
+	}
+}
+
+func TestRebuildSessionMessages_SemanticSupersede_TableDriven(t *testing.T) {
+	ts := time.Now().UTC()
+
+	tests := []struct {
+		name         string
+		records      []MessageLogRecord
+		expectKind   domain.MessageKind
+		expectCount  int
+		expectStatus string
+	}{
+		{
+			name: "action request pending then approved collapses",
+			records: []MessageLogRecord{
+				{Seq: 1, Timestamp: ts, Projection: MessageProjectionAppendRaw, Kind: domain.MessageKindActionRequest, Contents: "action_request(approval): Tool permission request: Read", Payload: mustJSON(t, map[string]any{"id": "req-a", "status": "pending", "payload": map[string]any{"request": map[string]any{"request_id": "req-a"}}})},
+				{Seq: 2, Timestamp: ts.Add(time.Second), Projection: MessageProjectionAppendRaw, Kind: domain.MessageKindActionRequest, Contents: "action_request(approval): Tool permission request: Read", Payload: mustJSON(t, map[string]any{"id": "req-a", "status": "approved", "payload": map[string]any{"request": map[string]any{"request_id": "req-a"}}})},
+			},
+			expectKind:   domain.MessageKindActionRequest,
+			expectCount:  1,
+			expectStatus: "approved",
+		},
+		{
+			name: "turn diff variants collapse by semantic diff",
+			records: []MessageLogRecord{
+				{Seq: 1, Timestamp: ts, Projection: MessageProjectionAppendRaw, Kind: domain.MessageKindArtifactUpdate, Contents: "artifact_update(turn_diff): Turn diff updated", Payload: mustJSON(t, map[string]any{"kind": "turn_diff", "payload": map[string]any{"diff": "diff --git a/x b/x\n+hi"}}), Raw: mustJSON(t, map[string]any{"method": "codex/event/turn_diff", "params": map[string]any{"msg": map[string]any{"turn_id": "turn-1", "unified_diff": "diff --git a/x b/x\n+hi"}}})},
+				{Seq: 2, Timestamp: ts.Add(time.Second), Projection: MessageProjectionAppendRaw, Kind: domain.MessageKindArtifactUpdate, Contents: "artifact_update(turn_diff): Turn diff updated", Payload: mustJSON(t, map[string]any{"kind": "turn_diff", "payload": map[string]any{"diff": "diff --git a/x b/x\n+hi"}}), Raw: mustJSON(t, map[string]any{"method": "turn/diff/updated", "params": map[string]any{"turnId": "turn-1", "diff": "diff --git a/x b/x\n+hi"}})},
+			},
+			expectKind:  domain.MessageKindArtifactUpdate,
+			expectCount: 1,
+		},
+		{
+			name: "unknown duplicates collapse by stable content",
+			records: []MessageLogRecord{
+				{Seq: 1, Timestamp: ts, Projection: MessageProjectionAppendRaw, Kind: domain.MessageKindSystem, Contents: "unknown(codex/event/turn_diff): Unhandled provider notification {...}"},
+				{Seq: 2, Timestamp: ts.Add(time.Second), Projection: MessageProjectionAppendRaw, Kind: domain.MessageKindSystem, Contents: "unknown(codex/event/turn_diff): Unhandled provider notification {...}"},
+			},
+			expectKind:  domain.MessageKindSystem,
+			expectCount: 1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sm := RebuildSessionMessages("sess-semantic", tc.records)
+			msgs := sm.GetMessages()
+			count := 0
+			var last domain.Message
+			for _, msg := range msgs {
+				if msg.Kind != tc.expectKind {
+					continue
+				}
+				count++
+				last = msg
+			}
+			if count != tc.expectCount {
+				t.Fatalf("expected %d %s message(s), got %d: %+v", tc.expectCount, tc.expectKind, count, msgs)
+			}
+			if tc.expectStatus != "" {
+				var payload map[string]any
+				if err := json.Unmarshal(last.Payload, &payload); err != nil {
+					t.Fatalf("unmarshal payload: %v", err)
+				}
+				if status, _ := payload["status"].(string); status != tc.expectStatus {
+					t.Fatalf("expected status %q, got %q", tc.expectStatus, status)
+				}
+			}
+		})
+	}
+}
+
+func mustJSON(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	b, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal json: %v", err)
+	}
+	return b
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // LogCorruptionError sentinel check (not swallowed by Load)
 // ────────────────────────────────────────────────────────────────────────────

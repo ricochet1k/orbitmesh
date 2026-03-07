@@ -1184,7 +1184,7 @@ func readMessageLogRecordsFromDisk(t *testing.T, dir, sessionID string) []storag
 	return records
 }
 
-func TestAgentExecutor_SendMessage_DuringDrain_ReturnsShutdown(t *testing.T) {
+func TestAgentExecutor_SendMessage_DuringDrain_WithoutDeferredStorageReturnsShutdown(t *testing.T) {
 	prov := newMockProvider()
 	executor, _ := createTestExecutor(prov)
 	defer executor.Shutdown(context.Background())
@@ -1199,13 +1199,15 @@ func TestAgentExecutor_SendMessage_DuringDrain_ReturnsShutdown(t *testing.T) {
 
 	executor.sessionRuns.BeginDrain(context.Background())
 
+	// Without SessionStartDeferredStorage configured, drain falls back to
+	// explicit shutdown rejection.
 	_, err := executor.SendMessage(context.Background(), "drain-send", "hello", "", "")
 	if !errors.Is(err, ErrExecutorShutdown) {
 		t.Fatalf("expected ErrExecutorShutdown, got %v", err)
 	}
 }
 
-func TestAgentExecutor_ResumeSession_DuringDrain_ReturnsShutdown(t *testing.T) {
+func TestAgentExecutor_ResumeSession_DuringDrain_WithoutTokenReturnsShutdown(t *testing.T) {
 	prov := newMockProvider()
 	executor, _ := createTestExecutor(prov)
 	defer executor.Shutdown(context.Background())
@@ -1220,10 +1222,258 @@ func TestAgentExecutor_ResumeSession_DuringDrain_ReturnsShutdown(t *testing.T) {
 
 	executor.sessionRuns.BeginDrain(context.Background())
 
+	// Manual ResumeSession (without token command envelope) remains reject-only
+	// during drain.
 	_, err := executor.ResumeSession(context.Background(), "drain-resume")
 	if !errors.Is(err, ErrExecutorShutdown) {
 		t.Fatalf("expected ErrExecutorShutdown, got %v", err)
 	}
+}
+
+func TestAgentExecutor_SendMessage_DuringDrain_DefersDurablyAndReplaysOnStartup(t *testing.T) {
+	store := newMockStorage()
+	deferredStore := storage.NewJSONStore[entity.DeferredOpEnvelope](
+		t.TempDir(),
+		func(s entity.DeferredOpEnvelope) string { return s.EnvelopeID },
+	)
+	broadcaster := NewEventBroadcaster(100)
+
+	prov1 := newMockProvider()
+	executor1 := NewAgentExecutor(ExecutorConfig{
+		Storage:                     store,
+		Broadcaster:                 broadcaster,
+		OperationTimeout:            5 * time.Second,
+		SessionStartDeferredStorage: deferredStore,
+		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
+			return prov1, nil
+		},
+	})
+	defer executor1.Shutdown(context.Background())
+
+	config := session.Config{ProviderType: "test", WorkingDir: "/tmp/test"}
+	if _, err := executor1.StartSession(context.Background(), "defer-replay", config); err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	executor1.sessionRuns.BeginDrain(context.Background())
+	if _, err := executor1.SendMessage(context.Background(), "defer-replay", "hello deferred", "", ""); err != nil {
+		t.Fatalf("expected deferred send to succeed, got %v", err)
+	}
+
+	envs, err := deferredStore.List()
+	if err != nil {
+		t.Fatalf("deferredStore.List: %v", err)
+	}
+	if len(envs) != 1 {
+		t.Fatalf("expected 1 deferred envelope, got %d", len(envs))
+	}
+
+	prov2 := newMockProvider()
+	executor2 := NewAgentExecutor(ExecutorConfig{
+		Storage:                     store,
+		Broadcaster:                 broadcaster,
+		OperationTimeout:            5 * time.Second,
+		SessionStartDeferredStorage: deferredStore,
+		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
+			return prov2, nil
+		},
+	})
+	defer executor2.Shutdown(context.Background())
+
+	if err := executor2.Startup(context.Background()); err != nil {
+		t.Fatalf("startup replay failed: %v", err)
+	}
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		envs, err = deferredStore.List()
+		if err != nil {
+			t.Fatalf("deferredStore.List after replay: %v", err)
+		}
+		if len(envs) == 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(envs) != 0 {
+		t.Fatalf("expected deferred queue to be empty after replay, got %d", len(envs))
+	}
+}
+
+func TestAgentExecutor_ToolResultsResume_DuringDrain_DefersDurably(t *testing.T) {
+	store := newMockStorage()
+	deferredStore := storage.NewJSONStore[entity.DeferredOpEnvelope](
+		t.TempDir(),
+		func(s entity.DeferredOpEnvelope) string { return s.EnvelopeID },
+	)
+	broadcaster := NewEventBroadcaster(100)
+
+	prov := newMockProvider()
+	executor := NewAgentExecutor(ExecutorConfig{
+		Storage:                     store,
+		Broadcaster:                 broadcaster,
+		OperationTimeout:            5 * time.Second,
+		SessionStartDeferredStorage: deferredStore,
+		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
+			return prov, nil
+		},
+	})
+	defer executor.Shutdown(context.Background())
+
+	config := session.Config{ProviderType: "test", WorkingDir: "/tmp/test"}
+	sess, err := executor.StartSession(context.Background(), "defer-tool-results", config)
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	executor.sessionRuns.BeginDrain(context.Background())
+	result := executor.submitSessionStartCommand(context.Background(), SessionStartCommand{
+		Kind:    SessionStartCommandToolResultsResume,
+		Session: sess,
+		RawID:   sess.ID,
+		Results: []session.ToolResult{{ToolCallID: "tc1", Result: "ok"}},
+		State:   sess.GetState(),
+	})
+	if result.Err != nil {
+		t.Fatalf("expected deferred tool-results admission, got err=%v", result.Err)
+	}
+	if !result.Deferred {
+		t.Fatal("expected tool-results resume command to be deferred")
+	}
+
+	envs, err := deferredStore.List()
+	if err != nil {
+		t.Fatalf("deferredStore.List: %v", err)
+	}
+	if len(envs) != 1 {
+		t.Fatalf("expected 1 deferred envelope, got %d", len(envs))
+	}
+}
+
+func TestAgentExecutor_StartRunWithMessage_DuringDrain_DefersOnAdmissionRace(t *testing.T) {
+	store := newMockStorage()
+	deferredStore := storage.NewJSONStore[entity.DeferredOpEnvelope](
+		t.TempDir(),
+		func(s entity.DeferredOpEnvelope) string { return s.EnvelopeID },
+	)
+	broadcaster := NewEventBroadcaster(100)
+
+	prov := newMockProvider()
+	executor := NewAgentExecutor(ExecutorConfig{
+		Storage:                     store,
+		Broadcaster:                 broadcaster,
+		OperationTimeout:            5 * time.Second,
+		SessionStartDeferredStorage: deferredStore,
+		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
+			return prov, nil
+		},
+	})
+	defer executor.Shutdown(context.Background())
+
+	config := session.Config{ProviderType: "test", WorkingDir: "/tmp/test"}
+	sess, err := executor.StartSession(context.Background(), "defer-race", config)
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	executor.sessionRuns.BeginDrain(context.Background())
+	if _, deferred, err := executor.startRunWithMessage(context.Background(), sess.ID, sess, "hello race", SendMessageOptions{}); err != nil || !deferred {
+		t.Fatalf("expected deferred startRunWithMessage result, deferred=%v err=%v", deferred, err)
+	}
+
+	admission := executor.submitSessionStartCommand(context.Background(), SessionStartCommand{
+		Kind:    SessionStartCommandMessage,
+		Session: sess,
+		RawID:   sess.ID,
+		Content: "hello race",
+		State:   sess.GetState(),
+	})
+	if admission.Err != nil || !admission.Deferred {
+		t.Fatalf("expected submitSessionStartCommand to defer after race, result=%+v", admission)
+	}
+
+	envs, err := deferredStore.List()
+	if err != nil {
+		t.Fatalf("deferredStore.List: %v", err)
+	}
+	if len(envs) != 1 {
+		t.Fatalf("expected 1 deferred envelope, got %d", len(envs))
+	}
+}
+
+func TestSessionStartAdmissionPolicy_Table(t *testing.T) {
+	newExecutor := func(t *testing.T) (*AgentExecutor, *domain.Session) {
+		t.Helper()
+		store := newMockStorage()
+		deferredStore := storage.NewJSONStore[entity.DeferredOpEnvelope](
+			t.TempDir(),
+			func(s entity.DeferredOpEnvelope) string { return s.EnvelopeID },
+		)
+		exec := NewAgentExecutor(ExecutorConfig{
+			Storage:                     store,
+			Broadcaster:                 NewEventBroadcaster(100),
+			OperationTimeout:            5 * time.Second,
+			SessionStartDeferredStorage: deferredStore,
+			ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
+				return newMockProvider(), nil
+			},
+		})
+		t.Cleanup(func() { _ = exec.Shutdown(context.Background()) })
+		sess, err := exec.StartSession(context.Background(), "policy-table", session.Config{ProviderType: "test", WorkingDir: "/tmp"})
+		if err != nil {
+			t.Fatalf("StartSession: %v", err)
+		}
+		return exec, sess
+	}
+
+	t.Run("draining", func(t *testing.T) {
+		exec, sess := newExecutor(t)
+		exec.sessionRuns.BeginDrain(context.Background())
+
+		cases := []struct {
+			name     string
+			cmd      SessionStartCommand
+			wantErr  error
+			deferred bool
+		}{
+			{name: "message", cmd: SessionStartCommand{Kind: SessionStartCommandMessage, Session: sess, RawID: sess.ID, Content: "hi", State: sess.GetState()}, deferred: true},
+			{name: "resume_token", cmd: SessionStartCommand{Kind: SessionStartCommandResume, Session: sess, RawID: sess.ID, TokenID: "tok", State: sess.GetState()}, deferred: true},
+			{name: "resume_manual", cmd: SessionStartCommand{Kind: SessionStartCommandResume, Session: sess, RawID: sess.ID, State: sess.GetState()}, wantErr: ErrExecutorShutdown},
+			{name: "tool_results", cmd: SessionStartCommand{Kind: SessionStartCommandToolResultsResume, Session: sess, RawID: sess.ID, Results: []session.ToolResult{{ToolCallID: "tc", Result: "ok"}}, State: sess.GetState()}, deferred: true},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				res := exec.submitSessionStartCommand(context.Background(), tc.cmd)
+				if tc.wantErr != nil {
+					if !errors.Is(res.Err, tc.wantErr) {
+						t.Fatalf("err=%v want=%v", res.Err, tc.wantErr)
+					}
+					return
+				}
+				if res.Err != nil {
+					t.Fatalf("unexpected err: %v", res.Err)
+				}
+				if res.Deferred != tc.deferred {
+					t.Fatalf("deferred=%v want=%v", res.Deferred, tc.deferred)
+				}
+			})
+		}
+	})
+
+	t.Run("running", func(t *testing.T) {
+		exec, sess := newExecutor(t)
+		cases := []SessionStartCommand{
+			{Kind: SessionStartCommandResume, Session: sess, RawID: sess.ID, TokenID: "tok", State: sess.GetState()},
+			{Kind: SessionStartCommandToolResultsResume, Session: sess, RawID: sess.ID, Results: []session.ToolResult{{ToolCallID: "tc", Result: "ok"}}, State: sess.GetState()},
+		}
+		for _, cmd := range cases {
+			res := exec.submitSessionStartCommand(context.Background(), cmd)
+			if res.Err != nil || res.Deferred {
+				t.Fatalf("expected admitted command kind=%s res=%+v", cmd.Kind, res)
+			}
+		}
+	})
 }
 
 func TestAgentExecutor_FullLifecycleIntegration(t *testing.T) {
@@ -1809,6 +2059,75 @@ func TestAgentExecutor_SendMessage_IdleSession_OK(t *testing.T) {
 	}
 }
 
+func TestAgentExecutor_BuildResumeMessagesForProviderSwitch_Generic(t *testing.T) {
+	prov := newMockProvider()
+	store := newMockStorage()
+	msgStore := storage.NewSessionMessagesLogStore(t.TempDir())
+	broadcaster := NewEventBroadcaster(100)
+
+	executor := NewAgentExecutor(ExecutorConfig{
+		Storage:          store,
+		Broadcaster:      broadcaster,
+		ProviderFactory:  func(providerType, sessionID string, config session.Config) (session.Session, error) { return prov, nil },
+		OperationTimeout: 5 * time.Second,
+		MessageLogStore:  msgStore,
+		ResumeMessageBuilder: func(providerType string, history []domain.Message) []session.Message {
+			if providerType != "openai" {
+				return nil
+			}
+			out := make([]session.Message, 0, len(history))
+			for _, msg := range history {
+				switch msg.Kind {
+				case domain.MessageKindUser:
+					out = append(out, session.Message{ID: msg.ID, Kind: session.MKUser, Contents: msg.Contents})
+				case domain.MessageKindOutput:
+					out = append(out, session.Message{ID: msg.ID, Kind: session.MKAssistant, Contents: msg.Contents})
+				}
+			}
+			return out
+		},
+	})
+	defer executor.Shutdown(context.Background())
+
+	sess := domain.NewSession("switch-seed", "claude-ws", "/tmp/test")
+	if err := store.Save(sess); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+
+	appendRecord := func(kind domain.MessageKind, contents string) {
+		t.Helper()
+		_, err := msgStore.Append(sess.ID, storage.MessageLogRecord{
+			Timestamp:  time.Now().UTC(),
+			Projection: storage.MessageProjectionAppend,
+			Kind:       kind,
+			Contents:   contents,
+		})
+		if err != nil {
+			t.Fatalf("append message log record: %v", err)
+		}
+	}
+
+	appendRecord(domain.MessageKindUser, "first prompt")
+	appendRecord(domain.MessageKindProgress, "noise progress update")
+	appendRecord(domain.MessageKindOutput, "assistant response")
+
+	seed := executor.buildResumeMessagesForProviderSwitch(sess.ID, "claude-ws", "openai")
+	if len(seed) != 2 {
+		t.Fatalf("expected 2 seeded messages, got %d", len(seed))
+	}
+	if seed[0].Kind != session.MKUser || seed[0].Contents != "first prompt" {
+		t.Fatalf("unexpected first seeded message: %+v", seed[0])
+	}
+	if seed[1].Kind != session.MKAssistant || seed[1].Contents != "assistant response" {
+		t.Fatalf("unexpected second seeded message: %+v", seed[1])
+	}
+
+	none := executor.buildResumeMessagesForProviderSwitch(sess.ID, "claude-ws", "claude-ws")
+	if len(none) != 0 {
+		t.Fatalf("expected no seed when provider does not change, got %d", len(none))
+	}
+}
+
 func TestAgentExecutor_SendMessage_TransitionsToIdleAfterTurnCompletion(t *testing.T) {
 	prov := newMockProvider()
 	executor, _ := createTestExecutor(prov)
@@ -2278,6 +2597,110 @@ func TestAgentExecutor_ResumeTokenMintAndConsume(t *testing.T) {
 	}
 	if updatedToken.ConsumedAt == nil || updatedToken.RevokedAt == nil {
 		t.Fatalf("expected token consumed/revoked, got %+v", updatedToken)
+	}
+}
+
+func TestAgentExecutor_ResumeSessionWithToken_DuringDrain_DefersAndReplaysOnStartup(t *testing.T) {
+	store := newMockStorage()
+	deferredStore := storage.NewJSONStore[entity.DeferredOpEnvelope](
+		t.TempDir(),
+		func(s entity.DeferredOpEnvelope) string { return s.EnvelopeID },
+	)
+	broadcaster := NewEventBroadcaster(100)
+
+	prov1 := newMockProvider()
+	executor1 := NewAgentExecutor(ExecutorConfig{
+		Storage:                     store,
+		Broadcaster:                 broadcaster,
+		OperationTimeout:            5 * time.Second,
+		SessionStartDeferredStorage: deferredStore,
+		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
+			return prov1, nil
+		},
+	})
+	defer executor1.Shutdown(context.Background())
+
+	_, err := executor1.StartSession(context.Background(), "resume-token-deferred", session.Config{ProviderType: "test", WorkingDir: "/tmp"})
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	now := time.Now().UTC()
+	attempt := &storage.RunAttemptMetadata{
+		AttemptID:      "attempt-deferred",
+		SessionID:      "resume-token-deferred",
+		ProviderType:   "test",
+		StartedAt:      now.Add(-time.Minute),
+		HeartbeatAt:    now,
+		TerminalReason: "interrupted",
+		WaitKind:       "tool_call",
+		WaitRef:        "tool-xyz",
+		ResumeTokenID:  "token-deferred",
+	}
+	if err := store.SaveRunAttempt(attempt); err != nil {
+		t.Fatalf("SaveRunAttempt failed: %v", err)
+	}
+	if err := store.SaveResumeToken(&storage.ResumeTokenMetadata{
+		TokenID:   "token-deferred",
+		SessionID: "resume-token-deferred",
+		AttemptID: "attempt-deferred",
+		CreatedAt: now.Add(-time.Minute),
+		ExpiresAt: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("SaveResumeToken failed: %v", err)
+	}
+
+	executor1.sessionRuns.BeginDrain(context.Background())
+	if _, err := executor1.ResumeSessionWithToken(context.Background(), "resume-token-deferred", "token-deferred"); err != nil {
+		t.Fatalf("expected resume-with-token to be deferred, got %v", err)
+	}
+
+	tok, err := store.LoadResumeToken("token-deferred")
+	if err != nil {
+		t.Fatalf("LoadResumeToken failed: %v", err)
+	}
+	if tok.ConsumedAt != nil {
+		t.Fatalf("expected token to remain unconsumed before replay, got %+v", tok)
+	}
+
+	envs, err := deferredStore.List()
+	if err != nil {
+		t.Fatalf("deferredStore.List: %v", err)
+	}
+	if len(envs) != 1 {
+		t.Fatalf("expected 1 deferred envelope, got %d", len(envs))
+	}
+
+	prov2 := newMockProvider()
+	executor2 := NewAgentExecutor(ExecutorConfig{
+		Storage:                     store,
+		Broadcaster:                 broadcaster,
+		OperationTimeout:            5 * time.Second,
+		SessionStartDeferredStorage: deferredStore,
+		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
+			return prov2, nil
+		},
+	})
+	defer executor2.Shutdown(context.Background())
+
+	if err := executor2.Startup(context.Background()); err != nil {
+		t.Fatalf("startup replay failed: %v", err)
+	}
+
+	envs, err = deferredStore.List()
+	if err != nil {
+		t.Fatalf("deferredStore.List after replay: %v", err)
+	}
+	if len(envs) != 0 {
+		t.Fatalf("expected deferred queue to be empty after replay, got %d", len(envs))
+	}
+
+	updatedToken, err := store.LoadResumeToken("token-deferred")
+	if err != nil {
+		t.Fatalf("LoadResumeToken after replay failed: %v", err)
+	}
+	if updatedToken.ConsumedAt == nil {
+		t.Fatalf("expected token consumed after replay, got %+v", updatedToken)
 	}
 }
 

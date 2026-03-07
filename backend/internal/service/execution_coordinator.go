@@ -21,6 +21,13 @@ const (
 	eventInactivityCheckEvery = 30 * time.Second
 )
 
+type managedRunStartOutcome int
+
+const (
+	managedRunStartNow managedRunStartOutcome = iota
+	managedRunStartDeferred
+)
+
 func (e *AgentExecutor) handleEvents(ctx context.Context, sc *sessionContext, run *session.Run, events <-chan domain.Event) {
 	defer close(run.EventsDone)
 	defer func() {
@@ -252,102 +259,99 @@ func (e *AgentExecutor) CancelRun(ctx context.Context, id string) error {
 }
 
 func (e *AgentExecutor) ResumeSession(ctx context.Context, id string) (*domain.Session, error) {
-	return e.resumeSessionValidated(ctx, id, "")
+	sess, _, err := e.resumeSessionValidated(ctx, id, "")
+	return sess, err
 }
 
 func (e *AgentExecutor) ResumeSessionWithToken(ctx context.Context, id string, tokenID string) (*domain.Session, error) {
-	if tokenID == "" {
-		return nil, ErrInvalidResumeToken
-	}
-	return e.resumeSessionValidated(ctx, id, tokenID)
+	res, err := e.ResumeSessionWithTokenResult(ctx, id, tokenID)
+	return res.Session, err
 }
 
-func (e *AgentExecutor) resumeSessionValidated(ctx context.Context, id string, tokenID string) (*domain.Session, error) {
+type SessionResumeResult struct {
+	Session  *domain.Session
+	Deferred bool
+}
+
+func (e *AgentExecutor) ResumeSessionWithTokenResult(ctx context.Context, id string, tokenID string) (SessionResumeResult, error) {
+	if tokenID == "" {
+		return SessionResumeResult{}, ErrInvalidResumeToken
+	}
+	sess, deferred, err := e.resumeSessionValidated(ctx, id, tokenID)
+	return SessionResumeResult{Session: sess, Deferred: deferred}, err
+}
+
+func (e *AgentExecutor) resumeSessionValidated(ctx context.Context, id string, tokenID string) (*domain.Session, bool, error) {
 	sc, err := e.ensureSessionContext(id)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	if e.sessionRuns != nil && e.sessionRuns.LifecycleMode() != entity.ActiveStoreModeRunning {
-		return nil, ErrExecutorShutdown
+	admission := e.submitSessionStartCommand(ctx, SessionStartCommand{
+		Kind:    SessionStartCommandResume,
+		Session: sc.session,
+		RawID:   id,
+		TokenID: tokenID,
+		State:   sc.session.GetState(),
+	})
+	if admission.Deferred {
+		return sc.session, true, nil
+	}
+	if admission.Err != nil {
+		return nil, false, admission.Err
 	}
 
 	if tokenID == "" {
-		currentState := sc.session.GetState()
-		if currentState != domain.SessionStateSuspended {
-			return nil, fmt.Errorf("%w: session is not suspended (current state: %s)", ErrInvalidState, currentState)
-		}
+		return e.resumeSessionWithoutToken(ctx, id, sc)
+	}
+	return e.resumeSessionWithTokenValidated(ctx, id, tokenID, sc)
+}
 
-		suspensionCtx := sc.session.GetSuspensionContext()
-		if suspensionCtx == nil {
-			return nil, fmt.Errorf("no suspension context found for session %s", id)
-		}
-
-		providerSuspensionCtx, ok := suspensionCtx.(*session.SuspensionContext)
-		if !ok {
-			return nil, fmt.Errorf("invalid suspension context type")
-		}
-
-		run := sc.getRun()
-		if run != nil {
-			suspendable, supportsResume := run.Session.(session.Suspendable)
-			if !supportsResume {
-				return nil, fmt.Errorf("provider does not support resumption")
-			}
-			if err := suspendable.Resume(ctx, providerSuspensionCtx); err != nil {
-				return nil, fmt.Errorf("failed to resume provider: %w", err)
-			}
-		}
-
-		sc.session.SetSuspensionContext(nil)
-		e.transitionWithSave(sc, domain.SessionStateRunning, "resumed from suspension")
-		return sc.session, nil
+func (e *AgentExecutor) resumeSessionWithoutToken(ctx context.Context, id string, sc *sessionContext) (*domain.Session, bool, error) {
+	currentState := sc.session.GetState()
+	if currentState != domain.SessionStateSuspended {
+		return nil, false, fmt.Errorf("%w: session is not suspended (current state: %s)", ErrInvalidState, currentState)
 	}
 
+	providerSuspensionCtx, err := sessionSuspensionContext(sc.session, id)
+	if err != nil {
+		return nil, false, err
+	}
+
+	if run := sc.getRun(); run != nil {
+		suspendable, supportsResume := run.Session.(session.Suspendable)
+		if !supportsResume {
+			return nil, false, fmt.Errorf("provider does not support resumption")
+		}
+		if err := suspendable.Resume(ctx, providerSuspensionCtx); err != nil {
+			return nil, false, fmt.Errorf("failed to resume provider: %w", err)
+		}
+	}
+
+	sc.session.SetSuspensionContext(nil)
+	e.transitionWithSave(sc, domain.SessionStateRunning, "resumed from suspension")
+	return sc.session, false, nil
+}
+
+func (e *AgentExecutor) resumeSessionWithTokenValidated(ctx context.Context, id, tokenID string, sc *sessionContext) (*domain.Session, bool, error) {
 	attempt, err := e.latestPersistedAttempt(id)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if attempt == nil {
-		return nil, ErrInvalidResumeToken
+		return nil, false, ErrInvalidResumeToken
 	}
 	if err := e.validateAndConsumeResumeToken(id, tokenID, attempt); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	if attempt != nil {
-		now := time.Now().UTC()
-		attempt.WaitKind = ""
-		attempt.WaitRef = ""
-		attempt.ResumeTokenID = ""
-		attempt.HeartbeatAt = now
-		if err := e.attemptStorage.SaveRunAttempt(attempt); err != nil {
-			return nil, fmt.Errorf("failed to clear waiting metadata: %w", err)
-		}
-		sc.amMu.Lock()
-		if sc.attempt != nil && sc.attempt.AttemptID == attempt.AttemptID {
-			sc.attempt.WaitKind = ""
-			sc.attempt.WaitRef = ""
-			sc.attempt.ResumeTokenID = ""
-			sc.attempt.HeartbeatAt = now
-		}
-		sc.amMu.Unlock()
+	if err := e.clearAttemptWaitingMetadata(sc, attempt); err != nil {
+		return nil, false, err
 	}
 
-	run := sc.getRun()
-	if run != nil {
-		suspensionCtx := sc.session.GetSuspensionContext()
-		providerSuspensionCtx, ok := suspensionCtx.(*session.SuspensionContext)
-		if ok {
-			suspendable, supportsResume := run.Session.(session.Suspendable)
-			if supportsResume {
-				if err := suspendable.Resume(ctx, providerSuspensionCtx); err != nil {
-					return nil, fmt.Errorf("failed to resume provider: %w", err)
-				}
-				sc.session.SetSuspensionContext(nil)
-				e.transitionWithSave(sc, domain.SessionStateRunning, "resumed from suspension")
-				return sc.session, nil
-			}
-		}
+	if resumed, err := e.resumeProviderIfPossible(ctx, sc); err != nil {
+		return nil, false, err
+	} else if resumed {
+		return sc.session, false, nil
 	}
 
 	sc.session.SetSuspensionContext(nil)
@@ -357,11 +361,67 @@ func (e *AgentExecutor) resumeSessionValidated(ctx context.Context, id string, t
 	e.emitSynthesized(sc.session, domain.NewSystemMessageEvent(sc.session.ID, "[resume] Resume token accepted. Provider continuation is unavailable; send a new message to continue."))
 	if e.storage != nil {
 		if err := e.storage.Save(sc.session); err != nil {
-			return nil, fmt.Errorf("failed to save session: %w", err)
+			return nil, false, fmt.Errorf("failed to save session: %w", err)
 		}
 	}
 
-	return sc.session, nil
+	return sc.session, false, nil
+}
+
+func (e *AgentExecutor) clearAttemptWaitingMetadata(sc *sessionContext, attempt *storage.RunAttemptMetadata) error {
+	if attempt == nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	attempt.WaitKind = ""
+	attempt.WaitRef = ""
+	attempt.ResumeTokenID = ""
+	attempt.HeartbeatAt = now
+	if err := e.attemptStorage.SaveRunAttempt(attempt); err != nil {
+		return fmt.Errorf("failed to clear waiting metadata: %w", err)
+	}
+	sc.amMu.Lock()
+	if sc.attempt != nil && sc.attempt.AttemptID == attempt.AttemptID {
+		sc.attempt.WaitKind = ""
+		sc.attempt.WaitRef = ""
+		sc.attempt.ResumeTokenID = ""
+		sc.attempt.HeartbeatAt = now
+	}
+	sc.amMu.Unlock()
+	return nil
+}
+
+func (e *AgentExecutor) resumeProviderIfPossible(ctx context.Context, sc *sessionContext) (bool, error) {
+	run := sc.getRun()
+	if run == nil {
+		return false, nil
+	}
+	providerSuspensionCtx, err := sessionSuspensionContext(sc.session, sc.session.ID)
+	if err != nil {
+		return false, nil
+	}
+	suspendable, supportsResume := run.Session.(session.Suspendable)
+	if !supportsResume {
+		return false, nil
+	}
+	if err := suspendable.Resume(ctx, providerSuspensionCtx); err != nil {
+		return false, fmt.Errorf("failed to resume provider: %w", err)
+	}
+	sc.session.SetSuspensionContext(nil)
+	e.transitionWithSave(sc, domain.SessionStateRunning, "resumed from suspension")
+	return true, nil
+}
+
+func sessionSuspensionContext(sess *domain.Session, id string) (*session.SuspensionContext, error) {
+	suspensionCtx := sess.GetSuspensionContext()
+	if suspensionCtx == nil {
+		return nil, fmt.Errorf("no suspension context found for session %s", id)
+	}
+	providerSuspensionCtx, ok := suspensionCtx.(*session.SuspensionContext)
+	if !ok {
+		return nil, fmt.Errorf("invalid suspension context type")
+	}
+	return providerSuspensionCtx, nil
 }
 
 func (e *AgentExecutor) validateAndConsumeResumeToken(sessionID, tokenID string, attempt *storage.RunAttemptMetadata) error {
@@ -425,12 +485,12 @@ func (e *AgentExecutor) ensureSessionContext(id string) (*sessionContext, error)
 	return sc, nil
 }
 
-func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess *domain.Session, content string, options SendMessageOptions) (*domain.Session, error) {
+func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess *domain.Session, content string, options SendMessageOptions) (*domain.Session, bool, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	if sc, exists := e.sessions[id]; exists && sc.getRun() != nil {
-		return sess, fmt.Errorf("session is already running")
+		return sess, false, fmt.Errorf("session is already running")
 	}
 
 	pType := sess.ProviderType
@@ -458,7 +518,7 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 
 	if persistSessionChanges && e.storage != nil {
 		if err := e.storage.Save(sess); err != nil {
-			return sess, fmt.Errorf("failed to save session message preferences: %w", err)
+			return sess, false, fmt.Errorf("failed to save session message preferences: %w", err)
 		}
 	}
 
@@ -471,6 +531,7 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 		Title:           sess.Title,
 		Custom:          custom,
 		SessionCustom:   sess.CustomDataCopy(),
+		ResumeMessages:  e.buildResumeMessagesForProviderSwitch(id, sess.ProviderType, pType),
 		Environment:     options.Environment,
 		AllowedTools:    options.AllowedTools,
 		DisallowedTools: options.DisallowedTools,
@@ -478,34 +539,37 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 
 	prov, err := e.sessionFactory(pType, id, config)
 	if err != nil {
-		return sess, fmt.Errorf("%w: %s", ErrProviderNotFound, pType)
+		return sess, false, fmt.Errorf("%w: %s", ErrProviderNotFound, pType)
 	}
 
 	if _, exists := e.sessions[id]; !exists {
 		e.sessions[id] = &sessionContext{session: sess, run: nil}
 	}
 	sc := e.sessions[id]
-	e.startRunAttempt(sc, pType, options.ProviderID)
 
 	run := session.NewProviderRun(prov, e.ctx)
 	sc.setRun(run)
+
+	startOutcome, err := e.startManagedSessionRun(id, func(runCtx context.Context) {
+		e.executeSessionStart(runCtx, sc, run, id, pType, config, content)
+	})
+	if err != nil {
+		sc.setRun(nil)
+		return sess, false, fmt.Errorf("failed to start managed run: %w", err)
+	}
+	if startOutcome == managedRunStartDeferred {
+		sc.setRun(nil)
+		return sess, true, nil
+	}
+
+	e.startRunAttempt(sc, pType, options.ProviderID)
 
 	e.emitSynthesized(sess, domain.NewUserMessageEvent(id, content))
 	if e.storage != nil {
 		_ = e.storage.Save(sess)
 	}
 
-	if err := e.startManagedSessionRun(id, func(runCtx context.Context) {
-		e.executeSessionStart(runCtx, sc, run, id, pType, config, content)
-	}); err != nil {
-		sc.setRun(nil)
-		if errors.Is(err, ErrExecutorShutdown) {
-			return sess, ErrExecutorShutdown
-		}
-		return sess, fmt.Errorf("failed to start managed run: %w", err)
-	}
-
-	return sess, nil
+	return sess, false, nil
 }
 
 func (e *AgentExecutor) executeSessionStart(runCtx context.Context, sc *sessionContext, run *session.Run, id string, pType string, config session.Config, content string) {
@@ -566,10 +630,10 @@ func (e *AgentExecutor) executeSessionStart(runCtx context.Context, sc *sessionC
 	e.mu.Unlock()
 }
 
-func (e *AgentExecutor) startManagedSessionRun(id string, execute func(context.Context)) error {
+func (e *AgentExecutor) startManagedSessionRun(id string, execute func(context.Context)) (managedRunStartOutcome, error) {
 	if e.sessionRuns == nil {
 		go execute(e.ctx)
-		return nil
+		return managedRunStartNow, nil
 	}
 
 	_, err := e.sessionRuns.Create(id, &sessionRunEntity{ID: id, execute: execute})
@@ -577,24 +641,24 @@ func (e *AgentExecutor) startManagedSessionRun(id string, execute func(context.C
 		if errors.Is(err, entity.ErrAlreadyExists) {
 			h, getErr := e.sessionRuns.Get(id)
 			if getErr != nil {
-				return getErr
+				return managedRunStartNow, getErr
 			}
 			if mutateErr := h.Mutate(func(runEntity **sessionRunEntity) {
 				(*runEntity).execute = execute
 				(*runEntity).done = false
 			}); mutateErr != nil {
-				return mutateErr
+				return managedRunStartNow, mutateErr
 			}
 			_, err = e.sessionRuns.Load(id)
 		}
 	}
 	if err != nil {
 		if errors.Is(err, entity.ErrActiveStoreDraining) || errors.Is(err, entity.ErrActiveStoreStartDeferred) {
-			return ErrExecutorShutdown
+			return managedRunStartDeferred, nil
 		}
-		return err
+		return managedRunStartNow, err
 	}
-	return nil
+	return managedRunStartNow, nil
 }
 
 func (e *AgentExecutor) transitionWithSave(sc *sessionContext, newState domain.SessionState, reason string) {
@@ -664,40 +728,54 @@ func (e *AgentExecutor) suspendSession(sc *sessionContext, toolCallID string, de
 // It is called from the EvalCoordinator's onSessionDone callback, which fires
 // from a tool handler goroutine.
 func (e *AgentExecutor) resumeSessionWithToolResults(sessionID string, results []session.ToolResult) {
+	if err := e.resumeSessionWithToolResultsManaged(sessionID, results); err != nil {
+		if errors.Is(err, ErrExecutorShutdown) {
+			return
+		}
+		log.Printf("resumeSessionWithToolResults: failed for session %s: %v", sessionID, err)
+	}
+}
+
+func (e *AgentExecutor) resumeSessionWithToolResultsManaged(sessionID string, results []session.ToolResult) error {
 	sc, err := e.ensureSessionContext(sessionID)
 	if err != nil {
-		log.Printf("resumeSessionWithToolResults: session %s not found: %v", sessionID, err)
-		return
+		return fmt.Errorf("session %s not found: %w", sessionID, err)
+	}
+	admission := e.submitSessionStartCommand(context.Background(), SessionStartCommand{
+		Kind:    SessionStartCommandToolResultsResume,
+		Session: sc.session,
+		RawID:   sessionID,
+		Results: append([]session.ToolResult(nil), results...),
+		State:   sc.session.GetState(),
+	})
+	if admission.Deferred {
+		return nil
+	}
+	if admission.Err != nil {
+		return fmt.Errorf("start admission rejected for session %s: %w", sessionID, admission.Err)
 	}
 
 	run := sc.getRun()
 	if run == nil {
-		log.Printf("resumeSessionWithToolResults: session %s has no active run", sessionID)
-		return
+		return fmt.Errorf("session %s has no active run", sessionID)
 	}
 
 	suspensionCtx := sc.session.GetSuspensionContext()
 	providerSuspCtx, ok := suspensionCtx.(*session.SuspensionContext)
 	if !ok || providerSuspCtx == nil {
-		log.Printf("resumeSessionWithToolResults: session %s has no suspension context", sessionID)
-		return
+		return fmt.Errorf("session %s has no suspension context", sessionID)
 	}
 
 	suspendable, ok := run.Session.(session.Suspendable)
 	if !ok {
-		log.Printf("resumeSessionWithToolResults: provider for session %s does not implement Suspendable", sessionID)
-		return
+		return fmt.Errorf("provider for session %s does not implement Suspendable", sessionID)
 	}
 
 	ctx := context.Background()
 	events, err := suspendable.ResumeWithToolResults(ctx, providerSuspCtx, results)
 	if err != nil {
-		log.Printf("resumeSessionWithToolResults: failed for session %s: %v", sessionID, err)
-		return
+		return fmt.Errorf("resume with tool results for session %s: %w", sessionID, err)
 	}
-
-	sc.session.SetSuspensionContext(nil)
-	e.transitionWithSave(sc, domain.SessionStateRunning, "tool results delivered")
 
 	// Re-launch the event loop for the new model turn. The provider has reset
 	// its event channel; we consume it in a new handleEvents call that runs
@@ -708,7 +786,7 @@ func (e *AgentExecutor) resumeSessionWithToolResults(sessionID string, results [
 	resumeRun := session.NewProviderRun(run.Session, e.ctx)
 	sc.setRun(resumeRun)
 
-	if err := e.startManagedSessionRun(sessionID, func(runCtx context.Context) {
+	startOutcome, err := e.startManagedSessionRun(sessionID, func(runCtx context.Context) {
 		go func() {
 			select {
 			case <-runCtx.Done():
@@ -729,9 +807,33 @@ func (e *AgentExecutor) resumeSessionWithToolResults(sessionID string, results [
 		e.mu.Lock()
 		sc.setRun(nil)
 		e.mu.Unlock()
-	}); err != nil {
-		log.Printf("resumeSessionWithToolResults: failed to start managed resumed run for session %s: %v", sessionID, err)
+	})
+	if err != nil {
+		sc.setRun(nil)
+		return fmt.Errorf("start managed resumed run for session %s: %w", sessionID, err)
 	}
+	if startOutcome == managedRunStartDeferred {
+		sc.setRun(nil)
+		retry := e.submitSessionStartCommand(context.Background(), SessionStartCommand{
+			Kind:    SessionStartCommandToolResultsResume,
+			Session: sc.session,
+			RawID:   sessionID,
+			Results: append([]session.ToolResult(nil), results...),
+			State:   sc.session.GetState(),
+		})
+		if retry.Deferred {
+			e.emitSynthesized(sc.session, domain.NewSystemMessageEvent(sessionID, "[shutdown] Tool result replay queued for restart."))
+			return nil
+		}
+		if retry.Err != nil {
+			return retry.Err
+		}
+		return ErrExecutorShutdown
+	}
+
+	sc.session.SetSuspensionContext(nil)
+	e.transitionWithSave(sc, domain.SessionStateRunning, "tool results delivered")
+	return nil
 }
 
 func (e *AgentExecutor) handlePanic(sc *sessionContext, r any) {

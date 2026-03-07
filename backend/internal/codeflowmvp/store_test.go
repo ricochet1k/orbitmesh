@@ -139,6 +139,90 @@ func TestExplainImpact_ReturnsReverseDependencies(t *testing.T) {
 	}
 }
 
+func TestPersistExtraction_LinksRequestsToHandlers(t *testing.T) {
+	dir := t.TempDir()
+	frontendDir := filepath.Join(dir, "frontend")
+	backendDir := filepath.Join(dir, "backend")
+	if err := os.MkdirAll(frontendDir, 0o755); err != nil {
+		t.Fatalf("mkdir frontend: %v", err)
+	}
+	if err := os.MkdirAll(backendDir, 0o755); err != nil {
+		t.Fatalf("mkdir backend: %v", err)
+	}
+
+	frontendFile := filepath.Join(frontendDir, "api.ts")
+	backendFile := filepath.Join(backendDir, "routes.go")
+	frontendSource := "export async function load(id: string) {\n  return fetch(`/api/sessions/${id}`, { method: 'GET' })\n}\n"
+	backendSource := "package sample\n\nimport (\n  \"net/http\"\n\n  \"github.com/go-chi/chi/v5\"\n)\n\ntype h struct{}\n\nfunc (x *h) Mount(r chi.Router) {\n  r.Get(\"/api/sessions/{id}\", x.getSession)\n}\n\nfunc (x *h) getSession(http.ResponseWriter, *http.Request) {}\n"
+	if err := os.WriteFile(frontendFile, []byte(frontendSource), 0o644); err != nil {
+		t.Fatalf("write frontend file: %v", err)
+	}
+	if err := os.WriteFile(backendFile, []byte(backendSource), 0o644); err != nil {
+		t.Fatalf("write backend file: %v", err)
+	}
+
+	summary, err := ScanPath(dir)
+	if err != nil {
+		t.Fatalf("ScanPath: %v", err)
+	}
+	if len(summary.APIReqs) == 0 {
+		t.Fatalf("expected api requests from frontend file")
+	}
+	if len(summary.APIRoutes) == 0 {
+		t.Fatalf("expected api handlers from backend file")
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "api-links.goraphdb")
+	persistSummary, err := PersistExtraction(summary, PersistOptions{DBPath: dbPath, ScanEpoch: "epoch-links", Producer: "test-producer"})
+	if err != nil {
+		t.Fatalf("PersistExtraction: %v", err)
+	}
+	if persistSummary.RequestsHandlerEdges == 0 {
+		t.Fatalf("expected REQUESTS_HANDLER edges, got none")
+	}
+
+	db, err := graphdb.Open(dbPath, graphdb.DefaultOptions())
+	if err != nil {
+		t.Fatalf("open graph db: %v", err)
+	}
+	defer db.Close()
+
+	assertLabelCount(t, db, NodeLabelAPIRequest, 1)
+	assertLabelCount(t, db, NodeLabelAPIHandler, 1)
+	assertEdgeLabelCount(t, db, EdgeLabelEmitsRequest, 1)
+	assertEdgeLabelCount(t, db, EdgeLabelHandlesRoute, 1)
+	assertEdgeLabelCount(t, db, EdgeLabelRequestsHandle, 1)
+
+	edges, err := db.EdgesByLabel(EdgeLabelRequestsHandle)
+	if err != nil {
+		t.Fatalf("EdgesByLabel(%q): %v", EdgeLabelRequestsHandle, err)
+	}
+	if len(edges) != 1 {
+		t.Fatalf("expected 1 REQUESTS_HANDLER edge, got %d", len(edges))
+	}
+	edge := edges[0]
+	from, err := db.GetNode(edge.From)
+	if err != nil {
+		t.Fatalf("GetNode(from): %v", err)
+	}
+	to, err := db.GetNode(edge.To)
+	if err != nil {
+		t.Fatalf("GetNode(to): %v", err)
+	}
+	if !hasLabel(from, NodeLabelAPIRequest) {
+		t.Fatalf("expected REQUESTS_HANDLER from APIRequest, got labels %v", from.Labels)
+	}
+	if !hasLabel(to, NodeLabelAPIHandler) {
+		t.Fatalf("expected REQUESTS_HANDLER to APIHandler, got labels %v", to.Labels)
+	}
+	if got := stringProp(edge.Props, "method"); got != "GET" {
+		t.Fatalf("expected edge method GET, got %q", got)
+	}
+	if got := stringProp(edge.Props, "normalized_path"); got != "/api/sessions/{param}" {
+		t.Fatalf("expected normalized path /api/sessions/{param}, got %q", got)
+	}
+}
+
 func assertLabelCount(t *testing.T, db *graphdb.DB, label string, expected int) {
 	t.Helper()
 	nodes, err := db.FindByLabel(label)

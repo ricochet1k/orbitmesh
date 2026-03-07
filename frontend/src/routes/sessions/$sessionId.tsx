@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/solid-router'
-import { createResource, createSignal, createEffect, createMemo, on, onMount, Show, For } from 'solid-js'
+import { createResource, createSignal, createEffect, createMemo, on, onMount, onCleanup, Show, For } from 'solid-js'
 import { apiClient } from '../../api/client'
 import { listProviders } from '../../api/providers'
 import type { SessionState } from '../../types/api'
@@ -12,7 +12,7 @@ import SessionMetrics from '../../components/SessionMetrics'
 import SessionTranscript from '../../components/SessionTranscript'
 import SessionComposer from '../../components/SessionComposer'
 import SessionTerminals from '../../components/SessionTerminals'
-import { useUiStabilityProbe } from '../../state/uiStability'
+import { reportUiStabilityTrace, useUiStabilityProbe } from '../../state/uiStability'
 
 export const Route = createFileRoute('/sessions/$sessionId')({
   component: SessionViewer,
@@ -129,6 +129,16 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
 
   // Scroll to bottom on initial mount so the newest messages are visible first.
   onMount(() => requestAnimationFrame(scrollToBottom))
+  onMount(() => {
+    reportUiStabilityTrace("sessions/viewer/lifecycle", "SessionViewer mounted", {
+      session_id: sessionId(),
+    })
+  })
+  onCleanup(() => {
+    reportUiStabilityTrace("sessions/viewer/lifecycle", "SessionViewer cleaned up", {
+      session_id: sessionId(),
+    })
+  })
 
   // Auto-scroll when messages update.
   createEffect(() => {
@@ -192,9 +202,13 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
     setComposerError(null)
     setComposerPending("interrupt")
     try {
-      await apiClient.sendSessionInput(sessionId(), "\x03")
+      if (providerType() === "pty") {
+        await apiClient.sendSessionInput(sessionId(), "\x03")
+      } else {
+        await apiClient.cancelSession(sessionId())
+      }
     } catch (err) {
-      setComposerError(err instanceof Error ? err.message : "Failed to send interrupt")
+      setComposerError(err instanceof Error ? err.message : "Failed to stop run")
     } finally {
       setComposerPending(null)
     }
@@ -363,6 +377,9 @@ export default function SessionViewer(props: SessionViewerProps = {}) {
                     {(model) => <option value={model}>{model}</option>}
                   </For>
                 </select>
+                <Show when={modelOptions().length === 0}>
+                  <p class="form-hint">No discovered models for this provider yet; enter a custom model override.</p>
+                </Show>
                 <input
                   class="session-viewer-menu-select"
                   value={selectedModel()}

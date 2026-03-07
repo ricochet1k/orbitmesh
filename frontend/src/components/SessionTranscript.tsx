@@ -79,6 +79,7 @@ type ActionDecisionOption = {
 
 export default function SessionTranscript(props: SessionTranscriptProps) {
   const rows = createMemo(() => buildDisplayRows(props.messages()))
+  const permissionContextByRequestID = createMemo(() => buildPermissionContextMap(props.messages()))
   const [expandedGroupIds, setExpandedGroupIds] = createSignal<Set<string>>(new Set())
 
   const isGroupExpanded = (id: string) => expandedGroupIds().has(id)
@@ -113,9 +114,14 @@ export default function SessionTranscript(props: SessionTranscriptProps) {
                   expanded={isGroupExpanded(row.id)}
                   onToggleExpanded={() => toggleGroupExpanded(row.id)}
                   onRespondActionRequest={props.onRespondActionRequest}
+                  permissionContextByRequestID={permissionContextByRequestID()}
                 />
               ) : (
-                <TranscriptItem message={row.message} onRespondActionRequest={props.onRespondActionRequest} />
+                <TranscriptItem
+                  message={row.message}
+                  onRespondActionRequest={props.onRespondActionRequest}
+                  permissionContextByRequestID={permissionContextByRequestID()}
+                />
               )}
           </For>
         </Show>
@@ -129,6 +135,7 @@ function TranscriptGroup(props: {
   expanded: boolean
   onToggleExpanded: () => void
   onRespondActionRequest?: (response: { actionId: string; decision: string; input?: string }) => void | Promise<void>
+  permissionContextByRequestID: ReadonlyMap<string, { toolName?: string; filePath?: string }>
 }) {
   return (
     <section class="transcript-group" data-testid="transcript-group">
@@ -143,7 +150,13 @@ function TranscriptGroup(props: {
       <Show when={props.expanded}>
         <div class="transcript-group-items" data-testid="transcript-group-items">
           <For each={props.row.messages}>
-            {(message) => <TranscriptItem message={message} onRespondActionRequest={props.onRespondActionRequest} />}
+            {(message) => (
+              <TranscriptItem
+                message={message}
+                onRespondActionRequest={props.onRespondActionRequest}
+                permissionContextByRequestID={props.permissionContextByRequestID}
+              />
+            )}
           </For>
         </div>
       </Show>
@@ -154,6 +167,7 @@ function TranscriptGroup(props: {
 function TranscriptItem(props: {
   message: TranscriptMessage
   onRespondActionRequest?: (response: { actionId: string; decision: string; input?: string }) => void | Promise<void>
+  permissionContextByRequestID: ReadonlyMap<string, { toolName?: string; filePath?: string }>
 }) {
   const [showRawJson, setShowRawJson] = createSignal(false)
 
@@ -178,10 +192,11 @@ function TranscriptItem(props: {
   })
   const actionDetails = createMemo(() => {
     if (!isActionRequestPayload(richPayload())) return []
-    return getActionRequestDetails(richPayload())
+    return getActionRequestDetails(richPayload(), props.message.content)
   })
   const canRespondAction = createMemo(() => actionStatus() === "" || actionStatus() === "pending")
-  const markdownBlocks = createMemo(() => splitIntoBlocks(props.message.content))
+  const displayContent = createMemo(() => formatDisplayContent(props.message.content, normalizedKind(), props.permissionContextByRequestID))
+  const markdownBlocks = createMemo(() => splitIntoBlocks(displayContent()))
   const rawJson = createMemo(() => JSON.stringify(props.message, null, 2))
   const rowClass = createMemo(() => buildMessageClass(props.message, normalizedKind(), isReasoning(), toolSummary()))
 
@@ -240,7 +255,7 @@ function TranscriptItem(props: {
             {(option) => (
               <button
                 type="button"
-                class={`btn btn-sm ${option.value === "accept" ? "btn-success" : "btn-danger"}`}
+                class={`btn btn-sm ${isPositiveActionDecision(option.value) ? "btn-success" : "btn-danger"}`}
                 data-testid={`action-request-${option.value}`}
                 onClick={(event) => {
                   event.stopPropagation()
@@ -261,6 +276,11 @@ function TranscriptItem(props: {
       </Show>
     </article>
   )
+}
+
+function isPositiveActionDecision(value: string): boolean {
+  const normalized = value.trim().toLowerCase()
+  return normalized === "accept" || normalized === "approve" || normalized === "allow" || normalized === "allow_always"
 }
 
 function ToolSummaryRow(props: { summary: ToolSummary }) {
@@ -541,25 +561,49 @@ function getActionDecisionOptions(payload: ActionRequestTranscriptPayload): Acti
   return []
 }
 
-function getActionRequestDetails(payload: ActionRequestTranscriptPayload): string[] {
+function getActionRequestDetails(payload: ActionRequestTranscriptPayload, messageContent: string): string[] {
   const details = asRecordValue(payload.payload)
   const request = asRecordValue(details?.request)
   if (!request) return []
 
   const lines: string[] = []
-  const callID = pickString(request, ["call_id", "itemId", "item_id", "id"])
+  const toolName = pickString(request, ["tool_name", "toolName"])
+  const contentLower = messageContent.trim().toLowerCase()
+  if (toolName && !contentLower.includes(toolName.trim().toLowerCase())) {
+    lines.push(`Tool: ${toolName}`)
+  }
+
+  const hint = pickString(request, ["hint"])
+  if (hint) lines.push(`Hint: ${hint}`)
 
   const reason = pickString(request, ["reason"])
-  if (reason) lines.push(`Reason: ${reason}`)
+  if (reason && reason !== hint) lines.push(`Reason: ${reason}`)
+
+  const decisionReason = pickString(request, ["decision_reason", "decisionReason"])
+  if (decisionReason) lines.push(`Decision policy: ${decisionReason}`)
 
   const grantRoot = pickString(request, ["grantRoot", "grant_root"])
   if (grantRoot) lines.push(`Scope: ${grantRoot}`)
 
-  const command = request["command"]
-  if (Array.isArray(command) && command.length > 0 && command.every((entry) => typeof entry === "string")) {
-    lines.push(`Command: ${(command as string[]).join(" ")}`)
-  } else if (typeof command === "string" && command.trim()) {
-    lines.push(`Command: ${command.trim()}`)
+  const command = getCommandPreview(request["command"])
+  if (command) {
+    lines.push(`Command: ${command}`)
+  }
+
+  const input = asRecordValue(request["input"])
+  if (input) {
+    const filePath = pickString(input, ["filePath", "file_path", "path", "file", "target"])
+    if (filePath) {
+      lines.push(`Path: ${normalizeWorkspacePath(filePath) ?? filePath}`)
+    }
+    const inputCommand = getCommandPreview(input["command"])
+    if (inputCommand && inputCommand !== command) {
+      lines.push(`Command: ${inputCommand}`)
+    }
+    const content = pickString(input, ["content", "old_string", "new_string"])
+    if (content) {
+      lines.push(`Content: ${content.length} chars`)
+    }
   }
 
   const changes = asRecordValue(request["changes"])
@@ -574,11 +618,17 @@ function getActionRequestDetails(payload: ActionRequestTranscriptPayload): strin
     if (total > entries.length) lines.push(`+${total - entries.length} more files`)
   }
 
-  if (lines.length === 0 && callID) {
-    lines.push(`Request: ${callID}`)
-  }
+  return Array.from(new Set(lines))
+}
 
-  return lines
+function getCommandPreview(value: unknown): string | null {
+  if (Array.isArray(value) && value.length > 0 && value.every((entry) => typeof entry === "string")) {
+    return (value as string[]).join(" ")
+  }
+  if (typeof value === "string" && value.trim()) {
+    return value.trim()
+  }
+  return null
 }
 
 function PinnedTodoWrite(props: { todo: TodoWriteState }) {
@@ -652,6 +702,45 @@ function formatPythonValue(value: unknown): string {
 function stringifyToolValue(value: unknown): string {
   if (typeof value === "string") return value
   return safeStringify(value)
+}
+
+function formatDisplayContent(
+  content: string,
+  kind: string,
+  permissionContextByRequestID: ReadonlyMap<string, { toolName?: string; filePath?: string }>,
+): string {
+  if (kind !== "tool_use") return content
+  const match = content.match(/^([A-Za-z][A-Za-z0-9_-]*):\s+([A-Za-z0-9_-]{12,})$/)
+  if (!match) return content
+  const fallbackName = match[1]
+  const requestID = match[2]
+  const context = permissionContextByRequestID.get(requestID)
+  const toolName = (context?.toolName ?? fallbackName).toLowerCase()
+  const filePath = context?.filePath
+  if (filePath) {
+    return `${toolName} ${normalizeWorkspacePath(filePath) ?? filePath}`
+  }
+  return toolName
+}
+
+function buildPermissionContextMap(messages: TranscriptMessage[]): Map<string, { toolName?: string; filePath?: string }> {
+  const out = new Map<string, { toolName?: string; filePath?: string }>()
+  for (const message of messages) {
+    if (normalizeTranscriptKind(message.kind) !== TRANSCRIPT_KINDS.ACTION_REQUEST) continue
+    const payload = coerceTranscriptPayload(message.kind, message.payload)
+    if (!isActionRequestPayload(payload)) continue
+    const details = asRecordValue(payload.payload)
+    const request = asRecordValue(details?.request)
+    if (!request) continue
+
+    const requestID = pickString(request, ["id", "call_id", "item_id", "itemId"])
+    if (!requestID) continue
+    const toolName = pickString(request, ["tool_name", "toolName"])
+    const input = asRecordValue(request["input"])
+    const filePath = pickString(input, ["filePath", "file_path", "path", "file", "target"])
+    out.set(requestID, { toolName: toolName ?? undefined, filePath: filePath ?? undefined })
+  }
+  return out
 }
 
 function asRecordValue(value: unknown): Record<string, unknown> | null {

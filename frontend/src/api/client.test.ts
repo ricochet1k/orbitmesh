@@ -241,6 +241,26 @@ describe("apiClient", () => {
     );
   });
 
+  it("triggerCodeflowScan sends POST request with CSRF token", async () => {
+    (fetch as any).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ started: true }),
+    });
+
+    const result = await apiClient.triggerCodeflowScan();
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/dashboard/codeflow/scan",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "X-CSRF-Token": "test-token",
+        }),
+      }),
+    );
+    expect(result).toEqual({ started: true });
+  });
+
   it("getPermissions fetches permissions", async () => {
     (fetch as any).mockResolvedValue({
       ok: true,

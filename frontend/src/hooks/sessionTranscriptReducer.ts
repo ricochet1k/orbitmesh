@@ -462,19 +462,28 @@ export function applyCanonicalActivityStreamEvent(
       return { messages: previous }
     }
     case TRANSCRIPT_KINDS.ACTION_REQUEST: {
+      const actionId = payload.data.id?.trim()
+      const msgId = actionId ? `action:${actionId}` : stableId(TRANSCRIPT_KINDS.ACTION_REQUEST)
+      const status = (payload.data.status ?? "").trim().toLowerCase()
+      const isOpen = !status || status === "pending"
+
+      const nextMessage: TranscriptMessage = {
+        id: msgId,
+        type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
+        kind: TRANSCRIPT_KINDS.ACTION_REQUEST,
+        timestamp: payload.timestamp,
+        content: `Action required${payload.data.kind ? ` (${payload.data.kind})` : ""}: ${payload.data.title ?? payload.data.id ?? "request"}`,
+        open: isOpen,
+        payload: payload.data,
+        raw: payload.raw,
+      }
+
       return {
-        messages: [
-          ...previous,
-          {
-            id: stableId(TRANSCRIPT_KINDS.ACTION_REQUEST),
-            type: TRANSCRIPT_MESSAGE_TYPES.SYSTEM,
-            kind: TRANSCRIPT_KINDS.ACTION_REQUEST,
-            timestamp: payload.timestamp,
-            content: `Action required${payload.data.kind ? ` (${payload.data.kind})` : ""}: ${payload.data.title ?? payload.data.id ?? "request"}`,
-            payload: payload.data,
-            raw: payload.raw,
-          },
-        ],
+        messages: mergeSortDedupeTranscriptMessages(
+          previous,
+          [nextMessage],
+          { sortByTimestamp: true },
+        ),
       }
     }
     case TRANSCRIPT_KINDS.ARTIFACT_UPDATE: {

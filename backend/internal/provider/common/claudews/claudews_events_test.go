@@ -331,13 +331,12 @@ func TestNoResponseTimeout_DefaultsAndOverrides(t *testing.T) {
 	}
 }
 
-func TestDispatchMessage_AssistantThinkingEmitsThoughtAndProgress(t *testing.T) {
+func TestDispatchMessage_AssistantThinkingEmitsThought(t *testing.T) {
 	p := NewClaudeWSProvider("s1", nil)
 	p.dispatchMessage([]byte(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"I should verify this first."}]}}`))
 
 	events := drainEvents(p.events.Events())
 	seenThought := false
-	seenProgress := false
 	for _, ev := range events {
 		switch ev.Type {
 		case domain.EventTypeThought:
@@ -345,19 +344,11 @@ func TestDispatchMessage_AssistantThinkingEmitsThoughtAndProgress(t *testing.T) 
 			if ok && strings.Contains(thought.Content, "verify") {
 				seenThought = true
 			}
-		case domain.EventTypeProgress:
-			progress, ok := ev.Progress()
-			if ok && progress.Channel == "reasoning" {
-				seenProgress = true
-			}
 		}
 	}
 
 	if !seenThought {
 		t.Fatal("expected thought event from assistant thinking block")
-	}
-	if !seenProgress {
-		t.Fatal("expected reasoning progress event from assistant thinking block")
 	}
 }
 

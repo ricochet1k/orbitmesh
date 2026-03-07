@@ -74,6 +74,8 @@ describe("AgentDock", () => {
     });
     (apiClient.pollDockMcp as any).mockResolvedValue(null);
     (apiClient.respondDockMcp as any).mockResolvedValue(undefined);
+    (apiClient.cancelSession as any).mockResolvedValue(undefined);
+    (apiClient.sendSessionInput as any).mockResolvedValue(undefined);
     (apiClient.getSessionMessagesPage as any).mockResolvedValue({ messages: [], next_before: null });
     (apiClient.listTerminals as any).mockResolvedValue({ terminals: [] });
   });
@@ -240,6 +242,44 @@ describe("AgentDock", () => {
         allowedTools: ["list_ui_components", "dispatch_ui_action", "multi_edit_ui"],
       }),
     );
+  });
+
+  it("stops non-PTY runs by cancelling the session", async () => {
+    (apiClient.getSession as any).mockResolvedValue({
+      id: "session-1",
+      provider_type: "codex",
+      state: "running",
+      working_dir: "/tmp",
+      created_at: "2026-02-05T12:00:00Z",
+      updated_at: "2026-02-05T12:00:00Z",
+      current_task: "T1",
+    });
+    (apiClient.getPermissions as any).mockResolvedValue({
+      role: "developer",
+      can_initiate_bulk_actions: true,
+    });
+
+    render(() => <AgentDock sessionId="session-1" />);
+    realtimeStatusHandler?.("open");
+    await waitFor(() => expect(screen.queryByTestId("agent-dock-loading")).toBeNull());
+
+    realtimeHandlers.get("sessions.state")?.({
+      type: "event",
+      topic: "sessions.state",
+      payload: {
+        session_id: "session-1",
+        derived_state: "running",
+        timestamp: "2026-02-05T12:00:01Z",
+      },
+    });
+
+    screen.getByTestId("agent-dock-toggle").click();
+    screen.getByTestId("session-composer-interrupt").click();
+
+    await waitFor(() => {
+      expect(apiClient.cancelSession).toHaveBeenCalledWith("session-1");
+    });
+    expect(apiClient.sendSessionInput).not.toHaveBeenCalled();
   });
 
   it("creates a dock session before sending when empty", async () => {

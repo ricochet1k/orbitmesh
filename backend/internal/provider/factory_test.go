@@ -15,6 +15,11 @@ type mockProvider struct {
 	testErr   error
 }
 
+type mockResumeProvider struct {
+	mockProvider
+	built []session.Message
+}
+
 func (m *mockProvider) CreateSession(sessionID string, config session.Config) (session.Session, error) {
 	if m.createErr != nil {
 		return nil, m.createErr
@@ -24,6 +29,16 @@ func (m *mockProvider) CreateSession(sessionID string, config session.Config) (s
 
 func (m *mockProvider) TestConfig(ctx context.Context, config session.Config) error {
 	return m.testErr
+}
+
+func (m *mockResumeProvider) BuildResumeMessages(history []domain.Message) []session.Message {
+	if len(m.built) > 0 {
+		return m.built
+	}
+	if len(history) == 0 {
+		return nil
+	}
+	return []session.Message{{ID: history[0].ID, Kind: session.MKUser, Contents: history[0].Contents}}
 }
 
 func TestDefaultFactory_Register(t *testing.T) {
@@ -107,6 +122,29 @@ func TestDefaultFactory_TestConfig(t *testing.T) {
 	}
 	if err := factory.TestConfig(context.Background(), "unknown-provider", session.Config{}); err == nil {
 		t.Error("expected error for unknown provider type")
+	}
+}
+
+func TestDefaultFactory_BuildResumeMessages(t *testing.T) {
+	factory := NewDefaultFactory()
+	factory.Register("resume-provider", &mockResumeProvider{built: []session.Message{{ID: "m1", Kind: session.MKSystem, Contents: "seed"}}})
+
+	msgs := factory.BuildResumeMessages("resume-provider", []domain.Message{{ID: "orig", Kind: domain.MessageKindUser, Contents: "hello"}})
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 resume message, got %d", len(msgs))
+	}
+	if msgs[0].ID != "m1" || msgs[0].Kind != session.MKSystem || msgs[0].Contents != "seed" {
+		t.Fatalf("unexpected mapped message: %+v", msgs[0])
+	}
+}
+
+func TestDefaultFactory_BuildResumeMessages_NoPolicy(t *testing.T) {
+	factory := NewDefaultFactory()
+	factory.Register("plain-provider", &mockProvider{})
+
+	msgs := factory.BuildResumeMessages("plain-provider", []domain.Message{{ID: "orig", Kind: domain.MessageKindUser, Contents: "hello"}})
+	if len(msgs) != 0 {
+		t.Fatalf("expected no resume messages without policy, got %d", len(msgs))
 	}
 }
 

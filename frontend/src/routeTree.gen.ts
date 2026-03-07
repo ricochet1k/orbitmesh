@@ -22,6 +22,7 @@ import { Route as TerminalsTerminalIdRouteImport } from './routes/terminals/$ter
 import { Route as SettingsProvidersRouteImport } from './routes/settings/providers'
 import { Route as SettingsProfileRouteImport } from './routes/settings/profile'
 import { Route as SettingsPreferencesRouteImport } from './routes/settings/preferences'
+import { Route as SettingsMcpServersRouteImport } from './routes/settings/mcp-servers'
 import { Route as SettingsIntegrationsRouteImport } from './routes/settings/integrations'
 import { Route as SettingsAgentsRouteImport } from './routes/settings/agents'
 import { Route as SessionsSessionIdRouteImport } from './routes/sessions/$sessionId'
@@ -92,6 +93,11 @@ const SettingsPreferencesRoute = SettingsPreferencesRouteImport.update({
   path: '/preferences',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsMcpServersRoute = SettingsMcpServersRouteImport.update({
+  id: '/mcp-servers',
+  path: '/mcp-servers',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsIntegrationsRoute = SettingsIntegrationsRouteImport.update({
   id: '/integrations',
   path: '/integrations',
@@ -124,6 +130,7 @@ export interface FileRoutesByFullPath {
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
   '/settings/agents': typeof SettingsAgentsRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
+  '/settings/mcp-servers': typeof SettingsMcpServersRoute
   '/settings/preferences': typeof SettingsPreferencesRoute
   '/settings/profile': typeof SettingsProfileRoute
   '/settings/providers': typeof SettingsProvidersRoute
@@ -142,6 +149,7 @@ export interface FileRoutesByTo {
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
   '/settings/agents': typeof SettingsAgentsRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
+  '/settings/mcp-servers': typeof SettingsMcpServersRoute
   '/settings/preferences': typeof SettingsPreferencesRoute
   '/settings/profile': typeof SettingsProfileRoute
   '/settings/providers': typeof SettingsProvidersRoute
@@ -162,6 +170,7 @@ export interface FileRoutesById {
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
   '/settings/agents': typeof SettingsAgentsRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
+  '/settings/mcp-servers': typeof SettingsMcpServersRoute
   '/settings/preferences': typeof SettingsPreferencesRoute
   '/settings/profile': typeof SettingsProfileRoute
   '/settings/providers': typeof SettingsProvidersRoute
@@ -183,6 +192,7 @@ export interface FileRouteTypes {
     | '/sessions/$sessionId'
     | '/settings/agents'
     | '/settings/integrations'
+    | '/settings/mcp-servers'
     | '/settings/preferences'
     | '/settings/profile'
     | '/settings/providers'
@@ -201,6 +211,7 @@ export interface FileRouteTypes {
     | '/sessions/$sessionId'
     | '/settings/agents'
     | '/settings/integrations'
+    | '/settings/mcp-servers'
     | '/settings/preferences'
     | '/settings/profile'
     | '/settings/providers'
@@ -220,6 +231,7 @@ export interface FileRouteTypes {
     | '/sessions/$sessionId'
     | '/settings/agents'
     | '/settings/integrations'
+    | '/settings/mcp-servers'
     | '/settings/preferences'
     | '/settings/profile'
     | '/settings/providers'
@@ -336,6 +348,13 @@ declare module '@tanstack/solid-router' {
       preLoaderRoute: typeof SettingsPreferencesRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/mcp-servers': {
+      id: '/settings/mcp-servers'
+      path: '/mcp-servers'
+      fullPath: '/settings/mcp-servers'
+      preLoaderRoute: typeof SettingsMcpServersRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/integrations': {
       id: '/settings/integrations'
       path: '/integrations'
@@ -370,6 +389,7 @@ declare module '@tanstack/solid-router' {
 interface SettingsRouteChildren {
   SettingsAgentsRoute: typeof SettingsAgentsRoute
   SettingsIntegrationsRoute: typeof SettingsIntegrationsRoute
+  SettingsMcpServersRoute: typeof SettingsMcpServersRoute
   SettingsPreferencesRoute: typeof SettingsPreferencesRoute
   SettingsProfileRoute: typeof SettingsProfileRoute
   SettingsProvidersRoute: typeof SettingsProvidersRoute
@@ -379,6 +399,7 @@ interface SettingsRouteChildren {
 const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsAgentsRoute: SettingsAgentsRoute,
   SettingsIntegrationsRoute: SettingsIntegrationsRoute,
+  SettingsMcpServersRoute: SettingsMcpServersRoute,
   SettingsPreferencesRoute: SettingsPreferencesRoute,
   SettingsProfileRoute: SettingsProfileRoute,
   SettingsProvidersRoute: SettingsProvidersRoute,

@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/ricochet1k/orbitmesh/internal/domain"
+	"github.com/ricochet1k/orbitmesh/internal/entity"
 	"github.com/ricochet1k/orbitmesh/internal/service"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
@@ -243,13 +244,18 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 	store := newInMemStore()
 	messageStore := storage.NewSessionMessagesLogStore(t.TempDir())
+	sessionStartDeferredStore := storage.NewJSONStore[entity.DeferredOpEnvelope](
+		t.TempDir(),
+		func(s entity.DeferredOpEnvelope) string { return s.EnvelopeID },
+	)
 	env.store = store
 	env.messageStore = messageStore
 	env.executor = service.NewAgentExecutor(service.ExecutorConfig{
-		Storage:         store,
-		TerminalStorage: store,
-		Broadcaster:     env.broadcaster,
-		MessageLogStore: messageStore,
+		Storage:                     store,
+		TerminalStorage:             store,
+		Broadcaster:                 env.broadcaster,
+		SessionStartDeferredStorage: sessionStartDeferredStore,
+		MessageLogStore:             messageStore,
 		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
 			if providerType != "mock" {
 				return nil, fmt.Errorf("unsupported provider: %s", providerType)
@@ -977,6 +983,55 @@ func TestResumeSession_OK_WithToken(t *testing.T) {
 	}
 }
 
+func TestResumeSession_WithToken_DuringDrain_IsAcceptedForDeferredReplay(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	created := createSession(t, r, "mock", "/tmp")
+	now := time.Now().UTC()
+	if err := env.store.SaveRunAttempt(&storage.RunAttemptMetadata{
+		AttemptID:      "attempt-resume-defer",
+		SessionID:      created.ID,
+		ProviderType:   "mock",
+		StartedAt:      now.Add(-time.Minute),
+		HeartbeatAt:    now,
+		TerminalReason: "interrupted",
+		WaitKind:       "tool_call",
+		WaitRef:        "tool-1",
+		ResumeTokenID:  "token-defer",
+	}); err != nil {
+		t.Fatalf("SaveRunAttempt failed: %v", err)
+	}
+	if err := env.store.SaveResumeToken(&storage.ResumeTokenMetadata{
+		TokenID:   "token-defer",
+		SessionID: created.ID,
+		AttemptID: "attempt-resume-defer",
+		CreatedAt: now,
+		ExpiresAt: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("SaveResumeToken failed: %v", err)
+	}
+
+	env.executor.BeginDrain(context.Background())
+
+	body, _ := json.Marshal(apiTypes.ResumeSessionRequest{TokenID: "token-defer"})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+created.ID+"/resume", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 during drain-deferred resume, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp apiTypes.SessionResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.Deferred {
+		t.Fatalf("expected deferred=true in response, got %+v", resp)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // POST /api/sessions/{id}/input
 // ---------------------------------------------------------------------------
@@ -1304,6 +1359,31 @@ func TestSendMessage_SessionNotFound(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &errResp)
 	if errResp.Error != "session not found" {
 		t.Errorf("Error = %q", errResp.Error)
+	}
+}
+
+func TestSendMessage_DuringDrain_IsAcceptedAsDeferred(t *testing.T) {
+	env := newTestEnv(t)
+	r := env.router()
+
+	created := createSession(t, r, "mock", "/tmp")
+	env.executor.BeginDrain(context.Background())
+
+	body, _ := json.Marshal(apiTypes.SendMessageRequest{Content: "queued while draining"})
+	req := httptest.NewRequest("POST", fmt.Sprintf("/api/sessions/%s/messages", created.ID), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", w.Code)
+	}
+	var resp apiTypes.SessionResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.Deferred {
+		t.Fatalf("expected deferred=true in response, got %+v", resp)
 	}
 }
 

@@ -18,6 +18,8 @@ type AgentConfig struct {
 	Name            string                    `json:"name"`
 	SystemPrompt    string                    `json:"system_prompt,omitempty"`
 	MCPServers      []session.MCPServerConfig `json:"mcp_servers,omitempty"`
+	// MCPServerRefs links the agent to globally-configured MCP servers (see MCPServerRegistry).
+	MCPServerRefs   []AgentMCPRef             `json:"mcp_server_refs,omitempty"`
 	Custom          map[string]any            `json:"custom,omitempty"`
 	AllowedTools    []string                  `json:"allowed_tools,omitempty"`
 	DisallowedTools []string                  `json:"disallowed_tools,omitempty"`

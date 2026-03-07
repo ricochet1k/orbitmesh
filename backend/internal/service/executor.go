@@ -37,6 +37,8 @@ const (
 // SessionFactory creates a session runner for the given provider type.
 type SessionFactory func(providerType, sessionID string, config session.Config) (session.Session, error)
 
+type ResumeMessageBuilder func(providerType string, history []domain.Message) []session.Message
+
 type sessionContext struct {
 	session *domain.Session
 	run     *session.Run // The active run (nil if idle)
@@ -88,6 +90,7 @@ type AgentExecutor struct {
 	terminalStorage    storage.TerminalStorage
 	broadcaster        *EventBroadcaster
 	sessionFactory     SessionFactory
+	resumeMsgBuilder   ResumeMessageBuilder
 	opTimeout          time.Duration
 	checkpointInterval time.Duration
 	terminalHubs       map[string]*TerminalHub
@@ -98,10 +101,11 @@ type AgentExecutor struct {
 	bootID             string
 	resumeTokenTTL     time.Duration
 
-	messageLogStore    *storage.SessionMessagesLogStore
-	usageMu            sync.RWMutex
-	sessionUsageStats  map[string]session.UsageStats
-	providerUsageStats map[string]providerUsageState
+	messageLogStore             *storage.SessionMessagesLogStore
+	usageMu                     sync.RWMutex
+	sessionUsageStats           map[string]session.UsageStats
+	providerUsageStats          map[string]providerUsageState
+	sessionStartDeferredStorage entity.TypedStorage[entity.DeferredOpEnvelope]
 
 	evalCoordinator *EvalCoordinator
 
@@ -113,18 +117,20 @@ type AgentExecutor struct {
 }
 
 type ExecutorConfig struct {
-	Storage            storage.Storage
-	TerminalStorage    storage.TerminalStorage
-	Broadcaster        *EventBroadcaster
-	ProviderFactory    SessionFactory
-	OperationTimeout   time.Duration
-	CheckpointInterval time.Duration
-	RunAttemptStorage  storage.RunAttemptStorage
-	ResumeTokenStorage storage.ResumeTokenStorage
-	ResumeTokenTTL     time.Duration
-	EvalStorage        entity.TypedStorage[toolcall.EvalSnapshot]
-	ToolRegistry       tools.Registry
-	MessageLogStore    *storage.SessionMessagesLogStore
+	Storage                     storage.Storage
+	TerminalStorage             storage.TerminalStorage
+	Broadcaster                 *EventBroadcaster
+	ProviderFactory             SessionFactory
+	OperationTimeout            time.Duration
+	CheckpointInterval          time.Duration
+	RunAttemptStorage           storage.RunAttemptStorage
+	ResumeTokenStorage          storage.ResumeTokenStorage
+	ResumeTokenTTL              time.Duration
+	EvalStorage                 entity.TypedStorage[toolcall.EvalSnapshot]
+	SessionStartDeferredStorage entity.TypedStorage[entity.DeferredOpEnvelope]
+	ToolRegistry                tools.Registry
+	MessageLogStore             *storage.SessionMessagesLogStore
+	ResumeMessageBuilder        ResumeMessageBuilder
 }
 
 func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
@@ -141,24 +147,26 @@ func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
 	}
 
 	exec := &AgentExecutor{
-		sessions:           make(map[string]*sessionContext),
-		sessionUsageStats:  make(map[string]session.UsageStats),
-		providerUsageStats: make(map[string]providerUsageState),
-		storage:            cfg.Storage,
-		terminalStorage:    cfg.TerminalStorage,
-		broadcaster:        cfg.Broadcaster,
-		sessionFactory:     cfg.ProviderFactory,
-		opTimeout:          opTimeout,
-		checkpointInterval: checkpointInterval,
-		terminalHubs:       make(map[string]*TerminalHub),
-		terminalObservers:  make(map[int64]TerminalObserver),
-		attemptStorage:     cfg.RunAttemptStorage,
-		resumeTokenStorage: cfg.ResumeTokenStorage,
-		bootID:             newBootID(),
-		resumeTokenTTL:     cfg.ResumeTokenTTL,
-		messageLogStore:    cfg.MessageLogStore,
-		ctx:                ctx,
-		cancel:             cancel,
+		sessions:                    make(map[string]*sessionContext),
+		sessionUsageStats:           make(map[string]session.UsageStats),
+		providerUsageStats:          make(map[string]providerUsageState),
+		storage:                     cfg.Storage,
+		terminalStorage:             cfg.TerminalStorage,
+		broadcaster:                 cfg.Broadcaster,
+		sessionFactory:              cfg.ProviderFactory,
+		resumeMsgBuilder:            cfg.ResumeMessageBuilder,
+		opTimeout:                   opTimeout,
+		checkpointInterval:          checkpointInterval,
+		terminalHubs:                make(map[string]*TerminalHub),
+		terminalObservers:           make(map[int64]TerminalObserver),
+		attemptStorage:              cfg.RunAttemptStorage,
+		resumeTokenStorage:          cfg.ResumeTokenStorage,
+		bootID:                      newBootID(),
+		resumeTokenTTL:              cfg.ResumeTokenTTL,
+		messageLogStore:             cfg.MessageLogStore,
+		sessionStartDeferredStorage: cfg.SessionStartDeferredStorage,
+		ctx:                         ctx,
+		cancel:                      cancel,
 	}
 
 	if exec.attemptStorage == nil {
@@ -175,6 +183,12 @@ func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
 
 	if exec.resumeTokenTTL <= 0 {
 		exec.resumeTokenTTL = 24 * time.Hour
+	}
+
+	sessionRunOpts := []entity.ActiveStoreOption[*sessionRunEntity, sessionRunSnapshot]{
+		entity.WithDrainStartPolicy[*sessionRunEntity, sessionRunSnapshot](func(entity.ActiveStoreStartOp, string) entity.DrainStartPolicyDecision {
+			return entity.DrainStartDefer
+		}),
 	}
 
 	exec.sessionRuns = entity.NewActiveStore[*sessionRunEntity, sessionRunSnapshot](
@@ -198,6 +212,7 @@ func NewAgentExecutor(cfg ExecutorConfig) *AgentExecutor {
 		entity.StoreOptions[*sessionRunEntity, sessionRunSnapshot]{
 			Kind: "session_run",
 		},
+		sessionRunOpts...,
 	)
 
 	// Wire up EvalCoordinator if eval storage is provided.
@@ -232,7 +247,13 @@ func (e *AgentExecutor) Startup(ctx context.Context) error {
 	if e == nil || e.recovery == nil {
 		return nil
 	}
-	return e.recovery.OnStartup(ctx)
+	if err := e.recovery.OnStartup(ctx); err != nil {
+		return err
+	}
+	if err := e.replayDeferredSessionStartCommands(ctx); err != nil {
+		return err
+	}
+	return nil
 }
 
 // CreateSession creates a new session in idle state without starting a provider.
@@ -254,6 +275,9 @@ func (e *AgentExecutor) CreateSession(ctx context.Context, id string, config ses
 	// Create session in idle state without instantiating a provider
 	session := domain.NewSession(id, config.ProviderType, config.WorkingDir)
 	session.ProjectID = config.ProjectID
+	if config.PreferredProviderID != "" {
+		session.SetPreferredProviderID(config.PreferredProviderID)
+	}
 	if config.AgentID != "" {
 		session.AgentID = config.AgentID
 	}
@@ -431,7 +455,14 @@ func (e *AgentExecutor) DeleteProjectSessions(ctx context.Context, projectID str
 	return firstErr
 }
 
-func (e *AgentExecutor) SendInput(ctx context.Context, id string, input string, providerID string, providerType string) error {
+type SessionRuntimeOptions struct {
+	ProviderID   string
+	ProviderType string
+	Custom       map[string]any
+	Environment  map[string]string
+}
+
+func (e *AgentExecutor) SendInput(ctx context.Context, id string, input string, options SessionRuntimeOptions) error {
 	e.mu.RLock()
 	sc, exists := e.sessions[id]
 	e.mu.RUnlock()
@@ -441,8 +472,8 @@ func (e *AgentExecutor) SendInput(ctx context.Context, id string, input string, 
 	}
 
 	// Store the provider preference if specified
-	if providerID != "" {
-		sc.session.SetPreferredProviderID(providerID)
+	if options.ProviderID != "" {
+		sc.session.SetPreferredProviderID(options.ProviderID)
 		if e.storage != nil {
 			if err := e.storage.Save(sc.session); err != nil {
 				return fmt.Errorf("failed to save session with provider preference: %w", err)
@@ -456,17 +487,34 @@ func (e *AgentExecutor) SendInput(ctx context.Context, id string, input string, 
 	}
 
 	// Build minimal config for mid-run input (runner is already started).
+	providerType := sc.session.ProviderType
+	if options.ProviderType != "" {
+		providerType = options.ProviderType
+	}
+
+	custom := make(map[string]any, len(options.Custom))
+	for k, v := range options.Custom {
+		custom[k] = v
+	}
+
+	environment := make(map[string]string, len(options.Environment))
+	for k, v := range options.Environment {
+		environment[k] = v
+	}
+
 	cfg := session.Config{
-		ProviderType:  sc.session.ProviderType,
+		ProviderType:  providerType,
 		WorkingDir:    sc.session.WorkingDir,
 		ProjectID:     sc.session.ProjectID,
+		Custom:        custom,
+		Environment:   environment,
 		SessionCustom: sc.session.CustomDataCopy(),
 	}
 	_, err := run.Session.SendInput(ctx, cfg, input)
 	return err
 }
 
-func (e *AgentExecutor) RespondAction(ctx context.Context, id string, response session.ActionResponse, providerID string, providerType string) error {
+func (e *AgentExecutor) RespondAction(ctx context.Context, id string, response session.ActionResponse, options SessionRuntimeOptions) error {
 	e.mu.RLock()
 	sc, exists := e.sessions[id]
 	e.mu.RUnlock()
@@ -475,8 +523,8 @@ func (e *AgentExecutor) RespondAction(ctx context.Context, id string, response s
 		return ErrSessionNotFound
 	}
 
-	if providerID != "" {
-		sc.session.SetPreferredProviderID(providerID)
+	if options.ProviderID != "" {
+		sc.session.SetPreferredProviderID(options.ProviderID)
 		if e.storage != nil {
 			if err := e.storage.Save(sc.session); err != nil {
 				return fmt.Errorf("failed to save session with provider preference: %w", err)
@@ -489,10 +537,27 @@ func (e *AgentExecutor) RespondAction(ctx context.Context, id string, response s
 		return fmt.Errorf("no active provider run for session %s", id)
 	}
 
+	providerType := sc.session.ProviderType
+	if options.ProviderType != "" {
+		providerType = options.ProviderType
+	}
+
+	custom := make(map[string]any, len(options.Custom))
+	for k, v := range options.Custom {
+		custom[k] = v
+	}
+
+	environment := make(map[string]string, len(options.Environment))
+	for k, v := range options.Environment {
+		environment[k] = v
+	}
+
 	cfg := session.Config{
-		ProviderType:  sc.session.ProviderType,
+		ProviderType:  providerType,
 		WorkingDir:    sc.session.WorkingDir,
 		ProjectID:     sc.session.ProjectID,
+		Custom:        custom,
+		Environment:   environment,
 		SessionCustom: sc.session.CustomDataCopy(),
 	}
 
@@ -525,6 +590,11 @@ type SendMessageOptions struct {
 	DisallowedTools []string
 }
 
+type SendMessageResult struct {
+	Session  *domain.Session
+	Deferred bool
+}
+
 type ExecutorDrainStatus struct {
 	AsOf        time.Time          `json:"as_of"`
 	SessionRuns entity.DrainStatus `json:"session_runs"`
@@ -543,6 +613,11 @@ func (e *AgentExecutor) SendMessage(ctx context.Context, id string, content stri
 }
 
 func (e *AgentExecutor) SendMessageWithOptions(ctx context.Context, id string, content string, options SendMessageOptions) (*domain.Session, error) {
+	res, err := e.SendMessageWithOptionsResult(ctx, id, content, options)
+	return res.Session, err
+}
+
+func (e *AgentExecutor) SendMessageWithOptionsResult(ctx context.Context, id string, content string, options SendMessageOptions) (SendMessageResult, error) {
 	e.mu.RLock()
 	sc, exists := e.sessions[id]
 	e.mu.RUnlock()
@@ -554,40 +629,26 @@ func (e *AgentExecutor) SendMessageWithOptions(ctx context.Context, id string, c
 	if !exists {
 		sess, err = e.GetSession(id)
 		if err != nil {
-			return nil, err
+			return SendMessageResult{}, err
 		}
 	} else {
 		sess = sc.session
 	}
 
 	state, deriveErr := e.DeriveSessionState(id)
-	if deriveErr != nil {
-		state = sess.GetState()
-	} else if state == domain.SessionStateIdle && sess.GetState() == domain.SessionStateSuspended {
-		// Respect only live in-memory suspension context; persisted session state is advisory.
-		if sess.GetSuspensionContext() != nil {
-			state = domain.SessionStateSuspended
-		}
+	result := e.submitSessionStartCommand(ctx, SessionStartCommand{
+		Kind:     SessionStartCommandMessage,
+		Session:  sess,
+		Content:  content,
+		Options:  options,
+		State:    state,
+		StateErr: deriveErr,
+		RawID:    id,
+	})
+	if result.Session == nil {
+		result.Session = sess
 	}
-
-	// Handle based on session state
-	switch state {
-	case domain.SessionStateIdle:
-		if e.sessionRuns != nil && e.sessionRuns.LifecycleMode() != entity.ActiveStoreModeRunning {
-			return sess, ErrExecutorShutdown
-		}
-		// For idle sessions, start a new run with this message
-		return e.startRunWithMessage(ctx, id, sess, content, options)
-
-	case domain.SessionStateRunning:
-		return sess, fmt.Errorf("cannot send message to running session: %s", e.describeSessionBlocker(id, domain.SessionStateRunning))
-
-	case domain.SessionStateSuspended:
-		return sess, fmt.Errorf("cannot send message to suspended session: %s", e.describeSessionBlocker(id, domain.SessionStateSuspended))
-
-	default:
-		return sess, fmt.Errorf("invalid session state: %v", state)
-	}
+	return SendMessageResult{Session: result.Session, Deferred: result.Deferred}, result.Err
 }
 
 func (e *AgentExecutor) describeSessionBlocker(sessionID string, state domain.SessionState) string {
@@ -739,7 +800,7 @@ func (e *AgentExecutor) DrainActiveSessions(ctx context.Context) {
 		return
 	}
 
-	var wg sync.WaitGroup
+	wg := newLabeledWaitGroup()
 	for _, id := range sessionIDs {
 		e.mu.RLock()
 		sc, exists := e.sessions[id]
@@ -756,18 +817,43 @@ func (e *AgentExecutor) DrainActiveSessions(ctx context.Context) {
 			continue
 		}
 
-		wg.Add(1)
-		go func(sessionID string, run *session.Run) {
-			defer wg.Done()
+		sessionID := id
+		wg.Go(fmt.Sprintf("session:%s", sessionID), func() {
 			if drainer, ok := run.Session.(session.TurnBoundaryDrainer); ok {
 				if err := drainer.DrainAtTurnBoundary(ctx); err != nil {
 					log.Printf("shutdown: session %s turn boundary drain: %v", sessionID, err)
 				}
 			}
 			_ = e.StopSession(ctx, sessionID)
-		}(id, run)
+		})
 	}
-	wg.Wait()
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	ticker := time.NewTicker(750 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			waitingOn := wg.WaitingOn()
+			if len(waitingOn) > 0 {
+				log.Printf("shutdown: waiting for active sessions to stop: %v", waitingOn)
+			}
+		case <-ctx.Done():
+			waitingOn := wg.WaitingOn()
+			if len(waitingOn) > 0 {
+				log.Printf("shutdown: active session drain timeout waiting_on=%v err=%v", waitingOn, ctx.Err())
+			}
+			return
+		}
+	}
 }
 
 func formatTaskReference(id, title string) string {

@@ -163,6 +163,131 @@ func TestPermissionRequest_CanBeCancelledByControlMessage(t *testing.T) {
 	close(blocked)
 }
 
+func TestPermissionRequest_EmitsActionRequestWithHint(t *testing.T) {
+	wc, _, cleanup := newTestWSConn(t)
+	defer cleanup()
+
+	blocked := make(chan struct{})
+	p := NewClaudeWSProvider("s1", waitingPermissionHandler{release: blocked})
+	p.ctx, p.cancel = context.WithCancel(context.Background())
+	p.wsConn = wc
+	p.config = session.Config{Custom: map[string]any{"claudews_permission_timeout_ms": 5000}}
+
+	p.handleControlRequest(RawMessage{Raw: []byte(`{"type":"control_request","request_id":"req-hint","request":{"subtype":"can_use_tool","tool_name":"Bash","hint":"Need user approval for shell command","input":{"command":"pwd"},"tool_use_id":"tool-hint"}}`)})
+
+	action := waitForActionRequestEvent(t, p.events.Events(), "req-hint", "pending")
+	if action.Kind != "approval" {
+		t.Fatalf("expected approval kind, got %q", action.Kind)
+	}
+	payload, _ := action.Payload.(map[string]any)
+	request, _ := payload["request"].(map[string]any)
+	if requestID, _ := request["request_id"].(string); requestID != "req-hint" {
+		t.Fatalf("expected request_id in action payload, got %q", requestID)
+	}
+	hint, _ := request["hint"].(string)
+	if hint != "Need user approval for shell command" {
+		t.Fatalf("expected hint in action payload, got %q", hint)
+	}
+	reason, _ := request["reason"].(string)
+	if reason != hint {
+		t.Fatalf("expected reason to mirror hint for UI rendering, got %q", reason)
+	}
+
+	p.dispatchMessage([]byte(`{"type":"control_cancel_request","request_id":"req-hint"}`))
+	close(blocked)
+}
+
+func TestPermissionRequest_EmitsResolvedActionRequestOnAllow(t *testing.T) {
+	wc, _, cleanup := newTestWSConn(t)
+	defer cleanup()
+
+	p := NewClaudeWSProvider("s1", allowPermissionHandler{})
+	p.ctx, p.cancel = context.WithCancel(context.Background())
+	p.wsConn = wc
+	p.config = session.Config{Custom: map[string]any{"claudews_permission_timeout_ms": 200}}
+
+	p.handleControlRequest(RawMessage{Raw: []byte(`{"type":"control_request","request_id":"req-allow","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"pwd"},"tool_use_id":"tool-allow"}}`)})
+
+	_ = waitForActionRequestEvent(t, p.events.Events(), "req-allow", "pending")
+	_ = waitForActionRequestEvent(t, p.events.Events(), "req-allow", "approved")
+}
+
+func TestRespondAction_ApprovesPendingPermissionRequest(t *testing.T) {
+	wc, outbound, cleanup := newTestWSConn(t)
+	defer cleanup()
+
+	blocked := make(chan struct{})
+	p := NewClaudeWSProvider("s1", waitingPermissionHandler{release: blocked})
+	p.ctx, p.cancel = context.WithCancel(context.Background())
+	p.wsConn = wc
+	p.config = session.Config{Custom: map[string]any{"claudews_permission_timeout_ms": 5000}}
+
+	p.handleControlRequest(RawMessage{Raw: []byte(`{"type":"control_request","request_id":"req-action","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"/tmp/notes.md"},"tool_use_id":"tool-action"}}`)})
+	_ = waitForActionRequestEvent(t, p.events.Events(), "req-action", "pending")
+
+	if _, err := p.RespondAction(context.Background(), session.Config{}, session.ActionResponse{ActionID: "req-action", Decision: "accept"}); err != nil {
+		t.Fatalf("respond action: %v", err)
+	}
+
+	msg := <-outbound
+	var response map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(msg), &response); err != nil {
+		t.Fatalf("unmarshal control response: %v", err)
+	}
+	body, _ := response["response"].(map[string]any)
+	payload, _ := body["response"].(map[string]any)
+	if behavior, _ := payload["behavior"].(string); behavior != "allow" {
+		t.Fatalf("expected allow behavior, got %#v", payload["behavior"])
+	}
+
+	_ = waitForActionRequestEvent(t, p.events.Events(), "req-action", "approved")
+	close(blocked)
+}
+
+func TestRespondAction_AllowAlwaysPersistsPermissionSuggestions(t *testing.T) {
+	wc, outbound, cleanup := newTestWSConn(t)
+	defer cleanup()
+
+	blocked := make(chan struct{})
+	p := NewClaudeWSProvider("s1", waitingPermissionHandler{release: blocked})
+	p.ctx, p.cancel = context.WithCancel(context.Background())
+	p.wsConn = wc
+	p.config = session.Config{Custom: map[string]any{"claudews_permission_timeout_ms": 5000}}
+
+	p.handleControlRequest(RawMessage{Raw: []byte(`{"type":"control_request","request_id":"req-always","request":{"subtype":"can_use_tool","tool_name":"Read","input":{"file_path":"/tmp/notes.md"},"permission_suggestions":[{"type":"addRules","behavior":"allow","destination":"session","rules":[{"toolName":"Read","ruleContent":"/tmp/*"}]}],"tool_use_id":"tool-always"}}`)})
+	action := waitForActionRequestEvent(t, p.events.Events(), "req-always", "pending")
+	payload, _ := action.Payload.(map[string]any)
+	decisions, _ := payload["decisions"].([]map[string]string)
+	if len(decisions) == 0 {
+		// JSON roundtrip through any may decode to []any; fall back to raw inspection.
+		b, _ := json.Marshal(payload["decisions"])
+		if !strings.Contains(string(b), "allow_always") {
+			t.Fatalf("expected allow_always decision, got %s", string(b))
+		}
+	}
+
+	if _, err := p.RespondAction(context.Background(), session.Config{}, session.ActionResponse{ActionID: "req-always", Decision: "allow_always"}); err != nil {
+		t.Fatalf("respond action: %v", err)
+	}
+
+	msg := <-outbound
+	var response map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(msg), &response); err != nil {
+		t.Fatalf("unmarshal control response: %v", err)
+	}
+	body, _ := response["response"].(map[string]any)
+	respPayload, _ := body["response"].(map[string]any)
+	if behavior, _ := respPayload["behavior"].(string); behavior != "allow" {
+		t.Fatalf("expected allow behavior, got %#v", respPayload["behavior"])
+	}
+	if _, ok := respPayload["updatedPermissions"]; !ok {
+		t.Fatalf("expected updatedPermissions in allow_always response, got %#v", respPayload)
+	}
+
+	_ = waitForActionRequestEvent(t, p.events.Events(), "req-always", "approved")
+	close(blocked)
+}
+
 type blockingPermissionHandler struct{}
 
 func (blockingPermissionHandler) RequestPermission(_ context.Context, _ tools.PermissionRequest) (tools.PermissionDecision, error) {
@@ -176,6 +301,39 @@ type waitingPermissionHandler struct {
 func (h waitingPermissionHandler) RequestPermission(_ context.Context, _ tools.PermissionRequest) (tools.PermissionDecision, error) {
 	<-h.release
 	return tools.PermissionDecision{Granted: true}, nil
+}
+
+type allowPermissionHandler struct{}
+
+func (allowPermissionHandler) RequestPermission(_ context.Context, _ tools.PermissionRequest) (tools.PermissionDecision, error) {
+	return tools.PermissionDecision{Granted: true}, nil
+}
+
+func waitForActionRequestEvent(t *testing.T, events <-chan domain.Event, actionID, status string) domain.ActionRequestData {
+	t.Helper()
+
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case ev := <-events:
+			if ev.Type != domain.EventTypeActionRequest {
+				continue
+			}
+			data, ok := ev.ActionRequest()
+			if !ok {
+				continue
+			}
+			if data.ID != actionID {
+				continue
+			}
+			if strings.TrimSpace(strings.ToLower(data.Status)) != strings.TrimSpace(strings.ToLower(status)) {
+				continue
+			}
+			return data
+		case <-deadline:
+			t.Fatalf("timed out waiting for action_request id=%s status=%s", actionID, status)
+		}
+	}
 }
 
 func extractDenyMessage(response map[string]any) string {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ricochet1k/orbitmesh/internal/domain"
 	"github.com/ricochet1k/orbitmesh/internal/provider"
 	"github.com/ricochet1k/orbitmesh/internal/provider/process"
 	"github.com/ricochet1k/orbitmesh/internal/session"
@@ -21,6 +22,7 @@ type Provider struct {
 }
 
 var _ provider.Provider = (*Provider)(nil)
+var _ provider.ResumeMessagePolicy = (*Provider)(nil)
 
 // NewProvider creates a new Codex provider factory.
 func NewProvider(cfg Config) *Provider {
@@ -30,6 +32,40 @@ func NewProvider(cfg Config) *Provider {
 // CreateSession creates a new Codex app-server session.
 func (p *Provider) CreateSession(sessionID string, config session.Config) (session.Session, error) {
 	return NewCodexProvider(sessionID, p.cfg), nil
+}
+
+func (p *Provider) BuildResumeMessages(history []domain.Message) []session.Message {
+	if len(history) == 0 {
+		return nil
+	}
+	out := make([]session.Message, 0, len(history))
+	for _, msg := range history {
+		contents := strings.TrimSpace(msg.Contents)
+		if contents == "" {
+			continue
+		}
+		mapped, ok := mapResumeMessage(msg, contents)
+		if !ok {
+			continue
+		}
+		out = append(out, mapped)
+	}
+	return out
+}
+
+func mapResumeMessage(msg domain.Message, contents string) (session.Message, bool) {
+	var kind session.MessageKind
+	switch msg.Kind {
+	case domain.MessageKindUser:
+		kind = session.MKUser
+	case domain.MessageKindOutput, domain.MessageKindThought:
+		kind = session.MKAssistant
+	case domain.MessageKindSystem, domain.MessageKindError:
+		kind = session.MKSystem
+	default:
+		return session.Message{}, false
+	}
+	return session.Message{ID: msg.ID, Kind: kind, Contents: contents}, true
 }
 
 // TestConfig performs a lightweight app-server handshake.

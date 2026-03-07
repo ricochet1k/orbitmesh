@@ -1,6 +1,7 @@
 package codeflowmvp
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -158,6 +159,91 @@ func TestFindings_SourceToSinkUnsanitized(t *testing.T) {
 
 	if vulnerableFindingCount == 0 {
 		t.Fatalf("expected at least one source_to_sink_unsanitized finding for vulnerable function")
+	}
+}
+
+func TestScanPath_SkipsUnparseableFilesWhenValidFilesExist(t *testing.T) {
+	dir := t.TempDir()
+	validPath := filepath.Join(dir, "valid.go")
+	invalidPath := filepath.Join(dir, "broken.go")
+
+	if err := os.WriteFile(validPath, []byte("package sample\n\nfunc ok() {}\n"), 0o644); err != nil {
+		t.Fatalf("write valid file: %v", err)
+	}
+	if err := os.WriteFile(invalidPath, []byte("func nope() {}\n"), 0o644); err != nil {
+		t.Fatalf("write invalid file: %v", err)
+	}
+
+	result, err := ScanPath(dir)
+	if err != nil {
+		t.Fatalf("ScanPath(%q): %v", dir, err)
+	}
+	if len(result.Files) != 1 {
+		t.Fatalf("expected 1 parseable file, got %d", len(result.Files))
+	}
+	if result.Files[0].Path != "valid.go" {
+		t.Fatalf("expected valid.go to be scanned, got %q", result.Files[0].Path)
+	}
+}
+
+func TestScanPath_ExtractsJSRequestsAndSkipsHeavyDirs(t *testing.T) {
+	dir := t.TempDir()
+	frontendDir := filepath.Join(dir, "frontend")
+	if err := os.MkdirAll(filepath.Join(frontendDir, "src"), 0o755); err != nil {
+		t.Fatalf("mkdir src: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(frontendDir, "node_modules", "pkg"), 0o755); err != nil {
+		t.Fatalf("mkdir node_modules: %v", err)
+	}
+
+	mainPath := filepath.Join(frontendDir, "src", "api.ts")
+	ignoredPath := filepath.Join(frontendDir, "node_modules", "pkg", "ignored.ts")
+
+	mainContent := "export async function callApi(id: string) {\n  return fetch(`/api/sessions/${id}`, { method: 'GET' })\n}\n"
+	ignoredContent := "export async function ignored() {\n  return fetch('/api/ignored', { method: 'POST' })\n}\n"
+
+	if err := os.WriteFile(mainPath, []byte(mainContent), 0o644); err != nil {
+		t.Fatalf("write main file: %v", err)
+	}
+	if err := os.WriteFile(ignoredPath, []byte(ignoredContent), 0o644); err != nil {
+		t.Fatalf("write ignored file: %v", err)
+	}
+
+	result, err := ScanPath(frontendDir)
+	if err != nil {
+		t.Fatalf("ScanPath(%q): %v", frontendDir, err)
+	}
+	if len(result.APIReqs) == 0 {
+		t.Fatalf("expected frontend API requests to be extracted")
+	}
+
+	for _, req := range result.APIReqs {
+		if req.NormalizedPath == "/api/ignored" {
+			t.Fatalf("expected node_modules request to be skipped")
+		}
+	}
+}
+
+func TestScanPath_ExtractsGoRouteHandlers(t *testing.T) {
+	result := mustScanFixturePath(t, "testdata/routes_sample.go")
+
+	if len(result.APIRoutes) != 2 {
+		t.Fatalf("expected 2 api handlers, got %d", len(result.APIRoutes))
+	}
+
+	want := map[string]string{
+		"GET":  "/api/sessions/{param}",
+		"POST": "/api/sessions",
+	}
+	for _, route := range result.APIRoutes {
+		if gotPath, ok := want[route.Method]; !ok {
+			t.Fatalf("unexpected method %q", route.Method)
+		} else if route.NormalizedPath != gotPath {
+			t.Fatalf("method %s normalized path = %q, want %q", route.Method, route.NormalizedPath, gotPath)
+		}
+		if route.HandlerExpr == "" {
+			t.Fatalf("expected handler expr for route %q", route.ID)
+		}
 	}
 }
 

@@ -189,6 +189,43 @@ describe("useSessionData", () => {
     expect(onSessionRefetchNeeded).toHaveBeenCalledTimes(1)
   })
 
+  it("keeps transcript state stable when loadEarlier history fetch fails", async () => {
+    ;(apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        messages: [
+          makeHistoryMessage({
+            id: "event:50:output",
+            contents: "latest history page",
+            timestamp: "2026-02-05T12:05:00Z",
+          }),
+        ],
+        next_before: 25,
+      })
+      .mockRejectedValueOnce(new Error("history pagination exploded"))
+
+    let data: ReturnType<typeof useSessionData> | undefined
+    createRoot((d) => {
+      dispose = d
+      const [sessionId] = createSignal("session-1")
+      const [canInspect] = createSignal<boolean | null>(true)
+      data = useSessionData({ sessionId, canInspect })
+    })
+
+    await vi.waitFor(() => {
+      expect(data?.messages().some((message) => message.content === "latest history page")).toBe(true)
+    })
+
+    expect(data?.historyCursor()).toBe(25)
+
+    data?.loadEarlier()
+
+    await vi.waitFor(() => {
+      expect(apiClient.getSessionMessagesPage).toHaveBeenCalledTimes(2)
+    })
+
+    expect(data?.messages().some((message) => message.content === "latest history page")).toBe(true)
+  })
+
   it("reduces real codex-backed stream events to exactly the same transcript shape as reload history", async () => {
     const fixture = parityFixture as {
       raw_codex_notifications: unknown[]
@@ -279,7 +316,7 @@ describe("useSessionData", () => {
 
       await vi.waitFor(() => {
         const messages = liveData?.messages() ?? []
-        expect(messages.filter((m) => m.kind === TRANSCRIPT_KINDS.ACTION_REQUEST).length).toBe(variant.stream_events.length)
+        expect(messages.filter((m) => m.kind === TRANSCRIPT_KINDS.ACTION_REQUEST).length).toBe(1)
       })
       const liveNormalized = normalizeStrictTranscriptModel(liveData?.messages() ?? [])
       dispose?.()
@@ -298,7 +335,7 @@ describe("useSessionData", () => {
 
       await vi.waitFor(() => {
         const messages = reloadData?.messages() ?? []
-        expect(messages.filter((m) => m.kind === TRANSCRIPT_KINDS.ACTION_REQUEST).length).toBe(variant.reload_messages.length)
+        expect(messages.filter((m) => m.kind === TRANSCRIPT_KINDS.ACTION_REQUEST).length).toBe(1)
       })
       const reloadNormalized = normalizeStrictTranscriptModel(reloadData?.messages() ?? [])
 

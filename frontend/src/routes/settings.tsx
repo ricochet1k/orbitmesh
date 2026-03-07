@@ -8,6 +8,7 @@ export const Route = createFileRoute('/settings')({
 const SETTINGS_NAV = [
   { to: '/settings/providers',    label: 'Providers'     },
   { to: '/settings/agents',       label: 'Agents'        },
+  { to: '/settings/mcp-servers',  label: 'MCP Servers'   },
   { to: '/settings/profile',      label: 'User Profile'  },
   { to: '/settings/integrations', label: 'Integrations'  },
   { to: '/settings/preferences',  label: 'Preferences'   },

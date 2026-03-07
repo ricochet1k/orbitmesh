@@ -405,3 +405,61 @@ func TestUpdateSessionFromEvent_PersistsCanonicalTranscriptKindsAndPayloadKeys(t
 		"payload":  map[string]any{"path": "main.go"},
 	}, []string{"ID", "Kind", "IsDelta", "Payload"})
 }
+
+func TestUpdateSessionFromEvent_ActionRequestResolvedUpdatesExistingMessage(t *testing.T) {
+	msgStore := storage.NewSessionMessagesLogStore(t.TempDir())
+	exec := &AgentExecutor{messageLogStore: msgStore}
+	sess := domain.NewSession("s1", "claudews", "/tmp")
+	sc := &sessionContext{session: sess}
+	pending := []DispatchOptions{}
+
+	exec.updateSessionFromEvent(sc, domain.NewActionRequestEvent(sess.ID, domain.ActionRequestData{
+		ID:     "req-1",
+		Kind:   "approval",
+		Title:  "Tool permission request: Read",
+		Status: "pending",
+		Payload: map[string]any{
+			"request": map[string]any{"request_id": "req-1", "tool_name": "Read"},
+		},
+	}, nil), &pending)
+
+	exec.updateSessionFromEvent(sc, domain.NewActionRequestEvent(sess.ID, domain.ActionRequestData{
+		ID:     "req-1",
+		Kind:   "approval",
+		Title:  "Tool permission request: Read",
+		Status: "approved",
+		Payload: map[string]any{
+			"request": map[string]any{"request_id": "req-1", "tool_name": "Read"},
+		},
+	}, nil), &pending)
+
+	messages, err := msgStore.Load(sess.ID)
+	if err != nil {
+		t.Fatalf("load message log: %v", err)
+	}
+
+	got := messages.GetMessages()
+	action := make([]domain.Message, 0, 2)
+	for _, msg := range got {
+		if msg.Kind == domain.MessageKindActionRequest {
+			action = append(action, msg)
+		}
+	}
+	if len(action) != 1 {
+		t.Fatalf("expected exactly one action_request message, got %d", len(action))
+	}
+	if action[0].Open == nil || *action[0].Open {
+		t.Fatalf("expected resolved action_request to be closed, got open=%v", action[0].Open)
+	}
+	if action[0].Contents != "action_request(approval): Tool permission request: Read" {
+		t.Fatalf("unexpected action_request content: %q", action[0].Contents)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(action[0].Payload, &payload); err != nil {
+		t.Fatalf("unmarshal action payload: %v", err)
+	}
+	if status, _ := payload["status"].(string); status != "approved" {
+		t.Fatalf("expected status approved, got %q", status)
+	}
+}

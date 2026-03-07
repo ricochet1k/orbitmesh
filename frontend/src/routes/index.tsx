@@ -22,6 +22,19 @@ interface DashboardProps {
   onNavigate?: (path: string) => void;
 }
 
+function hasInterestingCodeflowData(summary?: DashboardSummaryResponse): boolean {
+  const codeflow = summary?.codeflow;
+  if (!codeflow) return false;
+  return Boolean(
+    codeflow.hasData ||
+      (codeflow.recentFindings?.length ?? 0) > 0 ||
+      (codeflow.topRiskPaths?.length ?? 0) > 0 ||
+      (codeflow.mostComplexFunctions?.length ?? 0) > 0 ||
+      (codeflow.mostComplexModules?.length ?? 0) > 0 ||
+      (codeflow.mostComplexTypes?.length ?? 0) > 0,
+  );
+}
+
 function normalizeSummary(summary?: DashboardSummaryResponse): DashboardSummaryResponse {
   const normalizedCodeflow = {
     hasData: summary?.codeflow?.hasData ?? false,
@@ -110,10 +123,21 @@ export default function Dashboard(props: DashboardProps = {}) {
   const triggerScan = async () => {
     setScanPending(true);
     try {
-      await apiClient.triggerCodeflowScan();
+      const scan = await apiClient.triggerCodeflowScan();
+      if (!scan.started) {
+        await refetch();
+        return;
+      }
+
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const next = await refetch();
+        if (hasInterestingCodeflowData(next)) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
     } finally {
       setScanPending(false);
-      refetch();
     }
   };
 

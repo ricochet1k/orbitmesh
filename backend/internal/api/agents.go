@@ -80,6 +80,7 @@ func (h *Handler) createAgent(w http.ResponseWriter, r *http.Request) {
 		Name:            req.Name,
 		SystemPrompt:    req.SystemPrompt,
 		MCPServers:      mcpServersFromAPI(req.MCPServers),
+		MCPServerRefs:   mcpRefsFromAPI(req.MCPServerRefs),
 		Custom:          req.Custom,
 		AllowedTools:    req.AllowedTools,
 		DisallowedTools: req.DisallowedTools,
@@ -118,6 +119,7 @@ func (h *Handler) updateAgent(w http.ResponseWriter, r *http.Request) {
 		Name:            req.Name,
 		SystemPrompt:    req.SystemPrompt,
 		MCPServers:      mcpServersFromAPI(req.MCPServers),
+		MCPServerRefs:   mcpRefsFromAPI(req.MCPServerRefs),
 		Custom:          req.Custom,
 		AllowedTools:    req.AllowedTools,
 		DisallowedTools: req.DisallowedTools,
@@ -169,6 +171,7 @@ func agentConfigToResponse(cfg storage.AgentConfig) apiTypes.AgentConfigResponse
 		Name:            cfg.Name,
 		SystemPrompt:    cfg.SystemPrompt,
 		MCPServers:      servers,
+		MCPServerRefs:   mcpRefsToAPI(cfg.MCPServerRefs),
 		Custom:          cfg.Custom,
 		AllowedTools:    cfg.AllowedTools,
 		DisallowedTools: cfg.DisallowedTools,
@@ -187,6 +190,36 @@ func mcpServersFromAPI(in []apiTypes.MCPServerConfig) []session.MCPServerConfig 
 			Command: s.Command,
 			Args:    s.Args,
 			Env:     s.Env,
+		}
+	}
+	return out
+}
+
+func mcpRefsFromAPI(in []apiTypes.AgentMCPRef) []storage.AgentMCPRef {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]storage.AgentMCPRef, len(in))
+	for i, ref := range in {
+		out[i] = storage.AgentMCPRef{
+			ServerID:        ref.ServerID,
+			AllowedTools:    ref.AllowedTools,
+			DisallowedTools: ref.DisallowedTools,
+		}
+	}
+	return out
+}
+
+func mcpRefsToAPI(in []storage.AgentMCPRef) []apiTypes.AgentMCPRef {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]apiTypes.AgentMCPRef, len(in))
+	for i, ref := range in {
+		out[i] = apiTypes.AgentMCPRef{
+			ServerID:        ref.ServerID,
+			AllowedTools:    ref.AllowedTools,
+			DisallowedTools: ref.DisallowedTools,
 		}
 	}
 	return out

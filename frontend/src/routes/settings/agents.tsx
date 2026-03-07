@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/solid-router'
 import { createResource, createSignal, For, Show } from 'solid-js'
 import { apiClient } from '../../api/client'
-import type { AgentConfigRequest, AgentConfigResponse } from '../../types/api'
+import type { AgentConfigRequest, AgentConfigResponse, AgentMCPRef, MCPServerEntryResponse } from '../../types/api'
 
 export const Route = createFileRoute('/settings/agents')({
   component: AgentsPage,
@@ -26,6 +26,22 @@ function AgentForm(props: AgentFormProps) {
   const [saving, setSaving] = createSignal(false)
   const [error, setError] = createSignal<string | null>(null)
 
+  // MCP server refs
+  const [mcpServers] = createResource(() => apiClient.listMCPServers())
+  const [selectedRefs, setSelectedRefs] = createSignal<AgentMCPRef[]>(
+    props.agent?.mcp_server_refs ?? [],
+  )
+
+  const isServerSelected = (id: string) => selectedRefs().some((r) => r.server_id === id)
+
+  const toggleServer = (server: MCPServerEntryResponse) => {
+    if (isServerSelected(server.id)) {
+      setSelectedRefs((refs) => refs.filter((r) => r.server_id !== server.id))
+    } else {
+      setSelectedRefs((refs) => [...refs, { server_id: server.id }])
+    }
+  }
+
   const handleSubmit = async (e: Event) => {
     e.preventDefault()
     setError(null)
@@ -42,10 +58,12 @@ function AgentForm(props: AgentFormProps) {
         delete custom['model']
       }
 
+      const refs = selectedRefs()
       const req: AgentConfigRequest = {
         name: trimmedName,
         system_prompt: systemPrompt().trim() || undefined,
         mcp_servers: props.agent?.mcp_servers,
+        mcp_server_refs: refs.length > 0 ? refs : undefined,
         custom: Object.keys(custom).length > 0 ? custom : undefined,
       }
       await props.onSave(req)
@@ -92,6 +110,35 @@ function AgentForm(props: AgentFormProps) {
           placeholder="Instruction defaults applied to sessions using this agent"
         />
       </div>
+
+      <Show when={mcpServers()?.servers && mcpServers()!.servers.length > 0}>
+        <div class="form-group">
+          <label>MCP Servers (proxy tools into sessions)</label>
+          <p class="form-hint">
+            Select which MCP servers this agent can access. Their tools will be proxied through
+            OrbitMesh's built-in MCP server.
+          </p>
+          <div style="margin-top: 0.5rem;">
+            <For each={mcpServers()?.servers}>
+              {(server) => (
+                <label
+                  style="display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0; cursor: pointer;"
+                >
+                  <input
+                    type="checkbox"
+                    checked={isServerSelected(server.id)}
+                    onChange={() => toggleServer(server)}
+                  />
+                  <span>{server.name}</span>
+                  <span class="muted" style="font-size: 0.85em;">
+                    ({server.type === 'command' ? server.command : server.url})
+                  </span>
+                </label>
+              )}
+            </For>
+          </div>
+        </div>
+      </Show>
 
       <Show when={error()}>
         <p class="error-message">{error()}</p>
@@ -186,6 +233,9 @@ function AgentsPage() {
                     </Show>
                     <Show when={agent.system_prompt && agent.system_prompt.length > 0}>
                       <span class="meta-chip">system prompt configured</span>
+                    </Show>
+                    <Show when={agent.mcp_server_refs && agent.mcp_server_refs.length > 0}>
+                      <span class="meta-chip">{agent.mcp_server_refs!.length} MCP server(s)</span>
                     </Show>
                   </div>
                 </div>

@@ -225,9 +225,13 @@ export default function AgentDock(props: AgentDockProps) {
     setComposerError(null)
     setComposerPending("interrupt")
     try {
-      await apiClient.sendSessionInput(sessionId(), "\x03")
+      if (session()?.provider_type === "pty") {
+        await apiClient.sendSessionInput(sessionId(), "\x03")
+      } else {
+        await apiClient.cancelSession(sessionId())
+      }
     } catch (err) {
-      setComposerError(err instanceof Error ? err.message : "Failed to send interrupt")
+      setComposerError(err instanceof Error ? err.message : "Failed to stop run")
     } finally {
       setComposerPending(null)
     }

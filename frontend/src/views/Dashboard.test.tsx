@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@solidjs/testing-library";
+import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Dashboard from "./Dashboard";
 import { apiClient } from "../api/client";
@@ -13,6 +13,7 @@ vi.mock("@tanstack/solid-router", () => ({
 vi.mock("../api/client", () => ({
   apiClient: {
     getDashboardSummary: vi.fn(),
+    triggerCodeflowScan: vi.fn(),
   },
 }));
 
@@ -101,6 +102,7 @@ describe("Dashboard route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (apiClient.getDashboardSummary as any).mockResolvedValue(sampleSummary);
+    (apiClient.triggerCodeflowScan as any).mockResolvedValue({ started: true });
   });
 
   it("renders compact dashboard data widgets", async () => {
@@ -185,5 +187,34 @@ describe("Dashboard route", () => {
     expect(await screen.findByText(/No recent actions/i)).toBeDefined();
     expect(screen.getByText(/No open findings/i)).toBeDefined();
     expect(screen.getByText(/0 findings/i)).toBeDefined();
+  });
+
+  it("triggers codeflow scan and keeps refetching until codeflow data appears", async () => {
+    const emptySummary = {
+      ...sampleSummary,
+      codeflow: {
+        ...sampleSummary.codeflow,
+        hasData: false,
+        recentFindings: [],
+        topRiskPaths: [],
+        mostComplexFunctions: [],
+        mostComplexModules: [],
+        mostComplexTypes: [],
+      },
+    };
+
+    (apiClient.getDashboardSummary as any)
+      .mockResolvedValueOnce(emptySummary)
+      .mockResolvedValueOnce(emptySummary)
+      .mockResolvedValue(sampleSummary);
+
+    render(() => <Dashboard />);
+
+    const scanButton = await screen.findByRole("button", { name: "Scan CodeFlow" });
+    await fireEvent.click(scanButton);
+
+    expect(await screen.findByText("Dangerous call detected", {}, { timeout: 5000 })).toBeDefined();
+    expect(apiClient.triggerCodeflowScan).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(apiClient.getDashboardSummary).toHaveBeenCalledTimes(3));
   });
 });

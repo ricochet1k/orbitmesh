@@ -708,12 +708,19 @@ export interface ProviderTestResponse {
 // An AgentConfig defines what an agent does (system prompt, tools) and can be
 // paired with any Provider (which LLM backend to use) at session-creation time.
 
+export interface AgentMCPRef {
+  server_id: string;
+  allowed_tools?: string[];
+  disallowed_tools?: string[];
+}
+
 export interface AgentConfigRequest {
   /** Omit to auto-generate an ID on create. */
   id?: string;
   name: string;
   system_prompt?: string;
   mcp_servers?: MCPServerConfig[];
+  mcp_server_refs?: AgentMCPRef[];
   custom?: Record<string, any>;
 }
 
@@ -722,11 +729,86 @@ export interface AgentConfigResponse {
   name: string;
   system_prompt?: string;
   mcp_servers?: MCPServerConfig[];
+  mcp_server_refs?: AgentMCPRef[];
   custom?: Record<string, any>;
 }
 
 export interface AgentConfigListResponse {
   agents: AgentConfigResponse[];
+}
+
+// ---- MCP Server Registry types ----
+
+export interface MCPServerAuthRequest {
+  token?: string;
+  api_key?: string;
+  client_id?: string;
+  client_secret?: string;
+  auth_url?: string;
+  token_url?: string;
+  scopes?: string[];
+}
+
+export interface MCPServerEntryRequest {
+  id?: string;
+  name: string;
+  type: "command" | "sse";
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  auth_type?: "none" | "bearer" | "api_key" | "oauth2";
+  auth?: MCPServerAuthRequest;
+}
+
+export interface MCPServerEntryResponse {
+  id: string;
+  name: string;
+  type: "command" | "sse";
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  auth_type?: string;
+  client_id?: string;
+  auth_url?: string;
+  token_url?: string;
+  scopes?: string[];
+  has_token: boolean;
+  dynamic_registration?: boolean;
+}
+
+export interface MCPServerEntryListResponse {
+  servers: MCPServerEntryResponse[];
+}
+
+export interface MCPToolInfo {
+  name: string;
+  description?: string;
+  input_schema?: unknown;
+}
+
+export interface MCPResourceInfo {
+  uri: string;
+  name?: string;
+  description?: string;
+  mime_type?: string;
+}
+
+export interface MCPPromptInfo {
+  name: string;
+  description?: string;
+}
+
+export interface MCPServerCapabilities {
+  tools: MCPToolInfo[];
+  resources?: MCPResourceInfo[];
+  prompts?: MCPPromptInfo[];
+}
+
+export interface MCPOAuthStartResponse {
+  auth_url: string;
+  state: string;
 }
 
 export interface TranscriptMessage {
