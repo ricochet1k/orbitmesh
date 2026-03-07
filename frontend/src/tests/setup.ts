@@ -37,7 +37,7 @@ class TestWebSocket {
   }
 
   send(_data: string | ArrayBufferLike | Blob | ArrayBufferView) {
-    void _data;
+    this.sentMessages.push(_data as string);
   }
 }
 

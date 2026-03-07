@@ -509,7 +509,12 @@ func (e *AgentExecutor) startRunWithMessage(ctx context.Context, id string, sess
 		persistSessionChanges = true
 	}
 
-	custom := make(map[string]any, len(options.Custom))
+	custom := make(map[string]any, len(sess.ProviderCustom)+len(options.Custom))
+	if len(sess.ProviderCustom) > 0 {
+		for k, v := range sess.ProviderCustom {
+			custom[k] = v
+		}
+	}
 	if len(options.Custom) > 0 {
 		for k, v := range options.Custom {
 			custom[k] = v

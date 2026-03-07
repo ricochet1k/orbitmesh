@@ -291,17 +291,26 @@ func (p *CodexProvider) start(ctx context.Context, config session.Config) error 
 		return err
 	}
 
-	threadRes, err := p.sendRequestCtx(ctx, "thread/start", buildThreadStartParams(config), 12*time.Second)
-	if err != nil {
-		p.handleFailure(err)
-		return err
+	if p.threadID != "" {
+		params := buildThreadResumeParams(p.threadID, config)
+		_, err := p.sendRequestCtx(ctx, "thread/resume", params, 12*time.Second)
+		if err != nil {
+			p.handleFailure(err)
+			return err
+		}
+	} else {
+		threadRes, err := p.sendRequestCtx(ctx, "thread/start", buildThreadStartParams(config), 12*time.Second)
+		if err != nil {
+			p.handleFailure(err)
+			return err
+		}
+		threadID, err := parseThreadID(threadRes)
+		if err != nil {
+			p.handleFailure(err)
+			return err
+		}
+		p.threadID = threadID
 	}
-	threadID, err := parseThreadID(threadRes)
-	if err != nil {
-		p.handleFailure(err)
-		return err
-	}
-	p.threadID = threadID
 
 	p.state.SetState(session.StateRunning)
 	p.started = true
@@ -1140,7 +1149,7 @@ func buildCodexCommand(staticCfg Config, config session.Config) (string, []strin
 	return cmd, args
 }
 
-func buildThreadStartParams(config session.Config) map[string]any {
+func buildBaseThreadParams(config session.Config) map[string]any {
 	params := map[string]any{}
 	if model := customStr(config.Custom, "model"); model != "" {
 		params["model"] = model
@@ -1154,6 +1163,16 @@ func buildThreadStartParams(config session.Config) map[string]any {
 	if sandbox := customStr(config.Custom, "sandbox_mode"); sandbox != "" {
 		params["sandboxPolicy"] = buildSandboxPolicy(sandbox, config.WorkingDir, config.Custom)
 	}
+	return params
+}
+
+func buildThreadStartParams(config session.Config) map[string]any {
+	return buildBaseThreadParams(config)
+}
+
+func buildThreadResumeParams(threadID string, config session.Config) map[string]any {
+	params := buildBaseThreadParams(config)
+	params["threadId"] = threadID
 	return params
 }
 
@@ -1963,7 +1982,6 @@ func (p *CodexProvider) Resume(ctx context.Context, sc *session.SuspensionContex
 	p.activeTurnID = state.ActiveTurnID
 	p.turnActive = state.ActiveTurnID != ""
 	p.mu.Unlock()
-	// TODO(codex): restore remote thread via thread/resume before next turn.
 	return nil
 }
 

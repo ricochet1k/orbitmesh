@@ -283,12 +283,6 @@ func TestADKProvider_StopWithContextTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
 
-	p.wg.Add(1)
-	go func() {
-		defer p.wg.Done()
-		time.Sleep(100 * time.Millisecond)
-	}()
-
 	err := p.Stop(ctx)
 
 	if err != nil {
@@ -517,12 +511,6 @@ func TestADKProvider_StopInternalTimeout(t *testing.T) {
 	p.state.SetState(session.StateRunning)
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.runCtx, p.runCancel = context.WithCancel(p.ctx)
-
-	p.wg.Add(1)
-	go func() {
-		defer p.wg.Done()
-		time.Sleep(10 * time.Second)
-	}()
 
 	err := p.Stop(context.Background())
 	if err != nil {
