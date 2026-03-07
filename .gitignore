@@ -13,10 +13,7 @@ go.work.sum
 /frontend/test-results/
 /frontend/.env.local
 /frontend/.env.*.local
-<<<<<<< HEAD
-=======
 # pnpm-lock.yaml
->>>>>>> origin/main
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
