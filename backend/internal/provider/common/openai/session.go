@@ -314,6 +314,18 @@ func (s *Session) handleStream(
 			1,
 			nil,
 		))
+		s.events.Emit(domain.NewResourceUsageEvent(s.sessionID, domain.ResourceUsageData{
+			Scope: "turn",
+			Data: map[string]any{
+				"source": "usage",
+				"usage": map[string]any{
+					"input_tokens":  usage.PromptTokens,
+					"output_tokens": usage.CompletionTokens,
+					"total_tokens":  usage.TotalTokens,
+				},
+				"model": s.model,
+			},
+		}, nil))
 		s.state.AddTokens(usage.PromptTokens, usage.CompletionTokens)
 	}
 
