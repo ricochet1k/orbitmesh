@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/solid-router'
-import { createEffect, createMemo, createResource, createSignal, For, Show, onCleanup } from "solid-js"
+import { createEffect, createMemo, createResource, createSignal, For, Show } from "solid-js"
 import { apiClient } from "../api/client"
 import type { SessionResponse, TaskNode, TaskStatus } from "../types/api"
 import AgentGraph from "../graph/AgentGraph"
@@ -8,6 +8,7 @@ import { buildTaskGraph } from "../graph/graphData"
 import EmptyState from "../components/EmptyState"
 import SkeletonLoader from "../components/SkeletonLoader"
 import { dockSessionId, setDockSessionId } from "../state/agentDock"
+import { useGlobalClick } from "../hooks/useGlobalClick"
 
 export const Route = createFileRoute('/tasks')({
   component: TaskTreeView,
@@ -28,7 +29,7 @@ interface TaskTreeViewProps {
   onNavigate?: (path: string) => void
 }
 
-export default function TaskTreeView(props: TaskTreeViewProps = {}) {
+function useTaskTree(props: TaskTreeViewProps) {
   const navigate = useNavigate()
   const [treeResponse] = createResource(apiClient.getTaskTree)
   const [agents] = createResource(apiClient.listAgents)
@@ -98,11 +99,7 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
     setStartState("idle")
   })
 
-  createEffect(() => {
-    const handleClick = () => setMenu(null)
-    window.addEventListener("click", handleClick)
-    onCleanup(() => window.removeEventListener("click", handleClick))
-  })
+  useGlobalClick(() => setMenu(null))
 
   const roles = createMemo(() => {
     const unique = new Set<string>()
@@ -240,6 +237,74 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
     setStartState("idle")
     setStartError(null)
   }
+
+  return {
+    treeResponse,
+    treeData,
+    search,
+    setSearch,
+    roleFilter,
+    setRoleFilter,
+    statusFilter,
+    setStatusFilter,
+    expanded,
+    menu,
+    selectedId,
+    agentChoice,
+    setAgentChoice,
+    startState,
+    startError,
+    sessionInfo,
+    nodeRefs,
+    agentOptions,
+    roles,
+    filteredTree,
+    graphData,
+    selectedTask,
+    toggleExpanded,
+    selectTask,
+    onContextMenu,
+    updateStatus,
+    addSubtask,
+    startAgent,
+    openSessionViewer,
+    dismissSessionInfo,
+  }
+}
+
+export default function TaskTreeView(props: TaskTreeViewProps = {}) {
+  const {
+    treeResponse,
+    treeData,
+    search,
+    setSearch,
+    roleFilter,
+    setRoleFilter,
+    statusFilter,
+    setStatusFilter,
+    expanded,
+    menu,
+    selectedId,
+    agentChoice,
+    setAgentChoice,
+    startState,
+    startError,
+    sessionInfo,
+    nodeRefs,
+    agentOptions,
+    roles,
+    filteredTree,
+    graphData,
+    selectedTask,
+    toggleExpanded,
+    selectTask,
+    onContextMenu,
+    updateStatus,
+    addSubtask,
+    startAgent,
+    openSessionViewer,
+    dismissSessionInfo,
+  } = useTaskTree(props)
 
   return (
     <div class="task-tree-view ds-page" data-testid="tasks-view">
