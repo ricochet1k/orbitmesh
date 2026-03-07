@@ -1016,9 +1016,27 @@ func (p *ClaudeWSProvider) handleResultMsg(rm RawMessage) {
 		p.emitEvent(domain.NewErrorEvent(p.sessionID, errText, msg.Subtype, rm.Raw), rm.Raw)
 	}
 
-	if msg.Result != "" {
-		p.emitEvent(domain.NewOutputEvent(p.sessionID, msg.Result, rm.Raw), rm.Raw)
+	// Do not emit duplicate OutputEvents for msg.Result, as they are already handled by handleAssistantMsg (streamed).
+
+	// Parse modelUsage and additional token stats from raw message since the typed struct misses it.
+	var rawMsg map[string]any
+	if err := json.Unmarshal(rm.Raw, &rawMsg); err == nil {
+		usagePayload := map[string]any{
+			"source": "result",
+			"usage": rawMsg["usage"],
+		}
+		if cost, ok := rawMsg["total_cost_usd"]; ok {
+			usagePayload["total_cost_usd"] = cost
+		}
+		if modelUsage, ok := rawMsg["modelUsage"]; ok {
+			usagePayload["modelUsage"] = modelUsage
+		}
+		p.events.Emit(domain.NewResourceUsageEvent(p.sessionID, domain.ResourceUsageData{
+			Scope: "turn",
+			Data:  usagePayload,
+		}, rm.Raw))
 	}
+
 	if stopReason != "" {
 		p.events.Emit(domain.NewSystemMessageEvent(p.sessionID, fmt.Sprintf("Claude stop reason: %s", stopReason)))
 	}

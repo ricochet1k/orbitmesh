@@ -419,7 +419,7 @@ func (a *acpClientAdapter) handleContentBlock(sess *Session, block acpsdk.Conten
 
 		// Text output
 		sess.state.SetOutput(block.Text.Text)
-		sess.events.Emit(domain.NewOutputEvent(sess.sessionID, block.Text.Text, raw))
+		sess.events.Emit(domain.NewDeltaOutputEvent(sess.sessionID, block.Text.Text, raw))
 
 		// Track assistant message for snapshots
 		sess.mu.Lock()

@@ -180,7 +180,7 @@ func TestHandleResultMsg_EmitsTurnCompletionSystemMessageAfterOutput(t *testing.
 		select {
 		case ev := <-events:
 			switch ev.Type {
-			case domain.EventTypeOutput:
+			case domain.EventTypeResourceUsage:
 				seenOutput = true
 			case domain.EventTypeSystemMessage:
 				sm, ok := ev.SystemMessage()
@@ -188,7 +188,7 @@ func TestHandleResultMsg_EmitsTurnCompletionSystemMessageAfterOutput(t *testing.
 					continue
 				}
 				if !seenOutput {
-					t.Fatal("expected output event before turn completion message")
+					t.Fatal("expected resource usage event before turn completion message")
 				}
 				seenCompletion = true
 			case domain.EventTypeProgress:
