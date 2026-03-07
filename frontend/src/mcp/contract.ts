@@ -2,7 +2,7 @@ import type { Accessor } from "solid-js";
 
 export type McpActionType = "click" | "edit" | "focus" | "select" | "toggle" | "read";
 
-export type McpActionKey = McpActionType | (string & {});
+export type McpActionKey = McpActionType | (string & Record<never, never>);
 
 export type McpActionResult<TData = unknown> = {
   ok: boolean;
