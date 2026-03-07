@@ -19,7 +19,11 @@ function generateLargeTree(depth, breadth) {
     }
     return node;
   }
+<<<<<<< HEAD
 
+=======
+
+>>>>>>> origin/main
   const roots = [];
   for (let i = 0; i < breadth; i++) {
     roots.push(createNode(depth));
@@ -74,3 +78,7 @@ let end2 = performance.now();
 
 console.log(`Original Recursive (forEach): ${((end1 - start1)/RUNS).toFixed(2)}ms per run`);
 console.log(`Optimized Recursive (for loop + early check): ${((end2 - start2)/RUNS).toFixed(2)}ms per run`);
+<<<<<<< HEAD
+
+=======
+>>>>>>> origin/main

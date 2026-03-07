@@ -19,7 +19,11 @@ function generateLargeTree(depth, breadth) {
     }
     return node;
   }
+<<<<<<< HEAD
 
+=======
+
+>>>>>>> origin/main
   const roots = [];
   for (let i = 0; i < breadth; i++) {
     roots.push(createNode(depth));
@@ -59,7 +63,11 @@ function iterativeCollect(treeData) {
   for (let i = 0; i < treeData.length; i++) {
     stack.push(treeData[i]);
   }
+<<<<<<< HEAD
 
+=======
+
+>>>>>>> origin/main
   while (stack.length > 0) {
     const node = stack.pop();
     unique.add(node.role);
@@ -91,3 +99,7 @@ let end2 = performance.now();
 
 console.log(`Recursive: ${((end1 - start1)/RUNS).toFixed(2)}ms per run`);
 console.log(`Iterative: ${((end2 - start2)/RUNS).toFixed(2)}ms per run`);
+<<<<<<< HEAD
+
+=======
+>>>>>>> origin/main

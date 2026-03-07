@@ -19,7 +19,11 @@ function generateLargeTree(depth, breadth) {
     }
     return node;
   }
+<<<<<<< HEAD
 
+=======
+
+>>>>>>> origin/main
   const roots = [];
   for (let i = 0; i < breadth; i++) {
     roots.push(createNode(depth));
@@ -44,23 +48,39 @@ function recursiveCollect1(treeData) {
 function iterativeWithStack(treeData) {
   const unique = new Set();
   const stack = [];
+<<<<<<< HEAD
 
+=======
+
+>>>>>>> origin/main
   // Push all roots
   for (let i = 0; i < treeData.length; i++) {
     stack.push(treeData[i]);
   }
+<<<<<<< HEAD
 
   while (stack.length > 0) {
     const node = stack.pop();
     unique.add(node.role);
 
+=======
+
+  while (stack.length > 0) {
+    const node = stack.pop();
+    unique.add(node.role);
+
+>>>>>>> origin/main
     if (node.children) {
       for (let i = 0; i < node.children.length; i++) {
         stack.push(node.children[i]);
       }
     }
   }
+<<<<<<< HEAD
 
+=======
+
+>>>>>>> origin/main
   return Array.from(unique).sort();
 }
 
@@ -82,3 +102,7 @@ let end2 = performance.now();
 
 console.log(`Original Recursive (forEach): ${((end1 - start1)/RUNS).toFixed(2)}ms per run`);
 console.log(`Iterative (Stack): ${((end2 - start2)/RUNS).toFixed(2)}ms per run`);
+<<<<<<< HEAD
+
+=======
+>>>>>>> origin/main
