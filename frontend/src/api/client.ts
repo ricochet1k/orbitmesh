@@ -75,6 +75,7 @@ export const apiClient = {
   // Dashboard
   getDashboardSummary: dashboardApi.getDashboardSummary,
   triggerCodeflowScan: dashboardApi.triggerCodeflowScan,
+  queryCodeflowGraph: dashboardApi.queryCodeflowGraph,
 
   // MCP Servers
   listMCPServers: mcpServerApi.listMCPServers,

@@ -190,7 +190,7 @@ describe("useSessionData", () => {
   })
 
   it("keeps transcript state stable when loadEarlier history fetch fails", async () => {
-    ;(apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>)
+    (apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({
         messages: [
           makeHistoryMessage({
@@ -292,7 +292,7 @@ describe("useSessionData", () => {
     expect(fixture.variants.length).toBeGreaterThan(1)
 
     for (const variant of fixture.variants) {
-      ;(apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      (apiClient.getSessionMessagesPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         messages: [],
         next_before: null,
       })
