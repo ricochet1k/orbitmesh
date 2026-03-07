@@ -37,6 +37,8 @@
     "@codemirror/view": "^6.39.15",
     "codemirror": "^6.0.2",
     "d3": "^7.9.0",
+    "graphology": "^0.26.0",
+    "graphology-layout-forceatlas2": "^0.10.1",
     "markdown-it": "^14.1.1",
     "prosemirror-commands": "^1.7.1",
     "prosemirror-history": "^1.5.0",
@@ -49,6 +51,7 @@
     "prosemirror-state": "^1.4.4",
     "prosemirror-tables": "^1.8.5",
     "prosemirror-view": "^1.41.6",
+    "sigma": "^3.0.2",
     "solid-icons": "^1.2.0",
     "solid-js": "^1.8.20"
   },

@@ -1,5 +1,5 @@
 import { createFileRoute, Outlet, Link, useLocation } from '@tanstack/solid-router'
-import { createSignal } from 'solid-js'
+import { createSignal, For } from 'solid-js'
 
 export const Route = createFileRoute('/settings')({
   component: SettingsLayout,
@@ -44,7 +44,7 @@ function SettingsLayout() {
         </button>
 
         <nav id="settings-subnav" class={`settings-subnav${mobileNavOpen() ? ' open' : ''}`}>
-          {SETTINGS_NAV.map((item) => (
+          <For each={SETTINGS_NAV}>{(item) => (
             <Link
               to={item.to}
               class={`settings-subnav-item${location().pathname === item.to ? ' active' : ''}`}
@@ -52,7 +52,7 @@ function SettingsLayout() {
             >
               {item.label}
             </Link>
-          ))}
+          )}</For>
         </nav>
 
         <main class="settings-content">
