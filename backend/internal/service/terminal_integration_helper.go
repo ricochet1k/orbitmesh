@@ -178,12 +178,13 @@ func (e *AgentExecutor) updateTerminalFromEvent(sessionID string, event Terminal
 		term = domain.NewTerminal(sessionID, sessionID, kind)
 	}
 
+	termCopy := *term
 	if event.Update.Kind == terminal.UpdateSnapshot && event.Update.Snapshot != nil {
 		snapshot := *event.Update.Snapshot
-		term.LastSnapshot = &snapshot
-		term.LastSeq = event.Seq
-		term.LastUpdatedAt = time.Now().UTC()
-		_ = e.terminalStorage.SaveTerminal(term)
+		termCopy.LastSnapshot = &snapshot
+		termCopy.LastSeq = event.Seq
+		termCopy.LastUpdatedAt = time.Now().UTC()
+		_ = e.terminalStorage.SaveTerminal(&termCopy)
 	}
 
 	e.notifyTerminalObservers(sessionID, event)

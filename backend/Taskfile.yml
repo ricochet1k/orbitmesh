@@ -19,7 +19,7 @@ tasks:
     desc: Run backend tests
     dir: backend
     cmds:
-      - go test -v -race -coverprofile=coverage.out ./...
+      - go list -f '{{if len .TestGoFiles}}{{.ImportPath}}{{end}}' ./... | xargs go test -v -race -coverprofile=coverage.out
       - go tool cover -func=coverage.out | tail -1
 
   test:short:
