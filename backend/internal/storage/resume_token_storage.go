@@ -74,7 +74,11 @@ func (s *JSONFileStorage) SaveResumeToken(token *ResumeTokenMetadata) error {
 		return fmt.Errorf("%w: %v", ErrStorageWrite, err)
 	}
 	tmpName := f.Name()
-	_ = os.Chmod(tmpName, 0o600)
+	if err := os.Chmod(tmpName, 0o600); err != nil {
+		f.Close()
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("%w: failed to set permissions on temp file: %v", ErrStorageWrite, err)
+	}
 
 	defer func() {
 		if f != nil {

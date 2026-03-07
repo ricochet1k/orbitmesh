@@ -71,28 +71,36 @@ func NewJSONFileStorage(baseDir string) (*JSONFileStorage, error) {
 	if err == nil {
 		if info.Mode().Perm()&0o077 != 0 {
 			// Directory is too permissive, try to fix it
-			_ = os.Chmod(sessionsDir, 0o700)
+			if err := os.Chmod(sessionsDir, 0o700); err != nil {
+				return nil, fmt.Errorf("failed to fix permissions on sessions directory: %w", err)
+			}
 		}
 	}
 
 	info, err = os.Stat(terminalsDir)
 	if err == nil {
 		if info.Mode().Perm()&0o077 != 0 {
-			_ = os.Chmod(terminalsDir, 0o700)
+			if err := os.Chmod(terminalsDir, 0o700); err != nil {
+				return nil, fmt.Errorf("failed to fix permissions on terminals directory: %w", err)
+			}
 		}
 	}
 
 	info, err = os.Stat(attemptsDir)
 	if err == nil {
 		if info.Mode().Perm()&0o077 != 0 {
-			_ = os.Chmod(attemptsDir, 0o700)
+			if err := os.Chmod(attemptsDir, 0o700); err != nil {
+				return nil, fmt.Errorf("failed to fix permissions on attempts directory: %w", err)
+			}
 		}
 	}
 
 	info, err = os.Stat(resumeTokensDir)
 	if err == nil {
 		if info.Mode().Perm()&0o077 != 0 {
-			_ = os.Chmod(resumeTokensDir, 0o700)
+			if err := os.Chmod(resumeTokensDir, 0o700); err != nil {
+				return nil, fmt.Errorf("failed to fix permissions on resume_tokens directory: %w", err)
+			}
 		}
 	}
 
@@ -140,7 +148,11 @@ func (s *JSONFileStorage) Save(session *domain.Session) error {
 	}
 	tmpName := f.Name()
 	// Ensure restricted permissions on the temp file
-	_ = os.Chmod(tmpName, 0o600)
+	if err := os.Chmod(tmpName, 0o600); err != nil {
+		f.Close()
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("%w: failed to set permissions on temp file: %v", ErrStorageWrite, err)
+	}
 
 	defer func() {
 		if f != nil {
@@ -273,7 +285,11 @@ func atomicWriteFileAt(dir, destPath, prefix string, data []byte) error {
 		return fmt.Errorf("%w: %v", ErrStorageWrite, err)
 	}
 	tmpName := f.Name()
-	_ = os.Chmod(tmpName, 0o600)
+	if err := os.Chmod(tmpName, 0o600); err != nil {
+		f.Close()
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("%w: failed to set permissions on temp file: %v", ErrStorageWrite, err)
+	}
 
 	defer func() {
 		if f != nil {
