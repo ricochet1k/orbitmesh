@@ -1,4 +1,4 @@
-import { createSignal, createResource, Show, onMount, onCleanup, createEffect } from "solid-js";
+import { createSignal, createResource, Show, onMount, For } from "solid-js";
 import { apiClient } from "../api/client";
 import { SigmaGraph } from "../components/graph/SigmaGraph";
 
@@ -14,7 +14,7 @@ export default function CodeflowExplorer() {
   const [query, setQuery] = createSignal(SAMPLE_QUERIES[0].query);
   const [activeQuery, setActiveQuery] = createSignal("");
 
-  const [data, { refetch }] = createResource(activeQuery, async (q) => {
+  const [data] = createResource(activeQuery, async (q) => {
     if (!q) return null;
     return await apiClient.queryCodeflowGraph({ query: q });
   });
@@ -43,9 +43,9 @@ export default function CodeflowExplorer() {
             onChange={handleSampleChange}
           >
             <option value="" disabled selected>Sample Queries...</option>
-            {SAMPLE_QUERIES.map(sq => (
-              <option value={sq.query}>{sq.label}</option>
-            ))}
+            <For each={SAMPLE_QUERIES}>
+              {(sq) => <option value={sq.query}>{sq.label}</option>}
+            </For>
           </select>
         </div>
 
