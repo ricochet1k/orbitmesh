@@ -103,13 +103,18 @@ function useTaskTree(props: TaskTreeViewProps) {
 
   const roles = createMemo(() => {
     const unique = new Set<string>()
-    const collect = (nodes: TaskNode[]) => {
-      nodes.forEach((node) => {
-        unique.add(node.role)
-        collect(node.children ?? [])
-      })
+    const stack = [...treeData()]
+
+    while (stack.length > 0) {
+      const node = stack.pop()!
+      unique.add(node.role)
+      if (node.children && node.children.length > 0) {
+        for (let i = 0; i < node.children.length; i++) {
+          stack.push(node.children[i])
+        }
+      }
     }
-    collect(treeData())
+
     return Array.from(unique.values()).sort()
   })
 
