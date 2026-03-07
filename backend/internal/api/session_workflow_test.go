@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
-	"github.com/ricochet1k/orbitmesh/internal/provider/pty"
 	"github.com/ricochet1k/orbitmesh/internal/service"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
@@ -29,18 +27,7 @@ func TestSessionCreationAndEvents(t *testing.T) {
 		Storage:     nil, // In-memory only
 		Broadcaster: broadcaster,
 		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
-			if providerType == "pty" {
-				// Inject an override for the PTY command config if it's missing or trying to run claude
-				if config.Custom == nil {
-					config.Custom = make(map[string]any)
-				}
-				if _, hasCmd := config.Custom["command"]; !hasCmd {
-					config.Custom["command"] = "sh"
-					config.Custom["args"] = []any{"-c", "sleep 10"}
-				}
-				return pty.NewPTYProvider(sessionID), nil
-			}
-			return nil, fmt.Errorf("unknown provider: %s", providerType)
+return newMockProvider(), nil
 		},
 	})
 	defer executor.Shutdown(context.Background())
@@ -225,18 +212,7 @@ func TestSessionErrorHandling(t *testing.T) {
 		Storage:     nil,
 		Broadcaster: broadcaster,
 		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
-			if providerType == "pty" {
-				// Inject an override for the PTY command config if it's missing or trying to run claude
-				if config.Custom == nil {
-					config.Custom = make(map[string]any)
-				}
-				if _, hasCmd := config.Custom["command"]; !hasCmd {
-					config.Custom["command"] = "sh"
-					config.Custom["args"] = []any{"-c", "sleep 10"}
-				}
-				return pty.NewPTYProvider(sessionID), nil
-			}
-			return nil, fmt.Errorf("unknown provider: %s", providerType)
+return newMockProvider(), nil
 		},
 	})
 	defer executor.Shutdown(context.Background())
@@ -341,18 +317,7 @@ func TestSessionLifecycle(t *testing.T) {
 		Storage:     nil,
 		Broadcaster: broadcaster,
 		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
-			if providerType == "pty" {
-				// Inject an override for the PTY command config if it's missing or trying to run claude
-				if config.Custom == nil {
-					config.Custom = make(map[string]any)
-				}
-				if _, hasCmd := config.Custom["command"]; !hasCmd {
-					config.Custom["command"] = "sh"
-					config.Custom["args"] = []any{"-c", "sleep 10"}
-				}
-				return pty.NewPTYProvider(sessionID), nil
-			}
-			return nil, fmt.Errorf("unknown provider: %s", providerType)
+return newMockProvider(), nil
 		},
 	})
 	defer executor.Shutdown(context.Background())
@@ -381,7 +346,7 @@ func TestSessionLifecycle(t *testing.T) {
 
 	// Create session
 	reqBody := apiTypes.SessionRequest{
-		ProviderType: "pty",
+		ProviderType: "mock",
 		WorkingDir:   "/tmp",
 		Custom: map[string]any{
 			"command": "echo",

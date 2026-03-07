@@ -149,6 +149,9 @@ export default function Dashboard(props: DashboardProps = {}) {
             <button type="button" class={`btn ${window() === "24h" ? "btn-primary" : "btn-secondary"}`} onClick={() => setWindow("24h")}>24h</button>
             <button type="button" class={`btn ${window() === "7d" ? "btn-primary" : "btn-secondary"}`} onClick={() => setWindow("7d")}>7d</button>
           </div>
+          <button type="button" class="btn btn-secondary" onClick={() => navigateTo('/dashboard/codeflow/explorer')}>
+            CodeFlow Explorer
+          </button>
           <button type="button" class="btn btn-secondary" onClick={triggerScan} disabled={scanPending()}>
             {scanPending() ? "Scanning..." : "Scan CodeFlow"}
           </button>

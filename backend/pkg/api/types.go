@@ -508,6 +508,10 @@ type DashboardHotspotSummary struct {
 	Findings int    `json:"findings,omitempty"`
 }
 
+type CodeflowQueryRequest struct {
+	Query string `json:"query"`
+}
+
 type DashboardCodeflowFindingSummary struct {
 	ID        string    `json:"id"`
 	Severity  string    `json:"severity"`
