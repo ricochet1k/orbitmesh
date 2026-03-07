@@ -124,7 +124,7 @@ describe("Navigation Integration Tests", () => {
         );
       };
 
-      const user = userEvent.setup();
+      userEvent.setup();
       render(() => <TestComponent />);
 
       const link = screen.getByTestId("tasks-link") as HTMLAnchorElement;

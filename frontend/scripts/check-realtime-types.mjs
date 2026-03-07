@@ -27,8 +27,8 @@ if (!hasGo) {
 const beforeRealtime = readFileSync(generatedRealtimePath, "utf8");
 const beforeTranscript = readFileSync(generatedTranscriptPath, "utf8");
 
-const generate = spawnSync("go", ["run", "./backend/cmd/typegen-realtime"], {
-  cwd: repoRoot,
+const generate = spawnSync("go", ["run", "./cmd/typegen-realtime"], {
+  cwd: resolve(repoRoot, "backend"),
   stdio: "inherit",
 });
 if (generate.status !== 0) {

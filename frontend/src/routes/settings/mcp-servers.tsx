@@ -262,7 +262,7 @@ function CapabilitiesPanel(props: { serverId: string }) {
   }
 
   return (
-    <div class="capabilities-panel" style="margin-top: 0.5rem;">
+    <div class="capabilities-panel" style={{"margin-top":"0.5rem"}}>
       <Show when={!caps()}>
         <button
           class="btn btn-secondary"
@@ -274,23 +274,23 @@ function CapabilitiesPanel(props: { serverId: string }) {
       </Show>
 
       <Show when={error()}>
-        <p class="error-message" style="margin-top: 0.25rem;">{error()}</p>
+        <p class="error-message" style={{"margin-top":"0.25rem"}}>{error()}</p>
       </Show>
 
       <Show when={caps()}>
-        <div style="margin-top: 0.5rem;">
-          <h4 style="margin: 0 0 0.25rem;">Tools ({caps()!.tools.length})</h4>
+        <div style={{"margin-top":"0.5rem"}}>
+          <h4 style={{"margin":"0 0 0.25rem"}}>Tools ({caps()!.tools.length})</h4>
           <Show
             when={caps()!.tools.length > 0}
             fallback={<p class="muted">No tools</p>}
           >
-            <ul class="tool-list" style="list-style: none; padding: 0; margin: 0;">
+            <ul class="tool-list" style={{"list-style":"none","padding":"0","margin":"0"}}>
               <For each={caps()!.tools}>
                 {(tool) => (
-                  <li style="padding: 0.25rem 0; border-bottom: 1px solid var(--border, #333);">
+                  <li style={{"padding":"0.25rem 0","border-bottom":"1px solid var(--border, #333)"}}>
                     <strong>{tool.name}</strong>
                     <Show when={tool.description}>
-                      <span class="muted" style="margin-left: 0.5rem;">{tool.description}</span>
+                      <span class="muted" style={{"margin-left":"0.5rem"}}>{tool.description}</span>
                     </Show>
                   </li>
                 )}
@@ -299,14 +299,14 @@ function CapabilitiesPanel(props: { serverId: string }) {
           </Show>
 
           <Show when={caps()!.resources && caps()!.resources!.length > 0}>
-            <h4 style="margin: 0.5rem 0 0.25rem;">Resources ({caps()!.resources!.length})</h4>
-            <ul class="tool-list" style="list-style: none; padding: 0; margin: 0;">
+            <h4 style={{"margin":"0.5rem 0 0.25rem"}}>Resources ({caps()!.resources!.length})</h4>
+            <ul class="tool-list" style={{"list-style":"none","padding":"0","margin":"0"}}>
               <For each={caps()!.resources}>
                 {(res) => (
-                  <li style="padding: 0.25rem 0;">
+                  <li style={{"padding":"0.25rem 0"}}>
                     <strong>{res.name || res.uri}</strong>
                     <Show when={res.description}>
-                      <span class="muted" style="margin-left: 0.5rem;">{res.description}</span>
+                      <span class="muted" style={{"margin-left":"0.5rem"}}>{res.description}</span>
                     </Show>
                   </li>
                 )}
@@ -315,14 +315,14 @@ function CapabilitiesPanel(props: { serverId: string }) {
           </Show>
 
           <Show when={caps()!.prompts && caps()!.prompts!.length > 0}>
-            <h4 style="margin: 0.5rem 0 0.25rem;">Prompts ({caps()!.prompts!.length})</h4>
-            <ul class="tool-list" style="list-style: none; padding: 0; margin: 0;">
+            <h4 style={{"margin":"0.5rem 0 0.25rem"}}>Prompts ({caps()!.prompts!.length})</h4>
+            <ul class="tool-list" style={{"list-style":"none","padding":"0","margin":"0"}}>
               <For each={caps()!.prompts}>
                 {(prompt) => (
-                  <li style="padding: 0.25rem 0;">
+                  <li style={{"padding":"0.25rem 0"}}>
                     <strong>{prompt.name}</strong>
                     <Show when={prompt.description}>
-                      <span class="muted" style="margin-left: 0.5rem;">{prompt.description}</span>
+                      <span class="muted" style={{"margin-left":"0.5rem"}}>{prompt.description}</span>
                     </Show>
                   </li>
                 )}
@@ -332,7 +332,7 @@ function CapabilitiesPanel(props: { serverId: string }) {
 
           <button
             class="btn btn-secondary"
-            style="margin-top: 0.5rem;"
+            style={{"margin-top":"0.5rem"}}
             onClick={loadCapabilities}
             disabled={loading()}
           >
@@ -389,7 +389,7 @@ function OAuthButton(props: { server: MCPServerEntryResponse; onAuthorized: () =
             {authorizing() ? 'Authorizing…' : 'Authorize'}
           </button>
           <Show when={error()}>
-            <p class="error-message" style="margin-top: 0.25rem;">{error()}</p>
+            <p class="error-message" style={{"margin-top":"0.25rem"}}>{error()}</p>
           </Show>
         </>
       }
@@ -397,7 +397,7 @@ function OAuthButton(props: { server: MCPServerEntryResponse; onAuthorized: () =
       <span class="meta-chip">authorized</span>
       <button
         class="btn btn-secondary"
-        style="margin-left: 0.5rem;"
+        style={{"margin-left":"0.5rem"}}
         onClick={async () => {
           await apiClient.revokeMCPOAuthToken(props.server.id)
           props.onAuthorized()
@@ -497,7 +497,7 @@ function MCPServersPage() {
                     </Show>
                   </div>
                   <Show when={server.auth_type === 'oauth2'}>
-                    <div style="margin-top: 0.5rem;">
+                    <div style={{"margin-top":"0.5rem"}}>
                       <OAuthButton server={server} onAuthorized={() => refetch()} />
                     </div>
                   </Show>

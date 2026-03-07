@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -28,11 +27,7 @@ func TestSessionCreationAndEvents(t *testing.T) {
 		Storage:     nil, // In-memory only
 		Broadcaster: broadcaster,
 		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
-			if providerType == "pty" {
-				// Use the mockProvider defined in handler_test.go
-				return newMockProvider(), nil
-			}
-			return nil, fmt.Errorf("unknown provider: %s", providerType)
+			return newMockProvider(), nil
 		},
 	})
 	defer executor.Shutdown(context.Background())
@@ -217,10 +212,7 @@ func TestSessionErrorHandling(t *testing.T) {
 		Storage:     nil,
 		Broadcaster: broadcaster,
 		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
-			if providerType == "pty" {
-				return newMockProvider(), nil
-			}
-			return nil, fmt.Errorf("unknown provider: %s", providerType)
+			return newMockProvider(), nil
 		},
 	})
 	defer executor.Shutdown(context.Background())
@@ -325,10 +317,7 @@ func TestSessionLifecycle(t *testing.T) {
 		Storage:     nil,
 		Broadcaster: broadcaster,
 		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
-			if providerType == "pty" {
-				return newMockProvider(), nil
-			}
-			return nil, fmt.Errorf("unknown provider: %s", providerType)
+			return newMockProvider(), nil
 		},
 	})
 	defer executor.Shutdown(context.Background())
@@ -357,7 +346,7 @@ func TestSessionLifecycle(t *testing.T) {
 
 	// Create session
 	reqBody := apiTypes.SessionRequest{
-		ProviderType: "pty",
+		ProviderType: "mock",
 		WorkingDir:   "/tmp",
 		Custom: map[string]any{
 			"command": "bash",
