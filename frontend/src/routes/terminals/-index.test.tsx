@@ -56,7 +56,7 @@ describe("TerminalsView", () => {
   })
 
   it("renders empty state when no terminals", async () => {
-    ;(apiClient.listTerminals as any).mockResolvedValue({ terminals: [] })
+    (apiClient.listTerminals as any).mockResolvedValue({ terminals: [] })
 
     render(() => <TerminalsView />)
 
