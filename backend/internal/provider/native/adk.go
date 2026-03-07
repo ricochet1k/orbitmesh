@@ -76,7 +76,6 @@ type ADKSession struct {
 	pauseMu   sync.Mutex
 	paused    bool
 	pauseCond *sync.Cond
-	wg        sync.WaitGroup
 
 	failureCount  int
 	cooldownUntil time.Time
@@ -418,23 +417,8 @@ func (p *ADKSession) Stop(ctx context.Context) error {
 		}
 	}
 
-	done := make(chan struct{})
-	go func() {
-		// TODO: nothing adds to this waitgroup
-		p.wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-ctx.Done():
-		if p.cancel != nil {
-			p.cancel()
-		}
-	case <-time.After(5 * time.Second):
-		if p.cancel != nil {
-			p.cancel()
-		}
+	if p.cancel != nil {
+		p.cancel()
 	}
 
 	p.state.SetState(session.StateStopped)

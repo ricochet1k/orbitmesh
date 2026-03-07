@@ -1,4 +1,5 @@
-import { render, Show } from 'solid-js/web'
+import { Show } from "solid-js";
+import { render,  } from 'solid-js/web'
 import { ErrorComponentProps, RouterProvider, createRouter } from '@tanstack/solid-router'
 import './index.css'
 

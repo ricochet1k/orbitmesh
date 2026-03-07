@@ -173,6 +173,8 @@ func main() {
 			return factory.CreateSession(providerType, sessionID, config)
 		},
 	})
+
+	tools.RegisterSubAgentDelegate(&service.ExecutorSubAgentSpawner{Executor: executor})
 	if err := executor.Startup(context.Background()); err != nil {
 		log.Fatalf("executor startup recovery: %v", err)
 	}

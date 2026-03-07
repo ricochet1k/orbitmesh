@@ -23,6 +23,7 @@ type AgentConfig struct {
 	Custom          map[string]any            `json:"custom,omitempty"`
 	AllowedTools    []string                  `json:"allowed_tools,omitempty"`
 	DisallowedTools []string                  `json:"disallowed_tools,omitempty"`
+	AllowedSubAgents []string `json:"allowed_sub_agents,omitempty"`
 }
 
 // AgentConfigStorage manages agent configurations on disk.
