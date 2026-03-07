@@ -1,4 +1,4 @@
-import { Show } from "solid-js"
+import { Show, For } from "solid-js"
 import type { Accessor } from "solid-js"
 import type { SessionStatusResponse, UsageStats } from "../types/api"
 import type { SessionStreamIntel } from "../hooks/useSessionData"
@@ -93,12 +93,12 @@ export default function SessionMetrics(props: SessionMetricsProps) {
             when={sessionUsageRows().length > 0}
             fallback={<p class="session-usage-empty">No session usage reported.</p>}
           >
-            {sessionUsageRows().map((row) => (
+            <For each={sessionUsageRows()}>{(row) => (
               <div class="session-usage-row">
                 <span>{row.label}</span>
                 <strong>{row.value}</strong>
               </div>
-            ))}
+            )}</For>
           </Show>
         </div>
 
@@ -108,12 +108,12 @@ export default function SessionMetrics(props: SessionMetricsProps) {
             when={providerUsageRows().length > 0}
             fallback={<p class="session-usage-empty">No provider usage reported.</p>}
           >
-            {providerUsageRows().map((row) => (
+            <For each={providerUsageRows()}>{(row) => (
               <div class="session-usage-row">
                 <span>{row.label}</span>
                 <strong>{row.value}</strong>
               </div>
-            ))}
+            )}</For>
           </Show>
         </div>
       </div>
