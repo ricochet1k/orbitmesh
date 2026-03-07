@@ -13,7 +13,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
-	"github.com/ricochet1k/orbitmesh/internal/provider/pty"
 	"github.com/ricochet1k/orbitmesh/internal/service"
 	"github.com/ricochet1k/orbitmesh/internal/session"
 	"github.com/ricochet1k/orbitmesh/internal/storage"
@@ -30,7 +29,8 @@ func TestSessionCreationAndEvents(t *testing.T) {
 		Broadcaster: broadcaster,
 		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
 			if providerType == "pty" {
-				return pty.NewPTYProvider(sessionID), nil
+				// Use the mockProvider defined in handler_test.go
+				return newMockProvider(), nil
 			}
 			return nil, fmt.Errorf("unknown provider: %s", providerType)
 		},
@@ -218,7 +218,7 @@ func TestSessionErrorHandling(t *testing.T) {
 		Broadcaster: broadcaster,
 		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
 			if providerType == "pty" {
-				return pty.NewPTYProvider(sessionID), nil
+				return newMockProvider(), nil
 			}
 			return nil, fmt.Errorf("unknown provider: %s", providerType)
 		},
@@ -326,7 +326,7 @@ func TestSessionLifecycle(t *testing.T) {
 		Broadcaster: broadcaster,
 		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
 			if providerType == "pty" {
-				return pty.NewPTYProvider(sessionID), nil
+				return newMockProvider(), nil
 			}
 			return nil, fmt.Errorf("unknown provider: %s", providerType)
 		},
