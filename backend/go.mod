@@ -15,7 +15,7 @@ require (
 	github.com/odvcencio/gotreesitter v0.6.0
 	github.com/openai/openai-go/v3 v3.22.0
 	github.com/ricochet1k/monty-wasm-go v0.0.0-20260226020500-9b07ce139173
-	github.com/ricochet1k/termemu v0.0.0-20260209182826-78fb158143ff
+	github.com/ricochet1k/termemu v0.0.0-20260307062247-9e4a75d03023
 	google.golang.org/adk v0.4.0
 	google.golang.org/genai v1.46.0
 )
@@ -59,7 +59,6 @@ require (
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/kevinburke/ssh_config v1.5.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
-	github.com/mark3labs/mcp-go v0.45.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
