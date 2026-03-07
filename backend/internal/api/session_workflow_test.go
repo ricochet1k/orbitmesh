@@ -27,7 +27,7 @@ func TestSessionCreationAndEvents(t *testing.T) {
 		Storage:     nil, // In-memory only
 		Broadcaster: broadcaster,
 		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
-return newMockProvider(), nil
+			return newMockProvider(), nil
 		},
 	})
 	defer executor.Shutdown(context.Background())
@@ -212,7 +212,7 @@ func TestSessionErrorHandling(t *testing.T) {
 		Storage:     nil,
 		Broadcaster: broadcaster,
 		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
-return newMockProvider(), nil
+			return newMockProvider(), nil
 		},
 	})
 	defer executor.Shutdown(context.Background())
@@ -317,7 +317,7 @@ func TestSessionLifecycle(t *testing.T) {
 		Storage:     nil,
 		Broadcaster: broadcaster,
 		ProviderFactory: func(providerType, sessionID string, config session.Config) (session.Session, error) {
-return newMockProvider(), nil
+			return newMockProvider(), nil
 		},
 	})
 	defer executor.Shutdown(context.Background())
@@ -350,7 +350,7 @@ return newMockProvider(), nil
 		WorkingDir:   "/tmp",
 		Custom: map[string]any{
 			"command": "echo",
-			"args": []string{"hello"},
+			"args":    []string{"hello"},
 		},
 	}
 	bodyBytes, _ := json.Marshal(reqBody)

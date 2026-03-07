@@ -46,7 +46,9 @@ func NewJSONFileSnapshotStorage(baseDir string) (*JSONFileSnapshotStorage, error
 	info, err := os.Stat(snapshotsDir)
 	if err == nil {
 		if info.Mode().Perm()&0o077 != 0 {
-			_ = os.Chmod(snapshotsDir, 0o700)
+			if err := os.Chmod(snapshotsDir, 0o700); err != nil {
+				return nil, fmt.Errorf("failed to fix permissions on snapshots directory: %w", err)
+			}
 		}
 	}
 

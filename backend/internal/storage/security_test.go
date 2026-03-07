@@ -99,3 +99,37 @@ func TestSecurity_SymlinkCheck(t *testing.T) {
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && s[:len(substr)] == substr || len(s) > len(substr) && s[1:] == substr
 }
+
+func TestSecurity_DirectoryPermissionsFix(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	sessionsDir := filepath.Join(tmpDir, "sessions")
+	terminalsDir := filepath.Join(tmpDir, "terminals")
+	attemptsDir := filepath.Join(sessionsDir, "attempts")
+	resumeTokensDir := filepath.Join(sessionsDir, "resume_tokens")
+
+	dirs := []string{sessionsDir, terminalsDir, attemptsDir, resumeTokensDir}
+	for _, d := range dirs {
+		if err := os.MkdirAll(d, 0777); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(d, 0777); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, err := NewJSONFileStorage(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, d := range dirs {
+		info, err := os.Stat(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0700 {
+			t.Errorf("expected directory %s permissions 0700, got %o", d, info.Mode().Perm())
+		}
+	}
+}
