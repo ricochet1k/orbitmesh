@@ -118,11 +118,11 @@ function AgentForm(props: AgentFormProps) {
             Select which MCP servers this agent can access. Their tools will be proxied through
             OrbitMesh's built-in MCP server.
           </p>
-          <div style="margin-top: 0.5rem;">
+          <div style={{"margin-top":"0.5rem"}}>
             <For each={mcpServers()?.servers}>
               {(server) => (
                 <label
-                  style="display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0; cursor: pointer;"
+                  style={{"display":"flex","align-items":"center","gap":"0.5rem","padding":"0.25rem 0","cursor":"pointer"}}
                 >
                   <input
                     type="checkbox"
@@ -130,7 +130,7 @@ function AgentForm(props: AgentFormProps) {
                     onChange={() => toggleServer(server)}
                   />
                   <span>{server.name}</span>
-                  <span class="muted" style="font-size: 0.85em;">
+                  <span class="muted" style={{"font-size":"0.85em"}}>
                     ({server.type === 'command' ? server.command : server.url})
                   </span>
                 </label>

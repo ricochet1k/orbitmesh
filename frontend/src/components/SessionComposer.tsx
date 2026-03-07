@@ -1,4 +1,4 @@
-import { createSignal, Show, onMount } from "solid-js"
+import { createSignal, Show, onMount, For } from "solid-js"
 import type { Accessor } from "solid-js"
 import type { SessionState, ProviderConfigResponse } from "../types/api"
 
@@ -174,9 +174,9 @@ export default function SessionComposer(props: SessionComposerProps) {
               title="Select provider for this message"
             >
               <option value="">Default Provider</option>
-              {props.providers?.().map((provider) => (
+              <For each={props.providers?.()}>{(provider) => (
                 <option value={provider.id}>{provider.name}</option>
-              ))}
+              )}</For>
             </select>
           </Show>
           <Show when={props.isRunning() && props.onInterrupt}>

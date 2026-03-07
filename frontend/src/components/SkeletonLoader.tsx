@@ -1,4 +1,4 @@
-import { JSX } from 'solid-js'
+import { JSX, For } from 'solid-js'
 
 export interface SkeletonLoaderProps {
   variant?: 'text' | 'card' | 'list' | 'table' | 'graph'
@@ -14,44 +14,50 @@ export default function SkeletonLoader(props: SkeletonLoaderProps): JSX.Element 
       case 'text':
         return (
           <div class="skeleton-text-container" data-testid="skeleton-text">
-            {Array.from({ length: props.count || 3 }).map((_, i) => (
-              <div 
-                class="skeleton skeleton-text animate-shimmer" 
-                style={{ 
-                  width: i === (props.count || 3) - 1 ? '70%' : '100%',
-                  height: props.height || '1em'
-                }} 
-              />
-            ))}
+            <For each={Array.from({ length: props.count || 3 })}>
+              {(_, i) => (
+                <div
+                  class="skeleton skeleton-text animate-shimmer"
+                  style={{
+                    width: i() === (props.count || 3) - 1 ? '70%' : '100%',
+                    height: props.height || '1em'
+                  }}
+                />
+              )}
+            </For>
           </div>
         )
       
       case 'card':
         return (
           <div class="skeleton-card-container" data-testid="skeleton-card">
-            {Array.from({ length: props.count || 1 }).map(() => (
-              <div class="skeleton-card">
-                <div class="skeleton skeleton-card-header animate-shimmer" />
-                <div class="skeleton skeleton-card-body animate-shimmer" />
-                <div class="skeleton skeleton-card-footer animate-shimmer" />
-              </div>
-            ))}
+            <For each={Array.from({ length: props.count || 1 })}>
+              {() => (
+                <div class="skeleton-card">
+                  <div class="skeleton skeleton-card-header animate-shimmer" />
+                  <div class="skeleton skeleton-card-body animate-shimmer" />
+                  <div class="skeleton skeleton-card-footer animate-shimmer" />
+                </div>
+              )}
+            </For>
           </div>
         )
       
       case 'list':
         return (
           <div class="skeleton-list-container" data-testid="skeleton-list">
-            {Array.from({ length: props.count || 5 }).map(() => (
-              <div class="skeleton-list-item">
-                <div class="skeleton skeleton-list-icon animate-shimmer" />
-                <div class="skeleton-list-content">
-                  <div class="skeleton skeleton-list-title animate-shimmer" />
-                  <div class="skeleton skeleton-list-subtitle animate-shimmer" />
+            <For each={Array.from({ length: props.count || 5 })}>
+              {() => (
+                <div class="skeleton-list-item">
+                  <div class="skeleton skeleton-list-icon animate-shimmer" />
+                  <div class="skeleton-list-content">
+                    <div class="skeleton skeleton-list-title animate-shimmer" />
+                    <div class="skeleton skeleton-list-subtitle animate-shimmer" />
+                  </div>
+                  <div class="skeleton skeleton-list-badge animate-shimmer" />
                 </div>
-                <div class="skeleton skeleton-list-badge animate-shimmer" />
-              </div>
-            ))}
+              )}
+            </For>
           </div>
         )
       
@@ -59,17 +65,23 @@ export default function SkeletonLoader(props: SkeletonLoaderProps): JSX.Element 
         return (
           <div class="skeleton-table-container" data-testid="skeleton-table">
             <div class="skeleton-table-header">
-              {Array.from({ length: 5 }).map(() => (
-                <div class="skeleton skeleton-table-header-cell animate-shimmer" />
-              ))}
+              <For each={Array.from({ length: 5 })}>
+                {() => (
+                  <div class="skeleton skeleton-table-header-cell animate-shimmer" />
+                )}
+              </For>
             </div>
-            {Array.from({ length: props.count || 5 }).map(() => (
-              <div class="skeleton-table-row">
-                {Array.from({ length: 5 }).map(() => (
-                  <div class="skeleton skeleton-table-cell animate-shimmer" />
-                ))}
-              </div>
-            ))}
+            <For each={Array.from({ length: props.count || 5 })}>
+              {() => (
+                <div class="skeleton-table-row">
+                  <For each={Array.from({ length: 5 })}>
+                    {() => (
+                      <div class="skeleton skeleton-table-cell animate-shimmer" />
+                    )}
+                  </For>
+                </div>
+              )}
+            </For>
           </div>
         )
       

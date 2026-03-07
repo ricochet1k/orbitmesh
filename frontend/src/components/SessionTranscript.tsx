@@ -235,7 +235,8 @@ function TranscriptItem(props: {
                   <HighlightedCodeBlock code={block.content} language={block.lang} />
                 </Show>
               ) : (
-                <div class="transcript-markdown-chunk" innerHTML={renderMarkdownChunk(block.content)} />
+                // eslint-disable-next-line solid/no-innerhtml
+                <div class="transcript-markdown-chunk" innerHTML={/*@once*/ renderMarkdownChunk(block.content)} />
               )
             }
           </For>

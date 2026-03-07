@@ -42,11 +42,19 @@ export const McpDataText = (props: McpDataTextProps) => {
     return () => mcpRegistry.unregister(entry.id);
   });
 
-  const { mcpActions, mcpDescription, mcpId, mcpName, value, ...spanProps } = props;
+  const restProps = () => {
+    const p = { ...props };
+    delete p.mcpActions;
+    delete p.mcpDescription;
+    delete p.mcpId;
+    delete p.mcpName;
+    delete p.value;
+    return p;
+  };
 
   return (
-    <span ref={textRef} {...spanProps}>
-      {value ?? props.children}
+    <span ref={textRef} {...restProps()}>
+      {props.value ?? props.children}
     </span>
   );
 };

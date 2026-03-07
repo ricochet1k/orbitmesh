@@ -51,7 +51,14 @@ export const McpInputField = (props: McpInputFieldProps) => {
     return () => mcpRegistry.unregister(entry.id);
   });
 
-  const { mcpActions, mcpDescription, mcpId, mcpName, ...inputProps } = props;
+  const restProps = () => {
+    const p = { ...props };
+    delete p.mcpActions;
+    delete p.mcpDescription;
+    delete p.mcpId;
+    delete p.mcpName;
+    return p;
+  };
 
-  return <input ref={inputRef} {...inputProps} />;
+  return <input ref={inputRef} {...restProps()} />;
 };

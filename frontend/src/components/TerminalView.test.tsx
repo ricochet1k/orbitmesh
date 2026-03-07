@@ -51,7 +51,7 @@ vi.mock("../api/client", () => ({
 }));
 
 vi.mock("../api/_base", () => ({
-  readCookie: (_name: string) => "test-csrf-token",
+  readCookie: () => "test-csrf-token",
   CSRF_COOKIE_NAME: "orbitmesh-csrf-token",
   CSRF_HEADER_NAME: "X-CSRF-Token",
 }));

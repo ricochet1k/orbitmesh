@@ -43,10 +43,17 @@ export const McpButton = (props: McpButtonProps) => {
     return () => mcpRegistry.unregister(entry.id);
   });
 
-  const { mcpActions, mcpDescription, mcpId, mcpName, ...buttonProps } = props;
+  const restProps = () => {
+    const p = { ...props };
+    delete p.mcpActions;
+    delete p.mcpDescription;
+    delete p.mcpId;
+    delete p.mcpName;
+    return p;
+  };
 
   return (
-    <button ref={buttonRef} {...buttonProps}>
+    <button ref={buttonRef} {...restProps()}>
       {props.children}
     </button>
   );
