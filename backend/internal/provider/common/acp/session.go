@@ -442,7 +442,7 @@ func (s *Session) handleContentBlock(block acpsdk.ContentBlock) {
 	case block.Text != nil:
 		// Text output
 		s.state.SetOutput(block.Text.Text)
-		s.events.Emit(domain.NewOutputEvent(s.sessionID, block.Text.Text, raw))
+		s.events.Emit(domain.NewDeltaOutputEvent(s.sessionID, block.Text.Text, raw))
 
 	case block.Image != nil:
 		// Image output (emit as metadata)
