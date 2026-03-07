@@ -107,6 +107,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/realtime", h.realtimeWebSocket)
 	r.Get("/api/dashboard/summary", h.getDashboardSummary)
 	r.Post("/api/dashboard/codeflow/scan", h.triggerDashboardCodeflowScan)
+	r.Post("/api/v1/codeflow/query", h.queryCodeflowGraph)
 	r.Get("/api/sessions/{id}", h.getSession)
 	r.Delete("/api/sessions/{id}", h.stopSession)
 	r.Post("/api/sessions/{id}/input", h.sendSessionInput)

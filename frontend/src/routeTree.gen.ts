@@ -27,6 +27,7 @@ import { Route as SettingsIntegrationsRouteImport } from './routes/settings/inte
 import { Route as SettingsAgentsRouteImport } from './routes/settings/agents'
 import { Route as SessionsSessionIdRouteImport } from './routes/sessions/$sessionId'
 import { Route as HistoryCommitsRouteImport } from './routes/history/commits'
+import { Route as DashboardCodeflowExplorerRouteImport } from './routes/dashboard.codeflow.explorer'
 
 const TasksRoute = TasksRouteImport.update({
   id: '/tasks',
@@ -118,6 +119,12 @@ const HistoryCommitsRoute = HistoryCommitsRouteImport.update({
   path: '/history/commits',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DashboardCodeflowExplorerRoute =
+  DashboardCodeflowExplorerRouteImport.update({
+    id: '/dashboard/codeflow/explorer',
+    path: '/dashboard/codeflow/explorer',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -138,6 +145,7 @@ export interface FileRoutesByFullPath {
   '/sessions/': typeof SessionsIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/terminals/': typeof TerminalsIndexRoute
+  '/dashboard/codeflow/explorer': typeof DashboardCodeflowExplorerRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -157,6 +165,7 @@ export interface FileRoutesByTo {
   '/sessions': typeof SessionsIndexRoute
   '/settings': typeof SettingsIndexRoute
   '/terminals': typeof TerminalsIndexRoute
+  '/dashboard/codeflow/explorer': typeof DashboardCodeflowExplorerRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -178,6 +187,7 @@ export interface FileRoutesById {
   '/sessions/': typeof SessionsIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/terminals/': typeof TerminalsIndexRoute
+  '/dashboard/codeflow/explorer': typeof DashboardCodeflowExplorerRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -200,6 +210,7 @@ export interface FileRouteTypes {
     | '/sessions/'
     | '/settings/'
     | '/terminals/'
+    | '/dashboard/codeflow/explorer'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -219,6 +230,7 @@ export interface FileRouteTypes {
     | '/sessions'
     | '/settings'
     | '/terminals'
+    | '/dashboard/codeflow/explorer'
   id:
     | '__root__'
     | '/'
@@ -239,6 +251,7 @@ export interface FileRouteTypes {
     | '/sessions/'
     | '/settings/'
     | '/terminals/'
+    | '/dashboard/codeflow/explorer'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -253,6 +266,7 @@ export interface RootRouteChildren {
   TerminalsTerminalIdRoute: typeof TerminalsTerminalIdRoute
   SessionsIndexRoute: typeof SessionsIndexRoute
   TerminalsIndexRoute: typeof TerminalsIndexRoute
+  DashboardCodeflowExplorerRoute: typeof DashboardCodeflowExplorerRoute
 }
 
 declare module '@tanstack/solid-router' {
@@ -383,6 +397,13 @@ declare module '@tanstack/solid-router' {
       preLoaderRoute: typeof HistoryCommitsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/dashboard/codeflow/explorer': {
+      id: '/dashboard/codeflow/explorer'
+      path: '/dashboard/codeflow/explorer'
+      fullPath: '/dashboard/codeflow/explorer'
+      preLoaderRoute: typeof DashboardCodeflowExplorerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -422,6 +443,7 @@ const rootRouteChildren: RootRouteChildren = {
   TerminalsTerminalIdRoute: TerminalsTerminalIdRoute,
   SessionsIndexRoute: SessionsIndexRoute,
   TerminalsIndexRoute: TerminalsIndexRoute,
+  DashboardCodeflowExplorerRoute: DashboardCodeflowExplorerRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
