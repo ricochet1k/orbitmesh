@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/solid-router'
 import { createResource, createSignal, For, Show } from 'solid-js'
 import { apiClient } from '../../api/client'
 import type { AgentConfigRequest, AgentConfigResponse, AgentMCPRef, MCPServerEntryResponse } from '../../types/api'
+import { AgentMCPServerConfig } from './-agent_mcp_config'
 
 export const Route = createFileRoute('/settings/agents')({
   component: AgentsPage,
@@ -30,6 +31,12 @@ function AgentForm(props: AgentFormProps) {
   const [mcpServers] = createResource(() => apiClient.listMCPServers())
   const [selectedRefs, setSelectedRefs] = createSignal<AgentMCPRef[]>(
     props.agent?.mcp_server_refs ?? [],
+  )
+  const [spawnSubAgentEnabled, setSpawnSubAgentEnabled] = createSignal(
+    props.agent?.allowed_sub_agents !== undefined
+  )
+  const [allowedSubAgents, setAllowedSubAgents] = createSignal<string[]>(
+    props.agent?.allowed_sub_agents ?? []
   )
 
   const isServerSelected = (id: string) => selectedRefs().some((r) => r.server_id === id)
@@ -65,6 +72,7 @@ function AgentForm(props: AgentFormProps) {
         mcp_servers: props.agent?.mcp_servers,
         mcp_server_refs: refs.length > 0 ? refs : undefined,
         custom: Object.keys(custom).length > 0 ? custom : undefined,
+        allowed_sub_agents: spawnSubAgentEnabled() ? allowedSubAgents() : undefined,
       }
       await props.onSave(req)
     } catch (err) {
@@ -121,24 +129,95 @@ function AgentForm(props: AgentFormProps) {
           <div style={{"margin-top":"0.5rem"}}>
             <For each={mcpServers()?.servers}>
               {(server) => (
-                <label
-                  style={{"display":"flex","align-items":"center","gap":"0.5rem","padding":"0.25rem 0","cursor":"pointer"}}
-                >
-                  <input
-                    type="checkbox"
-                    checked={isServerSelected(server.id)}
-                    onChange={() => toggleServer(server)}
-                  />
-                  <span>{server.name}</span>
-                  <span class="muted" style={{"font-size":"0.85em"}}>
-                    ({server.type === 'command' ? server.command : server.url})
-                  </span>
-                </label>
+                <div style={{"margin-bottom": "0.75rem"}}>
+                  <label
+                    style={{"display":"flex","align-items":"center","gap":"0.5rem","padding":"0.25rem 0","cursor":"pointer"}}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isServerSelected(server.id)}
+                      onChange={() => toggleServer(server)}
+                    />
+                    <span>{server.name}</span>
+                    <span class="muted" style={{"font-size":"0.85em"}}>
+                      ({server.type === 'command' ? server.command : server.url})
+                    </span>
+                  </label>
+                  <Show when={isServerSelected(server.id)}>
+                    <AgentMCPServerConfig
+                      server={server}
+                      ref={selectedRefs().find(r => r.server_id === server.id)!}
+                      onChange={(updatedRef) => {
+                        setSelectedRefs(refs => refs.map(r => r.server_id === server.id ? updatedRef : r))
+                      }}
+                    />
+                  </Show>
+                </div>
               )}
             </For>
           </div>
         </div>
       </Show>
+
+      <div class="form-group">
+        <label>Built-in Tools</label>
+        <div style={{"margin-top":"0.5rem"}}>
+          <div style={{"margin-bottom": "0.75rem"}}>
+            <label
+              style={{"display":"flex","align-items":"center","gap":"0.5rem","padding":"0.25rem 0","cursor":"pointer"}}
+            >
+              <input
+                type="checkbox"
+                checked={spawnSubAgentEnabled()}
+                onChange={(e) => {
+                  setSpawnSubAgentEnabled(e.currentTarget.checked);
+                  if (e.currentTarget.checked && allowedSubAgents().length === 0) {
+                    setAllowedSubAgents([]);
+                  }
+                }}
+              />
+              <span>spawn_sub_agent</span>
+              <span class="muted" style={{"font-size":"0.85em"}}>
+                (Spawn a sub-agent to perform a task)
+              </span>
+            </label>
+            <Show when={spawnSubAgentEnabled()}>
+              <div style={{"margin-left": "1.5rem", "margin-top": "0.5rem", "padding-left": "0.5rem", "border-left": "2px solid var(--border-color)"}}>
+                <label style={{"font-size": "0.9em", "font-weight": "bold", "margin-bottom": "0.5rem", "display": "block"}}>Allowed Sub-Agents:</label>
+                <Show when={agentsList.loading}>
+                  <p class="muted" style={{"font-size": "0.9em"}}>Loading agents...</p>
+                </Show>
+                <Show when={agentsList()?.agents}>
+                  <div style={{"display": "flex", "flex-direction": "column", "gap": "0.25rem"}}>
+                    <For each={agentsList()?.agents.filter(a => a.id !== props.agent?.id)}>
+                      {(agent) => (
+                        <label style={{"display": "flex", "align-items": "center", "gap": "0.5rem", "cursor": "pointer", "font-size": "0.9em"}}>
+                          <input
+                            type="checkbox"
+                            checked={allowedSubAgents().includes(agent.id)}
+                            onChange={(e) => {
+                              if (e.currentTarget.checked) {
+                                setAllowedSubAgents(prev => [...prev, agent.id]);
+                              } else {
+                                setAllowedSubAgents(prev => prev.filter(id => id !== agent.id));
+                              }
+                            }}
+                          />
+                          <span>{agent.name}</span>
+                          <span class="muted" style={{"font-size": "0.85em"}}>({agent.id})</span>
+                        </label>
+                      )}
+                    </For>
+                    <Show when={agentsList()?.agents.filter(a => a.id !== props.agent?.id).length === 0}>
+                      <p class="muted" style={{"font-size": "0.9em"}}>No other agents available.</p>
+                    </Show>
+                  </div>
+                </Show>
+              </div>
+            </Show>
+          </div>
+        </div>
+      </div>
 
       <Show when={error()}>
         <p class="error-message">{error()}</p>

@@ -32,6 +32,8 @@ type ProxyResolver interface {
 	GetAgentMCPServerRefs(agentID string) []storage.AgentMCPRef
 	// GetMCPServerEntry returns a globally-configured MCP server entry.
 	GetMCPServerEntry(serverID string) (*storage.MCPServerEntry, error)
+	// GetAgentAllowedSubAgents returns the allowed sub-agents for an agent.
+	GetAgentAllowedSubAgents(agentID string) []string
 }
 
 type otpEntry struct {
@@ -191,6 +193,19 @@ func (g *Gateway) handleWS(w http.ResponseWriter, r *http.Request) {
 	g.mu.Unlock()
 	ctx = tools.WithAPIBaseURL(ctx, apiBase)
 
+	var allowedSubAgents []string
+	g.mu.Lock()
+	resolver := g.resolver
+	g.mu.Unlock()
+
+	if resolver != nil {
+		agentID := resolver.GetSessionAgentID(sessionID)
+		if agentID != "" {
+			allowedSubAgents = resolver.GetAgentAllowedSubAgents(agentID)
+		}
+	}
+	ctx = tools.WithAllowedSubAgents(ctx, allowedSubAgents)
+
 	server := mcp.NewServer(&mcp.Implementation{Name: "orbitmesh", Version: "1.0.0"}, nil)
 	for _, def := range g.reg.List() {
 		def := def
@@ -209,7 +224,7 @@ func (g *Gateway) handleWS(w http.ResponseWriter, r *http.Request) {
 	// Proxy external MCP servers based on agent config.
 	var proxyClients []*mcpclient.Client
 	g.mu.Lock()
-	resolver := g.resolver
+		resolver = g.resolver
 	g.mu.Unlock()
 	if resolver != nil {
 		proxyClients = g.setupProxyTools(ctx, server, resolver, sessionID)

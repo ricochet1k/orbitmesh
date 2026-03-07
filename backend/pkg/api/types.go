@@ -733,6 +733,7 @@ type AgentConfigRequest struct {
 	Custom          map[string]any    `json:"custom,omitempty"`
 	AllowedTools    []string          `json:"allowed_tools,omitempty"`
 	DisallowedTools []string          `json:"disallowed_tools,omitempty"`
+	AllowedSubAgents []string `json:"allowed_sub_agents,omitempty"`
 }
 
 // AgentConfigResponse is returned by agent endpoints.
@@ -745,6 +746,7 @@ type AgentConfigResponse struct {
 	Custom          map[string]any    `json:"custom,omitempty"`
 	AllowedTools    []string          `json:"allowed_tools,omitempty"`
 	DisallowedTools []string          `json:"disallowed_tools,omitempty"`
+	AllowedSubAgents []string `json:"allowed_sub_agents,omitempty"`
 }
 
 // AgentConfigListResponse wraps a list of agent configs.
