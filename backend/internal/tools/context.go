@@ -32,3 +32,17 @@ func APIBaseURLFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(ctxAPIBaseURLKey).(string)
 	return v
 }
+
+const ctxProjectIDKey contextKey = "project_id"
+
+func WithProjectID(ctx context.Context, projectID string) context.Context {
+	return context.WithValue(ctx, ctxProjectIDKey, projectID)
+}
+
+func ProjectIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	v, _ := ctx.Value(ctxProjectIDKey).(string)
+	return v
+}

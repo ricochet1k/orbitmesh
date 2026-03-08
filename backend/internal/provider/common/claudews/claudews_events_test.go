@@ -28,7 +28,7 @@ func TestHandleResultMsg_EmitsOutputNotPlan(t *testing.T) {
 		select {
 		case ev := <-events:
 			switch ev.Type {
-			case domain.EventTypeOutput:
+			case domain.EventTypeResourceUsage:
 				seenOutput = true
 			case domain.EventTypePlan:
 				seenPlan = true
@@ -38,7 +38,7 @@ func TestHandleResultMsg_EmitsOutputNotPlan(t *testing.T) {
 	}
 
 	if !seenOutput {
-		t.Fatal("expected output event from result message")
+		t.Error("expected resource usage event from result message")
 	}
 	if seenPlan {
 		t.Fatal("did not expect plan event from result message")

@@ -32,3 +32,12 @@ func (r *DefaultProxyResolver) GetAgentMCPServerRefs(agentID string) []storage.A
 func (r *DefaultProxyResolver) GetMCPServerEntry(serverID string) (*storage.MCPServerEntry, error) {
 	return r.MCPServerStore.Get(serverID)
 }
+
+
+func (r *DefaultProxyResolver) GetAgentAllowedSubAgents(agentID string) []string {
+	cfg, err := r.AgentStorage.Get(agentID)
+	if err != nil || cfg == nil {
+		return nil
+	}
+	return cfg.AllowedSubAgents
+}
