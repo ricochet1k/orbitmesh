@@ -20,7 +20,7 @@ vi.mock("@tanstack/solid-router", () => ({
 
 // ── Realtime client mock ───────────────────────────────────────────────────────
 
-const realtimeHandlers = new Map<string, (message: ServerEnvelope) => void>()
+const realtimeHandlers: Map<string, (message: ServerEnvelope) => void> = new Map()
 let realtimeStatusHandler: ((status: "connecting" | "open" | "closed") => void) | undefined
 
 vi.mock("../realtime/client", () => ({
