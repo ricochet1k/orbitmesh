@@ -36,9 +36,7 @@ class TestWebSocket {
     this.onclose?.call(this as unknown as WebSocket, new CloseEvent("close"));
   }
 
-  send(_data: string | ArrayBufferLike | Blob | ArrayBufferView) {
-    this.sentMessages.push(_data as string);
-  }
+  send() {}
 }
 
 const dumpActiveHandles = (label: string) => {

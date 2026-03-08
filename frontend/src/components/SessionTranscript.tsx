@@ -236,7 +236,7 @@ function TranscriptItem(props: {
                 </Show>
               ) : (
                 // eslint-disable-next-line solid/no-innerhtml
-                <div class="transcript-markdown-chunk" innerHTML={/*@once*/ renderMarkdownChunk(block.content)} />
+                <div class="transcript-markdown-chunk" innerHTML={renderMarkdownChunk(block.content)} />
               )
             }
           </For>

@@ -367,7 +367,6 @@ describe("SessionViewer", () => {
   })
 
   it("stop button cancels run for non-PTY providers", async () => {
-     (apiClient.getSession as any).mockResolvedValue(baseSession);
      (apiClient.getSession as any).mockResolvedValue(baseSession)
 
     render(() => <SessionViewer sessionId="session-1" />)
@@ -383,7 +382,6 @@ describe("SessionViewer", () => {
   })
 
   it("stop button sends Ctrl+C for PTY providers", async () => {
-     (apiClient.getSession as any).mockResolvedValue(makeSession({ provider_type: "pty" }));
      (apiClient.getSession as any).mockResolvedValue(makeSession({ provider_type: "pty" }))
 
     render(() => <SessionViewer sessionId="session-1" />)
@@ -428,8 +426,8 @@ describe("SessionViewer", () => {
   })
 
   it("shows action-in-progress tooltips", async () => {
-     (apiClient.getSession as any).mockResolvedValue(baseSession);
-     (apiClient.cancelSession as any).mockImplementation(() => new Promise(() => { })); // Never resolves
+     (apiClient.getSession as any).mockResolvedValue(baseSession)
+    ; (apiClient.cancelSession as any).mockImplementation(() => new Promise(() => { })) // Never resolves
 
     render(() => <SessionViewer sessionId="session-1" />)
 
@@ -455,7 +453,6 @@ describe("SessionViewer", () => {
   })
 
   it("updates state badge when sessions.state WebSocket event arrives", async () => {
-     (apiClient.getSession as any).mockResolvedValue(baseSession);
      (apiClient.getSession as any).mockResolvedValue(baseSession)
 
     render(() => <SessionViewer sessionId="session-1" />)

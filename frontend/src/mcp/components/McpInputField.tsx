@@ -51,14 +51,11 @@ export const McpInputField = (props: McpInputFieldProps) => {
     return () => mcpRegistry.unregister(entry.id);
   });
 
-  const restProps = () => {
-    const p = { ...props };
-    delete p.mcpActions;
-    delete p.mcpDescription;
-    delete p.mcpId;
-    delete p.mcpName;
-    return p;
+  const inputProps = () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { mcpActions, mcpDescription, mcpId, mcpName, ...rest } = props;
+    return rest;
   };
 
-  return <input ref={inputRef} {...restProps()} />;
+  return <input ref={inputRef} {...inputProps()} />;
 };

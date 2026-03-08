@@ -1,4 +1,4 @@
-import { JSX, For } from 'solid-js'
+import { JSX, Index } from 'solid-js'
 
 export interface SkeletonLoaderProps {
   variant?: 'text' | 'card' | 'list' | 'table' | 'graph'
@@ -14,24 +14,24 @@ export default function SkeletonLoader(props: SkeletonLoaderProps): JSX.Element 
       case 'text':
         return (
           <div class="skeleton-text-container" data-testid="skeleton-text">
-            <For each={Array.from({ length: props.count || 3 })}>
+            <Index each={Array.from({ length: props.count || 3 })}>
               {(_, i) => (
                 <div
                   class="skeleton skeleton-text animate-shimmer"
                   style={{
-                    width: i() === (props.count || 3) - 1 ? '70%' : '100%',
+                    width: i === (props.count || 3) - 1 ? '70%' : '100%',
                     height: props.height || '1em'
                   }}
                 />
               )}
-            </For>
+            </Index>
           </div>
         )
       
       case 'card':
         return (
           <div class="skeleton-card-container" data-testid="skeleton-card">
-            <For each={Array.from({ length: props.count || 1 })}>
+            <Index each={Array.from({ length: props.count || 1 })}>
               {() => (
                 <div class="skeleton-card">
                   <div class="skeleton skeleton-card-header animate-shimmer" />
@@ -39,14 +39,14 @@ export default function SkeletonLoader(props: SkeletonLoaderProps): JSX.Element 
                   <div class="skeleton skeleton-card-footer animate-shimmer" />
                 </div>
               )}
-            </For>
+            </Index>
           </div>
         )
       
       case 'list':
         return (
           <div class="skeleton-list-container" data-testid="skeleton-list">
-            <For each={Array.from({ length: props.count || 5 })}>
+            <Index each={Array.from({ length: props.count || 5 })}>
               {() => (
                 <div class="skeleton-list-item">
                   <div class="skeleton skeleton-list-icon animate-shimmer" />
@@ -57,7 +57,7 @@ export default function SkeletonLoader(props: SkeletonLoaderProps): JSX.Element 
                   <div class="skeleton skeleton-list-badge animate-shimmer" />
                 </div>
               )}
-            </For>
+            </Index>
           </div>
         )
       
@@ -65,23 +65,23 @@ export default function SkeletonLoader(props: SkeletonLoaderProps): JSX.Element 
         return (
           <div class="skeleton-table-container" data-testid="skeleton-table">
             <div class="skeleton-table-header">
-              <For each={Array.from({ length: 5 })}>
+              <Index each={Array.from({ length: 5 })}>
                 {() => (
                   <div class="skeleton skeleton-table-header-cell animate-shimmer" />
                 )}
-              </For>
+              </Index>
             </div>
-            <For each={Array.from({ length: props.count || 5 })}>
+            <Index each={Array.from({ length: props.count || 5 })}>
               {() => (
                 <div class="skeleton-table-row">
-                  <For each={Array.from({ length: 5 })}>
+                  <Index each={Array.from({ length: 5 })}>
                     {() => (
                       <div class="skeleton skeleton-table-cell animate-shimmer" />
                     )}
-                  </For>
+                  </Index>
                 </div>
               )}
-            </For>
+            </Index>
           </div>
         )
       

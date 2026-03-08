@@ -43,17 +43,14 @@ export const McpButton = (props: McpButtonProps) => {
     return () => mcpRegistry.unregister(entry.id);
   });
 
-  const restProps = () => {
-    const p = { ...props };
-    delete p.mcpActions;
-    delete p.mcpDescription;
-    delete p.mcpId;
-    delete p.mcpName;
-    return p;
+  const buttonProps = () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { mcpActions, mcpDescription, mcpId, mcpName, ...rest } = props;
+    return rest;
   };
 
   return (
-    <button ref={buttonRef} {...restProps()}>
+    <button ref={buttonRef} {...buttonProps()}>
       {props.children}
     </button>
   );

@@ -42,18 +42,14 @@ export const McpDataText = (props: McpDataTextProps) => {
     return () => mcpRegistry.unregister(entry.id);
   });
 
-  const restProps = () => {
-    const p = { ...props };
-    delete p.mcpActions;
-    delete p.mcpDescription;
-    delete p.mcpId;
-    delete p.mcpName;
-    delete p.value;
-    return p;
+  const spanProps = () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { mcpActions, mcpDescription, mcpId, mcpName, value, ...rest } = props;
+    return rest;
   };
 
   return (
-    <span ref={textRef} {...restProps()}>
+    <span ref={textRef} {...spanProps()}>
       {props.value ?? props.children}
     </span>
   );

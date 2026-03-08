@@ -174,9 +174,9 @@ export default function SessionComposer(props: SessionComposerProps) {
               title="Select provider for this message"
             >
               <option value="">Default Provider</option>
-              <For each={props.providers?.()}>{(provider) => (
+              {<For each={props.providers?.()}>{(provider) => (
                 <option value={provider.id}>{provider.name}</option>
-              )}</For>
+              )}</For>}
             </select>
           </Show>
           <Show when={props.isRunning() && props.onInterrupt}>
