@@ -40,6 +40,8 @@ func (s State) String() string {
 // MCPServerConfig describes an MCP server that can be attached to a session.
 type MCPServerConfig struct {
 	Name    string
+	Type    string
+	URL     string
 	Command string
 	Args    []string
 	Env     map[string]string

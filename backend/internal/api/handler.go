@@ -547,10 +547,6 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionKind := strings.TrimSpace(req.SessionKind)
-	if sessionKind != "" && sessionKind != domain.SessionKindDock {
-		writeError(w, http.StatusBadRequest, "invalid session_kind", "")
-		return
-	}
 
 	var providerConfig *storage.ProviderConfig
 	if req.ProviderID != "" {
@@ -635,8 +631,7 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		// Agent MCP servers are only used when the request doesn't supply its own list
-		// and the session is not a dock session (dock servers are always overridden below).
-		if len(req.MCPServers) == 0 && sessionKind != domain.SessionKindDock && len(agentConfig.MCPServers) > 0 {
+		if len(req.MCPServers) == 0 && len(agentConfig.MCPServers) > 0 {
 			config.MCPServers = agentConfig.MCPServers
 		}
 		if len(config.AllowedTools) == 0 && len(agentConfig.AllowedTools) > 0 {
@@ -678,25 +673,16 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if sessionKind == domain.SessionKindDock {
-		config.MCPServers = dockMCPServers(id)
-		if config.Custom == nil {
-			config.Custom = map[string]any{}
-		}
-		config.Custom["mcp_config"] = dockMCPConfig(id)
-	} else {
-		if len(req.MCPServers) > 0 {
-			config.MCPServers = make([]session.MCPServerConfig, len(req.MCPServers))
-			for i, s := range req.MCPServers {
-				config.MCPServers[i] = session.MCPServerConfig{
-					Name:    s.Name,
-					Command: s.Command,
-					Args:    s.Args,
-					Env:     s.Env,
-				}
+	if len(req.MCPServers) > 0 {
+		config.MCPServers = make([]session.MCPServerConfig, len(req.MCPServers))
+		for i, s := range req.MCPServers {
+			config.MCPServers[i] = session.MCPServerConfig{
+				Name:    s.Name,
+				Command: s.Command,
+				Args:    s.Args,
+				Env:     s.Env,
 			}
 		}
-		injectOrbitmeshMCP(id, &config)
 	}
 
 	session, err := h.executor.CreateSession(r.Context(), id, config)
@@ -1003,29 +989,8 @@ func usageStatsToAPI(stats session.UsageStats) apiTypes.UsageStats {
 	return out
 }
 
-func dockMCPServers(sessionID string) []session.MCPServerConfig {
-	return []session.MCPServerConfig{
-		{
-			Name:    "orbitmesh",
-			Command: "orbitmesh",
-			Args:    []string{"mcp-bridge", "--session-id", sessionID},
-		},
-	}
-}
-
-func dockMCPConfig(sessionID string) map[string]any {
-	return map[string]any{
-		"mcpServers": map[string]any{
-			"orbitmesh": map[string]any{
-				"command": "orbitmesh",
-				"args":    []string{"mcp-bridge", "--session-id", sessionID},
-			},
-		},
-	}
-}
-
 // injectOrbitmeshMCP appends the built-in OrbitMesh MCP server to config so that
-// all non-dock sessions have access to OrbitMesh tools. It is idempotent: if a
+// all sessions have access to OrbitMesh tools. It is idempotent: if a
 // server named "orbitmesh" is already present it does nothing.
 //
 // In addition to MCPServers (consumed by ADK and similar SDK-based providers) it
@@ -1033,16 +998,16 @@ func dockMCPConfig(sessionID string) map[string]any {
 // --mcp-config CLI arguments from that key. The claude-ws provider is excluded
 // because it registers MCP servers via sdkMcpServers in the WS initialize message
 // instead, and passing both paths would double-register the server with the CLI.
-func injectOrbitmeshMCP(sessionID string, config *session.Config) {
+func injectOrbitmeshMCP(sessionID string, host string, config *session.Config) {
 	for _, srv := range config.MCPServers {
 		if srv.Name == "orbitmesh" {
 			return
 		}
 	}
 	config.MCPServers = append(config.MCPServers, session.MCPServerConfig{
-		Name:    "orbitmesh",
-		Command: "orbitmesh",
-		Args:    []string{"mcp-bridge", "--session-id", sessionID},
+		Name: "orbitmesh",
+		Type: "http",
+		URL:  fmt.Sprintf("http://%s/api/sessions/%s/frontend-tools/mcp/request", host, sessionID),
 	})
 	// claude-ws registers orbitmesh via sdkMcpServers in the WS initialize message.
 	if config.ProviderType == "claude-ws" {
@@ -1051,16 +1016,16 @@ func injectOrbitmeshMCP(sessionID string, config *session.Config) {
 	if config.Custom == nil {
 		config.Custom = map[string]any{}
 	}
-	config.Custom["mcp_config"] = mergeOrbitmeshMCPConfig(sessionID, config.Custom["mcp_config"])
+	config.Custom["mcp_config"] = mergeOrbitmeshMCPConfig(sessionID, host, config.Custom["mcp_config"])
 }
 
 // mergeOrbitmeshMCPConfig returns an updated mcp_config value that includes the
 // orbitmesh server entry. It understands the map[string]any form used by
 // dockMCPConfig and the []any / string forms that agents or users may supply.
-func mergeOrbitmeshMCPConfig(sessionID string, existing any) any {
+func mergeOrbitmeshMCPConfig(sessionID string, host string, existing any) any {
 	entry := map[string]any{
-		"command": "orbitmesh",
-		"args":    []string{"mcp-bridge", "--session-id", sessionID},
+		"type": "http",
+		"url":  fmt.Sprintf("http://%s/api/sessions/%s/frontend-tools/mcp/request", host, sessionID),
 	}
 	switch v := existing.(type) {
 	case nil:

@@ -504,62 +504,6 @@ func TestCreateSession_WithMCPServers(t *testing.T) {
 	}
 }
 
-func TestCreateSession_DockKind(t *testing.T) {
-	env := newTestEnv(t)
-	r := env.router()
-
-	body, _ := json.Marshal(apiTypes.SessionRequest{
-		ProviderType: "mock",
-		WorkingDir:   "/tmp",
-		SessionKind:  domain.SessionKindDock,
-	})
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp apiTypes.SessionResponse
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp.SessionKind != domain.SessionKindDock {
-		t.Fatalf("SessionKind = %q, want %q", resp.SessionKind, domain.SessionKindDock)
-	}
-
-	sess, err := env.executor.GetSession(resp.ID)
-	if err != nil {
-		t.Fatalf("GetSession failed: %v", err)
-	}
-	if sess.Snapshot().Kind != domain.SessionKindDock {
-		t.Fatalf("stored kind = %q, want %q", sess.Snapshot().Kind, domain.SessionKindDock)
-	}
-}
-
-func TestCreateSession_InvalidKind(t *testing.T) {
-	env := newTestEnv(t)
-	r := env.router()
-
-	body, _ := json.Marshal(apiTypes.SessionRequest{
-		ProviderType: "mock",
-		WorkingDir:   "/tmp",
-		SessionKind:  "mystery",
-	})
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
-	}
-	var errResp apiTypes.ErrorResponse
-	_ = json.Unmarshal(w.Body.Bytes(), &errResp)
-	if errResp.Error != "invalid session_kind" {
-		t.Fatalf("Error = %q, want %q", errResp.Error, "invalid session_kind")
-	}
-}
 
 func TestCreateSession_ExecutorShutdown(t *testing.T) {
 	env := newTestEnv(t)
