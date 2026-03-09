@@ -21,21 +21,18 @@ const (
 	dockMCPKindMultiEdit = "multi_edit"
 )
 
-func (h *Handler) requireDockSession(id string) (*domain.SessionSnapshot, bool) {
+func (h *Handler) requireSession(id string) (*domain.SessionSnapshot, bool) {
 	sess, err := h.executor.GetSession(id)
 	if err != nil {
 		return nil, false
 	}
 	snap := sess.Snapshot()
-	if snap.Kind != domain.SessionKindDock {
-		return nil, false
-	}
 	return &snap, true
 }
 
 func (h *Handler) nextDockMCP(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if _, ok := h.requireDockSession(id); !ok {
+	if _, ok := h.requireSession(id); !ok {
 		writeError(w, http.StatusNotFound, "session not found", "")
 		return
 	}
@@ -66,7 +63,7 @@ func (h *Handler) nextDockMCP(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) requestDockMCP(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if _, ok := h.requireDockSession(id); !ok {
+	if _, ok := h.requireSession(id); !ok {
 		writeError(w, http.StatusNotFound, "session not found", "")
 		return
 	}
@@ -109,7 +106,7 @@ func (h *Handler) requestDockMCP(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) respondDockMCP(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if _, ok := h.requireDockSession(id); !ok {
+	if _, ok := h.requireSession(id); !ok {
 		writeError(w, http.StatusNotFound, "session not found", "")
 		return
 	}

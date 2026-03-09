@@ -17,7 +17,7 @@ const (
 )
 
 const (
-	SessionKindDock = "dock"
+
 )
 
 func (s SessionState) String() string {
@@ -154,6 +154,8 @@ type Session struct {
 	State      SessionState
 	WorkingDir string
 	ProjectID  string
+	AllowedTools      []string
+	DisallowedTools   []string
 	// ProviderCustom preserves the original provider-specific config (e.g.
 	// acp_command) so it can be re-supplied when starting a new run on an
 	// idle session via SendMessage.
@@ -287,6 +289,8 @@ type SessionSnapshot struct {
 	State             SessionState      `json:"state"`
 	WorkingDir        string            `json:"working_dir"`
 	ProjectID         string            `json:"project_id,omitempty"`
+	AllowedTools      []string          `json:"allowed_tools,omitempty"`
+	DisallowedTools   []string          `json:"disallowed_tools,omitempty"`
 	ProviderCustom    map[string]any    `json:"provider_custom,omitempty"`
 	CustomData        map[string]any    `json:"custom_data,omitempty"`
 	CreatedAt         time.Time         `json:"created_at"`
@@ -314,6 +318,8 @@ func (s *Session) Snapshot() SessionSnapshot {
 		State:               s.State,
 		WorkingDir:          s.WorkingDir,
 		ProjectID:           s.ProjectID,
+		AllowedTools:        s.AllowedTools,
+		DisallowedTools:     s.DisallowedTools,
 		ProviderCustom:      s.ProviderCustom,
 		CustomData:          s.CustomData,
 		CreatedAt:           s.CreatedAt,

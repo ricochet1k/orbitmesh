@@ -58,7 +58,7 @@ func runMCPBridge(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("X-Orbitmesh-Internal", "dock-mcp")
+	req.Header.Set("X-Orbitmesh-Internal", "frontend-tools-mcp")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

@@ -511,7 +511,7 @@ func containsString(items []string, target string) bool {
 }
 
 func listUIComponentsTool(ctx context.Context, _ json.RawMessage) (string, error) {
-	return dockRequest(ctx, apiTypes.DockMCPRequest{Kind: "list"})
+	return frontendToolsRequest(ctx, apiTypes.DockMCPRequest{Kind: "list"})
 }
 
 func dispatchUIActionTool(ctx context.Context, input json.RawMessage) (string, error) {
@@ -526,7 +526,7 @@ func dispatchUIActionTool(ctx context.Context, input json.RawMessage) (string, e
 	if strings.TrimSpace(args.ComponentID) == "" || strings.TrimSpace(args.Action) == "" {
 		return "", errors.New("component_id and action are required")
 	}
-	return dockRequest(ctx, apiTypes.DockMCPRequest{Kind: "dispatch", TargetID: args.ComponentID, Action: args.Action, Payload: args.Payload})
+	return frontendToolsRequest(ctx, apiTypes.DockMCPRequest{Kind: "dispatch", TargetID: args.ComponentID, Action: args.Action, Payload: args.Payload})
 }
 
 func multiEditUITool(ctx context.Context, input json.RawMessage) (string, error) {
@@ -536,20 +536,20 @@ func multiEditUITool(ctx context.Context, input json.RawMessage) (string, error)
 	if err := json.Unmarshal(input, &args); err != nil {
 		return "", err
 	}
-	return dockRequest(ctx, apiTypes.DockMCPRequest{Kind: "multi_edit", Payload: args.Fields})
+	return frontendToolsRequest(ctx, apiTypes.DockMCPRequest{Kind: "multi_edit", Payload: args.Fields})
 }
 
-func dockRequest(ctx context.Context, request apiTypes.DockMCPRequest) (string, error) {
+func frontendToolsRequest(ctx context.Context, request apiTypes.DockMCPRequest) (string, error) {
 	sessionID := strings.TrimSpace(SessionIDFromContext(ctx))
 	if sessionID == "" {
-		return "", errors.New("missing session context for dock tool")
+		return "", errors.New("missing session context for frontend tools tool")
 	}
 	baseURL := strings.TrimSpace(APIBaseURLFromContext(ctx))
 	if baseURL == "" {
 		baseURL = "http://127.0.0.1:8080"
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
-	url := fmt.Sprintf("%s/api/sessions/%s/dock/mcp/request", baseURL, sessionID)
+	url := fmt.Sprintf("%s/api/sessions/%s/frontend-tools/mcp/request", baseURL, sessionID)
 	body, err := json.Marshal(request)
 	if err != nil {
 		return "", err
@@ -559,7 +559,7 @@ func dockRequest(ctx context.Context, request apiTypes.DockMCPRequest) (string, 
 		return "", err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("X-Orbitmesh-Internal", "dock-mcp")
+	httpReq.Header.Set("X-Orbitmesh-Internal", "frontend-tools-mcp")
 	resp, err := (&http.Client{Timeout: 45 * time.Second}).Do(httpReq)
 	if err != nil {
 		return "", err

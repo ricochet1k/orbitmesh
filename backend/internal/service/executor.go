@@ -285,6 +285,8 @@ func (e *AgentExecutor) CreateSession(ctx context.Context, id string, config ses
 	if len(config.Custom) > 0 {
 		session.ProviderCustom = config.Custom
 	}
+	session.AllowedTools = append([]string(nil), config.AllowedTools...)
+	session.DisallowedTools = append([]string(nil), config.DisallowedTools...)
 	if config.SessionKind != "" {
 		session.SetKind(config.SessionKind)
 	}

@@ -11,7 +11,7 @@ const (
 	csrfCookieName       = "orbitmesh-csrf-token"
 	csrfHeaderName       = "X-CSRF-Token"
 	internalBypassHeader = "X-Orbitmesh-Internal"
-	internalBypassValue  = "dock-mcp"
+	internalBypassValue  = "frontend-tools-mcp"
 )
 
 func CSRFMiddleware(next http.Handler) http.Handler {
