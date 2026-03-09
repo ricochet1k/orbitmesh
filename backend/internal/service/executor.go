@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -753,13 +753,10 @@ func (e *AgentExecutor) ForceStop(ctx context.Context) error {
 
 func (e *AgentExecutor) Shutdown(ctx context.Context) error {
 	e.BeginDrain(ctx)
-	e.cancel()
 
+	// We must NOT call e.cancel() here because doing so will abort running provider prompts
+	// instantly before they can be gracefully drained. e.cancel() is used in ForceStop.
 	sessionIDs := e.listSessionIDs()
-
-	for _, id := range sessionIDs {
-		_ = e.StopSession(ctx, id)
-	}
 
 	if e.sessionRuns != nil {
 		if err := e.sessionRuns.AwaitDrain(ctx); err != nil {
@@ -774,6 +771,10 @@ func (e *AgentExecutor) Shutdown(ctx context.Context) error {
 		if err := e.evalCoordinator.AwaitDrain(ctx); err != nil {
 			return err
 		}
+	}
+
+	for _, id := range sessionIDs {
+		_ = e.StopSession(ctx, id)
 	}
 
 	return nil
@@ -821,7 +822,24 @@ func (e *AgentExecutor) DrainActiveSessions(ctx context.Context) {
 		wg.Go(fmt.Sprintf("session:%s", sessionID), func() {
 			if drainer, ok := run.Session.(session.TurnBoundaryDrainer); ok {
 				if err := drainer.DrainAtTurnBoundary(ctx); err != nil {
-					log.Printf("shutdown: session %s turn boundary drain: %v", sessionID, err)
+					slog.Error("shutdown: session turn boundary drain failed", "session", sessionID, "error", err)
+				}
+			} else {
+				// Poll session state to wait for it to exit Running
+				ticker := time.NewTicker(100 * time.Millisecond)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ctx.Done():
+						break
+					case <-ticker.C:
+						state := sc.session.GetState()
+						if state != domain.SessionStateRunning && state != domain.SessionStateSuspended {
+							break
+						}
+						continue
+					}
+					break
 				}
 			}
 			_ = e.StopSession(ctx, sessionID)
@@ -844,12 +862,12 @@ func (e *AgentExecutor) DrainActiveSessions(ctx context.Context) {
 		case <-ticker.C:
 			waitingOn := wg.WaitingOn()
 			if len(waitingOn) > 0 {
-				log.Printf("shutdown: waiting for active sessions to stop: %v", waitingOn)
+				slog.Info("shutdown: waiting for active sessions to stop", "waiting_on", waitingOn)
 			}
 		case <-ctx.Done():
 			waitingOn := wg.WaitingOn()
 			if len(waitingOn) > 0 {
-				log.Printf("shutdown: active session drain timeout waiting_on=%v err=%v", waitingOn, ctx.Err())
+				slog.Error("shutdown: active session drain timeout", "waiting_on", waitingOn, "error", ctx.Err())
 			}
 			return
 		}

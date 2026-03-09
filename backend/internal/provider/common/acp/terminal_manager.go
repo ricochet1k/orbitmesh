@@ -22,9 +22,9 @@ var (
 
 // ACPTerminal wraps a termemu terminal for workspace commands
 type ACPTerminal struct {
-	ID         string
-	Command    string
-	Args       []string
+	ID      string
+	Command string
+	Args    []string
 
 	backend    *termemu.PTYBackend
 	teeBackend *termemu.TeeBackend
@@ -36,9 +36,9 @@ type ACPTerminal struct {
 	exitSignal *string
 	done       chan struct{}
 
-	ctx        context.Context
-	cancel     context.CancelFunc
-	mu         sync.RWMutex
+	ctx    context.Context
+	cancel context.CancelFunc
+	mu     sync.RWMutex
 
 	// Terminal events
 	events  chan terminal.Event

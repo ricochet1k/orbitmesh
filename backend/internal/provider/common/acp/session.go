@@ -432,6 +432,11 @@ func (s *Session) handlePromptResponse(resp acpsdk.PromptResponse) {
 	s.events.Emit(domain.NewMetadataEvent(s.sessionID, "stop_reason", map[string]any{
 		"reason": resp.StopReason,
 	}, raw))
+
+	// Also emit turn_completed so execution coordinator can recognize it
+	s.events.Emit(domain.NewMetadataEvent(s.sessionID, "turn_completed", map[string]any{
+		"stop_reason": resp.StopReason,
+	}, raw))
 }
 
 // handleContentBlock processes an ACP content block.

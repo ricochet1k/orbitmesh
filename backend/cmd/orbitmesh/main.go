@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -120,7 +121,29 @@ func awaitExecutorDrainWithProgress(ctx context.Context, executor *service.Agent
 	}
 }
 
+func initLogging() {
+	logLevelStr := strings.ToUpper(os.Getenv("ORBITMESH_LOG_LEVEL"))
+	var level slog.Level
+	switch logLevelStr {
+	case "DEBUG":
+		level = slog.LevelDebug
+	case "WARN":
+		level = slog.LevelWarn
+	case "ERROR":
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: level,
+	}))
+	slog.SetDefault(logger)
+}
+
 func main() {
+	initLogging()
+
 	if maybeRunMCPBridge() {
 		return
 	}

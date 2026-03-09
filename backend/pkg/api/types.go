@@ -821,9 +821,9 @@ type MCPServerEntryResponse struct {
 	URL      string            `json:"url,omitempty"`
 	AuthType string            `json:"auth_type,omitempty"`
 	// OAuth2 public fields (safe to expose)
-	ClientID string   `json:"client_id,omitempty"`
-	AuthURL  string   `json:"auth_url,omitempty"`
-	TokenURL string   `json:"token_url,omitempty"`
+	ClientID            string   `json:"client_id,omitempty"`
+	AuthURL             string   `json:"auth_url,omitempty"`
+	TokenURL            string   `json:"token_url,omitempty"`
 	Scopes              []string `json:"scopes,omitempty"`
 	HasToken            bool     `json:"has_token"`
 	DynamicRegistration bool     `json:"dynamic_registration,omitempty"`

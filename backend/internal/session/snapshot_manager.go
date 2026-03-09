@@ -26,15 +26,15 @@ type SnapshotManager struct {
 	storage  SnapshotStorage
 	interval time.Duration
 
-	mu             sync.RWMutex
+	mu              sync.RWMutex
 	activeSnapshots map[string]*snapshotTask
 }
 
 type snapshotTask struct {
-	sessionID  string
-	cancel     context.CancelFunc
-	lastSaved  time.Time
-	saveCount  int
+	sessionID string
+	cancel    context.CancelFunc
+	lastSaved time.Time
+	saveCount int
 }
 
 // NewSnapshotManager creates a new snapshot manager.
@@ -148,10 +148,10 @@ func (sm *SnapshotManager) Stats() map[string]any {
 	sessions := make([]map[string]any, 0, len(sm.activeSnapshots))
 	for _, task := range sm.activeSnapshots {
 		sessions = append(sessions, map[string]any{
-			"session_id":  task.sessionID,
-			"last_saved":  task.lastSaved,
-			"save_count":  task.saveCount,
-			"age":         time.Since(task.lastSaved).String(),
+			"session_id": task.sessionID,
+			"last_saved": task.lastSaved,
+			"save_count": task.saveCount,
+			"age":        time.Since(task.lastSaved).String(),
 		})
 	}
 	stats["sessions"] = sessions

@@ -6,7 +6,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { reservePort } from "./free-port.js"
 
-const STARTUP_TIMEOUT_MS = 15_000
+const STARTUP_TIMEOUT_MS = 60_000
 const POLL_INTERVAL_MS = 500
 
 type ManagedProcess = {

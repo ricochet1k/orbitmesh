@@ -4,7 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -71,7 +72,7 @@ func (e *AgentExecutor) handleEvents(ctx context.Context, sc *sessionContext, ru
 				e.finalizeRunAttempt(sc, "failed", reason)
 				run.SetError(errors.New(reason))
 				if err := run.Session.Kill(); err != nil {
-					log.Printf("failed to kill stalled provider for session %s: %v", sc.session.ID, err)
+					slog.Warn("failed to kill stalled provider", "session", sc.session.ID, "error", err)
 				}
 				e.transitionWithSave(sc, domain.SessionStateIdle, reason)
 				return
@@ -136,7 +137,7 @@ func (e *AgentExecutor) flushPendingToolCalls(ctx context.Context, sc *sessionCo
 
 	deps, err := e.evalCoordinator.DispatchBatch(sc.session.ID, calls)
 	if err != nil {
-		log.Printf("DispatchBatch failed for session %s: %v", sc.session.ID, err)
+		slog.Error("DispatchBatch failed", "session", sc.session.ID, "error", err)
 		return
 	}
 
@@ -163,7 +164,7 @@ func (e *AgentExecutor) compactSessionMessageLog(sessionID string) {
 		return
 	}
 	if err := e.messageLogStore.CompactSession(sessionID); err != nil {
-		log.Printf("message-log compaction failed for session %s: %v", sessionID, err)
+		slog.Error("message-log compaction failed", "session", sessionID, "error", err)
 	}
 }
 
@@ -587,7 +588,7 @@ func (e *AgentExecutor) executeSessionStart(runCtx context.Context, sc *sessionC
 		}
 	}()
 
-	log.Printf("STARTING SESSION %s with provider %s", id, pType)
+	slog.Info("STARTING SESSION", "session", id, "provider", pType)
 
 	startCtx, startCancel := context.WithTimeout(run.Ctx, e.opTimeout)
 	defer startCancel()
@@ -595,7 +596,7 @@ func (e *AgentExecutor) executeSessionStart(runCtx context.Context, sc *sessionC
 	events, err := run.Session.SendInput(startCtx, config, content)
 	if err != nil {
 		errMsg := fmt.Sprintf("Provider failed to start: %v", err)
-		log.Printf("SESSION START FAILED: %v", errMsg)
+		slog.Error("SESSION START FAILED", "error", errMsg, "session", id)
 		e.emitSynthesized(sc.session, domain.NewErrorEvent(id, errMsg, "SESSION_START_FAILED", nil))
 		e.finalizeRunAttempt(sc, "failed", errMsg)
 		run.SetError(err)
@@ -732,7 +733,7 @@ func (e *AgentExecutor) resumeSessionWithToolResults(sessionID string, results [
 		if errors.Is(err, ErrExecutorShutdown) {
 			return
 		}
-		log.Printf("resumeSessionWithToolResults: failed for session %s: %v", sessionID, err)
+		slog.Error("resumeSessionWithToolResults: failed", "session", sessionID, "error", err)
 	}
 }
 
@@ -838,7 +839,7 @@ func (e *AgentExecutor) resumeSessionWithToolResultsManaged(sessionID string, re
 
 func (e *AgentExecutor) handlePanic(sc *sessionContext, r any) {
 	errMsg := fmt.Sprintf("Panic recovered: %v", r)
-	log.Printf("PANIC: %v", errMsg)
+	slog.Error("PANIC", "error", errMsg, "stack", string(debug.Stack()))
 
 	e.emitSynthesized(sc.session, domain.NewErrorEvent(sc.session.ID, errMsg, "PANIC", nil))
 	e.finalizeRunAttempt(sc, "failed", errMsg)

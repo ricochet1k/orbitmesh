@@ -20,12 +20,12 @@ import (
 // OAuthMetadata represents the OAuth 2.0 Authorization Server Metadata
 // as defined in RFC 8414.
 type OAuthMetadata struct {
-	Issuer                string   `json:"issuer"`
-	AuthorizationEndpoint string   `json:"authorization_endpoint"`
-	TokenEndpoint         string   `json:"token_endpoint"`
-	RegistrationEndpoint  string   `json:"registration_endpoint,omitempty"`
-	ScopesSupported       []string `json:"scopes_supported,omitempty"`
-	ResponseTypesSupported []string `json:"response_types_supported,omitempty"`
+	Issuer                        string   `json:"issuer"`
+	AuthorizationEndpoint         string   `json:"authorization_endpoint"`
+	TokenEndpoint                 string   `json:"token_endpoint"`
+	RegistrationEndpoint          string   `json:"registration_endpoint,omitempty"`
+	ScopesSupported               []string `json:"scopes_supported,omitempty"`
+	ResponseTypesSupported        []string `json:"response_types_supported,omitempty"`
 	CodeChallengeMethodsSupported []string `json:"code_challenge_methods_supported,omitempty"`
 }
 
@@ -244,9 +244,9 @@ func discoverWellKnown(ctx context.Context, parsed *url.URL) (*OAuthMetadata, er
 func DynamicRegister(ctx context.Context, registrationEndpoint, redirectURI string) (*DynamicRegistrationResponse, error) {
 	clientMeta := map[string]any{
 		"client_name":                "OrbitMesh",
-		"redirect_uris":             []string{redirectURI},
-		"grant_types":               []string{"authorization_code", "refresh_token"},
-		"response_types":            []string{"code"},
+		"redirect_uris":              []string{redirectURI},
+		"grant_types":                []string{"authorization_code", "refresh_token"},
+		"response_types":             []string{"code"},
 		"token_endpoint_auth_method": "none",
 	}
 

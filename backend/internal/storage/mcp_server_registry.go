@@ -44,7 +44,7 @@ type MCPServerAuth struct {
 
 	// Dynamic client registration (RFC 7591) — true when client_id was
 	// obtained via discovery rather than manually configured.
-	DynamicRegistration bool   `json:"dynamic_registration,omitempty"`
+	DynamicRegistration  bool   `json:"dynamic_registration,omitempty"`
 	RegistrationEndpoint string `json:"registration_endpoint,omitempty"`
 
 	// Stored OAuth tokens (populated after OAuth flow completes)

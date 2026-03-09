@@ -9,11 +9,11 @@ import (
 // After a threshold of failures, it enters a cooldown period where
 // operations are blocked.
 type Breaker struct {
-	mu              sync.RWMutex
-	threshold       int
-	cooldownPeriod  time.Duration
-	failureCount    int
-	cooldownUntil   time.Time
+	mu             sync.RWMutex
+	threshold      int
+	cooldownPeriod time.Duration
+	failureCount   int
+	cooldownUntil  time.Time
 }
 
 // NewBreaker creates a new circuit breaker with the specified threshold and cooldown.

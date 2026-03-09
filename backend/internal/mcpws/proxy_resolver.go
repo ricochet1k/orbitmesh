@@ -8,9 +8,9 @@ import (
 // DefaultProxyResolver implements ProxyResolver by reading from the executor,
 // agent storage, and MCP server registry.
 type DefaultProxyResolver struct {
-	Executor        *service.AgentExecutor
-	AgentStorage    *storage.AgentConfigStorage
-	MCPServerStore  *storage.MCPServerRegistry
+	Executor       *service.AgentExecutor
+	AgentStorage   *storage.AgentConfigStorage
+	MCPServerStore *storage.MCPServerRegistry
 }
 
 func (r *DefaultProxyResolver) GetSessionAgentID(sessionID string) string {

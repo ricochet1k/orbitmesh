@@ -6,55 +6,55 @@ import (
 
 func TestParseMessage(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   string
+		name     string
+		input    string
 		wantType MessageType
-		wantErr bool
+		wantErr  bool
 	}{
 		{
-			name: "message_start",
-			input: `{"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-5","usage":{"input_tokens":10,"output_tokens":0}}}`,
+			name:     "message_start",
+			input:    `{"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-5","usage":{"input_tokens":10,"output_tokens":0}}}`,
 			wantType: MessageTypeMessageStart,
-			wantErr: false,
+			wantErr:  false,
 		},
 		{
-			name: "content_block_start - text",
-			input: `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			name:     "content_block_start - text",
+			input:    `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
 			wantType: MessageTypeContentBlockStart,
-			wantErr: false,
+			wantErr:  false,
 		},
 		{
-			name: "content_block_delta - text",
-			input: `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}`,
+			name:     "content_block_delta - text",
+			input:    `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}`,
 			wantType: MessageTypeContentBlockDelta,
-			wantErr: false,
+			wantErr:  false,
 		},
 		{
-			name: "message_delta",
-			input: `{"type":"message_delta","delta":{"stop_reason":"end_turn","usage":{"output_tokens":5}}}`,
+			name:     "message_delta",
+			input:    `{"type":"message_delta","delta":{"stop_reason":"end_turn","usage":{"output_tokens":5}}}`,
 			wantType: MessageTypeMessageDelta,
-			wantErr: false,
+			wantErr:  false,
 		},
 		{
-			name: "message_stop",
-			input: `{"type":"message_stop"}`,
+			name:     "message_stop",
+			input:    `{"type":"message_stop"}`,
 			wantType: MessageTypeMessageStop,
-			wantErr: false,
+			wantErr:  false,
 		},
 		{
-			name: "error",
-			input: `{"type":"error","error":{"type":"invalid_request","message":"Invalid API key"}}`,
+			name:     "error",
+			input:    `{"type":"error","error":{"type":"invalid_request","message":"Invalid API key"}}`,
 			wantType: MessageTypeError,
-			wantErr: false,
+			wantErr:  false,
 		},
 		{
-			name: "empty",
-			input: "",
+			name:    "empty",
+			input:   "",
 			wantErr: true,
 		},
 		{
-			name: "invalid JSON",
-			input: `{invalid json}`,
+			name:    "invalid JSON",
+			input:   `{invalid json}`,
 			wantErr: true,
 		},
 	}
@@ -190,7 +190,7 @@ func TestMessage_ExtractUsage(t *testing.T) {
 		wantOk bool
 	}{
 		{
-			name: "message_start format",
+			name:  "message_start format",
 			input: `{"type":"message_start","message":{"usage":{"input_tokens":10,"output_tokens":0}}}`,
 			want: UsageData{
 				InputTokens:  10,
@@ -199,7 +199,7 @@ func TestMessage_ExtractUsage(t *testing.T) {
 			wantOk: true,
 		},
 		{
-			name: "message_delta format",
+			name:  "message_delta format",
 			input: `{"type":"message_delta","delta":{"usage":{"output_tokens":5}}}`,
 			want: UsageData{
 				InputTokens:  0,
@@ -208,7 +208,7 @@ func TestMessage_ExtractUsage(t *testing.T) {
 			wantOk: true,
 		},
 		{
-			name: "top-level usage",
+			name:  "top-level usage",
 			input: `{"type":"test","usage":{"input_tokens":20,"output_tokens":10}}`,
 			want: UsageData{
 				InputTokens:  20,
@@ -257,7 +257,7 @@ func TestMessage_ExtractContentBlock(t *testing.T) {
 		wantOk bool
 	}{
 		{
-			name: "text block start",
+			name:  "text block start",
 			input: `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
 			want: ContentBlock{
 				Type:  ContentBlockTypeText,
@@ -267,7 +267,7 @@ func TestMessage_ExtractContentBlock(t *testing.T) {
 			wantOk: true,
 		},
 		{
-			name: "text delta",
+			name:  "text delta",
 			input: `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}`,
 			want: ContentBlock{
 				Type:  ContentBlockTypeText,
@@ -277,7 +277,7 @@ func TestMessage_ExtractContentBlock(t *testing.T) {
 			wantOk: true,
 		},
 		{
-			name: "tool use start",
+			name:  "tool use start",
 			input: `{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tool_123","name":"get_weather","input":{}}}`,
 			want: ContentBlock{
 				Type:        ContentBlockTypeToolUse,
@@ -335,7 +335,7 @@ func TestMessage_ExtractError(t *testing.T) {
 		wantOk bool
 	}{
 		{
-			name: "error message",
+			name:  "error message",
 			input: `{"type":"error","error":{"type":"invalid_request","message":"Invalid API key"}}`,
 			want: ErrorInfo{
 				Type:    "invalid_request",

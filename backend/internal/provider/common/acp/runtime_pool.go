@@ -389,6 +389,9 @@ func runtimeKey(cfg process.Config) string {
 
 func mergeEnvironment(base map[string]string, extra map[string]string) map[string]string {
 	env := maps.Clone(base)
+	if env == nil {
+		env = make(map[string]string)
+	}
 	maps.Copy(env, extra)
 	return env
 }

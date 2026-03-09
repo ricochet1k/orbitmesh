@@ -28,7 +28,7 @@ func TestPTYProvider_Lifecycle(t *testing.T) {
 	p.mu.Lock()
 
 	err := p.start(config)
- p.mu.Unlock()
+	p.mu.Unlock()
 	if err != nil {
 		t.Fatalf("failed to start: %v", err)
 	}
