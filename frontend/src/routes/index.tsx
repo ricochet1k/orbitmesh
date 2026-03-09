@@ -123,6 +123,7 @@ export default function Dashboard(props: DashboardProps = {}) {
   const triggerScan = async () => {
     setScanPending(true);
     try {
+      const previousLastScanAt = summaryData()?.codeflow?.lastScanAt;
       const scan = await apiClient.triggerCodeflowScan();
       if (!scan.started) {
         await refetch();
@@ -131,8 +132,12 @@ export default function Dashboard(props: DashboardProps = {}) {
 
       for (let attempt = 0; attempt < 20; attempt += 1) {
         const next = await refetch();
-        if (hasInterestingCodeflowData(next)) {
-          break;
+        if (!previousLastScanAt) {
+          if (hasInterestingCodeflowData(next)) break;
+        } else {
+          if (next?.codeflow?.lastScanAt && next.codeflow.lastScanAt !== previousLastScanAt) {
+            break;
+          }
         }
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }

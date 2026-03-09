@@ -1,4 +1,4 @@
-import { createSignal, onMount, For, Show, JSX } from "solid-js"
+import { createSignal, onMount, For, Show, JSX, createEffect, on } from "solid-js"
 import {
   BsChevronRight,
   BsChevronDown,
@@ -199,6 +199,38 @@ export default function FileTree(props: FileTreeProps): JSX.Element {
       setRootLoading(false)
     }
   })
+
+  createEffect(on(() => props.selectedPath, (path) => {
+    if (!path) return;
+
+    const parts = path.split("/");
+    const dirsToExpand: string[] = ["."];
+
+    let currentPath = "";
+    // Only go up to parts.length - 1 because the last part is the file itself
+    for (let i = 0; i < parts.length - 1; i++) {
+      currentPath = currentPath ? `${currentPath}/${parts[i]}` : parts[i];
+      dirsToExpand.push(currentPath);
+    }
+
+    let needsUpdate = false;
+    const newExpanded = new Set(expandedDirs());
+    for (const dir of dirsToExpand) {
+      if (!newExpanded.has(dir)) {
+        newExpanded.add(dir);
+        needsUpdate = true;
+      }
+    }
+
+    if (needsUpdate) {
+      setExpandedDirs(newExpanded);
+      for (const dir of dirsToExpand) {
+        if (!dirContents().has(dir)) {
+          loadDir(dir);
+        }
+      }
+    }
+  }));
 
   const rootEntries = () => sortEntries(dirContents().get(".") ?? [])
 

@@ -264,7 +264,7 @@ func TestDashboardSummaryService_BuildComputesComplexityRankings(t *testing.T) {
 	content := "package sample\n\ntype Worker struct{ Name string }\n\nfunc (w *Worker) Run(v int) int {\n\tif v > 1 && v < 10 {\n\t\tfor i := 0; i < v; i++ {\n\t\t\tv += i\n\t\t}\n\t}\n\treturn v\n}\n\nfunc helper(x int) int {\n\tif x%2 == 0 {\n\t\treturn x + 1\n\t}\n\treturn x\n}\n"
 	_ = commitFile(t, repo, dir, "pkg/sample.go", content, "add sample go file", now.Add(-time.Hour))
 
-	extraction, err := codeflowmvp.ScanPath(filepath.Join(dir, "pkg"))
+	extraction, err := codeflowmvp.ScanPath(dir, filepath.Join(dir, "pkg"))
 	if err != nil {
 		t.Fatalf("scan path: %v", err)
 	}

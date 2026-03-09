@@ -1,0 +1,26 @@
+
+> @orbitmesh/frontend@0.0.1 dev /app/frontend
+> vite
+
+Warning: Route file "/app/frontend/src/routes/navigation.test.tsx" does not export a Route. This file will not be included in the route tree.
+
+If this file is not intended to be a route, you can exclude it using one of these options:
+  1. Rename the file to "/app/frontend/src/routes/-navigation.test.tsx" (prefix with "-")
+  2. Use 'routeFileIgnorePattern' in your config to match this file
+
+Current configuration:
+  routeFileIgnorePrefix: "-"
+  routeFileIgnorePattern: undefined
+Warning: Route file "/app/frontend/src/routes/index.smoke.test.tsx" does not export a Route. This file will not be included in the route tree.
+
+If this file is not intended to be a route, you can exclude it using one of these options:
+  1. Rename the file to "/app/frontend/src/routes/-index.smoke.test.tsx" (prefix with "-")
+  2. Use 'routeFileIgnorePattern' in your config to match this file
+
+Current configuration:
+  routeFileIgnorePrefix: "-"
+  routeFileIgnorePattern: undefined
+
+  VITE v5.4.21  ready in 1684 ms
+
+  ➜  Local:   http://127.0.0.1:3000/
