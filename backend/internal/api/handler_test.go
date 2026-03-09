@@ -131,7 +131,12 @@ func (s *inMemStore) List() ([]*domain.Session, error) {
 func (s *inMemStore) SaveTerminal(term *domain.Terminal) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.terminals[term.ID] = term
+	termCopy := *term
+	if termCopy.LastSnapshot != nil {
+		snapCopy := *termCopy.LastSnapshot
+		termCopy.LastSnapshot = &snapCopy
+	}
+	s.terminals[term.ID] = &termCopy
 	return nil
 }
 
@@ -142,7 +147,12 @@ func (s *inMemStore) LoadTerminal(id string) (*domain.Terminal, error) {
 	if !ok {
 		return nil, storage.ErrTerminalNotFound
 	}
-	return term, nil
+	termCopy := *term
+	if termCopy.LastSnapshot != nil {
+		snapCopy := *termCopy.LastSnapshot
+		termCopy.LastSnapshot = &snapCopy
+	}
+	return &termCopy, nil
 }
 
 func (s *inMemStore) DeleteTerminal(id string) error {
@@ -157,7 +167,12 @@ func (s *inMemStore) ListTerminals() ([]*domain.Terminal, error) {
 	defer s.mu.RUnlock()
 	out := make([]*domain.Terminal, 0, len(s.terminals))
 	for _, term := range s.terminals {
-		out = append(out, term)
+		termCopy := *term
+		if termCopy.LastSnapshot != nil {
+			snapCopy := *termCopy.LastSnapshot
+			termCopy.LastSnapshot = &snapCopy
+		}
+		out = append(out, &termCopy)
 	}
 	return out, nil
 }
