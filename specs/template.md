@@ -42,5 +42,12 @@ Why is this feature necessary? What problem does it solve for the user or the sy
 ## 9. Alternatives Considered
 What other approaches were evaluated, and why were they rejected?
 
-## 10. Open Questions
+## 10. Implementation Plan
+A checklist of tasks required to implement this feature. This serves to track what is done and what still needs to be done.
+
+* [ ] Subtask 1
+* [ ] Subtask 2
+* [ ] Subtask 3
+
+## 11. Open Questions
 Are there any unresolved questions or decisions that need to be made before work can begin?
