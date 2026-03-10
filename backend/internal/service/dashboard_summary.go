@@ -747,7 +747,7 @@ func (s *DashboardSummaryService) TriggerCodeflowScanAsync() bool {
 		if stat, err := os.Stat(scanPath); err != nil || !stat.IsDir() {
 			scanPath = s.gitDir
 		}
-		extraction, err := codeflowmvp.ScanPath(scanPath)
+		extraction, err := codeflowmvp.ScanPath(s.gitDir, scanPath)
 		if err != nil {
 			return
 		}

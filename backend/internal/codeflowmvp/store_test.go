@@ -49,7 +49,7 @@ func TestPersistExtraction_RerunRetiresStaleFactsForTouchedFile(t *testing.T) {
 		t.Fatalf("write initial fixture: %v", err)
 	}
 
-	firstScan, err := ScanPath(fixturePath)
+	firstScan, err := ScanPath("", fixturePath)
 	if err != nil {
 		t.Fatalf("ScanPath(initial): %v", err)
 	}
@@ -64,7 +64,7 @@ func TestPersistExtraction_RerunRetiresStaleFactsForTouchedFile(t *testing.T) {
 		t.Fatalf("write updated fixture: %v", err)
 	}
 
-	secondScan, err := ScanPath(fixturePath)
+	secondScan, err := ScanPath("", fixturePath)
 	if err != nil {
 		t.Fatalf("ScanPath(updated): %v", err)
 	}
@@ -161,7 +161,7 @@ func TestPersistExtraction_LinksRequestsToHandlers(t *testing.T) {
 		t.Fatalf("write backend file: %v", err)
 	}
 
-	summary, err := ScanPath(dir)
+	summary, err := ScanPath("", dir)
 	if err != nil {
 		t.Fatalf("ScanPath: %v", err)
 	}

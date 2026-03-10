@@ -174,7 +174,7 @@ func TestScanPath_SkipsUnparseableFilesWhenValidFilesExist(t *testing.T) {
 		t.Fatalf("write invalid file: %v", err)
 	}
 
-	result, err := ScanPath(dir)
+	result, err := ScanPath("", dir)
 	if err != nil {
 		t.Fatalf("ScanPath(%q): %v", dir, err)
 	}
@@ -209,7 +209,7 @@ func TestScanPath_ExtractsJSRequestsAndSkipsHeavyDirs(t *testing.T) {
 		t.Fatalf("write ignored file: %v", err)
 	}
 
-	result, err := ScanPath(frontendDir)
+	result, err := ScanPath("", frontendDir)
 	if err != nil {
 		t.Fatalf("ScanPath(%q): %v", frontendDir, err)
 	}
@@ -255,7 +255,7 @@ func mustScanFixture(t *testing.T) ExtractionSummary {
 func mustScanFixturePath(t *testing.T, fixturePath string) ExtractionSummary {
 	t.Helper()
 	fixturePath = filepath.Join(fixturePath)
-	result, err := ScanPath(fixturePath)
+	result, err := ScanPath("", fixturePath)
 	if err != nil {
 		t.Fatalf("ScanPath(%q): %v", fixturePath, err)
 	}

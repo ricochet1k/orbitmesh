@@ -49,7 +49,7 @@ func runScan(args []string) {
 	}
 	scanPath := flags.Arg(0)
 
-	result, err := codeflowmvp.ScanPath(scanPath)
+	result, err := codeflowmvp.ScanPath("", scanPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "codeflow-mvp: %v\n", err)
 		os.Exit(1)

@@ -215,13 +215,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	resp, err := http.Get("http://192.168.1.31:1234/v1/models")
-	if err != nil {
-		log.Printf("http get error: %v", err)
-	} else {
-		log.Printf("http get ok: %v", resp)
-		resp.Body.Close()
-	}
 
 	go func() {
 		fmt.Printf("OrbitMesh listening on %s\n", addr)

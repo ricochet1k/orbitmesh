@@ -25,19 +25,32 @@ type extractor struct {
 	seenPackages map[string]PackageFact
 }
 
-func ScanPath(path string) (ExtractionSummary, error) {
-	absPath, err := filepath.Abs(path)
+func ScanPath(projectRoot string, scanPath string) (ExtractionSummary, error) {
+	absPath, err := filepath.Abs(scanPath)
 	if err != nil {
-		return ExtractionSummary{}, fmt.Errorf("resolve path %q: %w", path, err)
+		return ExtractionSummary{}, fmt.Errorf("resolve path %q: %w", scanPath, err)
 	}
 
 	stat, err := os.Stat(absPath)
 	if err != nil {
-		return ExtractionSummary{}, fmt.Errorf("stat %q: %w", path, err)
+		return ExtractionSummary{}, fmt.Errorf("stat %q: %w", scanPath, err)
+	}
+
+	var scanRoot string
+	if projectRoot != "" {
+		scanRoot, err = filepath.Abs(projectRoot)
+		if err != nil {
+			scanRoot = absPath
+		}
+	} else {
+		scanRoot = absPath
+		if !stat.IsDir() {
+			scanRoot = filepath.Dir(absPath)
+		}
 	}
 
 	sourceFiles := make([]string, 0)
-	scanRoot := absPath
+
 	if stat.IsDir() {
 		err = filepath.WalkDir(absPath, func(curr string, d fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
@@ -55,13 +68,12 @@ func ScanPath(path string) (ExtractionSummary, error) {
 			return nil
 		})
 		if err != nil {
-			return ExtractionSummary{}, fmt.Errorf("walk %q: %w", path, err)
+			return ExtractionSummary{}, fmt.Errorf("walk %q: %w", scanPath, err)
 		}
 	} else if isScannablePath(strings.ToLower(stat.Name())) {
 		sourceFiles = append(sourceFiles, absPath)
-		scanRoot = filepath.Dir(absPath)
 	} else {
-		return ExtractionSummary{}, fmt.Errorf("path %q is not a directory or supported source file (.go/.js/.jsx/.ts/.tsx)", path)
+		return ExtractionSummary{}, fmt.Errorf("path %q is not a directory or supported source file (.go/.js/.jsx/.ts/.tsx)", scanPath)
 	}
 
 	sort.Strings(sourceFiles)
@@ -85,7 +97,7 @@ func ScanPath(path string) (ExtractionSummary, error) {
 		}
 	}
 	if len(ext.summary.Files) == 0 {
-		return ExtractionSummary{}, fmt.Errorf("scan %q: no parseable supported files found", path)
+		return ExtractionSummary{}, fmt.Errorf("scan %q: no parseable supported files found", scanPath)
 	}
 
 	for _, pkg := range ext.seenPackages {
