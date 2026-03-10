@@ -20,8 +20,9 @@ To build a reliable platform for autonomous agents, we need a robust, centralize
   * Direct rendering of the UI.
 
 ## 4. Requirements & User Experience (UX)
-While the Execution Engine itself does not have a direct user interface, it provides the fundamental API and realtime event streaming surface that the frontend relies upon.
-* **Session Lifecycle Control**: Users (via the API) must be able to create, start, stop, kill, and resume sessions reliably.
+The primary user interface for the Execution Engine is the Session List (dashboard), where users can view and manage all active, suspended, and completed agents.
+* **Session Dashboard**: Users must be able to see a real-time list of all agents running on the instance, their current status, and basic metrics (like duration or token usage).
+* **Session Lifecycle Control**: Users (via the dashboard and API) must be able to create, start, stop, kill, and resume sessions reliably.
 * **Concurrency**: The user should be able to run multiple agent sessions in parallel without them interfering with each other's state or execution.
 * **Observability**: As an agent runs, the engine must accurately emit state changes and outputs so the UI can reflect the agent's progress in real-time.
 * **Graceful Degradation**: If an agent crashes or times out, the engine must catch the failure, clean up resources, and emit a final error state, preventing zombie processes or memory leaks.
