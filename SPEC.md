@@ -15,7 +15,7 @@ The following is a comprehensive list of features that have been identified, eit
 
 ### Core Engine & Infrastructure
 - [ ] **Backend Agent Execution Engine**: [specs/features/core/backend-agent-execution-engine.md](specs/features/core/backend-agent-execution-engine.md)
-- [ ] **Backend Architecture**: [specs/features/core/backend-architecture.md](specs/features/core/backend-architecture.md)
+- [x] **Backend Architecture**: [specs/features/core/backend-architecture.md](specs/features/core/backend-architecture.md)
 - [ ] **Global Session State Stream**: [specs/features/core/global-session-state-stream.md](specs/features/core/global-session-state-stream.md)
 - [ ] **Resumable Session Recovery**: [specs/features/core/resumable-session-recovery.md](specs/features/core/resumable-session-recovery.md)
 - [ ] **Session Lifecycle Design**: [specs/features/core/session-lifecycle.md](specs/features/core/session-lifecycle.md)
