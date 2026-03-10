@@ -28,6 +28,14 @@ This document defines the roles and task templates used in the OrbitMesh project
 | **review-usability** | Specialized usability review. |
 | **task** | Standard implementation or planning task. |
 
+## Spec-Driven Development
+
+OrbitMesh follows a **Spec-Driven Development** methodology. All new features must be designed in a feature spec before any code is written.
+
+- The main vision and index of features is located in [`SPEC.md`](SPEC.md).
+- The detailed guide on this process is in [`feature-spec-driven-development.md`](feature-spec-driven-development.md).
+- Do not write code for a feature unless a spec exists and has been approved.
+
 ## Usage
 
 Agents should use the `strand` CLI to interact with tasks. Choose the command based on how the task is specified:
