@@ -237,7 +237,12 @@ Both backend and frontend support hot reload during development:
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed development guidelines.
 
-## Architecture
+## Architecture & Spec-Driven Development
+
+OrbitMesh follows a **Spec-Driven Development** methodology. All new features must be designed in a feature spec before any code is written.
+
+- The main vision and index of features is located in [`SPEC.md`](SPEC.md).
+- The detailed guide on this process is in [`feature-spec-driven-development.md`](feature-spec-driven-development.md).
 
 ### Design Decisions
 
@@ -246,7 +251,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed development guidelines.
 - **Storage**: File-based JSON with no external database dependencies
 - **CI/CD**: GitHub Actions for automated testing and deployment
 
-See [design-docs/](design-docs/) for detailed architecture documentation including [Frontend Architecture](design-docs/03-frontend-architecture.md) and [docs/backend-architecture.md](docs/backend-architecture.md) for core backend components.
+Our legacy design documents are still available in [design-docs/](design-docs/) and [docs/](docs/) while they are being migrated to the new `specs/` directory system as outlined in `SPEC.md`.
 
 ## License
 

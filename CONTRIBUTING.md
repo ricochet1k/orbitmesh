@@ -8,6 +8,10 @@ See [README.md](README.md) for initial setup instructions.
 
 ## Development Workflow
 
+### 0. Read the Spec
+
+OrbitMesh follows a **Spec-Driven Development** model. Before writing code, ensure a feature spec exists and is approved. Read [`SPEC.md`](SPEC.md) and [`feature-spec-driven-development.md`](feature-spec-driven-development.md) for details.
+
 ### 1. Create a Feature Branch
 
 ```bash
