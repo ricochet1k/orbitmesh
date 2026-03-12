@@ -26,7 +26,7 @@ The following is a comprehensive list of features that have been identified, eit
 - [ ] **Terminal Connection Writer Lock UX**: [specs/features/core/terminal-connection-writer-lock.md](specs/features/core/terminal-connection-writer-lock.md)
 - [ ] **PTY Advanced Extraction**: [specs/features/core/pty-advanced-extraction.md](specs/features/core/pty-advanced-extraction.md)
 - [ ] **Monitoring and Metrics**: [specs/features/core/monitoring-and-metrics.md](specs/features/core/monitoring-and-metrics.md)
-- [ ] **Multiple Projects Design**: [specs/features/core/design-multiple-projects.md](specs/features/core/design-multiple-projects.md)
+- [x] **Multiple Projects Design**: [specs/features/core/design-multiple-projects.md](specs/features/core/design-multiple-projects.md)
 - [ ] **Session Streaming Storage Audit**: [specs/features/core/session-streaming-storage.md](specs/features/core/session-streaming-storage.md)
 
 ### Frontend & User Interface
