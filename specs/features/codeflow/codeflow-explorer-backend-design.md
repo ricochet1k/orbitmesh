@@ -22,9 +22,9 @@ To provide a smooth, interactive developer experience, the CodeFlow Explorer UI 
 ## 4. Requirements & User Experience (UX)
 * **Live Updates**: When a user modifies a file in the observed project, the backend file watcher should detect the change, trigger an incremental analysis of the affected files, update `goraphdb`, and make the updated graph available immediately.
 * **REST API Surface**:
-    * `POST /api/codeflow/query`: Execute an arbitrary, read-only Cypher query against `goraphdb`. The frontend can craft specific queries to fetch nodes and edges needed for its exact visualization context (e.g., neighborhood traversal or specific file bounding).
-    * `GET /api/codeflow/stream`: A Server-Sent Events (SSE) endpoint that streams live graph mutation events (node/edge additions, modifications, and deletions) as the file watcher triggers the analyzer.
-* **Performance**: The query API must execute read-only queries with low latency to support interactive exploration. The SSE stream provides continuous delta updates so the frontend does not have to constantly poll.
+    * `POST /api/codeflow/query`: Execute an arbitrary, read-only Cypher query against `goraphdb`. The frontend crafts specific queries to fetch nodes and edges for its exact visualization context.
+        * If the JSON payload includes `"live": true`, the endpoint holds the connection open as a Server-Sent Events (SSE) stream. It first sends the initial result set, and subsequently pushes updated result sets (or diffs) whenever the underlying data relevant to the query changes.
+* **Performance**: The query API must execute read-only queries with low latency to support interactive exploration. The live query SSE stream ensures the frontend receives updates efficiently without polling and without being overwhelmed by global graph mutations irrelevant to the current view.
 * **Limits**: The query API must implement strict execution timeouts and sensible hard limits on the number of records returned to prevent heavy arbitrary queries from crashing the backend or the frontend browser.
 
 ## 5. System Design & Architecture
@@ -33,18 +33,21 @@ To provide a smooth, interactive developer experience, the CodeFlow Explorer UI 
     * A worker pool consumes events from the file watcher queue.
     * For modified files, it invokes the generic static analyzer using the project's custom configuration rules.
     * The analyzer emits a stream of abstract nodes and edges.
-* **Database Integration & SSE Broadcaster**:
+* **Database Integration & Hybrid Live Query Engine**:
     * The backend translates the analyzer's output into Cypher mutation queries (upserts/MERGE for new entities, deletions for removed entities).
-    * Upon successful commit to `goraphdb`, the database integration layer fires mutation events into an SSE broadcaster channel.
-    * Connected frontend clients receive these SSE deltas and apply them live to their in-memory `graphology` state.
+    * Upon successful commit to `goraphdb`, the database integration layer fires mutation events into an internal broadcaster channel.
+    * **Live Query Re-evaluation**: When a `POST /query` request is made with `"live": true`, the backend parses the incoming Cypher query to extract the specific node labels (e.g., `:Function`, `:Class`) and edge relationship types (e.g., `[:CALLS]`, `[:IMPLEMENTS]`) being requested.
+    * The active SSE connection subscribes *only* to internal mutation events matching those extracted types.
+    * When a relevant mutation occurs, the backend debounces the trigger (e.g., 500ms) to batch rapid file changes, re-evaluates the full Cypher query, and pushes the updated results down the SSE stream.
 * **REST API Layer**:
     * Built using standard Go HTTP routing (e.g., `net/http` or a lightweight router).
-    * The `POST /query` handler accepts the Cypher string, parses it (if necessary to enforce read-only status), sets a strict context timeout, executes it against `goraphdb`, and serializes the raw records into JSON.
+    * The `POST /query` handler accepts the Cypher string, parses it for safety (enforcing read-only status) and live-subscription types, sets strict context timeouts for initial and subsequent evaluations, and handles the SSE connection lifecycle.
 
 ## 6. Security & Privacy
 * **Access Control**: API requests must include standard CSRF headers and rely on the existing session authentication middleware.
 * **Query Safety**: Allowing arbitrary Cypher queries introduces risk. The backend MUST strictly enforce read-only transaction execution for `POST /api/codeflow/query`. The backend should intercept or block any queries containing mutation keywords (e.g., `CREATE`, `MERGE`, `DELETE`, `SET`).
 * **Resource Exhaustion (DoS)**: Arbitrary queries can be computationally expensive (e.g., unbounded Cartesian products). The API must enforce strict query execution timeouts (e.g., `context.WithTimeout` in Go) and limit the maximum number of result rows returned.
+* **Concurrent Live Queries**: The backend should enforce a limit on the number of concurrent "live" SSE queries per user/session to prevent connection exhaustion and database overload. While not a primary concern for the prototype phase, the architectural hook for this limit must exist.
 * **Directory Traversal**: The file watcher and analyzer must be strictly sandboxed to the target project directory.
 
 ## 7. Testing Plan
