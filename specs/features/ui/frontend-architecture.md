@@ -70,7 +70,7 @@ frontend/
 * **WebSocket Management**: A dedicated WebSocket manager handles connecting to the backend's real-time feeds (e.g., PTY activity, session events). It manages connection lifecycle, automatic reconnection with exponential backoff, and dispatches events to reactive signals.
 
 ### 5.6 Rendering Strategies for High-Frequency Data
-* **Terminal/Event Feeds**: Instead of re-rendering massive lists on every tick, SolidJS's `<For>` and `<Index>` components are used strictly for list rendering. For extreme high-frequency data (like raw PTY streams), the architecture supports buffering and batching DOM updates, or deferring rendering to optimized terminal emulators (e.g., xterm.js) integrated via SolidJS lifecycle hooks.
+* **Terminal/Event Feeds**: Instead of re-rendering massive lists on every tick, SolidJS's `<For>` and `<Index>` components are used strictly for list rendering. For extreme high-frequency data (like raw PTY streams), the architecture dictates using a custom lightweight terminal renderer rather than heavy third-party emulators like xterm.js. The architecture supports buffering and batching these DOM updates seamlessly with SolidJS's fine-grained reactivity.
 * **Canvas Visualizations**: For complex node graphs (CodeFlow), the architecture dictates offloading rendering to WebGL via libraries like `sigma.js` and `graphology`. SolidJS is responsible for managing the *data state* and *canvas lifecycle*, but not the frame-by-frame rendering of the graph nodes to avoid reactive overhead on thousands of elements.
 
 ## 6. Security & Privacy
