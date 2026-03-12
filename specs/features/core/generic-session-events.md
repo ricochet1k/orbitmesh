@@ -14,13 +14,13 @@ Different LLM providers emit execution data, streams, and tool calls in disparat
   * The general persistence mechanism passing through the Entity storage system.
 * **Out of Scope**:
   * The exhaustive schema of individual event payloads (this is covered in [Session Event Types](session-event-types.md)).
-  * The low-level implementation details of the Entity storage system, specifically the resolution of the delta compaction problem (this will be covered in the [Entity Storage Architecture](entity-storage-architecture.md) spec).
+  * The low-level implementation details of the Entity storage system (this will be covered in the [Entity Storage Architecture](entity-storage-architecture.md) spec).
   * The UI rendering components themselves.
 
 ## 4. Requirements & User Experience (UX)
 * **Frontend Consumption**:
   * **Live Stream**: The frontend requires a real-time, low-latency stream of events as they occur (e.g., streaming text generation, tool call execution) to drive live agent session viewers and terminal dashboards.
-  * **History/Log Viewer**: The frontend requires the ability to fetch historical events for completed or paused sessions. In this view, raw stream deltas should ideally be compacted or omitted in favor of the final concatenated message blocks to improve performance and readability.
+  * **History/Log Viewer**: The frontend requires the ability to fetch historical events for completed or paused sessions. In this view, raw stream deltas are generally omitted in favor of the final concatenated message blocks to improve performance and readability.
 * **Provider Conformance**: All integrated LLM providers must accurately translate their native responses into the appropriate `domain.Event` types (e.g., converting an OpenAI delta chunk or a Claude block update into an `EventTypeOutput` or `EventTypeThought` with the `IsDelta` flag).
 
 ## 5. System Design & Architecture
@@ -38,8 +38,6 @@ Different LLM providers emit execution data, streams, and tool calls in disparat
   3. **Broadcasting & Storage**: The event is handed to the execution engine. The engine simultaneously:
      * Publishes the event to the global `EventBus` (specifically `EventBroadcaster`), which routes it to connected WebSocket clients for live UI updates.
      * Passes the event to the `LogEntity` system (built on the core Entity `Store`+`Handle` pattern) for durable storage.
-* **Storage and Compaction**:
-  * While broadcasting deltas is critical for the live UI, storing thousands of individual character deltas is inefficient. The system design acknowledges the need for delta compaction in storage—merging `IsDelta=true` events into their parent messages before or during persistence. The exact mechanism for this compaction remains a known architectural challenge to be detailed in the Entity spec.
 
 ## 6. Security & Privacy
 * Events intrinsically carry the input prompts, reasoning (`thought` events), and outputs of the LLM, which may contain highly sensitive proprietary code, API keys, or PII.
@@ -54,21 +52,14 @@ Different LLM providers emit execution data, streams, and tool calls in disparat
   * Verify that an event emitted by a mock provider is successfully received by a subscriber on the `EventBroadcaster`.
   * Verify that an event is successfully persisted and retrievable via the `LogEntity` storage mechanism.
 
-## 8. Rollout & Deployment
-* This specification documents the *current* state of the generic eventing system. No immediate rollout is required.
-* Future changes to the event schema must be backwards-compatible or involve data migrations for historical sessions stored in the database.
-* The introduction of robust delta compaction will require careful rollout and potential backfilling of existing uncompacted event logs.
-
-## 9. Alternatives Considered
+## 8. Alternatives Considered
 * **Provider-Specific Streams**: We could pipe raw provider JSON directly to the frontend and handle normalization in the UI. **Rejected**: This tightly couples the frontend to specific LLM providers, dramatically increases frontend complexity, and makes backend analysis or storage of execution state nearly impossible.
 * **Separating Status from Output**: We could have distinct streams for system status vs. LLM output. **Rejected**: Multiplexing all execution activity into a single ordered timeline (`domain.Event` stream) simplifies chronological replay and storage.
 
-## 10. Implementation Plan
+## 9. Implementation Plan
 * [x] Define `domain.Event` and associated payload structs in `backend/internal/domain/event.go`.
 * [x] Implement the `EventBroadcaster` for pub/sub routing in `backend/internal/service/events.go`.
-* [ ] Finalize delta compaction logic within the Entity storage layer (Tracked as a separate feature/issue).
 * [x] Document the system (this spec).
 
-## 11. Open Questions
-* **Delta Compaction**: What is the most performant way to implement delta compaction in the `LogEntity` system without blocking the fast-path of the `EventBus`?
+## 10. Open Questions
 * **Typed Unknowns**: How quickly can we deprecate `EventTypeUnknown` as new provider features (like specific prompt caching metrics) are introduced?
