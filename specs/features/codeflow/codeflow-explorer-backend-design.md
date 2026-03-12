@@ -22,11 +22,10 @@ To provide a smooth, interactive developer experience, the CodeFlow Explorer UI 
 ## 4. Requirements & User Experience (UX)
 * **Live Updates**: When a user modifies a file in the observed project, the backend file watcher should detect the change, trigger an incremental analysis of the affected files, update `goraphdb`, and make the updated graph available immediately.
 * **REST API Surface**:
-    * `GET /api/codeflow/nodes`: Retrieve nodes, with optional filtering (e.g., by type, directory, or search query) and pagination/limits.
-    * `GET /api/codeflow/edges`: Retrieve edges, typically scoped to a set of nodes or a specific bounding context, with limits.
-    * `GET /api/codeflow/graph`: Retrieve a combined payload of nodes and edges for a specific context (e.g., neighborhood of a node), formatted for direct ingestion by `graphology`.
-* **Performance**: The API must respond with low latency to support interactive exploration, zooming, and panning in the frontend canvas.
-* **Limits**: The API must implement sensible upper bounds on the number of nodes/edges returned in a single request to prevent browser crashes, even if these limits are fairly generous (e.g., 5,000 - 10,000 elements).
+    * `POST /api/codeflow/query`: Execute an arbitrary, read-only Cypher query against `goraphdb`. The frontend can craft specific queries to fetch nodes and edges needed for its exact visualization context (e.g., neighborhood traversal or specific file bounding).
+    * `GET /api/codeflow/stream`: A Server-Sent Events (SSE) endpoint that streams live graph mutation events (node/edge additions, modifications, and deletions) as the file watcher triggers the analyzer.
+* **Performance**: The query API must execute read-only queries with low latency to support interactive exploration. The SSE stream provides continuous delta updates so the frontend does not have to constantly poll.
+* **Limits**: The query API must implement strict execution timeouts and sensible hard limits on the number of records returned to prevent heavy arbitrary queries from crashing the backend or the frontend browser.
 
 ## 5. System Design & Architecture
 * **File Watcher Component**: A continuous background process (e.g., using `fsnotify` in Go) that monitors the target project directory. It debounces file system events and queues them for processing.
@@ -34,18 +33,19 @@ To provide a smooth, interactive developer experience, the CodeFlow Explorer UI 
     * A worker pool consumes events from the file watcher queue.
     * For modified files, it invokes the generic static analyzer using the project's custom configuration rules.
     * The analyzer emits a stream of abstract nodes and edges.
-* **Database Integration (`goraphdb`)**:
-    * The backend translates the analyzer's output into Cypher queries.
-    * For incremental updates, it performs upserts (MERGE) for new/modified entities and deletions for removed entities to keep the graph synced with the current file state.
+* **Database Integration & SSE Broadcaster**:
+    * The backend translates the analyzer's output into Cypher mutation queries (upserts/MERGE for new entities, deletions for removed entities).
+    * Upon successful commit to `goraphdb`, the database integration layer fires mutation events into an SSE broadcaster channel.
+    * Connected frontend clients receive these SSE deltas and apply them live to their in-memory `graphology` state.
 * **REST API Layer**:
     * Built using standard Go HTTP routing (e.g., `net/http` or a lightweight router).
-    * Handlers execute read-only Cypher queries against `goraphdb`.
-    * Data is serialized into JSON. The exact structure will be negotiated with the frontend to ensure minimal transformation is needed before loading into `graphology` (e.g., an object with `nodes` and `edges` arrays containing `id`, `label`, `attributes`, `source`, `target`).
+    * The `POST /query` handler accepts the Cypher string, parses it (if necessary to enforce read-only status), sets a strict context timeout, executes it against `goraphdb`, and serializes the raw records into JSON.
 
 ## 6. Security & Privacy
-* **Access Control**: API requests must include standard CSRF headers (as required by the OrbitMesh frontend framework) and rely on the existing session authentication middleware to ensure only authorized users can view the codebase graph.
-* **Directory Traversal**: The file watcher and analyzer must be strictly sandboxed to the target project directory to prevent arbitrary file reads or execution outside the permitted workspace.
-* **Injection**: All inputs to the REST API (e.g., search queries, node IDs) must be sanitized and parameterized when constructing Cypher queries to prevent graph database injection attacks.
+* **Access Control**: API requests must include standard CSRF headers and rely on the existing session authentication middleware.
+* **Query Safety**: Allowing arbitrary Cypher queries introduces risk. The backend MUST strictly enforce read-only transaction execution for `POST /api/codeflow/query`. The backend should intercept or block any queries containing mutation keywords (e.g., `CREATE`, `MERGE`, `DELETE`, `SET`).
+* **Resource Exhaustion (DoS)**: Arbitrary queries can be computationally expensive (e.g., unbounded Cartesian products). The API must enforce strict query execution timeouts (e.g., `context.WithTimeout` in Go) and limit the maximum number of result rows returned.
+* **Directory Traversal**: The file watcher and analyzer must be strictly sandboxed to the target project directory.
 
 ## 7. Testing Plan
 * **Unit Tests**:
