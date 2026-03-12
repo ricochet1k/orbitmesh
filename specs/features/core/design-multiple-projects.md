@@ -58,13 +58,10 @@ By enforcing project-level isolation, we solve the problem of data entanglement,
 
 ## 10. Implementation Plan
 * [x] **Frontend**: Implement the basic top-level project selector dropdown UI.
-* [ ] **Backend**: Create the Project domain entity and database schema for tracking available projects (a lightweight "meta" database to hold the list of projects and paths to their respective `goraphdb` instances).
+* [ ] **Backend**: Create the Project domain entity and mechanism for tracking available projects (a simple JSON file managed by the backend engine to hold the list of projects and paths to their respective `goraphdb` instances).
 * [ ] **Backend**: Implement the Project Database Manager to handle dynamic connections to multiple `goraphdb` instances based on `project_id`.
 * [ ] **Backend**: Refactor all existing REST API routes in `backend/internal/api` to be nested under `/api/v1/projects/{project_id}/`.
 * [ ] **Backend**: Refactor backend execution engine and session managers to associate active operations with a `project_id`.
 * [ ] **Frontend**: Implement the "Create Project" UI flow.
 * [ ] **Frontend**: Refactor all API client calls and tanstack-router routes to include and require the `project_id` parameter.
 * [ ] **Testing**: Update all Go and Vitest/Playwright tests to accommodate the new project-scoped architecture.
-
-## 11. Open Questions
-* Should the backend "meta" database for tracking projects be an SQLite database, or a simple JSON file managed by the backend engine?
