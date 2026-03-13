@@ -69,11 +69,13 @@ To provide a smooth, interactive developer experience, the CodeFlow Explorer UI 
 * **Batch vs. Incremental Analysis**: Considered running the analyzer only on demand or in large batches. Rejected in favor of live, incremental analysis via a file watcher to ensure the frontend always displays the most up-to-date representation of the code.
 
 ## 10. Implementation Plan
-* [ ] Initialize REST API routing and placeholder handlers for `/api/codeflow/*`.
-* [ ] Implement `goraphdb` integration for querying nodes and edges with defined safety limits.
+* [x] Initialize REST API routing and base handler for `POST /api/v1/codeflow/query`.
+* [x] Implement `goraphdb` integration for querying nodes and edges with defined safety limits (`codeflowmvp` package).
 * [ ] Build the background file watcher service using `fsnotify`.
-* [ ] Integrate the generic static analyzer engine to run incrementally on file changes.
+* [ ] Integrate the generic static analyzer engine to run incrementally on file changes (currently it runs as a bulk scan).
 * [ ] Implement the database mutation logic (Cypher queries) to sync analyzer output to `goraphdb`.
+* [ ] Update the `POST /api/v1/codeflow/query` endpoint to handle the `"live": true` parameter and upgrade the connection to SSE.
+* [ ] Implement the hybrid query parsing and internal event subscription logic for live re-evaluation.
 * [ ] Write unit and integration tests for the API, watcher, and analyzer pipeline.
 * [ ] Finalize the JSON response format in coordination with frontend `graphology` requirements.
 
