@@ -92,13 +92,15 @@ frontend/
 N/A - As per project constraints, the focus is strictly on the technical design and requirements for the selected architecture.
 
 ## 10. Implementation Plan
-* [ ] Initialize Vite project with SolidJS and TypeScript template.
-* [ ] Configure pnpm, strict ESLint rules (`eslint-plugin-solid`), and TypeScript compiler options.
-* [ ] Set up `@tanstack/solid-router` with basic route tree structure.
-* [ ] Implement core API fetch wrapper with mandatory CSRF header injection.
-* [ ] Design and implement the WebSocket connection manager for real-time feeds.
-* [ ] Configure Vitest and Playwright testing environments.
-* [ ] Document canvas integration patterns (sigma.js/graphology) for future CodeFlow features.
+*Note: A significant portion of this foundational architecture is already implemented. The following tracks current progress:*
+
+* [x] Initialize Vite project with SolidJS and TypeScript template.
+* [x] Configure pnpm, strict ESLint rules (`eslint-plugin-solid`), and TypeScript compiler options.
+* [x] Set up file-based routing with basic route tree structure.
+* [x] Implement core API fetch wrapper with mandatory CSRF header injection.
+* [x] Design and implement the WebSocket connection manager for real-time feeds.
+* [x] Configure Vitest and Playwright testing environments.
+* [x] Integrate canvas dependencies (`sigma.js`/`graphology`) and D3 for future CodeFlow features.
 
 ## 11. Open Questions
 * *Are there specific bandwidth or latency constraints we need to simulate for the WebSocket connection manager's reconnection logic?*
