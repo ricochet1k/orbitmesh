@@ -17,7 +17,6 @@ Autonomous agents performing development or operational tasks cannot assume an u
     * Leveraging built-in provider session persistence (e.g., internal session IDs) as the primary restoration strategy.
 * **Out of Scope**:
     * Execution scheduling for long-running asynchronous tools (e.g., tools that sleep for a week). This will be handled in a separate feature spec: **Long-Running Async Tools**.
-    * Modifying the core architecture of the `goraphdb` graph database used by OrbitMesh, assuming it already supports durable event storage.
 
 ## 4. Requirements & User Experience (UX)
 
@@ -28,9 +27,9 @@ Autonomous agents performing development or operational tasks cannot assume an u
 * **As an OrbitMesh user**, if the LLM provider I was using goes offline, I want to resume the session using a different provider (e.g., switching from Claude to Codex), and the system should attempt to translate the transcript to the new provider's format.
 
 ### Functional Requirements
-1. **Durable State Storage**: Every turn, tool call, and response must be durably committed to the database (Store/Handle pattern) before being dispatched.
-2. **Provider Persistence First**: The system must persist the specific provider's internal session ID. Upon resume, it must attempt to use this native persistence mechanism first.
-3. **Transcript Replay Fallback**: If native provider persistence is unavailable or provider-switching occurs, the system must replay the provider-agnostic transcript to rebuild the context window.
+1. **Durable State Storage**: Every turn, tool call, and response must be durably committed using the existing session storage mechanisms (e.g., the filesystem-based snapshot manager and message logs, *not* `goraphdb`, which is reserved exclusively for CodeFlow).
+2. **Provider-Led Strategy Selection**: The system must persist the specific provider's internal session ID along with other metadata. Upon resume, the *provider implementation* itself chooses the restoration strategy based on this data, metadata, and provider-specific custom data in the stored session State.
+3. **Transcript Replay Fallback**: If native provider persistence is unavailable or provider-switching occurs, the system must support replaying the provider-agnostic transcript to rebuild the context window.
 4. **Clean Text Rendering Fallback**: If replay fails (e.g., context window limits are exceeded), the system must fallback to rendering the historical transcript as clean text to summarize past events, dropping older context as necessary.
 5. **Transparent Recovery**: The act of resuming should be transparent to the agent unless specific state is permanently lost.
 6. **Lost State Injection**: If an active resource (e.g., a PTY) cannot be re-attached during recovery, the system must inject a notification into the transcript. The preference order for this injection is:
@@ -42,19 +41,19 @@ Autonomous agents performing development or operational tasks cannot assume an u
 ## 5. System Design & Architecture
 
 ### Architectural Components
-* **Session Manager**: The component responsible for orchestrating the session lifecycle (Init, Running, Paused, Resuming, Terminated). It needs to coordinate the recovery sequence upon backend initialization.
-* **Event Stream (Transcript)**: The durable log of all agent interactions. This must be stored in a provider-agnostic format (e.g., OrbitMesh's internal schema) to support cross-provider resumes.
-* **Provider Adapters**: Each provider adapter (e.g., Anthropic, OpenAI) must implement a `Resume(sessionID, transcript)` interface.
+* **Session Manager & Snapshots**: The component responsible for orchestrating the session lifecycle. Recovery relies on the existing `SnapshotManager` (`internal/session/snapshot_manager.go`) and filesystem store, which serialize session state to disk. *Note: `goraphdb` is not used for sessions.*
+* **Event Stream (Transcript)**: The durable log of all agent interactions (e.g., `internal/storage/session_messages_store.go`). This is stored in a provider-agnostic format to support cross-provider resumes.
+* **Provider Adapters**: Each provider adapter must implement a resume mechanism (e.g., as outlined in the ACP `SESSION_PERSISTENCE_PLAN.md`). The provider analyzes the restored snapshot's metadata and custom state to determine whether to use native resumption (like ACP's `LoadSessionRequest`), transcript replay, or text summarization.
 * **Resource Reconciler**: During the `Resuming` phase, this component checks the expected state of external resources (Terminals/PTYs, open Websockets) against the actual system state, attempting reconnection and generating "Lost State" messages if reconnection fails.
 
 ### Data Flow for Recovery
-1. **Initialization**: On backend startup, the Session Manager queries the database for all sessions in a `Running` or `Paused` state.
+1. **Initialization**: On backend startup, the Session Manager queries the filesystem store for all session snapshots that indicate an interrupted or paused state.
 2. **Reconciliation**: For each recovering session, the Resource Reconciler attempts to bind to existing Terminals/PTYs. If a Terminal defined in the session state cannot be found, a `ResourceLostEvent` is generated.
-3. **Transcript Assembly**: The system retrieves the durable provider-agnostic transcript. If a `ResourceLostEvent` exists, it is appended to the transcript as a Tool/System/User message.
-4. **Provider Handoff**: The Session Manager calls the Provider Adapter's `Resume` method:
-    * **Strategy A (Native)**: Pass the stored Provider Session ID.
-    * **Strategy B (Replay)**: Pass the structured agnostic transcript.
-    * **Strategy C (Summarized Text)**: Pass a truncated/summarized string representation of the transcript.
+3. **Transcript Assembly**: The system retrieves the durable provider-agnostic message history. If a `ResourceLostEvent` exists, it is appended to the transcript as a Tool/System/User message.
+4. **Provider Handoff**: The Session Manager loads the snapshot and passes control to the specific Provider. The provider evaluates the snapshot's custom data and metadata to execute its chosen restoration strategy:
+    * **Strategy A (Native)**: E.g., sending a `LoadSessionRequest` if the agent supports it and a valid provider session ID exists.
+    * **Strategy B (Replay)**: Replaying the structured agnostic transcript.
+    * **Strategy C (Summarized Text)**: Summarizing the transcript if context limits are an issue.
 5. **Execution Resumes**: The agent is prompted to continue its execution loop.
 
 ## 6. Security & Privacy
@@ -73,7 +72,7 @@ Autonomous agents performing development or operational tasks cannot assume an u
     * Use Playwright to verify the UI flows for manually pausing and resuming a session, ensuring the terminal output correctly reflects the resumed state.
 
 ## 8. Rollout & Deployment
-* **Database Migrations**: We will likely need new state enum values for sessions (e.g., `StatusPaused`, `StatusResuming`) in the `goraphdb` schema. Provider Session IDs must be added to the persistent session model.
+* **Storage Migrations**: We will likely need new state enum values for sessions (e.g., `StatusPaused`, `StatusResuming`) in the snapshot schema. Snapshot versioning (e.g., `Version: 1` -> `Version: 2`) will handle these updates.
 * **Feature Flags**: Rollout can be immediate, as this enhances existing session reliability, but the explicit Pause/Resume UI buttons should be hidden behind a frontend feature flag (`ENABLE_SESSION_SUSPEND`) until the backend logic is fully validated.
 * **Monitoring**: Add new metrics:
     * `session_recovery_attempts_total`
@@ -86,12 +85,12 @@ Autonomous agents performing development or operational tasks cannot assume an u
 * **Relying Solely on Provider Context**: Rejected. Providers do not guarantee indefinite session persistence, and we cannot lock users into a single provider if they wish to switch mid-task. Storing a provider-agnostic transcript is mandatory.
 
 ## 10. Implementation Plan
-* [ ] Update the `goraphdb` schema to support new session states (`Paused`, `Resuming`) and store the Provider Session ID.
-* [ ] Implement the `Resource Reconciler` to verify and attempt to re-attach Terminals/PTYs on backend startup.
+* [ ] *Existing Code*: Expand upon the current `SnapshotManager` and `FilesystemStore` implementations to robustly handle the new `Paused` and `Resuming` states, ensuring all metadata is serialized.
+* [ ] Implement the `Resource Reconciler` to verify and attempt to re-attach Terminals/PTYs on backend startup or manual resume.
 * [ ] Implement the "Lost State" message injection logic (prioritizing Tool Response -> System Message -> User Message).
-* [ ] Update the Provider Interface to include a robust `Resume` method supporting the fallback chain (Native -> Replay -> Text).
+* [ ] Update the Provider Interface and existing implementations (like ACP) to dynamically choose their resumption strategy based on the restored snapshot's custom state.
 * [ ] Implement backend APIs for explicit Pause and Resume actions.
-* [ ] Implement cross-provider transcript translation logic.
+* [ ] Implement cross-provider transcript translation logic for when native provider IDs cannot be used.
 * [ ] Add frontend UI controls for Pausing and Resuming sessions (behind a feature flag).
 * [ ] Write unit and integration tests covering crash recovery, provider switching, and lost state injection.
 
