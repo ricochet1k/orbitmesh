@@ -76,9 +76,17 @@ The layered architecture heavily facilitates testing:
 * **Global Store Lock**: Rejected because it would serialize all reads across the system, causing unnecessary contention. The chosen per-entity lock model allows concurrent reads of different entities.
 
 ## 10. Implementation Plan
-- [x] Document the current backend architectural layers.
-- [x] Emphasize the separation of concerns and the `entity` package pattern.
-- [x] Note CodeFlow exclusions.
+- [x] Separate core business structures into `internal/domain` layer without transport dependencies.
+- [x] Scaffold initial JSON file persistence logic in the `internal/storage` layer.
+- [x] Implement the central orchestrator logic (e.g., `AgentExecutor`, `EvalCoordinator`) inside `internal/service`.
+- [x] Define LLM integration wrappers in the `internal/provider` boundary.
+- [x] Implement initial REST/Websocket controllers in `internal/api` and `internal/realtime`.
+- [x] Design the central durable state abstraction (`Store[T,S] + Handle[T,S]`) inside `internal/entity`.
+- [ ] Migrate `storage.RunAttemptMetadata` to the new `entity` pattern.
+- [ ] Migrate `toolcall.Eval` to the new `entity` pattern (proving dep tracking/wakeup logic).
+- [ ] Migrate `domain.Session` (state/messages) to the new `entity` pattern.
+- [ ] Migrate full session contexts (`ActiveStore`, `RunHandle`) to replace locked states in `AgentExecutor`.
+- [ ] Fold remaining types (`ResumeToken`, `RunAttempt`) under the new session stores.
 
 ## 11. Open Questions
-* How should we transition legacy components (like older storage routines or event broadcasters) fully into the newer `entity` model? This will likely be addressed as technical debt in a future iteration.
+* How should we transition legacy components (like older storage routines or event broadcasters) fully into the newer `entity` model? (This is largely addressed by the migration steps in the Implementation Plan, but exact timing remains open).
