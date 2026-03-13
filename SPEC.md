@@ -41,6 +41,7 @@ The following is a comprehensive list of features that have been identified, eit
 - [ ] **Transcript Paging Contract**: [specs/features/ui/transcript-paging-contract.md](specs/features/ui/transcript-paging-contract.md)
 
 ### CodeFlow Explorer (Visualization)
+- [ ] **Read-After-Write Detection**: [specs/features/codeflow/read-after-write-detection.md](specs/features/codeflow/read-after-write-detection.md)
 - [x] **CodeFlow Explorer Backend Design**: [specs/features/codeflow/codeflow-explorer-backend-design.md](specs/features/codeflow/codeflow-explorer-backend-design.md)
 - [ ] **CodeFlow Node Graph Canvas Interface**: [specs/features/codeflow/node-graph-canvas-interface.md](specs/features/codeflow/node-graph-canvas-interface.md)
 - [ ] **CodeFlow Explorer Data Flow Type Lineage**: [specs/features/codeflow/data-flow-type-lineage.md](specs/features/codeflow/data-flow-type-lineage.md)
