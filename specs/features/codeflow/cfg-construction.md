@@ -583,24 +583,38 @@ Considered storing the CFG in a separate, specialized data structure (e.g., an a
 
 ## 10. Implementation Plan
 
-* [ ] Define `BlockFact`, `CFGEdgeFact`, `StmtEdgeFact`, `DeferEdgeFact` types in `cfg_model.go`.
+Implementation status is tracked inline below so this spec stays aligned with the codebase.
+
+* [ ] (partial) Define `BlockFact`, `CFGEdgeFact`, `StmtEdgeFact`, `DeferEdgeFact` types in `cfg_model.go`.
+  - `BlockFact`, `CFGEdgeFact`, and `StmtEdgeFact` are implemented in `backend/internal/codeflowmvp/model.go`.
+  - `DeferEdgeFact` is still missing.
 * [ ] Add `cfg` configuration block to `codeflow.yaml` schema and parsing.
-* [ ] Implement core CFG builder: leader identification, block partitioning, edge construction (`cfg_builder.go`).
-* [ ] Implement Go-specific CFG patterns: `if/else`, `for/range`, `switch`, `select`, `defer`, `go`, `panic`, `goto`, labeled `break`/`continue` (`cfg_builder_go.go`).
+* [ ] (partial) Implement core CFG builder: leader identification, block partitioning, edge construction (`cfg_builder.go`).
+  - A first-pass Go CFG builder exists in `backend/internal/codeflowmvp/cfg_builder_go.go`.
+  - It currently emits blocks, `NEXT`, and `NEXT_STMT`, but does not yet implement leader-based partitioning or dead-block analysis.
+* [ ] (partial) Implement Go-specific CFG patterns: `if/else`, `for/range`, `switch`, `select`, `defer`, `go`, `panic`, `goto`, labeled `break`/`continue` (`cfg_builder_go.go`).
+  - `if/else` and `for` have initial support.
+  - `switch`, `select`, `defer`, `go`, `panic`, `goto`, and labeled branch handling remain to be implemented.
 * [ ] Implement JS/TS-specific CFG patterns: `if/else`, `for/for-in/for-of`, `while/do-while`, `switch`, `try/catch/finally`, `return/throw`, `async/await` (`cfg_builder_jsts.go`).
-* [ ] Implement `NEXT_STMT` edge construction across block boundaries.
+* [ ] (partial) Implement `NEXT_STMT` edge construction across block boundaries.
+  - Sequential `NEXT_STMT` edges are emitted.
+  - Branch-aware `NEXT_STMT` behavior still needs validation and likely refinement.
 * [ ] Implement reachability analysis to mark dead blocks.
-* [ ] Integrate CFG builder into the scan pipeline (call after fact extraction, before rules evaluation).
+* [x] Integrate CFG builder into the scan pipeline (call after fact extraction, before rules evaluation).
 * [ ] Add `block_id` and `stmt_index` properties to `CallSite` and `ExecutionUnit` persistence.
-* [ ] Add `Block` node persistence with unique constraint and `function_id` index.
-* [ ] Add `NEXT`, `NEXT_STMT`, `CONTAINS_BLOCK`, `DEFERS` edge persistence.
-* [ ] Update `retirePriorEpochFacts` to include `Block` nodes and new edge types.
-* [ ] Create Go test fixtures and write unit tests for Go CFG patterns.
+* [x] Add `Block` node persistence with unique constraint and `function_id` index.
+* [ ] (partial) Add `NEXT`, `NEXT_STMT`, `CONTAINS_BLOCK`, `DEFERS` edge persistence.
+  - `NEXT`, `NEXT_STMT`, and `CONTAINS_BLOCK` are persisted.
+  - `DEFERS` is not yet implemented.
+* [ ] Update `retirePriorEpochFacts` to include `Block`/`Statement` nodes and new edge types.
+* [ ] (partial) Create Go test fixtures and write unit tests for Go CFG patterns.
+  - Initial fixture/tests were added for extraction and persistence paths.
+  - Coverage for control-flow constructs listed above is still missing.
 * [ ] Create JS/TS test fixtures and write unit tests for JS/TS CFG patterns.
 * [ ] Write property-based tests for CFG invariants.
-* [ ] Write round-trip persistence tests.
+* [x] Write round-trip persistence tests.
 * [ ] Add CFG build timing to scan summary output.
-* [ ] Update `ExtractionSummary` and `PersistenceSummary` with CFG counts.
+* [x] Update `ExtractionSummary` and `PersistenceSummary` with CFG counts.
 
 ## 11. Open Questions
 
