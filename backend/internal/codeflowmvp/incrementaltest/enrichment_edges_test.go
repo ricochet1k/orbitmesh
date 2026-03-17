@@ -108,7 +108,10 @@ func retireEdgesByLabelAndEpoch(t testing.TB, db *graphdb.DB, label, producer st
 		if e.Props["producer"] != producer {
 			continue
 		}
-		ep, _ := e.Props["scan_epoch"].(uint64)
+		ep, ok := e.Props["scan_epoch"].(uint64)
+		if !ok {
+			continue // missing or wrong type — skip rather than risk incorrect deletion
+		}
 		if ep < currentEpoch {
 			if err := db.DeleteEdge(e.ID); err != nil {
 				t.Fatalf("DeleteEdge: %v", err)

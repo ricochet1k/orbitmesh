@@ -101,7 +101,10 @@ func retireByEpoch(t testing.TB, db *graphdb.DB, touchedFile string, currentEpoc
 		if n.Props["producer"] != producer {
 			continue
 		}
-		ep, _ := n.Props["scan_epoch"].(uint64)
+		ep, ok := n.Props["scan_epoch"].(uint64)
+		if !ok {
+			continue // missing or wrong type — skip rather than risk incorrect deletion
+		}
 		if ep < currentEpoch {
 			toDelete = append(toDelete, n.ID)
 		}
@@ -140,7 +143,10 @@ func retireByOwnerIndex(t testing.TB, db *graphdb.DB, touchedFile string, curren
 		if n.Props["file_id"] != touchedFile {
 			continue
 		}
-		ep, _ := n.Props["scan_epoch"].(uint64)
+		ep, ok := n.Props["scan_epoch"].(uint64)
+		if !ok {
+			continue // missing or wrong type — skip rather than risk incorrect deletion
+		}
 		if ep < currentEpoch {
 			toDelete = append(toDelete, n.ID)
 		}
