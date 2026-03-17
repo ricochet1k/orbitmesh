@@ -398,40 +398,70 @@ func TestFixpointEnrichment_MutualRules(t *testing.T) {
 }
 
 // fixpointMutualRules runs two rules simultaneously until stable:
-//   Rule 1 (forward): if A is api_exposed and A calls B, mark B api_exposed.
-//   Rule 2 (backward): if B is taint_sensitive and A calls B, mark A taint_sensitive.
+//
+//	Rule 1 (forward):  if A is api_exposed and A calls B, mark B api_exposed.
+//	Rule 2 (backward): if B is taint_sensitive and A calls B, mark A taint_sensitive.
+//
+// Uses a worklist: only nodes whose property changed in the previous iteration
+// are examined in the next iteration, matching the pattern in fixpointTaintPropagate.
 func fixpointMutualRules(t testing.TB, db *graphdb.DB) int {
 	t.Helper()
+
+	// Seed the worklist from the initial property states.
+	allFns, err := db.FindByLabel("Function")
+	if err != nil {
+		t.Fatalf("FindByLabel: %v", err)
+	}
+	worklist := map[graphdb.NodeID]struct{}{}
+	for _, n := range allFns {
+		ae, _ := n.Props["api_exposed"].(bool)
+		ts, _ := n.Props["taint_sensitive"].(bool)
+		if ae || ts {
+			worklist[n.ID] = struct{}{}
+		}
+	}
+
 	const maxIter = 20
 	for i := 0; i < maxIter; i++ {
-		changed := false
+		if len(worklist) == 0 {
+			return i + 1
+		}
+		nextWorklist := map[graphdb.NodeID]struct{}{}
 
-		allFns, _ := db.FindByLabel("Function")
-		for _, n := range allFns {
+		for nID := range worklist {
+			n, err := db.GetNode(nID)
+			if err != nil {
+				t.Fatalf("GetNode: %v", err)
+			}
 			ae, _ := n.Props["api_exposed"].(bool)
 			ts, _ := n.Props["taint_sensitive"].(bool)
 
-			outEdges, _ := db.OutEdgesLabeled(n.ID, "CALLS")
-			for _, e := range outEdges {
-				callee, _ := db.GetNode(e.To)
-				calleeAE, _ := callee.Props["api_exposed"].(bool)
-				// Rule 1: propagate api_exposed forward to callees.
-				if ae && !calleeAE {
-					db.UpdateNode(callee.ID, graphdb.Props{"api_exposed": true})
-					changed = true
+			// Rule 1 (forward): propagate api_exposed to callees.
+			if ae {
+				outEdges, _ := db.OutEdgesLabeled(nID, "CALLS")
+				for _, e := range outEdges {
+					callee, _ := db.GetNode(e.To)
+					if calleeAE, _ := callee.Props["api_exposed"].(bool); !calleeAE {
+						db.UpdateNode(callee.ID, graphdb.Props{"api_exposed": true})
+						nextWorklist[callee.ID] = struct{}{}
+					}
 				}
-				calleeTS, _ := callee.Props["taint_sensitive"].(bool)
-				// Rule 2: propagate taint_sensitive backward to callers.
-				if calleeTS && !ts {
-					db.UpdateNode(n.ID, graphdb.Props{"taint_sensitive": true})
-					changed = true
+			}
+
+			// Rule 2 (backward): propagate taint_sensitive to callers.
+			if ts {
+				inEdges, _ := db.InEdgesLabeled(nID, "CALLS")
+				for _, e := range inEdges {
+					caller, _ := db.GetNode(e.From)
+					if callerTS, _ := caller.Props["taint_sensitive"].(bool); !callerTS {
+						db.UpdateNode(caller.ID, graphdb.Props{"taint_sensitive": true})
+						nextWorklist[caller.ID] = struct{}{}
+					}
 				}
 			}
 		}
 
-		if !changed {
-			return i + 1
-		}
+		worklist = nextWorklist
 	}
 	t.Errorf("fixpoint did not converge within %d iterations", maxIter)
 	return maxIter
