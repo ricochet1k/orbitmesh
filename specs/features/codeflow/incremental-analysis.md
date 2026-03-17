@@ -289,8 +289,11 @@ The retirement mechanism for enrichment edges is `EdgesByLabel`, which uses gora
 ```go
 edges, _ := db.EdgesByLabel("TAINT_REACHES")
 for _, e := range edges {
-    if e.Props["producer"] == producer &&
-       e.Props["scan_epoch"].(uint64) < currentEpoch {
+    ep, ok := e.Props["scan_epoch"].(uint64)
+    if !ok {
+        continue // missing or wrong type — skip rather than risk incorrect deletion
+    }
+    if e.Props["producer"] == producer && ep < currentEpoch {
         db.DeleteEdge(e.ID)
     }
 }
