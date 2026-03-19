@@ -227,41 +227,82 @@ Every epoch writes a completion marker when finished successfully:
 ```go
 // Stored as a metadata node in goraphdb
 type ScanEpochMarker struct {
-    ID        string   // "epoch:<producer>:<epoch>"
+    ID        string // "epoch:<producer>:<epoch>"
     Producer  string
     Epoch     uint64
-    Status    string   // "in_progress" | "complete" | "failed"
-    Files     []string // File IDs touched in this epoch (stored as comma-separated string due to goraphdb array filter limitation)
-    StartedAt int64    // Unix timestamp
-    Duration  int64    // Milliseconds
+    Status    string // "in_progress" | "complete" | "failed"
+    StartedAt int64  // Unix timestamp
+    Duration  int64  // Milliseconds
 }
 ```
 
-Note: Because goraphdb cannot filter on array properties in Cypher queries, the `Files` list is stored as a comma-delimited string property and parsed in application code when needed. The marker node's primary purpose is crash recovery (Section 5.10), not querying.
+The marker does not need to store which files were touched. Crash recovery identifies affected files by scanning the producer's nodes directly: `FindByProperty("producer", producer)` returns only that producer's nodes, which can then be grouped by `file_id` to find which files had partially-written facts (see Section 5.10).
 
-#### 5.3.4 Retirement: Extension of `retirePriorEpochFacts`
+#### 5.3.4 Node and Edge Properties Convention
 
-The existing `retirePriorEpochFacts` function in `store.go` already implements the core retirement logic:
+Every node and edge written by any producer must carry two properties:
 
-1. For each node label, find nodes where `producer` matches AND `scan_epoch` differs from the current epoch AND the node belongs to a touched file (via `file_id` or `id` for File nodes).
-2. Delete stale edges connected to those nodes.
-3. Delete the stale nodes.
+| Property | Type | Purpose |
+|---|---|---|
+| `producer` | `string` | Identifies who created this fact (e.g. `"codeflow-mvp"`, `"enrichment/taint"`) |
+| `scan_epoch` | `uint64` | Monotonically increasing epoch counter for this producer |
 
-The incremental system extends this in two ways:
-
-**Extension 1: Numeric epoch comparison.** The current implementation compares `scan_epoch` as a string (RFC3339 timestamp). The incremental system switches to `uint64` epoch counters, enabling `<` comparison instead of `!=` comparison. This is important because multiple incremental updates may run, and we want to retire facts from ALL previous epochs, not just the immediately prior one.
+A secondary index on `producer` is created once at DB open time:
 
 ```go
-// Current (string equality):
-if node.GetString("scan_epoch") != currentEpoch { ... }
-
-// New (numeric comparison):
-if node.GetUint64("scan_epoch") < currentEpoch { ... }
+db.CreateIndex("producer")
 ```
 
-**Extension 2: Per-producer file scoping.** The `touchedFiles` parameter is already file-scoped. The incremental system continues this pattern: each incremental update passes only the set of changed files, so retirement only affects facts within those files for that producer.
+This enables `FindByProperty("producer", producerID)` to retrieve all of a producer's nodes directly without a full graph scan — the key to efficient retirement.
 
-**Full re-scan behavior:** When a full re-scan is triggered, the `touchedFiles` set contains ALL files in the project. This causes retirement of all prior-epoch facts across the entire codebase, equivalent to starting fresh.
+#### 5.3.5 Retirement: Extension of `retirePriorEpochFacts`
+
+The existing `retirePriorEpochFacts` function in `store.go` is updated to use the producer index instead of iterating by label:
+
+```go
+// New: use producer index to avoid full-label scan
+nodes, _ := db.FindByProperty("producer", producer)
+for _, node := range nodes {
+    if !nodeInTouchedScope(node, touchedFiles) {
+        continue
+    }
+    if node.GetUint64("scan_epoch") < currentEpoch {
+        staleNodeIDs = append(staleNodeIDs, node.ID)
+    }
+}
+```
+
+This replaces the old pattern of iterating every label (`FindByLabel`) and filtering by producer, which scanned all nodes regardless of producer. The new approach only touches the producer's own nodes.
+
+**Numeric epoch comparison.** The current implementation compares `scan_epoch` as a string (RFC3339 timestamp). The incremental system switches to `uint64` epoch counters, enabling `<` comparison instead of `!=`. This retires facts from ALL previous epochs, not just the immediately prior one.
+
+**Per-producer file scoping.** Each incremental update passes only the set of changed files as `touchedFiles`, so retirement only affects facts within those files for that producer.
+
+**Full re-scan behavior:** When a full re-scan is triggered, `touchedFiles` contains ALL files in the project, causing retirement of all prior-epoch facts across the entire codebase.
+
+#### 5.3.6 Enrichment Edge Retirement
+
+Enrichment rules often add edges between existing Layer 1 nodes (e.g. a `TAINT_REACHES` edge between two `Function` nodes neither of which was created by the enrichment rule). These edges are not found by `FindByProperty("producer", ...)` on nodes.
+
+The retirement mechanism for enrichment edges is `EdgesByLabel`, which uses goraphdb's built-in btree edge-type index:
+
+```go
+edges, _ := db.EdgesByLabel("TAINT_REACHES")
+for _, e := range edges {
+    ep, ok := e.Props["scan_epoch"].(uint64)
+    if !ok {
+        continue // missing or wrong type — skip rather than risk incorrect deletion
+    }
+    if e.Props["producer"] == producer && ep < currentEpoch {
+        db.DeleteEdge(e.ID)
+    }
+}
+```
+
+**Conventions:**
+- Each enrichment rule uses a **distinct edge label** (e.g. `TAINT_REACHES`, `DATA_FLOWS`, `SECURITY_RISK`). The label naturally scopes `EdgesByLabel` to that rule's output.
+- Every enrichment edge carries both `producer` and `scan_epoch`. The `producer` filter is checked even though the label already scopes to one rule — this guards against future cases where two rules share a label, and makes the graph self-describing.
+- Layer 1 edges (e.g. `CALLS`, `DEFINES`) are never touched by enrichment retirement because they have a different `producer` value.
 
 ### 5.4 Incremental Fact Extraction (Layer 1)
 
@@ -364,10 +405,11 @@ Input: changedBaseNodeIDs (set of node IDs whose facts changed in Layer 1)
            affectedRuleExecutions.Add((ruleID, execKey))
 
 2. For each (ruleID, execKey) in affectedRuleExecutions:
-       a. Find all nodes/edges with producer = "enrichment/<ruleID>"
-          that were produced by this execution (tracked via execution_key property)
-       b. Delete those derived nodes and edges
-       c. Re-run the enrichment rule
+       a. Retire stale derived nodes: FindByProperty("producer", "enrichment/<ruleID>"),
+          filter to this execution_key, delete those nodes.
+       b. Retire stale derived edges: EdgesByLabel(<ruleEdgeLabel>), filter by
+          producer = "enrichment/<ruleID>" and scan_epoch < currentEpoch, delete.
+       c. Re-run the enrichment rule (see Section 5.5.5 for fixpoint rules).
 
 3. Update dependency indices with results from step 2
 
@@ -377,6 +419,39 @@ Input: changedBaseNodeIDs (set of node IDs whose facts changed in Layer 1)
        Add those to affectedRuleExecutions and repeat from step 2
        Cap recursion at 10 iterations to prevent infinite loops
 ```
+
+#### 5.5.5 Fixpoint Enrichment Rules
+
+Some enrichment rules are not one-shot — they propagate facts through the graph iteratively until stable. Examples include tag propagation (taint, API exposure) and dataflow analysis. These rules use a **worklist fixpoint** algorithm:
+
+```
+enrichEpoch = EpochManager.Next("enrichment/<ruleID>")
+
+worklist = initial dirty nodes (e.g. nodes with taint_source = true)
+
+for iteration in 1..MAX_ITERATIONS:
+    if worklist is empty: break   // fixpoint reached
+
+    nextWorklist = {}
+    for each node in worklist:
+        neighbors = rule-specific traversal (e.g. InEdgesLabeled("CALLS") for bottom-up taint)
+        for each neighbor not yet marked:
+            mark neighbor (UpdateNode)
+            add enrichment edge (AddEdge with producer, scan_epoch = enrichEpoch)
+            nextWorklist.add(neighbor)
+
+    worklist = nextWorklist
+
+// After fixpoint:
+retireEdgesByLabelAndEpoch("TAINT_REACHES", "enrichment/taint", enrichEpoch)
+```
+
+**Key properties:**
+- All nodes and edges produced during the fixpoint carry the **same epoch number**. There are no epoch bumps between iterations.
+- Rules must be **monotone**: they only add facts (mark nodes, add edges), never remove during a cycle. This guarantees convergence — each iteration strictly increases the set of marked nodes.
+- **Mutual rules** (e.g. forward propagation + backward propagation) run together in the same worklist loop body, converging in O(graph diameter) iterations.
+- `MAX_ITERATIONS` is capped at 20 to guard against non-monotone rule bugs. A warning is logged if the cap is hit.
+- After the fixpoint completes, retirement runs once: retire all edges of this rule's label with `scan_epoch < enrichEpoch`. Nodes propagated from (`tainted`, `api_exposed` etc.) are reset and re-set during the next fixpoint run rather than tracked by epoch, since they are properties on Layer 1 nodes the enrichment rule does not own.
 
 #### 5.5.3 Granularity: Per-File
 
@@ -404,7 +479,7 @@ The indices are stored as metadata nodes in goraphdb:
 })
 ```
 
-The `read_node_ids` and `produced_nodes` are stored as comma-delimited strings (workaround for goraphdb's lack of array property filtering). They are parsed into sets in application code on startup.
+The `read_node_ids` and `produced_nodes` are stored as comma-delimited strings. This is intentional: these fields are only read on startup to rebuild the in-memory indices, never filtered in Cypher. Comma-delimited strings are straightforward to serialize and parse in application code.
 
 ### 5.6 Tag Propagation Invalidation
 
@@ -417,7 +492,7 @@ Every propagated tag carries a `tag_source` property identifying which leaf node
 ```
 (:Function {
     id:         "pkg/auth::Validate",
-    effects:    "READ,WRITE",          // Comma-delimited (goraphdb limitation)
+    effects:    "READ,WRITE",          // Comma-delimited; parsed in application code, not Cypher-filtered
     tag_sources: "READ:pkg/db::Query,WRITE:pkg/db::Execute"
 })
 ```
@@ -431,9 +506,10 @@ When Layer 1 re-extracts facts for a file and a function's directly-assigned tag
 ```
 Input: changedTagNodeID (a leaf node whose tags changed)
 
-1. Find all nodes N where tag_sources contains changedTagNodeID
-   (Application-level string search on the tag_sources property,
-    since goraphdb cannot filter arrays in Cypher)
+1. Find all nodes N where tag_sources contains changedTagNodeID.
+   Use FindByProperty("producer", enrichmentProducer) to get the candidate set,
+   then filter in application code by checking whether tag_sources contains
+   changedTagNodeID. (tag_sources is a comma-delimited string parsed in app code.)
 
 2. For each such node N:
        a. Remove the stale tags that originated from changedTagNodeID
@@ -693,19 +769,23 @@ func detectIncompleteEpochs(db *graphdb.DB) ([]ScanEpochMarker, error) {
 For each incomplete epoch:
 
 ```
-1. Read the marker to find (producer, epoch, files)
-2. Delete all nodes/edges with scan_epoch = <epoch> AND producer = <producer>
-   (These are the partially-written facts from the crashed update)
-3. Mark the epoch marker as status = "failed"
-4. For each file listed in the marker:
-       Add it to a recovery re-scan queue
-5. Trigger a standard incremental update for the recovery queue
+1. Read the marker to find (producer, epoch)
+2. Use FindByProperty("producer", producer) to get all nodes for that producer.
+   Collect the file_id values of nodes with scan_epoch = <epoch>
+   — these are the files that were partially written during the crash.
+3. Delete all nodes with scan_epoch = <epoch> AND producer = <producer>.
+   For enrichment producers, also delete edges via EdgesByLabel(<label>) filtered
+   by producer = <producer> AND scan_epoch = <epoch>.
+4. Mark the epoch marker as status = "failed"
+5. Add the collected file IDs to a recovery re-scan queue
+6. Trigger a standard incremental update for the recovery queue
 ```
 
 This is safe because:
-- The partially-written facts are cleanly identifiable by their epoch and producer.
+- The partially-written facts are cleanly identifiable by their epoch and producer via the `producer` index.
 - Deleting them restores the graph to the state before the crashed update.
 - Re-scanning the affected files regenerates the correct facts.
+- No files list needs to be stored in the marker — the producer index lets us reconstruct which files were touched from the nodes themselves.
 
 #### 5.10.3 Write Ordering for Crash Safety
 
@@ -872,7 +952,7 @@ func (engine *IncrementalEngine) ProcessBatch(batch ChangeBatch) error {
 
 * **Epoch property type change**: Existing `scan_epoch` properties are RFC3339 strings. The migration converts them to `uint64` values. This is a one-time migration triggered on first startup with the new version.
 * **New metadata nodes**: `ScanEpochMarker` and `DependencyRecord` are new node types with their own label and unique constraint on `id`. Created on first startup.
-* **Index creation**: Add index on `scan_epoch` (numeric) for each node label to speed up retirement queries.
+* **Index creation**: Add index on `producer` at DB open time (`db.CreateIndex("producer")`). This replaces the old per-label full scan in `retirePriorEpochFacts` with a direct property lookup, enabling efficient retirement without scanning unrelated producers' nodes.
 
 ### 8.2 Feature Flags
 
@@ -927,15 +1007,17 @@ Allow readers to see partially-updated data during writes and rely on the live q
 
 * [ ] Implement monotonic `EpochManager` with per-producer counters and goraphdb persistence
 * [ ] Migrate `scan_epoch` from RFC3339 string to `uint64` in `store.go` and update `retirePriorEpochFacts`
-* [ ] Add `ScanEpochMarker` metadata node creation and management
-* [ ] Implement crash recovery: detect incomplete epochs on startup, clean up, re-queue affected files
+* [ ] Add `db.CreateIndex("producer")` at DB open time; update `retirePriorEpochFacts` to use `FindByProperty("producer", ...)` instead of per-label scan
+* [ ] Add `ScanEpochMarker` metadata node creation and management (no files list needed)
+* [ ] Implement crash recovery: detect incomplete epochs via `FindByProperty("producer", ...)`, clean up partial facts, re-queue affected files by scanning their `file_id` properties
 * [ ] Build `fsnotify`-based file watcher with debouncing, extension filtering, and ignore patterns
 * [ ] Implement git-aware branch switch detection via `.git/HEAD` monitoring and `git diff --name-status`
 * [ ] Implement rename detection (git-based and content hash fallback)
 * [ ] Build `ChangeBatch` aggregation pipeline connecting watcher to incremental engine
 * [ ] Implement incremental Layer 1 fact extraction (re-parse changed files only, retire stale facts per-file)
 * [ ] Build forward and reverse dependency index data structures with goraphdb persistence
-* [ ] Implement Layer 2 enrichment invalidation algorithm (identify affected rules, delete derived facts, re-run)
+* [ ] Implement Layer 2 enrichment invalidation algorithm (identify affected rules, delete derived nodes via producer index, delete derived edges via `EdgesByLabel` + producer + epoch filter, re-run)
+* [ ] Implement fixpoint enrichment for propagation rules (worklist algorithm, monotone accumulation, same epoch for all iterations, `MAX_ITERATIONS` cap)
 * [ ] Implement tag propagation invalidation with `tag_source` tracking and bounded re-propagation
 * [ ] Implement finding reconciliation (fingerprint matching, status preservation, retirement)
 * [ ] Implement `GraphLock` read-write locking around all DB access
