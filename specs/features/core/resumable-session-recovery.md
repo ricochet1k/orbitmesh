@@ -73,7 +73,6 @@ Autonomous agents performing development or operational tasks cannot assume an u
 
 ## 8. Rollout & Deployment
 * **Storage Migrations**: We will likely need new state enum values for sessions (e.g., `StatusPaused`, `StatusResuming`) in the snapshot schema. Snapshot versioning (e.g., `Version: 1` -> `Version: 2`) will handle these updates.
-* **Feature Flags**: Rollout can be immediate, as this enhances existing session reliability, but the explicit Pause/Resume UI buttons should be hidden behind a frontend feature flag (`ENABLE_SESSION_SUSPEND`) until the backend logic is fully validated.
 * **Monitoring**: Add new metrics:
     * `session_recovery_attempts_total`
     * `session_recovery_success_total`
@@ -85,13 +84,14 @@ Autonomous agents performing development or operational tasks cannot assume an u
 * **Relying Solely on Provider Context**: Rejected. Providers do not guarantee indefinite session persistence, and we cannot lock users into a single provider if they wish to switch mid-task. Storing a provider-agnostic transcript is mandatory.
 
 ## 10. Implementation Plan
-* [ ] *Existing Code*: Expand upon the current `SnapshotManager` and `FilesystemStore` implementations to robustly handle the new `Paused` and `Resuming` states, ensuring all metadata is serialized.
+* [x] Implement the foundational `SnapshotManager` and `FilesystemStore` logic to support interval-based and manual snapshots.
+* [x] Update the Provider Interface and existing implementations (e.g., `acp/session.go`, `LoadSession`) to execute resumption logic based on the restored snapshot's state.
+* [ ] Expand the `SnapshotManager` to robustly handle explicit `Paused` and `Resuming` states, ensuring all metadata (like terminal identifiers) is serialized.
 * [ ] Implement the `Resource Reconciler` to verify and attempt to re-attach Terminals/PTYs on backend startup or manual resume.
-* [ ] Implement the "Lost State" message injection logic (prioritizing Tool Response -> System Message -> User Message).
-* [ ] Update the Provider Interface and existing implementations (like ACP) to dynamically choose their resumption strategy based on the restored snapshot's custom state.
+* [ ] Implement the "Lost State" message injection logic (prioritizing Tool Response -> System Message -> User Message) for failed reconciliations.
 * [ ] Implement backend APIs for explicit Pause and Resume actions.
 * [ ] Implement cross-provider transcript translation logic for when native provider IDs cannot be used.
-* [ ] Add frontend UI controls for Pausing and Resuming sessions (behind a feature flag).
+* [ ] Add frontend UI controls for explicitly Pausing and Resuming sessions.
 * [ ] Write unit and integration tests covering crash recovery, provider switching, and lost state injection.
 
 ## 11. Open Questions
