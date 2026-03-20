@@ -302,6 +302,36 @@ func TestCFGExtraction_FromSourceText(t *testing.T) {
 	}
 }
 
+func TestCFGExtraction_MarksEntryExitPerFunction(t *testing.T) {
+	result := mustScanFixturePath(t, "testdata/cfg_multi_sample.go")
+	if len(result.Blocks) == 0 {
+		t.Fatalf("expected CFG blocks")
+	}
+
+	entriesByFunction := map[string]int{}
+	exitsByFunction := map[string]int{}
+	for _, b := range result.Blocks {
+		if b.IsEntry {
+			entriesByFunction[b.FunctionID]++
+		}
+		if b.IsExit {
+			exitsByFunction[b.FunctionID]++
+		}
+	}
+
+	if len(entriesByFunction) != len(result.Functions) {
+		t.Fatalf("entry blocks tracked for %d functions, want %d", len(entriesByFunction), len(result.Functions))
+	}
+	for _, fn := range result.Functions {
+		if entriesByFunction[fn.ID] != 1 {
+			t.Fatalf("function %s entry block count=%d want 1", fn.ID, entriesByFunction[fn.ID])
+		}
+		if exitsByFunction[fn.ID] < 1 {
+			t.Fatalf("function %s exit block count=%d want >=1", fn.ID, exitsByFunction[fn.ID])
+		}
+	}
+}
+
 func TestCFGExtraction_CountsIncludeCFG(t *testing.T) {
 	result := mustScanFixturePath(t, "testdata/cfg_sample.go")
 	if result.Counts.Blocks != len(result.Blocks) {

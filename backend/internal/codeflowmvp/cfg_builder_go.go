@@ -28,21 +28,25 @@ func (e *extractor) buildGoCFGForFunction(fnNode *gotreesitter.Node, bodyNode *g
 	if bodyNode == nil {
 		return
 	}
+
+	startBlockIndex := len(e.summary.Blocks)
 	res := e.buildGoBlockStatements(functionID, fileID, bodyNode, lang, source)
 	if res.entry == "" {
 		_ = e.appendBlock(functionID, fileID, toPosition(fnNode.StartPoint()), toPosition(fnNode.EndPoint()), 0, true, true, "normal")
 		return
 	}
-	for i := range e.summary.Blocks {
-		if e.summary.Blocks[i].ID == res.entry {
-			e.summary.Blocks[i].IsEntry = true
-		}
+
+	blockIndexByID := map[string]int{}
+	for i := startBlockIndex; i < len(e.summary.Blocks); i++ {
+		blockIndexByID[e.summary.Blocks[i].ID] = i
+	}
+
+	if idx, ok := blockIndexByID[res.entry]; ok {
+		e.summary.Blocks[idx].IsEntry = true
 	}
 	for _, id := range res.exits {
-		for i := range e.summary.Blocks {
-			if e.summary.Blocks[i].ID == id {
-				e.summary.Blocks[i].IsExit = true
-			}
+		if idx, ok := blockIndexByID[id]; ok {
+			e.summary.Blocks[idx].IsExit = true
 		}
 	}
 	for i := 1; i < len(res.stmtNode); i++ {
