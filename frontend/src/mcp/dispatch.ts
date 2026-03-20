@@ -83,10 +83,17 @@ export const createMcpDispatch = (registry: McpRegistry) => {
     const results: Record<string, { ok: boolean; error?: string }> = {};
     let ok = true;
 
-    for (const [fieldId, value] of Object.entries(normalized)) {
+    const entries = Object.entries(normalized);
+    const promises = entries.map(async ([fieldId, value]) => {
       const result = await dispatchAction(fieldId, "edit", {
         value: value === undefined || value === null ? "" : String(value),
       });
+      return { fieldId, result };
+    });
+
+    const resolvedResults = await Promise.all(promises);
+
+    for (const { fieldId, result } of resolvedResults) {
       results[fieldId] = { ok: result.ok, error: result.error };
       if (!result.ok) ok = false;
     }
