@@ -261,3 +261,86 @@ func mustScanFixturePath(t *testing.T, fixturePath string) ExtractionSummary {
 	}
 	return result
 }
+
+func TestCFGExtraction_FromSourceText(t *testing.T) {
+	result := mustScanFixturePath(t, "testdata/cfg_sample.go")
+	if len(result.Blocks) < 5 {
+		t.Fatalf("expected multiple CFG blocks, got %d", len(result.Blocks))
+	}
+	if len(result.CFGEdges) < 4 {
+		t.Fatalf("expected CFG edges, got %d", len(result.CFGEdges))
+	}
+	if len(result.StmtEdges) == 0 {
+		t.Fatalf("expected stmt edges")
+	}
+	var entry, exits int
+	for _, b := range result.Blocks {
+		if b.IsEntry {
+			entry++
+		}
+		if b.IsExit {
+			exits++
+		}
+	}
+	if entry != 1 {
+		t.Fatalf("expected exactly 1 entry block, got %d", entry)
+	}
+	if exits < 1 {
+		t.Fatalf("expected at least 1 exit block, got %d", exits)
+	}
+	var hasTrue, hasFalse bool
+	for _, e := range result.CFGEdges {
+		if e.Condition == "true" {
+			hasTrue = true
+		}
+		if e.Condition == "false" {
+			hasFalse = true
+		}
+	}
+	if !hasTrue || !hasFalse {
+		t.Fatalf("expected true/false branch edges, got %+v", result.CFGEdges)
+	}
+}
+
+func TestCFGExtraction_MarksEntryExitPerFunction(t *testing.T) {
+	result := mustScanFixturePath(t, "testdata/cfg_multi_sample.go")
+	if len(result.Blocks) == 0 {
+		t.Fatalf("expected CFG blocks")
+	}
+
+	entriesByFunction := map[string]int{}
+	exitsByFunction := map[string]int{}
+	for _, b := range result.Blocks {
+		if b.IsEntry {
+			entriesByFunction[b.FunctionID]++
+		}
+		if b.IsExit {
+			exitsByFunction[b.FunctionID]++
+		}
+	}
+
+	if len(entriesByFunction) != len(result.Functions) {
+		t.Fatalf("entry blocks tracked for %d functions, want %d", len(entriesByFunction), len(result.Functions))
+	}
+	for _, fn := range result.Functions {
+		if entriesByFunction[fn.ID] != 1 {
+			t.Fatalf("function %s entry block count=%d want 1", fn.ID, entriesByFunction[fn.ID])
+		}
+		if exitsByFunction[fn.ID] < 1 {
+			t.Fatalf("function %s exit block count=%d want >=1", fn.ID, exitsByFunction[fn.ID])
+		}
+	}
+}
+
+func TestCFGExtraction_CountsIncludeCFG(t *testing.T) {
+	result := mustScanFixturePath(t, "testdata/cfg_sample.go")
+	if result.Counts.Blocks != len(result.Blocks) {
+		t.Fatalf("counts.blocks=%d want %d", result.Counts.Blocks, len(result.Blocks))
+	}
+	if result.Counts.CFGEdges != len(result.CFGEdges) {
+		t.Fatalf("counts.cfg_edges=%d want %d", result.Counts.CFGEdges, len(result.CFGEdges))
+	}
+	if result.Counts.StmtEdges != len(result.StmtEdges) {
+		t.Fatalf("counts.stmt_edges=%d want %d", result.Counts.StmtEdges, len(result.StmtEdges))
+	}
+}
