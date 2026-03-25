@@ -20,6 +20,8 @@ const (
 	NodeLabelFinding       = "Finding"
 	NodeLabelAPIRequest    = "APIRequest"
 	NodeLabelAPIHandler    = "APIHandler"
+	NodeLabelBlock         = "Block"
+	NodeLabelStatement     = "Statement"
 
 	EdgeLabelDefines        = "DEFINES"
 	EdgeLabelCalls          = "CALLS"
@@ -29,6 +31,9 @@ const (
 	EdgeLabelEmitsRequest   = "EMITS_REQUEST"
 	EdgeLabelHandlesRoute   = "HANDLES_ROUTE"
 	EdgeLabelRequestsHandle = "REQUESTS_HANDLER"
+	EdgeLabelContainsBlock  = "CONTAINS_BLOCK"
+	EdgeLabelNext           = "NEXT"
+	EdgeLabelNextStmt       = "NEXT_STMT"
 
 	defaultAnalyzerVersion = "codeflow-mvp-step2"
 	defaultDBPath          = ".codeflow-mvp.goraphdb"
@@ -64,6 +69,11 @@ type PersistenceSummary struct {
 	EmitsRequestEdges    int    `json:"emits_request_edges"`
 	HandlesRouteEdges    int    `json:"handles_route_edges"`
 	RequestsHandlerEdges int    `json:"requests_handler_edges"`
+	ContainsBlockEdges   int    `json:"contains_block_edges"`
+	NextEdges            int    `json:"next_edges"`
+	NextStmtEdges        int    `json:"next_stmt_edges"`
+	Statements           int    `json:"statements"`
+	Blocks               int    `json:"blocks"`
 	UnresolvedCalls      int    `json:"unresolved_calls"`
 }
 
@@ -103,7 +113,7 @@ func PersistExtraction(summary ExtractionSummary, opts PersistOptions) (Persiste
 	}
 	defer db.Close()
 
-	for _, label := range []string{NodeLabelFile, NodeLabelFunction, NodeLabelCallSite, NodeLabelExecutionUnit, NodeLabelFinding, NodeLabelAPIRequest, NodeLabelAPIHandler} {
+	for _, label := range []string{NodeLabelFile, NodeLabelFunction, NodeLabelCallSite, NodeLabelExecutionUnit, NodeLabelFinding, NodeLabelAPIRequest, NodeLabelAPIHandler, NodeLabelBlock, NodeLabelStatement} {
 		if err := ensureUniqueConstraint(db, label, "id"); err != nil {
 			return PersistenceSummary{}, err
 		}
@@ -258,6 +268,59 @@ func PersistExtraction(summary ExtractionSummary, opts PersistOptions) (Persiste
 		apiRequestNodes[req.ID] = nodeID
 	}
 
+	blockNodes := make(map[string]graphdb.NodeID, len(summary.Blocks))
+	for _, block := range summary.Blocks {
+		nodeID, err := upsertNode(db, NodeLabelBlock, block.ID, graphdb.Props{
+			"id":               block.ID,
+			"kind":             NodeLabelBlock,
+			"function_id":      block.FunctionID,
+			"file_id":          block.FileID,
+			"block_index":      block.BlockIndex,
+			"start_line":       block.StartLine,
+			"start_column":     block.StartColumn,
+			"end_line":         block.EndLine,
+			"end_column":       block.EndColumn,
+			"stmt_count":       block.StmtCount,
+			"is_entry":         block.IsEntry,
+			"is_exit":          block.IsExit,
+			"is_dead":          block.IsDead,
+			"block_kind":       block.BlockKind,
+			"semantic_hash":    hashString(block.ID),
+			"analyzer_version": analyzerVersion,
+			"scan_epoch":       scanEpoch,
+			"producer":         producer,
+			"producer_version": producerVersion,
+		})
+		if err != nil {
+			return PersistenceSummary{}, fmt.Errorf("upsert block node %q: %w", block.ID, err)
+		}
+		blockNodes[block.ID] = nodeID
+	}
+
+	statementNodes := make(map[string]graphdb.NodeID, len(summary.Statements))
+	for _, st := range summary.Statements {
+		nodeID, err := upsertNode(db, NodeLabelStatement, st.ID, graphdb.Props{
+			"id":               st.ID,
+			"kind":             NodeLabelStatement,
+			"function_id":      st.FunctionID,
+			"file_id":          st.FileID,
+			"stmt_kind":        st.Kind,
+			"line":             st.Start.Line,
+			"column":           st.Start.Column,
+			"end_line":         st.End.Line,
+			"end_column":       st.End.Column,
+			"semantic_hash":    hashString(st.ID),
+			"analyzer_version": analyzerVersion,
+			"scan_epoch":       scanEpoch,
+			"producer":         producer,
+			"producer_version": producerVersion,
+		})
+		if err != nil {
+			return PersistenceSummary{}, fmt.Errorf("upsert statement node %q: %w", st.ID, err)
+		}
+		statementNodes[st.ID] = nodeID
+	}
+
 	apiHandlerNodes := make(map[string]graphdb.NodeID, len(resolvedAPIRoutes))
 	for _, route := range resolvedAPIRoutes {
 		nodeID, err := upsertNode(db, NodeLabelAPIHandler, route.ID, graphdb.Props{
@@ -332,8 +395,10 @@ func PersistExtraction(summary ExtractionSummary, opts PersistOptions) (Persiste
 		Findings:       len(summary.Findings),
 		APIRequests:    len(summary.APIReqs),
 		APIHandlers:    len(resolvedAPIRoutes),
+		Blocks:         len(summary.Blocks),
+		Statements:     len(summary.Statements),
 	}
-	summaryOut.Nodes = summaryOut.Files + summaryOut.Functions + summaryOut.CallSites + summaryOut.ExecutionUnits + summaryOut.Findings + summaryOut.APIRequests + summaryOut.APIHandlers
+	summaryOut.Nodes = summaryOut.Files + summaryOut.Functions + summaryOut.CallSites + summaryOut.ExecutionUnits + summaryOut.Findings + summaryOut.APIRequests + summaryOut.APIHandlers + summaryOut.Blocks + summaryOut.Statements
 
 	for _, fn := range summary.Functions {
 		from, okFrom := fileNodes[fn.FileID]
@@ -352,6 +417,67 @@ func PersistExtraction(summary ExtractionSummary, opts PersistOptions) (Persiste
 		}
 		if created {
 			summaryOut.DefinesEdges++
+		}
+	}
+
+	for _, block := range summary.Blocks {
+		from, okFrom := functionNodes[block.FunctionID]
+		to, okTo := blockNodes[block.ID]
+		if !okFrom || !okTo {
+			continue
+		}
+		created, err := upsertEdge(db, from, to, EdgeLabelContainsBlock, graphdb.Props{
+			"analyzer_version": analyzerVersion,
+			"scan_epoch":       scanEpoch,
+			"producer":         producer,
+			"producer_version": producerVersion,
+		})
+		if err != nil {
+			return PersistenceSummary{}, fmt.Errorf("persist CONTAINS_BLOCK edge %q -> %q: %w", block.FunctionID, block.ID, err)
+		}
+		if created {
+			summaryOut.ContainsBlockEdges++
+		}
+	}
+
+	for _, edge := range summary.CFGEdges {
+		from, okFrom := blockNodes[edge.FromBlockID]
+		to, okTo := blockNodes[edge.ToBlockID]
+		if !okFrom || !okTo {
+			continue
+		}
+		created, err := upsertEdge(db, from, to, EdgeLabelNext, graphdb.Props{
+			"condition":        edge.Condition,
+			"analyzer_version": analyzerVersion,
+			"scan_epoch":       scanEpoch,
+			"producer":         producer,
+			"producer_version": producerVersion,
+		})
+		if err != nil {
+			return PersistenceSummary{}, fmt.Errorf("persist NEXT edge %q -> %q: %w", edge.FromBlockID, edge.ToBlockID, err)
+		}
+		if created {
+			summaryOut.NextEdges++
+		}
+	}
+
+	for _, edge := range summary.StmtEdges {
+		from, okFrom := statementNodes[edge.FromNodeID]
+		to, okTo := statementNodes[edge.ToNodeID]
+		if !okFrom || !okTo {
+			continue
+		}
+		created, err := upsertEdge(db, from, to, EdgeLabelNextStmt, graphdb.Props{
+			"analyzer_version": analyzerVersion,
+			"scan_epoch":       scanEpoch,
+			"producer":         producer,
+			"producer_version": producerVersion,
+		})
+		if err != nil {
+			return PersistenceSummary{}, fmt.Errorf("persist NEXT_STMT edge %q -> %q: %w", edge.FromNodeID, edge.ToNodeID, err)
+		}
+		if created {
+			summaryOut.NextStmtEdges++
 		}
 	}
 

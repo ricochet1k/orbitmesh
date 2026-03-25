@@ -216,6 +216,9 @@ func (e *extractor) walkGoNode(node *gotreesitter.Node, lang *gotreesitter.Langu
 				Start:     toPosition(node.StartPoint()),
 				End:       toPosition(node.EndPoint()),
 			})
+			if bodyNode := node.ChildByFieldName("body", lang); bodyNode != nil {
+				e.buildGoCFGForFunction(node, bodyNode, lang, source, fileID, functionID)
+			}
 			nextState.currentFunctionID = functionID
 		}
 	case "method_declaration":
@@ -240,6 +243,9 @@ func (e *extractor) walkGoNode(node *gotreesitter.Node, lang *gotreesitter.Langu
 				Start:     toPosition(node.StartPoint()),
 				End:       toPosition(node.EndPoint()),
 			})
+			if bodyNode := node.ChildByFieldName("body", lang); bodyNode != nil {
+				e.buildGoCFGForFunction(node, bodyNode, lang, source, fileID, methodID)
+			}
 			nextState.currentFunctionID = methodID
 		}
 	case "call_expression":

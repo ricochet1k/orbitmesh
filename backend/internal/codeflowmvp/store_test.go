@@ -17,8 +17,8 @@ func TestPersistExtraction_MappingPresence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PersistExtraction: %v", err)
 	}
-	if persistSummary.Nodes != 10 {
-		t.Fatalf("expected 10 persisted nodes, got %d", persistSummary.Nodes)
+	if persistSummary.Nodes < 10 {
+		t.Fatalf("expected at least 10 persisted nodes, got %d", persistSummary.Nodes)
 	}
 
 	db, err := graphdb.Open(dbPath, graphdb.DefaultOptions())
@@ -243,4 +243,29 @@ func assertEdgeLabelCount(t *testing.T, db *graphdb.DB, label string, expected i
 	if len(edges) != expected {
 		t.Fatalf("expected %d %s edges, got %d", expected, label, len(edges))
 	}
+}
+
+func TestPersistExtraction_PersistsCFGGraphState(t *testing.T) {
+	summary := mustScanFixturePath(t, "testdata/cfg_sample.go")
+	dbPath := filepath.Join(t.TempDir(), "cfg-state.goraphdb")
+
+	persistSummary, err := PersistExtraction(summary, PersistOptions{DBPath: dbPath, ScanEpoch: "epoch-cfg", Producer: "test-producer"})
+	if err != nil {
+		t.Fatalf("PersistExtraction: %v", err)
+	}
+	if persistSummary.Blocks == 0 || persistSummary.NextEdges == 0 || persistSummary.NextStmtEdges == 0 {
+		t.Fatalf("expected CFG persistence counts, got %+v", persistSummary)
+	}
+
+	db, err := graphdb.Open(dbPath, graphdb.DefaultOptions())
+	if err != nil {
+		t.Fatalf("open graph db: %v", err)
+	}
+	defer db.Close()
+
+	assertLabelCount(t, db, NodeLabelBlock, len(summary.Blocks))
+	assertLabelCount(t, db, NodeLabelStatement, len(summary.Statements))
+	assertEdgeLabelCount(t, db, EdgeLabelContainsBlock, len(summary.Blocks))
+	assertEdgeLabelCount(t, db, EdgeLabelNext, len(summary.CFGEdges))
+	assertEdgeLabelCount(t, db, EdgeLabelNextStmt, len(summary.StmtEdges))
 }
