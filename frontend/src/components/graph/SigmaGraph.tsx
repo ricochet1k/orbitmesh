@@ -1,4 +1,4 @@
-import { createEffect, onCleanup, onMount } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import Sigma from "sigma";
 import Graph from "graphology";
 import forceAtlas2 from "graphology-layout-forceatlas2";
@@ -23,6 +23,8 @@ export function SigmaGraph(props: SigmaGraphProps) {
   let containerRef: HTMLDivElement | undefined;
   let sigmaInstance: Sigma | null = null;
   let graph: Graph | null = null;
+  // Signal used to notify createEffect that sigma is ready after onMount.
+  const [sigmaReady, setSigmaReady] = createSignal(false);
 
   onMount(() => {
     if (!containerRef) return;
@@ -41,6 +43,11 @@ export function SigmaGraph(props: SigmaGraphProps) {
       // MVP: In the future this could dispatch an event to expand the node
     });
 
+    // Notify createEffect that the sigma instance is now ready. This ensures
+    // the effect re-runs with the current props.data even if the data arrived
+    // before onMount fired (which is the normal SolidJS ordering).
+    setSigmaReady(true);
+
     onCleanup(() => {
       sigmaInstance?.kill();
       graph?.clear();
@@ -48,7 +55,9 @@ export function SigmaGraph(props: SigmaGraphProps) {
   });
 
   createEffect(() => {
-    if (!graph || !sigmaInstance || !props.data) return;
+    // Track sigmaReady so this effect re-runs once onMount has initialised the
+    // graph/sigmaInstance variables (plain JS refs, not signals).
+    if (!sigmaReady() || !graph || !sigmaInstance || !props.data) return;
 
     graph.clear();
 
