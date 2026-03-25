@@ -1,6 +1,41 @@
 /* ── CodeFlow Explorer ──────────────────────────────────────────────────── */
 
+/*
+ * Component-scoped design tokens.
+ * Scoped to .cfe-root rather than :root to keep them local and avoid
+ * polluting the global namespace.  All hardcoded colours live here so
+ * the dark editor/graph theme can be adjusted in one place.
+ */
 .cfe-root {
+  /* Editor panel – dark code-editor chrome */
+  --cfe-editor-bg:          #0d1117;
+  --cfe-editor-chrome-bg:   #090e17;
+  --cfe-editor-border:      #1c2535;
+  --cfe-editor-label:       #57728a;
+  --cfe-editor-text:        #c9d5e3;
+  --cfe-editor-placeholder: #2e3f52;
+  --cfe-legend-title:       #3d5166;
+  --cfe-legend-text:        #6b849d;
+  --cfe-error-text:         #f87171;
+
+  /* Graph canvas */
+  --cfe-graph-bg:             #060c18;
+  --cfe-graph-dot:            #1a2a40;
+  --cfe-graph-toolbar-bg:     rgba(6, 12, 24, 0.85);
+  --cfe-graph-toolbar-border: #0f1f36;
+  --cfe-graph-empty-icon:     #1e3354;
+  --cfe-graph-empty-text:     #2e4a65;
+  --cfe-graph-empty-hint:     #1e3354;
+
+  /* Accent derivatives (built from the app's primary/secondary palette) */
+  --cfe-icon-gradient-from: #1e40af;
+  --cfe-icon-shadow:        rgba(37, 99, 235, 0.3);
+  --cfe-focus-ring:         rgba(37, 99, 235, 0.18);
+  --cfe-spinner-track:      rgba(14, 165, 233, 0.25);
+  --cfe-stat-pill-bg:       rgba(14, 165, 233, 0.08);
+  --cfe-stat-pill-border:   rgba(14, 165, 233, 0.2);
+
+  /* Layout */
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -32,13 +67,13 @@
   width: 34px;
   height: 34px;
   border-radius: var(--radius-lg, 8px);
-  background: linear-gradient(135deg, #1e40af 0%, #0ea5e9 100%);
+  background: linear-gradient(135deg, var(--cfe-icon-gradient-from) 0%, var(--color-secondary, #0ea5e9) 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   color: #fff;
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+  box-shadow: 0 2px 8px var(--cfe-icon-shadow);
 }
 
 .cfe-header-title-group {
@@ -92,7 +127,7 @@
 .cfe-sample-select:focus {
   outline: none;
   border-color: var(--color-primary, #2563eb);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+  box-shadow: 0 0 0 3px var(--cfe-focus-ring);
 }
 
 /* ── Split body ──────────────────────────────────────────────────────────── */
@@ -110,8 +145,8 @@
   flex-direction: column;
   width: 350px;
   flex-shrink: 0;
-  background: #0d1117;
-  border-right: 1px solid #1c2535;
+  background: var(--cfe-editor-bg);
+  border-right: 1px solid var(--cfe-editor-border);
   overflow: hidden;
 }
 
@@ -120,27 +155,27 @@
   align-items: center;
   justify-content: space-between;
   padding: 9px 16px;
-  border-bottom: 1px solid #1c2535;
+  border-bottom: 1px solid var(--cfe-editor-border);
   flex-shrink: 0;
-  background: #090e17;
+  background: var(--cfe-editor-chrome-bg);
 }
 
 .cfe-editor-label {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 10.5px;
+  font-size: 0.65625rem; /* 10.5px */
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #57728a;
+  color: var(--cfe-editor-label);
 }
 
 .cfe-loading-badge {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: 0.6875rem; /* 11px */
   color: var(--color-secondary, #0ea5e9);
   font-weight: 500;
 }
@@ -151,7 +186,7 @@
   display: inline-block;
   width: 10px;
   height: 10px;
-  border: 1.5px solid rgba(14, 165, 233, 0.25);
+  border: 1.5px solid var(--cfe-spinner-track);
   border-top-color: var(--color-secondary, #0ea5e9);
   border-radius: 50%;
   animation: cfe-spin 0.65s linear infinite;
@@ -179,16 +214,16 @@
   background: transparent;
   padding: 16px;
   font-family: var(--font-mono, 'IBM Plex Mono', 'SFMono-Regular', monospace);
-  font-size: 12.5px;
+  font-size: 0.78125rem; /* 12.5px */
   line-height: 1.8;
-  color: #c9d5e3;
+  color: var(--cfe-editor-text);
   caret-color: var(--color-secondary, #0ea5e9);
   tab-size: 2;
   min-height: 0;
 }
 
 .cfe-editor-textarea::placeholder {
-  color: #2e3f52;
+  color: var(--cfe-editor-placeholder);
 }
 
 .cfe-editor-textarea:focus {
@@ -204,9 +239,9 @@
   justify-content: space-between;
   gap: 10px;
   padding: 10px 14px;
-  border-top: 1px solid #1c2535;
+  border-top: 1px solid var(--cfe-editor-border);
   flex-shrink: 0;
-  background: #090e17;
+  background: var(--cfe-editor-chrome-bg);
 }
 
 .cfe-error-banner {
@@ -218,8 +253,8 @@
 }
 
 .cfe-error-text {
-  font-size: 11px;
-  color: #f87171;
+  font-size: 0.6875rem; /* 11px */
+  color: var(--cfe-error-text);
   line-height: 1.4;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -230,7 +265,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12.5px;
+  font-size: 0.78125rem; /* 12.5px */
   padding: 7px 16px;
   border-radius: var(--radius-xl, 12px);
   white-space: nowrap;
@@ -241,18 +276,18 @@
 
 .cfe-legend {
   padding: 12px 16px 14px;
-  border-top: 1px solid #1c2535;
+  border-top: 1px solid var(--cfe-editor-border);
   flex-shrink: 0;
-  background: #090e17;
+  background: var(--cfe-editor-chrome-bg);
 }
 
 .cfe-legend-title {
   display: block;
-  font-size: 9.5px;
+  font-size: 0.59375rem; /* 9.5px */
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #3d5166;
+  color: var(--cfe-legend-title);
   margin-bottom: 9px;
 }
 
@@ -266,8 +301,8 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 11px;
-  color: #6b849d;
+  font-size: 0.6875rem; /* 11px */
+  color: var(--cfe-legend-text);
 }
 
 .cfe-legend-dot {
@@ -284,7 +319,7 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: #060c18;
+  background: var(--cfe-graph-bg);
   overflow: hidden;
   position: relative;
 }
@@ -294,7 +329,7 @@
   content: "";
   position: absolute;
   inset: 0;
-  background-image: radial-gradient(circle, #1a2a40 1px, transparent 1px);
+  background-image: radial-gradient(circle, var(--cfe-graph-dot) 1px, transparent 1px);
   background-size: 28px 28px;
   pointer-events: none;
   z-index: 0;
@@ -308,8 +343,8 @@
   justify-content: flex-end;
   gap: 6px;
   padding: 7px 14px;
-  background: rgba(6, 12, 24, 0.85);
-  border-bottom: 1px solid #0f1f36;
+  background: var(--cfe-graph-toolbar-bg);
+  border-bottom: 1px solid var(--cfe-graph-toolbar-border);
   flex-shrink: 0;
   backdrop-filter: blur(4px);
   min-height: 38px;
@@ -326,12 +361,12 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 10.5px;
+  font-size: 0.65625rem; /* 10.5px */
   font-weight: 600;
   padding: 2px 10px;
   border-radius: 9999px;
-  background: rgba(14, 165, 233, 0.08);
-  border: 1px solid rgba(14, 165, 233, 0.2);
+  background: var(--cfe-stat-pill-bg);
+  border: 1px solid var(--cfe-stat-pill-border);
   color: var(--color-secondary, #0ea5e9);
   letter-spacing: 0.02em;
 }
@@ -357,18 +392,18 @@
 }
 
 .cfe-graph-empty-icon {
-  color: #1e3354;
+  color: var(--cfe-graph-empty-icon);
   opacity: 0.9;
 }
 
 .cfe-graph-empty-text {
-  font-size: 13px;
-  color: #2e4a65;
+  font-size: 0.8125rem; /* 13px */
+  color: var(--cfe-graph-empty-text);
   font-weight: 500;
   letter-spacing: 0.02em;
 }
 
 .cfe-graph-empty-hint {
-  font-size: 11.5px;
-  color: #1e3354;
+  font-size: 0.71875rem; /* 11.5px */
+  color: var(--cfe-graph-empty-hint);
 }
