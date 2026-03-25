@@ -1,0 +1,409 @@
+/* ── CodeFlow Explorer ──────────────────────────────────────────────────── */
+
+/*
+ * Component-scoped design tokens.
+ * Scoped to .cfe-root rather than :root to keep them local and avoid
+ * polluting the global namespace.  All hardcoded colours live here so
+ * the dark editor/graph theme can be adjusted in one place.
+ */
+.cfe-root {
+  /* Editor panel – dark code-editor chrome */
+  --cfe-editor-bg:          #0d1117;
+  --cfe-editor-chrome-bg:   #090e17;
+  --cfe-editor-border:      #1c2535;
+  --cfe-editor-label:       #57728a;
+  --cfe-editor-text:        #c9d5e3;
+  --cfe-editor-placeholder: #2e3f52;
+  --cfe-legend-title:       #3d5166;
+  --cfe-legend-text:        #6b849d;
+  --cfe-error-text:         #f87171;
+
+  /* Graph canvas */
+  --cfe-graph-bg:             #060c18;
+  --cfe-graph-dot:            #1a2a40;
+  --cfe-graph-toolbar-bg:     rgba(6, 12, 24, 0.85);
+  --cfe-graph-toolbar-border: #0f1f36;
+  --cfe-graph-empty-icon:     #1e3354;
+  --cfe-graph-empty-text:     #2e4a65;
+  --cfe-graph-empty-hint:     #1e3354;
+
+  /* Accent derivatives (built from the app's primary/secondary palette) */
+  --cfe-icon-gradient-from: #1e40af;
+  --cfe-icon-shadow:        rgba(37, 99, 235, 0.3);
+  --cfe-focus-ring:         rgba(37, 99, 235, 0.18);
+  --cfe-spinner-track:      rgba(14, 165, 233, 0.25);
+  --cfe-stat-pill-bg:       rgba(14, 165, 233, 0.08);
+  --cfe-stat-pill-border:   rgba(14, 165, 233, 0.2);
+
+  /* Layout */
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--color-surface-2, #f4f6f9);
+  overflow: hidden;
+}
+
+/* ── Page header ─────────────────────────────────────────────────────────── */
+
+.cfe-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-lg, 24px);
+  padding: 16px 24px;
+  background: var(--color-surface-0, #ffffff);
+  border-bottom: 1px solid var(--color-border, #d6dbe3);
+  flex-shrink: 0;
+  min-height: 58px;
+}
+
+.cfe-page-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cfe-header-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-lg, 8px);
+  background: linear-gradient(135deg, var(--cfe-icon-gradient-from) 0%, var(--color-secondary, #0ea5e9) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px var(--cfe-icon-shadow);
+}
+
+.cfe-header-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.cfe-header-title {
+  font-size: var(--text-base, 1rem);
+  font-weight: 600;
+  color: var(--color-text-primary, #0b1220);
+  line-height: 1.25;
+  margin: 0;
+}
+
+.cfe-header-subtitle {
+  font-size: var(--text-xs, 0.75rem);
+  color: var(--color-text-tertiary, #556070);
+  margin: 0;
+}
+
+.cfe-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cfe-sample-select {
+  font-size: var(--text-sm, 0.875rem);
+  font-family: var(--font-sans);
+  padding: 7px 32px 7px 12px;
+  background: var(--color-surface-1, #f9fafb);
+  border: 1px solid var(--color-border, #d6dbe3);
+  border-radius: var(--radius-xl, 12px);
+  color: var(--color-text-secondary, #1f2937);
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' stroke='%23556070' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  min-width: 210px;
+  transition: var(--transition-fast, all 120ms);
+}
+
+.cfe-sample-select:hover {
+  border-color: var(--color-primary, #2563eb);
+  background-color: var(--color-surface-0, #ffffff);
+}
+
+.cfe-sample-select:focus {
+  outline: none;
+  border-color: var(--color-primary, #2563eb);
+  box-shadow: 0 0 0 3px var(--cfe-focus-ring);
+}
+
+/* ── Split body ──────────────────────────────────────────────────────────── */
+
+.cfe-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── Editor panel (left sidebar) ─────────────────────────────────────────── */
+
+.cfe-editor-panel {
+  display: flex;
+  flex-direction: column;
+  width: 350px;
+  flex-shrink: 0;
+  background: var(--cfe-editor-bg);
+  border-right: 1px solid var(--cfe-editor-border);
+  overflow: hidden;
+}
+
+.cfe-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--cfe-editor-border);
+  flex-shrink: 0;
+  background: var(--cfe-editor-chrome-bg);
+}
+
+.cfe-editor-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.65625rem; /* 10.5px */
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--cfe-editor-label);
+}
+
+.cfe-loading-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.6875rem; /* 11px */
+  color: var(--color-secondary, #0ea5e9);
+  font-weight: 500;
+}
+
+/* ── Spinner ─────────────────────────────────────────────────────────────── */
+
+.cfe-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--cfe-spinner-track);
+  border-top-color: var(--color-secondary, #0ea5e9);
+  border-radius: 50%;
+  animation: cfe-spin 0.65s linear infinite;
+  flex-shrink: 0;
+}
+
+.cfe-spinner-lg {
+  width: 28px;
+  height: 28px;
+  border-width: 2.5px;
+}
+
+@keyframes cfe-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Query textarea ──────────────────────────────────────────────────────── */
+
+.cfe-editor-textarea {
+  flex: 1;
+  width: 100%;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 16px;
+  font-family: var(--font-mono, 'IBM Plex Mono', 'SFMono-Regular', monospace);
+  font-size: 0.78125rem; /* 12.5px */
+  line-height: 1.8;
+  color: var(--cfe-editor-text);
+  caret-color: var(--color-secondary, #0ea5e9);
+  tab-size: 2;
+  min-height: 0;
+}
+
+.cfe-editor-textarea::placeholder {
+  color: var(--cfe-editor-placeholder);
+}
+
+.cfe-editor-textarea:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+/* ── Editor footer (run button + error) ──────────────────────────────────── */
+
+.cfe-editor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--cfe-editor-border);
+  flex-shrink: 0;
+  background: var(--cfe-editor-chrome-bg);
+}
+
+.cfe-error-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.cfe-error-text {
+  font-size: 0.6875rem; /* 11px */
+  color: var(--cfe-error-text);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cfe-run-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78125rem; /* 12.5px */
+  padding: 7px 16px;
+  border-radius: var(--radius-xl, 12px);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── Node-type legend ────────────────────────────────────────────────────── */
+
+.cfe-legend {
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--cfe-editor-border);
+  flex-shrink: 0;
+  background: var(--cfe-editor-chrome-bg);
+}
+
+.cfe-legend-title {
+  display: block;
+  font-size: 0.59375rem; /* 9.5px */
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--cfe-legend-title);
+  margin-bottom: 9px;
+}
+
+.cfe-legend-items {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px 10px;
+}
+
+.cfe-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.6875rem; /* 11px */
+  color: var(--cfe-legend-text);
+}
+
+.cfe-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 4px currentColor;
+}
+
+/* ── Graph panel (right) ─────────────────────────────────────────────────── */
+
+.cfe-graph-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--cfe-graph-bg);
+  overflow: hidden;
+  position: relative;
+}
+
+/* Subtle dot-grid background texture */
+.cfe-graph-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, var(--cfe-graph-dot) 1px, transparent 1px);
+  background-size: 28px 28px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.cfe-graph-toolbar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 7px 14px;
+  background: var(--cfe-graph-toolbar-bg);
+  border-bottom: 1px solid var(--cfe-graph-toolbar-border);
+  flex-shrink: 0;
+  backdrop-filter: blur(4px);
+  min-height: 38px;
+}
+
+.cfe-graph-stats {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Pills adapted for dark graph background */
+.cfe-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.65625rem; /* 10.5px */
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  background: var(--cfe-stat-pill-bg);
+  border: 1px solid var(--cfe-stat-pill-border);
+  color: var(--color-secondary, #0ea5e9);
+  letter-spacing: 0.02em;
+}
+
+.cfe-graph-canvas-wrap {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  z-index: 1;
+}
+
+/* ── Empty / loading states ──────────────────────────────────────────────── */
+
+.cfe-graph-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  z-index: 1;
+}
+
+.cfe-graph-empty-icon {
+  color: var(--cfe-graph-empty-icon);
+  opacity: 0.9;
+}
+
+.cfe-graph-empty-text {
+  font-size: 0.8125rem; /* 13px */
+  color: var(--cfe-graph-empty-text);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.cfe-graph-empty-hint {
+  font-size: 0.71875rem; /* 11.5px */
+  color: var(--cfe-graph-empty-hint);
+}

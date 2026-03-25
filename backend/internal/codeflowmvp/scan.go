@@ -22,6 +22,8 @@ type extractor struct {
 	spawnSeq     map[string]int
 	apiReqSeq    map[string]int
 	apiRouteSeq  map[string]int
+	stmtSeq      map[string]int
+	blockSeq     map[string]int
 	seenPackages map[string]PackageFact
 }
 
@@ -84,6 +86,8 @@ func ScanPath(projectRoot string, scanPath string) (ExtractionSummary, error) {
 		spawnSeq:     map[string]int{},
 		apiReqSeq:    map[string]int{},
 		apiRouteSeq:  map[string]int{},
+		stmtSeq:      map[string]int{},
+		blockSeq:     map[string]int{},
 		seenPackages: map[string]PackageFact{},
 	}
 
@@ -141,14 +145,18 @@ func ScanPath(projectRoot string, scanPath string) (ExtractionSummary, error) {
 	ext.summary.Findings = rules.Evaluate(ruleFacts)
 
 	ext.summary.Counts = Counts{
-		Files:     len(ext.summary.Files),
-		Packages:  len(ext.summary.Packages),
-		Functions: len(ext.summary.Functions),
-		Calls:     len(ext.summary.Calls),
-		Spawns:    len(ext.summary.Spawns),
-		APIReqs:   len(ext.summary.APIReqs),
-		APIRoutes: len(ext.summary.APIRoutes),
-		Findings:  len(ext.summary.Findings),
+		Files:      len(ext.summary.Files),
+		Packages:   len(ext.summary.Packages),
+		Functions:  len(ext.summary.Functions),
+		Calls:      len(ext.summary.Calls),
+		Spawns:     len(ext.summary.Spawns),
+		APIReqs:    len(ext.summary.APIReqs),
+		APIRoutes:  len(ext.summary.APIRoutes),
+		Findings:   len(ext.summary.Findings),
+		Blocks:     len(ext.summary.Blocks),
+		CFGEdges:   len(ext.summary.CFGEdges),
+		StmtEdges:  len(ext.summary.StmtEdges),
+		Statements: len(ext.summary.Statements),
 	}
 
 	return ext.summary, nil

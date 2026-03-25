@@ -10,10 +10,15 @@ The primary users of OrbitMesh are developers who need to manage, monitor, and d
 ## 1. Journey: Starting and Monitoring a New Agent Session
 
 ### 1.1 Triggering a Session
-**Goal**: A developer wants to initiate a new task for an AI agent to solve.
+**Goal**: A developer wants to initiate a new task for an AI agent to solve, configure an environment, or start a sandbox.
 * **Entry Point**: The user starts at the main dashboard or a dedicated "New Session" view.
-* **Action**: They input a prompt or select a pre-defined task template. They may configure specific provider settings (e.g., Claude, Codex) or select the target project workspace.
+* **Action**: They input a prompt or select a pre-defined task template. They may configure specific provider settings (e.g., Claude, Codex) or select the target project workspace. They also have options to attach specific repositories, define environmental variables, and set resource limits.
 * **Feedback**: Upon submission, the UI immediately transitions to the active **Agent Session Viewer** for that newly created session.
+
+### 1.2 Interactive Setup and Environment Bootstrapping
+**Goal**: Ensure the execution environment is properly primed with necessary dependencies and context before the core task begins.
+* **Action**: If a pre-setup script is defined, the developer watches the terminal as the environment boots (e.g., installing npm packages, starting docker containers).
+* **Feedback**: A clear visual indicator shows when the environment transitions from "Bootstrapping" to "Ready".
 
 ### 1.2 Real-Time Monitoring
 **Goal**: The developer needs to ensure the agent is making progress and hasn't encountered errors or infinite loops.
@@ -41,12 +46,13 @@ The primary users of OrbitMesh are developers who need to manage, monitor, and d
 * **Status Visibility**: Each node in the tree displays its status. Real-time updates push status changes up the tree (e.g., a sub-task failure immediately marks the parent node as "At Risk" or "Failed").
 
 ### 2.2 Deep Dive into Code Execution
-**Goal**: A specific sub-task failed or produced unexpected results, and the developer needs to understand the exact code execution path.
+**Goal**: A specific sub-task failed or produced unexpected results, and the developer needs to understand the exact code execution path and the flow of data state.
 * **Transition**: From a specific task node or session event, the user clicks "View in CodeFlow".
 * **View**: **CodeFlow Explorer** (Canvas Interface).
 * **Interaction**:
     * The user is presented with a WebGL-based node graph (powered by sigma.js) representing the structural elements (functions, variables) and execution flow.
     * They can pan, zoom, and select specific nodes to see the exact data flowing through them at runtime.
+    * The UI provides a "Time Scrubber" to replay the execution flow step-by-step, highlighting edges and nodes as data mutations occurred.
     * **Real-time Aspect**: If the session is currently active, the CodeFlow graph updates dynamically as the static analyzer processes new files or as execution events are emitted, showing the "live pulse" of the agent's work.
 
 ---
@@ -78,6 +84,15 @@ The primary users of OrbitMesh are developers who need to manage, monitor, and d
 **Goal**: The platform needs to operate on a new repository or codebase.
 * **Entry Point**: A "Projects" or "Workspaces" management view.
 * **Interaction**: The user defines the path to the project, sets environment variables specific to that workspace, and configures any pre-requisite setup commands the agent should run.
+* **Integration Configuration**: They can link external tools (like GitHub, Jira, or custom internal APIs) that agents will have access to while working within this specific project context.
+
+## 5. Journey: Auditing Provider Fidelity and Costs
+
+### 5.1 Reviewing Model Performance
+**Goal**: Understand how accurately different LLMs are following system instructions and how much they cost.
+* **Entry Point**: The "Analytics" or "Fidelity" dashboard.
+* **Interaction**: The developer views graphs comparing tool usage adherence, context window saturation, and parsing error rates across different sessions and providers.
+* **Cost Tracking**: The UI visualizes token usage over time, mapped to specific projects or task types to track budget consumption.
 
 ---
 
