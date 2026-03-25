@@ -24,7 +24,7 @@ The following is a comprehensive list of features that have been identified, eit
 - [ ] **Entity Storage Architecture**: [specs/features/core/entity-storage-architecture.md](specs/features/core/entity-storage-architecture.md)
 - [ ] **Session Event Types**: [specs/features/core/session-event-types.md](specs/features/core/session-event-types.md)
 - [ ] **Realtime Websocket Feed**: [specs/features/core/realtime-websocket.md](specs/features/core/realtime-websocket.md)
-- [ ] **TermEmu PTY Websocket Activity Feed**: [specs/features/core/termemu-pty-websocket-activity-feed.md](specs/features/core/termemu-pty-websocket-activity-feed.md)
+- [x] **TermEmu PTY Websocket Activity Feed**: [specs/features/core/termemu-pty-websocket-activity-feed.md](specs/features/core/termemu-pty-websocket-activity-feed.md)
 - [ ] **Terminal Connection Writer Lock UX**: [specs/features/core/terminal-connection-writer-lock.md](specs/features/core/terminal-connection-writer-lock.md)
 - [ ] **PTY Advanced Extraction**: [specs/features/core/pty-advanced-extraction.md](specs/features/core/pty-advanced-extraction.md)
 - [ ] **Monitoring and Metrics**: [specs/features/core/monitoring-and-metrics.md](specs/features/core/monitoring-and-metrics.md)
