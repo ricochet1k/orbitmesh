@@ -23,17 +23,20 @@ const NODE_LEGEND = [
 ];
 
 function countNodesAndEdges(data: CodeflowQueryResult) {
-  const nodes = new Set<string>();
-  let edges = 0;
+  const nodeIds = new Set<string>();
+  const edgeIds = new Set<string>();
   (data.rows ?? []).forEach((row: Record<string, unknown>) => {
     Object.values(row).forEach((val) => {
       if (!val || typeof val !== "object") return;
       const v = val as Record<string, unknown>;
-      if (v.id && Array.isArray(v.labels)) nodes.add(String(v.id));
-      if (v.id && v.type && v.start_id !== undefined) edges++;
+      if (v.id && Array.isArray(v.labels)) {
+        nodeIds.add(String(v.id));
+      } else if (v.id && v.type && v.start_id !== undefined && v.end_id !== undefined) {
+        edgeIds.add(String(v.id));
+      }
     });
   });
-  return { nodes: nodes.size, edges };
+  return { nodes: nodeIds.size, edges: edgeIds.size };
 }
 
 export default function CodeflowExplorer() {
