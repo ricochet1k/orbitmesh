@@ -14,9 +14,9 @@ OrbitMesh consists of a Go-based backend providing the execution engine, databas
 The following is a comprehensive list of features that have been identified, either implemented without a formal spec, or planned for the future. Every feature listed here must have its own detailed spec file in the `specs/features/` or `specs/future/` directories before its development can be finalized.
 
 ### Core Engine & Infrastructure
+- [x] **Backend Architecture**: [specs/features/core/backend-architecture.md](specs/features/core/backend-architecture.md)
 - [x] **Backend Agent Execution Engine**: [specs/features/core/backend-agent-execution-engine.md](specs/features/core/backend-agent-execution-engine.md)
 - [ ] **Task Scheduler**: [specs/features/core/task-scheduler.md](specs/features/core/task-scheduler.md)
-- [ ] **Backend Architecture**: [specs/features/core/backend-architecture.md](specs/features/core/backend-architecture.md)
 - [ ] **Global Session State Stream**: [specs/features/core/global-session-state-stream.md](specs/features/core/global-session-state-stream.md)
 - [x] **Resumable Session Recovery**: [specs/features/core/resumable-session-recovery.md](specs/features/core/resumable-session-recovery.md)
 - [ ] **Long-Running Async Tools**: [specs/features/core/long-running-async-tools.md](specs/features/core/long-running-async-tools.md)
