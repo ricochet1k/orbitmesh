@@ -51,6 +51,7 @@ type APIRequestFact struct {
 	ID             string   `json:"id"`
 	FileID         string   `json:"file_id"`
 	CallerID       string   `json:"caller_id,omitempty"`
+	CalleeExpr     string   `json:"callee_expr,omitempty"`
 	Method         string   `json:"method"`
 	Path           string   `json:"path"`
 	NormalizedPath string   `json:"normalized_path"`

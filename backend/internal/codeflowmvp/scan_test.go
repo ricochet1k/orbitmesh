@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/ricochet1k/orbitmesh/internal/codeflowmvp/rules"
 )
 
 func TestFunctionExtraction(t *testing.T) {
@@ -101,13 +103,16 @@ func TestLoopAncestryDetection(t *testing.T) {
 func TestFindings_SpawnInLoop(t *testing.T) {
 	result := mustScanFixture(t)
 
-	if len(result.Findings) != 1 {
-		t.Fatalf("expected 1 finding, got %d", len(result.Findings))
+	// Find the specific spawn_in_loop finding (there may be additional YAML-derived findings).
+	var finding *rules.Finding
+	for i := range result.Findings {
+		if result.Findings[i].RuleID == "spawn_in_loop" {
+			finding = &result.Findings[i]
+			break
+		}
 	}
-
-	finding := result.Findings[0]
-	if finding.RuleID != "spawn_in_loop" {
-		t.Fatalf("expected spawn_in_loop rule, got %q", finding.RuleID)
+	if finding == nil {
+		t.Fatalf("expected a spawn_in_loop finding; findings: %+v", result.Findings)
 	}
 	if finding.Severity == "" {
 		t.Fatalf("expected finding severity")

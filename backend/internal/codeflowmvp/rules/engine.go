@@ -177,6 +177,12 @@ func matchesAnyCallee(callee string, allowlist []string) bool {
 }
 
 func fingerprint(parts ...string) string {
+	return Fingerprint(parts...)
+}
+
+// Fingerprint computes a stable SHA1-based fingerprint for a finding.
+// It is exported so callers outside the rules package can generate compatible fingerprints.
+func Fingerprint(parts ...string) string {
 	h := sha1.New()
 	for _, part := range parts {
 		_, _ = h.Write([]byte(part))

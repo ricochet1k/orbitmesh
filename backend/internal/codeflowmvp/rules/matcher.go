@@ -149,9 +149,16 @@ func MatchSignature(calleeExpr string, sig *ParsedSignature) bool {
 }
 
 // matchSegment checks if an expression segment matches a pattern segment.
-// "*" matches anything. Otherwise, exact match is required.
+// "*" matches anything. Go type annotations like "*Router" or "*DB" are treated
+// as type wildcards since we lack full type resolution (any expression matches).
+// Otherwise, exact match is required.
 func matchSegment(expr, pattern string) bool {
 	if pattern == "*" {
+		return true
+	}
+	// A pattern like "*Router" is a Go pointer type annotation, not a wildcard marker.
+	// Without type resolution we can't verify the exact type, so we accept any value.
+	if len(pattern) > 1 && pattern[0] == '*' && !strings.ContainsAny(pattern[1:], "/*") {
 		return true
 	}
 	return expr == pattern

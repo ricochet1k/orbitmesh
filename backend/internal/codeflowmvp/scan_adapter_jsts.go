@@ -168,6 +168,7 @@ func (e *extractor) extractJSFetch(node *gotreesitter.Node, lang *gotreesitter.L
 		ID:             requestID,
 		FileID:         fileID,
 		CallerID:       callerID,
+		CalleeExpr:     callee,
 		Method:         method,
 		Path:           rawPath,
 		NormalizedPath: normalizedPath,
