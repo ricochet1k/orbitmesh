@@ -17,14 +17,15 @@ type scanState struct {
 }
 
 type extractor struct {
-	summary      ExtractionSummary
-	callSeq      map[string]int
-	spawnSeq     map[string]int
-	apiReqSeq    map[string]int
-	apiRouteSeq  map[string]int
-	stmtSeq      map[string]int
-	blockSeq     map[string]int
-	seenPackages map[string]PackageFact
+	summary         ExtractionSummary
+	callSeq         map[string]int
+	spawnSeq        map[string]int
+	apiReqSeq       map[string]int
+	apiRouteSeq     map[string]int
+	stmtSeq         map[string]int
+	blockSeq        map[string]int
+	seenPackages    map[string]PackageFact
+	jsConstRegistry map[string]map[string]string // fileID -> constName -> value
 }
 
 func ScanPath(projectRoot string, scanPath string) (ExtractionSummary, error) {
@@ -81,14 +82,15 @@ func ScanPath(projectRoot string, scanPath string) (ExtractionSummary, error) {
 	sort.Strings(sourceFiles)
 
 	ext := &extractor{
-		summary:      ExtractionSummary{},
-		callSeq:      map[string]int{},
-		spawnSeq:     map[string]int{},
-		apiReqSeq:    map[string]int{},
-		apiRouteSeq:  map[string]int{},
-		stmtSeq:      map[string]int{},
-		blockSeq:     map[string]int{},
-		seenPackages: map[string]PackageFact{},
+		summary:         ExtractionSummary{},
+		callSeq:         map[string]int{},
+		spawnSeq:        map[string]int{},
+		apiReqSeq:       map[string]int{},
+		apiRouteSeq:     map[string]int{},
+		stmtSeq:         map[string]int{},
+		blockSeq:        map[string]int{},
+		seenPackages:    map[string]PackageFact{},
+		jsConstRegistry: map[string]map[string]string{},
 	}
 
 	for _, filePath := range sourceFiles {
@@ -110,6 +112,10 @@ func ScanPath(projectRoot string, scanPath string) (ExtractionSummary, error) {
 	sort.Slice(ext.summary.Packages, func(i, j int) bool {
 		return ext.summary.Packages[i].ID < ext.summary.Packages[j].ID
 	})
+
+	// Post-extraction: resolve handler function IDs that couldn't be resolved
+	// during extraction because the target method hadn't been extracted yet.
+	ext.resolveAPIHandlerFunctionIDs()
 
 	ruleFacts := rules.Facts{
 		Functions: make([]rules.FunctionFact, 0, len(ext.summary.Functions)),
@@ -169,6 +175,8 @@ func ScanPath(projectRoot string, scanPath string) (ExtractionSummary, error) {
 		CFGEdges:   len(ext.summary.CFGEdges),
 		StmtEdges:  len(ext.summary.StmtEdges),
 		Statements: len(ext.summary.Statements),
+		Tags:       len(ext.summary.Tags),
+		RuleEdges:  len(ext.summary.RuleEdges),
 	}
 
 	return ext.summary, nil

@@ -7,9 +7,13 @@ import "./dashboard.codeflow.explorer.css";
 
 const SAMPLE_QUERIES = [
   { label: "All Nodes & Edges (Limit 100)", query: "MATCH (n)-[r]->(m) RETURN n, r, m LIMIT 100" },
+  { label: "Frontend -> Backend API Links", query: "MATCH (req:APIRequest)-[r:REQUESTS_HANDLER]->(handler:APIHandler) RETURN req, r, handler" },
+  { label: "Unlinked API Requests", query: "MATCH (req:APIRequest) WHERE NOT EXISTS((req)-[:REQUESTS_HANDLER]->()) RETURN req" },
+  { label: "Unhandled Backend Routes", query: "MATCH (handler:APIHandler) WHERE NOT EXISTS(()-[:REQUESTS_HANDLER]->(handler)) RETURN handler" },
   { label: "High Severity Findings", query: "MATCH (f:Finding {severity: 'high'})-[r]->(n) RETURN f, r, n LIMIT 50" },
   { label: "Code Spawns in Loops", query: "MATCH (f:Function)-[r:SPAWNS]->(e:ExecutionUnit) WHERE r.inside_loop = true RETURN f, r, e" },
   { label: "API Handlers", query: "MATCH (f:File)-[r:HANDLES_ROUTE]->(a:APIHandler) RETURN f, r, a" },
+  { label: "Tagged Nodes", query: "MATCH (n)-[r:HAS_TAG]->(t:Tag) RETURN n, r, t LIMIT 100" },
 ];
 
 const NODE_LEGEND = [
@@ -18,8 +22,9 @@ const NODE_LEGEND = [
   { label: "ExecutionUnit", color: "#805AD5" },
   { label: "Finding",       color: "#E53E3E" },
   { label: "CallSite",      color: "#38A169" },
-  { label: "APIHandler",    color: "#0BC5EA" },
-  { label: "APIRequest",    color: "#DD6B20" },
+  { label: "APIHandler",    color: "#48BB78" },
+  { label: "APIRequest",    color: "#4299E1" },
+  { label: "Tag",           color: "#ED8936" },
 ];
 
 function countNodesAndEdges(data: CodeflowQueryResult) {

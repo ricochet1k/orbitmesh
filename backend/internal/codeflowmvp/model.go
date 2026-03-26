@@ -107,6 +107,29 @@ type StmtEdgeFact struct {
 	ToNodeID   string `json:"to_node_id"`
 }
 
+// TagFact represents a tag to be applied to a node in the graph.
+// Tags are stored as separate Tag nodes with HAS_TAG edges, as required
+// by goraphdb's Cypher limitations (no array property filtering).
+type TagFact struct {
+	NodeID         string  `json:"node_id"`
+	TagName        string  `json:"tag_name"`
+	Domain         string  `json:"domain,omitempty"`
+	RuleID         string  `json:"rule_id"`
+	Source         string  `json:"source"` // "direct" or "propagated"
+	PropagatedFrom string  `json:"propagated_from,omitempty"`
+	Confidence     float64 `json:"confidence"`
+}
+
+// RuleEdgeFact represents an edge emitted by a YAML rule.
+type RuleEdgeFact struct {
+	Type       string            `json:"type"`
+	FromID     string            `json:"from_id"`
+	ToID       string            `json:"to_id"`
+	Properties map[string]string `json:"properties,omitempty"`
+	RuleID     string            `json:"rule_id"`
+	Confidence float64           `json:"confidence"`
+}
+
 type Counts struct {
 	Files      int `json:"files"`
 	Packages   int `json:"packages"`
@@ -120,6 +143,8 @@ type Counts struct {
 	CFGEdges   int `json:"cfg_edges"`
 	StmtEdges  int `json:"stmt_edges"`
 	Statements int `json:"statements"`
+	Tags       int `json:"tags"`
+	RuleEdges  int `json:"rule_edges"`
 }
 
 type ExtractionSummary struct {
@@ -135,5 +160,7 @@ type ExtractionSummary struct {
 	CFGEdges   []CFGEdgeFact    `json:"cfg_edges,omitempty"`
 	StmtEdges  []StmtEdgeFact   `json:"stmt_edges,omitempty"`
 	Statements []StatementFact  `json:"statements,omitempty"`
+	Tags       []TagFact        `json:"tags,omitempty"`
+	RuleEdges  []RuleEdgeFact   `json:"rule_edges,omitempty"`
 	Counts     Counts           `json:"counts"`
 }
