@@ -94,8 +94,8 @@ type DataFlowSpec struct {
 type PropagationConfig struct {
 	TagSets           []TagSet `yaml:"tag_sets,omitempty"`
 	MaxDepth          int      `yaml:"max_depth,omitempty"`
-	RespectBoundaries bool     `yaml:"respect_boundaries,omitempty"`
-	PropagateDomains  bool     `yaml:"propagate_domains,omitempty"`
+	RespectBoundaries *bool    `yaml:"respect_boundaries,omitempty"`
+	PropagateDomains  *bool    `yaml:"propagate_domains,omitempty"`
 }
 
 // TagSet defines a group of tags that propagate together.
@@ -187,13 +187,12 @@ func LoadConfigFromBytes(data []byte) (*RuleConfig, error) {
 		if cfg.Propagation.MaxDepth == 0 {
 			cfg.Propagation.MaxDepth = 50
 		}
-		// RespectBoundaries and PropagateDomains default to true.
-		// Since Go zero-value for bool is false, we handle this by
-		// always setting them if the propagation block exists and they
-		// were not explicitly set. We use a custom unmarshal approach
-		// via a wrapper to detect explicit false vs unset. For simplicity
-		// in this initial implementation, we document that omitting these
-		// fields means true.
+		if cfg.Propagation.RespectBoundaries == nil {
+			cfg.Propagation.RespectBoundaries = boolPtr(true)
+		}
+		if cfg.Propagation.PropagateDomains == nil {
+			cfg.Propagation.PropagateDomains = boolPtr(true)
+		}
 	}
 	return &cfg, nil
 }
@@ -337,6 +336,7 @@ func FindProjectConfig(dir string) (string, error) {
 		return "", fmt.Errorf("resolving absolute path: %w", err)
 	}
 
+	startDir := dir
 	for {
 		for _, name := range []string{"codeflow.yaml", ".codeflow.yaml"} {
 			candidate := filepath.Join(dir, name)
@@ -348,8 +348,18 @@ func FindProjectConfig(dir string) (string, error) {
 		parent := filepath.Dir(dir)
 		if parent == dir {
 			// Reached filesystem root.
-			return "", fmt.Errorf("no codeflow.yaml found starting from %s", dir)
+			return "", fmt.Errorf("no codeflow.yaml found in %s or any parent directory", startDir)
 		}
 		dir = parent
 	}
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+// BoolVal dereferences a *bool, returning def if the pointer is nil.
+func BoolVal(b *bool, def bool) bool {
+	if b == nil {
+		return def
+	}
+	return *b
 }

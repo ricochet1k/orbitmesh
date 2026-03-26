@@ -124,10 +124,14 @@ func (eng *Engine) RunRule(rule AnalysisRule) ([]Finding, error) {
 
 // substituteParams replaces template parameters in the form {{param}} with values from params.
 func substituteParams(s string, params map[string]string) string {
-	for k, v := range params {
-		s = strings.ReplaceAll(s, "{{"+k+"}}", v)
+	if len(params) == 0 {
+		return s
 	}
-	return s
+	pairs := make([]string, 0, len(params)*2)
+	for k, v := range params {
+		pairs = append(pairs, "{{"+k+"}}", v)
+	}
+	return strings.NewReplacer(pairs...).Replace(s)
 }
 
 // renderExplain renders the explain string as a Go text/template with row data.

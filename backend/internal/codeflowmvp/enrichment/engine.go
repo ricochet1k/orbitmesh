@@ -37,14 +37,12 @@ func NewEngine(querier GraphQuerier) *Engine {
 // Rules in the same phase run sequentially. Phase N runs before phase N+1.
 // Returns the number of enrichment operations performed.
 func (eng *Engine) Run(rules []EnrichmentRule, scanEpoch string, producer string) (int, error) {
-	sorted := make([]EnrichmentRule, len(rules))
-	copy(sorted, rules)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].Phase < sorted[j].Phase
+	sort.Slice(rules, func(i, j int) bool {
+		return rules[i].Phase < rules[j].Phase
 	})
 
 	total := 0
-	for _, rule := range sorted {
+	for _, rule := range rules {
 		n, err := eng.RunRule(rule, scanEpoch, producer)
 		if err != nil {
 			log.Printf("enrichment rule %s failed: %v", rule.ID, err)

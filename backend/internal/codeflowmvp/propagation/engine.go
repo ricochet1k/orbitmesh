@@ -1,11 +1,13 @@
 package propagation
 
+import "container/list"
+
 // PropagationConfig configures the tag propagation engine.
 type PropagationConfig struct {
 	TagSets           []TagSet `yaml:"tag_sets" json:"tag_sets"`
 	MaxDepth          int      `yaml:"max_depth" json:"max_depth"`
-	RespectBoundaries bool     `yaml:"respect_boundaries" json:"respect_boundaries"`
-	PropagateDomains  bool     `yaml:"propagate_domains" json:"propagate_domains"`
+	RespectBoundaries *bool    `yaml:"respect_boundaries" json:"respect_boundaries"`
+	PropagateDomains  *bool    `yaml:"propagate_domains" json:"propagate_domains"`
 }
 
 // TagSet defines a group of tags and optional propagation constraints.
@@ -56,11 +58,20 @@ type PropagationResult struct {
 
 // DefaultConfig returns a PropagationConfig with sensible defaults.
 func DefaultConfig() PropagationConfig {
+	t, f := true, false
 	return PropagationConfig{
 		MaxDepth:          50,
-		RespectBoundaries: true,
-		PropagateDomains:  false,
+		RespectBoundaries: &t,
+		PropagateDomains:  &f,
 	}
+}
+
+// boolVal dereferences a *bool, returning def if the pointer is nil.
+func boolVal(b *bool, def bool) bool {
+	if b == nil {
+		return def
+	}
+	return *b
 }
 
 // tagKey uniquely identifies a tag assignment on a node.
@@ -90,7 +101,7 @@ func Propagate(input PropagationInput) PropagationResult {
 		maxDepth = 50
 	}
 
-	respectBoundaries := input.Config.RespectBoundaries
+	respectBoundaries := boolVal(input.Config.RespectBoundaries, true)
 
 	// Index functions by ID.
 	funcByID := make(map[string]*FunctionInfo, len(input.Functions))
@@ -150,7 +161,7 @@ func Propagate(input PropagationInput) PropagationResult {
 			from string // the originating nodeID for propagated_from
 		}
 
-		var worklist []workItem
+		worklist := list.New()
 		// nodeTags tracks which tags are pending propagation from each node.
 		nodeTags := make(map[string][]seedTag)
 
@@ -167,15 +178,15 @@ func Propagate(input PropagationInput) PropagationResult {
 		// Initialize worklist with all seed nodes.
 		queued := make(map[string]bool)
 		for nodeID := range nodeTags {
-			worklist = append(worklist, workItem{nodeID: nodeID, depth: 0})
+			worklist.PushBack(workItem{nodeID: nodeID, depth: 0})
 			queued[nodeID] = true
 		}
 
 		// Process worklist.
-		for len(worklist) > 0 {
-			// Pop from front.
-			item := worklist[0]
-			worklist = worklist[1:]
+		for worklist.Len() > 0 {
+			front := worklist.Front()
+			item := front.Value.(workItem)
+			worklist.Remove(front)
 
 			if item.depth >= maxDepth {
 				continue
@@ -205,7 +216,7 @@ func Propagate(input PropagationInput) PropagationResult {
 				var addedNew bool
 				for _, st := range tags {
 					domain := ""
-					if input.Config.PropagateDomains {
+					if boolVal(input.Config.PropagateDomains, false) {
 						domain = st.tag.Domain
 					}
 
@@ -239,7 +250,7 @@ func Propagate(input PropagationInput) PropagationResult {
 				}
 
 				if addedNew && !queued[ci.callerID] {
-					worklist = append(worklist, workItem{
+					worklist.PushBack(workItem{
 						nodeID: ci.callerID,
 						depth:  item.depth + 1,
 					})

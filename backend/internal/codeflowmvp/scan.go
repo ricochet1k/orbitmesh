@@ -1,6 +1,7 @@
 package codeflowmvp
 
 import (
+	"bytes"
 	"fmt"
 	"io/fs"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"text/template"
 
 	"github.com/ricochet1k/orbitmesh/internal/codeflowmvp/rules"
 )
@@ -284,16 +286,8 @@ func (e *extractor) applyYAMLRules() {
 
 // collectEmission appends emitted tags and edges from a rule match to the summary.
 func (e *extractor) collectEmission(result rules.EmissionResult) {
-	for _, tag := range result.Tags {
-		e.summary.Tags = append(e.summary.Tags, TagFact{
-			NodeID:     tag.NodeID,
-			TagName:    tag.TagName,
-			Domain:     tag.Domain,
-			RuleID:     tag.RuleID,
-			Source:     tag.Source,
-			Confidence: tag.Confidence,
-		})
-	}
+	// TagFact is a type alias (model.TagFact = rules.TagFact), so append directly.
+	e.summary.Tags = append(e.summary.Tags, result.Tags...)
 	for _, edge := range result.Edges {
 		e.summary.RuleEdges = append(e.summary.RuleEdges, RuleEdgeFact{
 			Type:       edge.Type,
@@ -368,10 +362,12 @@ func (e *extractor) applyInMemoryYAMLAnalyses() {
 				if linkedReqIDs[req.ID] {
 					continue
 				}
-				msg := renderExplainTemplate(analysis.Explain, map[string]string{
-					"req.path":    req.Path,
-					"req.method":  req.Method,
-					"req.file_id": req.FileID,
+				msg := renderExplainTemplate(analysis.Explain, map[string]interface{}{
+					"req": map[string]interface{}{
+						"path":    req.Path,
+						"method":  req.Method,
+						"file_id": req.FileID,
+					},
 				})
 				fp := rules.Fingerprint(analysis.ID, req.ID)
 				if existingFPs[fp] {
@@ -398,10 +394,12 @@ func (e *extractor) applyInMemoryYAMLAnalyses() {
 				if linkedHandlerIDs[handler.ID] {
 					continue
 				}
-				msg := renderExplainTemplate(analysis.Explain, map[string]string{
-					"handler.path":    handler.Path,
-					"handler.method":  handler.Method,
-					"handler.file_id": handler.FileID,
+				msg := renderExplainTemplate(analysis.Explain, map[string]interface{}{
+					"handler": map[string]interface{}{
+						"path":    handler.Path,
+						"method":  handler.Method,
+						"file_id": handler.FileID,
+					},
 				})
 				fp := rules.Fingerprint(analysis.ID, handler.ID)
 				if existingFPs[fp] {
@@ -436,10 +434,14 @@ func (e *extractor) applyInMemoryYAMLAnalyses() {
 				}
 				// Resolve the fact location (spawn or call site).
 				fileID, callerID, start, end := resolveFactLocation(nodeID, spawnByID, e.summary.Calls, fileByFunction)
-				msg := renderExplainTemplate(analysis.Explain, map[string]string{
-					"cs.file_id":    fileID,
-					"cs.start_line": fmt.Sprintf("%d", start.Line),
-					"fn.name":       nodeID,
+				msg := renderExplainTemplate(analysis.Explain, map[string]interface{}{
+					"cs": map[string]interface{}{
+						"file_id":    fileID,
+						"start_line": start.Line,
+					},
+					"fn": map[string]interface{}{
+						"name": nodeID,
+					},
 				})
 				fp := rules.Fingerprint(analysis.ID, nodeID)
 				if existingFPs[fp] {
@@ -477,16 +479,21 @@ func extractTagNameFromCypher(query string) string {
 	return m[1]
 }
 
-// renderExplainTemplate replaces `{{key}}` placeholders in template with values from vars.
-func renderExplainTemplate(template string, vars map[string]string) string {
-	if template == "" || len(vars) == 0 {
-		return template
+// renderExplainTemplate renders an explain string as a Go text/template with the given data,
+// consistent with analysis/engine.go's renderExplain. Falls back to the raw string on error.
+func renderExplainTemplate(tmplStr string, data map[string]interface{}) string {
+	if tmplStr == "" {
+		return ""
 	}
-	pairs := make([]string, 0, len(vars)*2)
-	for k, v := range vars {
-		pairs = append(pairs, "{{"+k+"}}", v)
+	t, err := template.New("explain").Parse(tmplStr)
+	if err != nil {
+		return tmplStr
 	}
-	return strings.NewReplacer(pairs...).Replace(template)
+	var buf bytes.Buffer
+	if err := t.Execute(&buf, data); err != nil {
+		return tmplStr
+	}
+	return buf.String()
 }
 
 // resolveFactLocation looks up a fact by ID and returns its file, caller, and positions.

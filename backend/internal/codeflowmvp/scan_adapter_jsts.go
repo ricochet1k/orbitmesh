@@ -369,9 +369,11 @@ func (e *extractor) resolveJSImportedConstants(root *gotreesitter.Node, lang *go
 	}
 }
 
-// resolveJSImportPath resolves a relative import path against the current file.
+// resolveJSImportPath resolves a relative import path against the current file's directory,
+// returning the base path without extension. Extension resolution (trying .ts, .js, .tsx,
+// .jsx) and index-file fallback are handled by lookupJSExportedConst.
 // e.g., fileID="frontend/src/api/sessions.ts", importPath="./_base"
-// → "frontend/src/api/_base.ts" (tries .ts, .js, .tsx, .jsx, /index.ts)
+// → "frontend/src/api/_base"
 func resolveJSImportPath(fileID string, importPath string) string {
 	if !strings.HasPrefix(importPath, ".") {
 		return "" // Only resolve relative imports

@@ -154,7 +154,7 @@ analyses:
       MATCH (req:APIRequest)
       WHERE NOT EXISTS((req)-[:REQUESTS_HANDLER]->())
       RETURN req
-    explain: "Frontend API call to {{req.path}} has no matching backend handler"
+    explain: "Frontend API call to {{.req.path}} has no matching backend handler"
 
   - id: "unhandled_route"
     severity: "info"
@@ -163,7 +163,7 @@ analyses:
       MATCH (handler:APIHandler)
       WHERE NOT EXISTS(()-[:REQUESTS_HANDLER]->(handler))
       RETURN handler
-    explain: "Backend route {{handler.method}} {{handler.path}} has no frontend caller"
+    explain: "Backend route {{.handler.method}} {{.handler.path}} has no frontend caller"
 
   - id: "spawn_in_loop_finding"
     severity: "medium"
@@ -171,7 +171,7 @@ analyses:
     query: |
       MATCH (cs:CallSite)-[:HAS_TAG]->(t:Tag {name: "SpawnInLoop"})
       RETURN cs
-    explain: "Goroutine spawn inside loop at {{cs.file_id}}:{{cs.start_line}}"
+    explain: "Goroutine spawn inside loop at {{.cs.file_id}}:{{.cs.start_line}}"
 
   - id: "read_after_write_same_domain"
     severity: "medium"
@@ -181,7 +181,7 @@ analyses:
       MATCH (fn)-[:HAS_TAG]->(tr:Tag {name: "Read"})
       WHERE tw.domain = tr.domain
       RETURN fn, tw, tr
-    explain: "Function {{fn.name}} performs a write then read on {{tw.domain}}"
+    explain: "Function {{.fn.name}} performs a write then read on {{.tw.domain}}"
 
 # Frontend Presentation
 visuals:

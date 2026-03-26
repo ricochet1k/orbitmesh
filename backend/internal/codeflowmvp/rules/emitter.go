@@ -3,13 +3,16 @@ package rules
 import "strings"
 
 // TagFact represents a tag to be applied to a node in the graph.
+// Tags are stored as separate Tag nodes with HAS_TAG edges, as required
+// by goraphdb's Cypher limitations (no array property filtering).
 type TagFact struct {
-	NodeID     string  `json:"node_id"`
-	TagName    string  `json:"tag_name"`
-	Domain     string  `json:"domain,omitempty"`
-	RuleID     string  `json:"rule_id"`
-	Source     string  `json:"source"` // "direct" or "propagated"
-	Confidence float64 `json:"confidence"`
+	NodeID         string  `json:"node_id"`
+	TagName        string  `json:"tag_name"`
+	Domain         string  `json:"domain,omitempty"`
+	RuleID         string  `json:"rule_id"`
+	Source         string  `json:"source"` // "direct" or "propagated"
+	PropagatedFrom string  `json:"propagated_from,omitempty"`
+	Confidence     float64 `json:"confidence"`
 }
 
 // EdgeFact represents an edge to be created between two nodes.
