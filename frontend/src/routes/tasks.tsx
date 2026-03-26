@@ -42,6 +42,7 @@ function useTaskTree(props: TaskTreeViewProps) {
   const [menu, setMenu] = createSignal<ContextMenuState | null>(null)
   const [selectedId, setSelectedId] = createSignal(getInitialTaskId())
   const [agentChoice, setAgentChoice] = createSignal("")
+  const [showAdvanced, setShowAdvanced] = createSignal(false)
   const [startState, setStartState] = createSignal<"idle" | "starting" | "success" | "error">("idle")
   const [startError, setStartError] = createSignal<string | null>(null)
   const [sessionInfo, setSessionInfo] = createSignal<{ taskId: string; session: SessionResponse } | null>(null)
@@ -252,6 +253,8 @@ function useTaskTree(props: TaskTreeViewProps) {
     selectedId,
     agentChoice,
     setAgentChoice,
+    showAdvanced,
+    setShowAdvanced,
     startState,
     startError,
     sessionInfo,
@@ -287,6 +290,8 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
     selectedId,
     agentChoice,
     setAgentChoice,
+    showAdvanced,
+    setShowAdvanced,
     startState,
     startError,
     sessionInfo,
@@ -331,6 +336,17 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
           </div>
         </div>
       </header>
+
+      <div class="ds-toolbar" data-testid="tasks-toolbar">
+        <button
+          type="button"
+          class="advanced-toggle-button ds-button ds-button-secondary"
+          aria-pressed={showAdvanced()}
+          onClick={() => setShowAdvanced((value) => !value)}
+        >
+          {showAdvanced() ? "Hide Advanced" : "Show Advanced"}
+        </button>
+      </div>
 
       <main class="task-tree-layout ds-layout">
         <section class="dashboard-panel task-tree-panel content-block ds-panel">
@@ -512,23 +528,41 @@ export default function TaskTreeView(props: TaskTreeViewProps = {}) {
           </Show>
         </section>
 
-        <section class="dashboard-panel graph-view compact content-block ds-panel">
-          <div class="panel-header ds-panel-header">
-            <div>
-              <p class="panel-kicker ds-kicker">Task topology</p>
-              <h2>Graph Sync</h2>
+        <Show
+          when={showAdvanced()}
+          fallback={
+            <section class="dashboard-panel graph-view compact content-block ds-panel" data-testid="tasks-graph-collapsed">
+              <div class="panel-header ds-panel-header">
+                <div>
+                  <p class="panel-kicker ds-kicker">Task topology</p>
+                  <h2>Graph Sync</h2>
+                </div>
+                <span class="panel-pill neutral ds-pill ds-pill-neutral">Hidden</span>
+              </div>
+              <p class="muted">
+                Graph topology is hidden in concise mode. Use <strong>Show Advanced</strong> to open it.
+              </p>
+            </section>
+          }
+        >
+          <section class="dashboard-panel graph-view compact content-block ds-panel" data-testid="tasks-graph-panel">
+            <div class="panel-header ds-panel-header">
+              <div>
+                <p class="panel-kicker ds-kicker">Task topology</p>
+                <h2>Graph Sync</h2>
+              </div>
+              <span class="panel-pill neutral ds-pill ds-pill-neutral">Linked</span>
             </div>
-            <span class="panel-pill neutral ds-pill ds-pill-neutral">Linked</span>
-          </div>
-          <div id="graph-container">
-            <AgentGraph
-              nodes={graphData().nodes}
-              links={graphData().links}
-              selectedId={selectedId()}
-              onSelect={(node) => node.type === "task" && selectTask(node.id)}
-            />
-          </div>
-        </section>
+            <div id="graph-container">
+              <AgentGraph
+                nodes={graphData().nodes}
+                links={graphData().links}
+                selectedId={selectedId()}
+                onSelect={(node) => node.type === "task" && selectTask(node.id)}
+              />
+            </div>
+          </section>
+        </Show>
       </main>
 
       <Show when={menu()}>
