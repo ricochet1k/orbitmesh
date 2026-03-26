@@ -115,6 +115,7 @@ func ScanPath(projectRoot string, scanPath string) (ExtractionSummary, error) {
 		Functions: make([]rules.FunctionFact, 0, len(ext.summary.Functions)),
 		Calls:     make([]rules.CallFact, 0, len(ext.summary.Calls)),
 		Spawns:    make([]rules.SpawnFact, 0, len(ext.summary.Spawns)),
+		Blocks:    make([]rules.BlockFact, 0, len(ext.summary.Blocks)),
 	}
 	for _, fn := range ext.summary.Functions {
 		ruleFacts.Functions = append(ruleFacts.Functions, rules.FunctionFact{
@@ -140,6 +141,17 @@ func ScanPath(projectRoot string, scanPath string) (ExtractionSummary, error) {
 			InsideLoop: call.InsideLoop,
 			Start:      rules.Position{Line: call.Start.Line, Column: call.Start.Column},
 			End:        rules.Position{Line: call.End.Line, Column: call.End.Column},
+		})
+	}
+	for _, b := range ext.summary.Blocks {
+		ruleFacts.Blocks = append(ruleFacts.Blocks, rules.BlockFact{
+			ID:         b.ID,
+			FunctionID: b.FunctionID,
+			FileID:     b.FileID,
+			IsDead:     b.IsDead,
+			BlockKind:  b.BlockKind,
+			Start:      rules.Position{Line: b.StartLine, Column: b.StartColumn},
+			End:        rules.Position{Line: b.EndLine, Column: b.EndColumn},
 		})
 	}
 	ext.summary.Findings = rules.Evaluate(ruleFacts)
