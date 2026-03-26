@@ -46,8 +46,19 @@ type CallFact struct {
 	End        Position
 }
 
+type BlockFact struct {
+	ID         string
+	FunctionID string
+	FileID     string
+	IsDead     bool
+	BlockKind  string
+	Start      Position
+	End        Position
+}
+
 type Facts struct {
 	Functions []FunctionFact
 	Calls     []CallFact
 	Spawns    []SpawnFact
+	Blocks    []BlockFact
 }

@@ -1,6 +1,8 @@
 module github.com/ricochet1k/orbitmesh
 
-go 1.25
+go 1.24.4
+
+toolchain go1.24.7
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
@@ -29,7 +31,6 @@ require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.3.0 // indirect
 	github.com/PuerkitoBio/goquery v1.9.2 // indirect
-	github.com/air-verse/air v1.64.5 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
@@ -105,5 +106,3 @@ require (
 	rsc.io/omap v1.2.0 // indirect
 	rsc.io/ordered v1.1.1 // indirect
 )
-
-tool github.com/air-verse/air

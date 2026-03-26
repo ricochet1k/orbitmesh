@@ -9,6 +9,7 @@ import (
 
 const RuleSpawnInLoop = "spawn_in_loop"
 const RuleSourceToSinkUnsanitized = "source_to_sink_unsanitized"
+const RuleUnreachableCode = "unreachable_code"
 
 var sourceCalleeSuffixes = []string{
 	"os.Getenv",
@@ -70,6 +71,7 @@ func Evaluate(facts Facts) []Finding {
 	}
 
 	findings = append(findings, evaluateSourceToSinkUnsanitized(facts, fileByFunction)...)
+	findings = append(findings, evaluateUnreachableCode(facts, fileByFunction)...)
 
 	sort.Slice(findings, func(i, j int) bool {
 		return findings[i].Fingerprint < findings[j].Fingerprint
@@ -133,6 +135,34 @@ func evaluateSourceToSinkUnsanitized(facts Facts, fileByFunction map[string]stri
 		}
 	}
 
+	return out
+}
+
+func evaluateUnreachableCode(facts Facts, fileByFunction map[string]string) []Finding {
+	out := make([]Finding, 0)
+	for _, block := range facts.Blocks {
+		if !block.IsDead {
+			continue
+		}
+		fileID := block.FileID
+		if fileID == "" {
+			fileID = fileByFunction[block.FunctionID]
+		}
+		out = append(out, Finding{
+			RuleID:   RuleUnreachableCode,
+			Severity: "low",
+			Message:  "unreachable code detected after unconditional exit",
+			Location: Location{
+				FileID:     fileID,
+				FunctionID: block.FunctionID,
+				FactID:     block.ID,
+				Start:      block.Start,
+				End:        block.End,
+			},
+			Fingerprint: fingerprint(RuleUnreachableCode, block.ID, block.FunctionID),
+			Confidence:  0.90,
+		})
+	}
 	return out
 }
 
