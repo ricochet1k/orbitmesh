@@ -51,6 +51,7 @@ type APIRequestFact struct {
 	ID             string   `json:"id"`
 	FileID         string   `json:"file_id"`
 	CallerID       string   `json:"caller_id,omitempty"`
+	CalleeExpr     string   `json:"callee_expr,omitempty"`
 	Method         string   `json:"method"`
 	Path           string   `json:"path"`
 	NormalizedPath string   `json:"normalized_path"`
@@ -107,6 +108,19 @@ type StmtEdgeFact struct {
 	ToNodeID   string `json:"to_node_id"`
 }
 
+// TagFact is defined in the rules package to avoid duplication.
+type TagFact = rules.TagFact
+
+// RuleEdgeFact represents an edge emitted by a YAML rule.
+type RuleEdgeFact struct {
+	Type       string            `json:"type"`
+	FromID     string            `json:"from_id"`
+	ToID       string            `json:"to_id"`
+	Properties map[string]string `json:"properties,omitempty"`
+	RuleID     string            `json:"rule_id"`
+	Confidence float64           `json:"confidence"`
+}
+
 type Counts struct {
 	Files      int `json:"files"`
 	Packages   int `json:"packages"`
@@ -120,6 +134,8 @@ type Counts struct {
 	CFGEdges   int `json:"cfg_edges"`
 	StmtEdges  int `json:"stmt_edges"`
 	Statements int `json:"statements"`
+	Tags       int `json:"tags"`
+	RuleEdges  int `json:"rule_edges"`
 }
 
 type ExtractionSummary struct {
@@ -135,5 +151,7 @@ type ExtractionSummary struct {
 	CFGEdges   []CFGEdgeFact    `json:"cfg_edges,omitempty"`
 	StmtEdges  []StmtEdgeFact   `json:"stmt_edges,omitempty"`
 	Statements []StatementFact  `json:"statements,omitempty"`
+	Tags       []TagFact        `json:"tags,omitempty"`
+	RuleEdges  []RuleEdgeFact   `json:"rule_edges,omitempty"`
 	Counts     Counts           `json:"counts"`
 }

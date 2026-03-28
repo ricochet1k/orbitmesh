@@ -22,6 +22,7 @@ const (
 	NodeLabelAPIHandler    = "APIHandler"
 	NodeLabelBlock         = "Block"
 	NodeLabelStatement     = "Statement"
+	NodeLabelTag           = "Tag"
 
 	EdgeLabelDefines        = "DEFINES"
 	EdgeLabelCalls          = "CALLS"
@@ -34,6 +35,7 @@ const (
 	EdgeLabelContainsBlock  = "CONTAINS_BLOCK"
 	EdgeLabelNext           = "NEXT"
 	EdgeLabelNextStmt       = "NEXT_STMT"
+	EdgeLabelHasTag         = "HAS_TAG"
 
 	defaultAnalyzerVersion = "codeflow-mvp-step2"
 	defaultDBPath          = ".codeflow-mvp.goraphdb"
@@ -74,6 +76,8 @@ type PersistenceSummary struct {
 	NextStmtEdges        int    `json:"next_stmt_edges"`
 	Statements           int    `json:"statements"`
 	Blocks               int    `json:"blocks"`
+	Tags                 int    `json:"tags"`
+	HasTagEdges          int    `json:"has_tag_edges"`
 	UnresolvedCalls      int    `json:"unresolved_calls"`
 }
 
@@ -113,7 +117,7 @@ func PersistExtraction(summary ExtractionSummary, opts PersistOptions) (Persiste
 	}
 	defer db.Close()
 
-	for _, label := range []string{NodeLabelFile, NodeLabelFunction, NodeLabelCallSite, NodeLabelExecutionUnit, NodeLabelFinding, NodeLabelAPIRequest, NodeLabelAPIHandler, NodeLabelBlock, NodeLabelStatement} {
+	for _, label := range []string{NodeLabelFile, NodeLabelFunction, NodeLabelCallSite, NodeLabelExecutionUnit, NodeLabelFinding, NodeLabelAPIRequest, NodeLabelAPIHandler, NodeLabelBlock, NodeLabelStatement, NodeLabelTag} {
 		if err := ensureUniqueConstraint(db, label, "id"); err != nil {
 			return PersistenceSummary{}, err
 		}
@@ -694,11 +698,49 @@ func PersistExtraction(summary ExtractionSummary, opts PersistOptions) (Persiste
 		}
 	}
 
+	// Persist Tag nodes and HAS_TAG edges
+	for _, tag := range summary.Tags {
+		tagID := tagNodeID(tag.NodeID, tag.TagName, tag.Domain, tag.RuleID)
+		tagNodeDBID, err := upsertNode(db, NodeLabelTag, tagID, graphdb.Props{
+			"id":              tagID,
+			"kind":            NodeLabelTag,
+			"name":            tag.TagName,
+			"domain":          tag.Domain,
+			"source":          tag.Source,
+			"rule_id":         tag.RuleID,
+			"propagated_from": tag.PropagatedFrom,
+			"confidence":      tag.Confidence,
+			"scan_epoch":       scanEpoch,
+			"producer":         producer,
+			"producer_version": producerVersion,
+		})
+		if err != nil {
+			return PersistenceSummary{}, fmt.Errorf("persist Tag node %q: %w", tagID, err)
+		}
+		summaryOut.Tags++
+
+		// Find the node that this tag applies to and create HAS_TAG edge
+		ownerNodeDBID, err := findNodeBySemanticID(db, tag.NodeID)
+		if err == nil && ownerNodeDBID != 0 {
+			created, err := upsertEdge(db, ownerNodeDBID, tagNodeDBID, EdgeLabelHasTag, graphdb.Props{
+				"scan_epoch":       scanEpoch,
+				"producer":         producer,
+				"producer_version": producerVersion,
+			})
+			if err != nil {
+				return PersistenceSummary{}, fmt.Errorf("persist HAS_TAG edge %q -> %q: %w", tag.NodeID, tagID, err)
+			}
+			if created {
+				summaryOut.HasTagEdges++
+			}
+		}
+	}
+
 	if err := retirePriorEpochFacts(db, touchedFiles, scanEpoch, producer); err != nil {
 		return PersistenceSummary{}, err
 	}
 
-	summaryOut.Edges = summaryOut.DefinesEdges + summaryOut.CallEdges + summaryOut.AtCallsiteEdges + summaryOut.SpawnEdges + summaryOut.FindingAtEdges + summaryOut.EmitsRequestEdges + summaryOut.HandlesRouteEdges + summaryOut.RequestsHandlerEdges
+	summaryOut.Edges = summaryOut.DefinesEdges + summaryOut.CallEdges + summaryOut.AtCallsiteEdges + summaryOut.SpawnEdges + summaryOut.FindingAtEdges + summaryOut.EmitsRequestEdges + summaryOut.HandlesRouteEdges + summaryOut.RequestsHandlerEdges + summaryOut.HasTagEdges
 	return summaryOut, nil
 }
 
@@ -906,6 +948,38 @@ func findingNodeID(fingerprint string) string {
 	return "finding:" + fingerprint
 }
 
+// tagNodeID generates a unique ID for a Tag node.
+func tagNodeID(ownerNodeID string, tagName string, domain string, ruleID string) string {
+	parts := ownerNodeID + "|tag:" + tagName
+	if domain != "" {
+		parts += "|domain:" + domain
+	}
+	if ruleID != "" {
+		parts += "|rule:" + ruleID
+	}
+	return "tag:" + hashString(parts)
+}
+
+// findNodeBySemanticID looks up a node's internal database ID by its semantic ID.
+// It tries multiple common node labels to find the node.
+func findNodeBySemanticID(db *graphdb.DB, semanticID string) (graphdb.NodeID, error) {
+	labels := []string{
+		NodeLabelFunction, NodeLabelCallSite, NodeLabelFile,
+		NodeLabelAPIRequest, NodeLabelAPIHandler, NodeLabelExecutionUnit,
+		NodeLabelBlock, NodeLabelStatement, NodeLabelFinding,
+	}
+	for _, label := range labels {
+		node, err := db.FindByUniqueConstraint(label, "id", semanticID)
+		if err != nil {
+			continue
+		}
+		if node != nil {
+			return node.ID, nil
+		}
+	}
+	return 0, fmt.Errorf("node %q not found", semanticID)
+}
+
 func cloneProps(props graphdb.Props) graphdb.Props {
 	if len(props) == 0 {
 		return graphdb.Props{}
@@ -922,7 +996,7 @@ func retirePriorEpochFacts(db *graphdb.DB, touchedFiles map[string]struct{}, cur
 		return nil
 	}
 
-	labels := []string{NodeLabelFile, NodeLabelFunction, NodeLabelCallSite, NodeLabelExecutionUnit, NodeLabelFinding, NodeLabelAPIRequest, NodeLabelAPIHandler}
+	labels := []string{NodeLabelFile, NodeLabelFunction, NodeLabelCallSite, NodeLabelExecutionUnit, NodeLabelFinding, NodeLabelAPIRequest, NodeLabelAPIHandler, NodeLabelTag}
 	touchedNodeIDs := map[graphdb.NodeID]struct{}{}
 	staleNodeIDs := map[graphdb.NodeID]struct{}{}
 

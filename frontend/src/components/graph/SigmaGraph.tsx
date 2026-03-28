@@ -14,8 +14,9 @@ const COLORS: Record<string, string> = {
   ExecutionUnit: "#805AD5", // Purple
   Finding: "#E53E3E", // Red
   CallSite: "#38A169", // Green
-  APIHandler: "#0BC5EA", // Cyan
-  APIRequest: "#DD6B20", // Orange
+  APIHandler: "#48BB78", // Green (backend)
+  APIRequest: "#4299E1", // Blue (frontend)
+  Tag: "#ED8936", // Orange (tags)
   default: "#A0AEC0",
 };
 

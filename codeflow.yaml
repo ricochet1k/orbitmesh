@@ -1,0 +1,215 @@
+version: "2"
+
+# Layer 1: Fact Generation Rules
+# These rules match AST patterns and emit tags/edges on the base graph.
+rules:
+  # ── Frontend API Requests ─────────────────────────────────────────
+  - id: "fetch_api_request"
+    match:
+      callee: ["fetch", "window.fetch", "globalThis.fetch"]
+    node:
+      tags: ["APIRequest", "HTTPClient"]
+
+  # ── Backend Chi Router Handlers ───────────────────────────────────
+  - id: "chi_get_handler"
+    match:
+      signature: "github.com/go-chi/chi/v5::*Router.Get($path, $handler)"
+    node:
+      tags: ["APIHandler", "HTTPServer"]
+
+  - id: "chi_post_handler"
+    match:
+      signature: "github.com/go-chi/chi/v5::*Router.Post($path, $handler)"
+    node:
+      tags: ["APIHandler", "HTTPServer"]
+
+  - id: "chi_put_handler"
+    match:
+      signature: "github.com/go-chi/chi/v5::*Router.Put($path, $handler)"
+    node:
+      tags: ["APIHandler", "HTTPServer"]
+
+  - id: "chi_delete_handler"
+    match:
+      signature: "github.com/go-chi/chi/v5::*Router.Delete($path, $handler)"
+    node:
+      tags: ["APIHandler", "HTTPServer"]
+
+  - id: "chi_patch_handler"
+    match:
+      signature: "github.com/go-chi/chi/v5::*Router.Patch($path, $handler)"
+    node:
+      tags: ["APIHandler", "HTTPServer"]
+
+  # ── Database Operations ───────────────────────────────────────────
+  - id: "sql_exec_write"
+    match:
+      signature: "database/sql::*DB.Exec(*)"
+    node:
+      tags: ["Write", "SQL"]
+      properties:
+        effect_domain: "sql"
+
+  - id: "sql_query_read"
+    match:
+      signature: "database/sql::*DB.Query(*)"
+    node:
+      tags: ["Read", "SQL"]
+      properties:
+        effect_domain: "sql"
+
+  # ── Concurrency ───────────────────────────────────────────────────
+  - id: "go_spawn"
+    match:
+      kind: "go_statement"
+    node:
+      tags: ["Spawn"]
+
+  - id: "spawn_in_loop"
+    match:
+      kind: "go_statement"
+      context:
+        ancestor:
+          kind: ["for_statement", "range_clause"]
+    node:
+      tags: ["SpawnInLoop"]
+
+  # ── Taint Sources ─────────────────────────────────────────────────
+  - id: "env_read"
+    match:
+      signature: "os::*.Getenv(*)"
+    node:
+      tags: ["TaintSource", "Environment"]
+
+  - id: "http_form_value"
+    match:
+      callee: ["FormValue", "PostFormValue"]
+    node:
+      tags: ["TaintSource", "UserInput"]
+    data_flow:
+      role: "source"
+      categories: ["injection"]
+
+  # ── Taint Sinks ──────────────────────────────────────────────────
+  - id: "sql_exec_sink"
+    match:
+      callee: [".Exec", ".ExecContext", ".Query", ".QueryContext"]
+    node:
+      tags: ["TaintSink", "SQL"]
+    data_flow:
+      role: "sink"
+      categories: ["sql_injection"]
+
+  - id: "exec_command_sink"
+    match:
+      callee: ["exec.Command", "exec.CommandContext"]
+    node:
+      tags: ["TaintSink", "CommandInjection"]
+    data_flow:
+      role: "sink"
+      categories: ["command_injection"]
+
+  # ── Sanitizers ───────────────────────────────────────────────────
+  - id: "html_escape_sanitizer"
+    match:
+      callee: ["html.EscapeString", "template.HTMLEscapeString", "url.QueryEscape"]
+    node:
+      tags: ["Sanitizer"]
+    data_flow:
+      role: "sanitizer"
+      categories: ["XSS"]
+
+  # ── Propagation Boundaries ───────────────────────────────────────
+  - id: "http_handler_boundary"
+    match:
+      signature: "net/http::*.ServeHTTP(*)"
+    node:
+      tags: ["Boundary"]
+      properties:
+        boundary_kind: "http_handler"
+
+# Layer 2a: Tag Propagation Configuration
+propagation:
+  tag_sets:
+    - id: "side_effects"
+      tags: ["Read", "Write"]
+
+    - id: "taint"
+      tags: ["TaintSource", "TaintSink", "Sanitizer"]
+      propagate_only: ["TaintSource"]
+
+    - id: "api_effects"
+      tags: ["APIRequest", "APIHandler", "HTTPClient", "HTTPServer"]
+
+  max_depth: 30
+  respect_boundaries: true
+  propagate_domains: true
+
+# Layer 3: Analysis Queries
+analyses:
+  - id: "unlinked_api_request"
+    severity: "info"
+    description: "Frontend API call with no matching backend handler"
+    query: |
+      MATCH (req:APIRequest)
+      WHERE NOT EXISTS((req)-[:REQUESTS_HANDLER]->())
+      RETURN req
+    explain: "Frontend API call to {{.req.path}} has no matching backend handler"
+
+  - id: "unhandled_route"
+    severity: "info"
+    description: "Backend route with no frontend caller"
+    query: |
+      MATCH (handler:APIHandler)
+      WHERE NOT EXISTS(()-[:REQUESTS_HANDLER]->(handler))
+      RETURN handler
+    explain: "Backend route {{.handler.method}} {{.handler.path}} has no frontend caller"
+
+  - id: "spawn_in_loop_finding"
+    severity: "medium"
+    description: "Goroutine spawn inside a loop"
+    query: |
+      MATCH (cs:CallSite)-[:HAS_TAG]->(t:Tag {name: "SpawnInLoop"})
+      RETURN cs
+    explain: "Goroutine spawn inside loop at {{.cs.file_id}}:{{.cs.start_line}}"
+
+  - id: "read_after_write_same_domain"
+    severity: "medium"
+    description: "Read follows write to the same data system within a single boundary"
+    query: |
+      MATCH (fn:Function)-[:HAS_TAG]->(tw:Tag {name: "Write"})
+      MATCH (fn)-[:HAS_TAG]->(tr:Tag {name: "Read"})
+      WHERE tw.domain = tr.domain
+      RETURN fn, tw, tr
+    explain: "Function {{.fn.name}} performs a write then read on {{.tw.domain}}"
+
+# Frontend Presentation
+visuals:
+  nodes:
+    - match_tag: "APIRequest"
+      shape: "circle"
+      color: "#4299E1"
+    - match_tag: "APIHandler"
+      shape: "circle"
+      color: "#48BB78"
+    - match_tag: "TaintSink"
+      shape: "octagon"
+      color: "#E53E3E"
+    - match_tag: "Boundary"
+      shape: "diamond"
+      color: "#4299E1"
+  edges:
+    - match_type: "REQUESTS_HANDLER"
+      stroke_dash: "solid"
+    - match_type: "SPAWNS"
+      stroke_dash: "dashed"
+    - match_type: "HAS_TAG"
+      visible: false
+  queries:
+    - id: "api_links"
+      query: |
+        MATCH (req:APIRequest)-[r:REQUESTS_HANDLER]->(handler:APIHandler)
+        RETURN req, r, handler
+      presentation:
+        path_color: "#ED8936"
+        highlight: true
