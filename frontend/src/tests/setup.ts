@@ -45,7 +45,6 @@ const dumpActiveHandles = (label: string) => {
   const handles = getter.call(process) as unknown[];
   const summary = handles.map((handle) => handle?.constructor?.name ?? "Unknown");
   if (summary.length === 0) return;
-  // eslint-disable-next-line no-console
   console.warn(`[vitest] ${label}: active handles`, summary);
 };
 
@@ -92,7 +91,6 @@ afterEach(() => {
 
 afterAll(() => {
   if (alwaysDump && (timeouts.size > 0 || intervals.size > 0)) {
-    // eslint-disable-next-line no-console
     console.warn(`[vitest] pending timers after run: ${timeouts.size} timeouts, ${intervals.size} intervals`);
     dumpActiveHandles("afterAll");
   }
