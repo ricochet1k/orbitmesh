@@ -16,7 +16,7 @@ export const Route = createFileRoute("/extractors")({
 
 type NoticeTone = "error" | "success" | "neutral";
 
-function ExtractorRulesView() {
+export default function ExtractorRulesView() {
   const [configResponse, { refetch }] = createResource(apiClient.getExtractorConfig);
   const { sessions } = useSessionStore();
   const [draft, setDraft] = createSignal<ExtractorConfig | null>(null);
@@ -33,6 +33,7 @@ function ExtractorRulesView() {
   const [loadingSnapshot, setLoadingSnapshot] = createSignal(false);
   const [replaying, setReplaying] = createSignal(false);
   const [initialized, setInitialized] = createSignal(false);
+  const [showAdvanced, setShowAdvanced] = createSignal(false);
 
   createEffect(() => {
     const response = configResponse();
@@ -261,6 +262,13 @@ function ExtractorRulesView() {
   return (
     <div class="extractor-view ds-page">
       <header class="view-header ds-page-header">
+        <div>
+          <p class="eyebrow ds-page-kicker">Extractors</p>
+          <h1 data-testid="extractors-heading">Extractor Workbench</h1>
+          <p class="dashboard-subtitle ds-page-subtitle">
+            Tune profile rules quickly; reveal snapshot/replay tooling only when needed.
+          </p>
+        </div>
         <div class="header-meta stats-bubbles ds-metrics">
           <div class="meta-card stat-bubble ds-metric">
             <p>Profiles</p>
@@ -276,6 +284,17 @@ function ExtractorRulesView() {
           </div>
         </div>
       </header>
+
+      <div class="ds-toolbar" data-testid="extractors-toolbar">
+        <button
+          type="button"
+          class="advanced-toggle-button ds-button ds-button-secondary"
+          aria-pressed={showAdvanced()}
+          onClick={() => setShowAdvanced((value) => !value)}
+        >
+          {showAdvanced() ? "Hide Advanced" : "Show Advanced"}
+        </button>
+      </div>
 
       <Show when={notice()}>
         {(current) => <p class={`extractor-banner ${current().tone}`}>{current().message}</p>}
@@ -584,107 +603,125 @@ function ExtractorRulesView() {
           </Show>
         </section>
 
-        <section class="extractor-panel content-block ds-panel">
-          <div class="panel-header ds-panel-header">
-            <div>
-              <p class="panel-kicker ds-kicker">Snapshots</p>
-              <h2>Region Preview</h2>
-            </div>
-            <div class="panel-tools">
-              <select value={selectedSessionId()} onChange={(event) => setSelectedSessionId(event.currentTarget.value)}>
-                <option value="">Select session</option>
-                <For each={sessions()?.sessions ?? []}>
-                  {(session) => (
-                    <option value={session.id}>
-                      {session.id.slice(0, 8)} · {session.provider_type} · {session.state}
-                    </option>
-                  )}
-                </For>
-              </select>
-              <button type="button" class="neutral" onClick={handleLoadSnapshot} disabled={loadingSnapshot()}>
-                {loadingSnapshot() ? "Loading..." : "Load snapshot"}
-              </button>
-            </div>
-          </div>
-          <div class="snapshot-preview">
-            <Show when={snapshot()} fallback={<p class="empty-state">Load a snapshot to preview regions.</p>}>
-              {(snap) => (
-                <div class="snapshot-shell">
-                  <div class="snapshot-meta">
-                    <span>{snap().rows} rows</span>
-                    <span>{snap().cols} cols</span>
-                    <span>Region: {formatRegion(regionPreview())}</span>
-                  </div>
-                  <div class="snapshot-lines">
-                    <For each={snap().lines}>
-                      {(line, index) => {
-                        const region = regionPreview();
-                        const row = index();
-                        if (!region || row < region.top || row >= region.bottom) {
-                          return <div class="snapshot-line">{line}</div>;
-                        }
-                        const { prefix, highlight, suffix } = splitLine(line, region.left, region.right);
-                        return (
-                          <div class="snapshot-line">
-                            <span>{prefix}</span>
-                            <span class="snapshot-highlight">{highlight || " "}</span>
-                            <span>{suffix}</span>
-                          </div>
-                        );
-                      }}
-                    </For>
-                  </div>
+        <Show
+          when={showAdvanced()}
+          fallback={
+            <section class="extractor-panel content-block ds-panel" data-testid="extractors-advanced-collapsed">
+              <div class="panel-header ds-panel-header">
+                <div>
+                  <p class="panel-kicker ds-kicker">Snapshots & replay</p>
+                  <h2>Advanced tooling</h2>
                 </div>
-              )}
-            </Show>
-          </div>
-        </section>
+                <span class="panel-pill neutral ds-pill ds-pill-neutral">Hidden</span>
+              </div>
+              <p class="muted">
+                Snapshot region preview and replay diagnostics are hidden in concise mode. Use <strong>Show Advanced</strong>.
+              </p>
+            </section>
+          }
+        >
+          <section class="extractor-panel content-block ds-panel" data-testid="extractors-snapshot-panel">
+            <div class="panel-header ds-panel-header">
+              <div>
+                <p class="panel-kicker ds-kicker">Snapshots</p>
+                <h2>Region Preview</h2>
+              </div>
+              <div class="panel-tools">
+                <select value={selectedSessionId()} onChange={(event) => setSelectedSessionId(event.currentTarget.value)}>
+                  <option value="">Select session</option>
+                  <For each={sessions()}>
+                    {(session) => (
+                      <option value={session.id}>
+                        {session.id.slice(0, 8)} · {session.provider_type} · {session.state}
+                      </option>
+                    )}
+                  </For>
+                </select>
+                <button type="button" class="neutral" onClick={handleLoadSnapshot} disabled={loadingSnapshot()}>
+                  {loadingSnapshot() ? "Loading..." : "Load snapshot"}
+                </button>
+              </div>
+            </div>
+            <div class="snapshot-preview">
+              <Show when={snapshot()} fallback={<p class="empty-state">Load a snapshot to preview regions.</p>}>
+                {(snap) => (
+                  <div class="snapshot-shell">
+                    <div class="snapshot-meta">
+                      <span>{snap().rows} rows</span>
+                      <span>{snap().cols} cols</span>
+                      <span>Region: {formatRegion(regionPreview())}</span>
+                    </div>
+                    <div class="snapshot-lines">
+                      <For each={snap().lines}>
+                        {(line, index) => {
+                          const region = regionPreview();
+                          const row = index();
+                          if (!region || row < region.top || row >= region.bottom) {
+                            return <div class="snapshot-line">{line}</div>;
+                          }
+                          const { prefix, highlight, suffix } = splitLine(line, region.left, region.right);
+                          return (
+                            <div class="snapshot-line">
+                              <span>{prefix}</span>
+                              <span class="snapshot-highlight">{highlight || " "}</span>
+                              <span>{suffix}</span>
+                            </div>
+                          );
+                        }}
+                      </For>
+                    </div>
+                  </div>
+                )}
+              </Show>
+            </div>
+          </section>
 
-        <section class="extractor-panel content-block ds-panel">
-          <div class="panel-header ds-panel-header">
-            <div>
-              <p class="panel-kicker ds-kicker">Replay</p>
-              <h2>Extractor Replay</h2>
+          <section class="extractor-panel content-block ds-panel" data-testid="extractors-replay-panel">
+            <div class="panel-header ds-panel-header">
+              <div>
+                <p class="panel-kicker ds-kicker">Replay</p>
+                <h2>Extractor Replay</h2>
+              </div>
+              <div class="panel-tools">
+                <input
+                  type="text"
+                  placeholder="Start offset (optional)"
+                  value={startOffset()}
+                  onInput={(event) => setStartOffset(event.currentTarget.value)}
+                />
+                <button type="button" class="neutral" onClick={handleReplay} disabled={replaying()}>
+                  {replaying() ? "Replaying..." : "Run replay"}
+                </button>
+              </div>
             </div>
-            <div class="panel-tools">
-              <input
-                type="text"
-                placeholder="Start offset (optional)"
-                value={startOffset()}
-                onInput={(event) => setStartOffset(event.currentTarget.value)}
-              />
-              <button type="button" class="neutral" onClick={handleReplay} disabled={replaying()}>
-                {replaying() ? "Replaying..." : "Run replay"}
-              </button>
+            <div class="replay-results">
+              <Show when={replayResult()} fallback={<p class="empty-state">No replay results yet.</p>}>
+                {(result) => (
+                  <div class="replay-shell">
+                    <div class="replay-meta">
+                      <span>Offset: {result().offset}</span>
+                      <span>Frames: {result().diagnostics.frames}</span>
+                      <span>Bytes: {result().diagnostics.bytes}</span>
+                    </div>
+                    <div class="replay-records">
+                      <For each={result().records}>
+                        {(record) => (
+                          <div class="replay-record">
+                            <header>
+                              <span>{record.type}</span>
+                              <span>{record.entry?.kind ?? record.id ?? ""}</span>
+                            </header>
+                            <p>{formatRecord(record)}</p>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </div>
+                )}
+              </Show>
             </div>
-          </div>
-          <div class="replay-results">
-            <Show when={replayResult()} fallback={<p class="empty-state">No replay results yet.</p>}>
-              {(result) => (
-                <div class="replay-shell">
-                  <div class="replay-meta">
-                    <span>Offset: {result().offset}</span>
-                    <span>Frames: {result().diagnostics.frames}</span>
-                    <span>Bytes: {result().diagnostics.bytes}</span>
-                  </div>
-                  <div class="replay-records">
-                    <For each={result().records}>
-                      {(record) => (
-                        <div class="replay-record">
-                          <header>
-                            <span>{record.type}</span>
-                            <span>{record.entry?.kind ?? record.id ?? ""}</span>
-                          </header>
-                          <p>{formatRecord(record)}</p>
-                        </div>
-                      )}
-                    </For>
-                  </div>
-                </div>
-              )}
-            </Show>
-          </div>
-        </section>
+          </section>
+        </Show>
       </main>
     </div>
   );

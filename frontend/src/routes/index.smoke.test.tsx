@@ -1,4 +1,4 @@
-import { render, screen } from "@solidjs/testing-library";
+import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Dashboard from "./index";
 
@@ -47,9 +47,13 @@ describe("Dashboard route smoke", () => {
 
     expect(await screen.findByText("No recent actions")).toBeDefined();
     expect(screen.getByText("No open findings")).toBeDefined();
-    expect(screen.getByText("No risk paths")).toBeDefined();
+    expect(screen.queryByText("No risk paths")).toBeNull();
 
     expect(screen.getByText(/^unknown$/i)).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show Advanced" }));
+
+    expect(await screen.findByText("No risk paths")).toBeDefined();
     expect(screen.getByText("frontend/src/routes/index.tsx")).toBeDefined();
     expect(screen.getByText("0 touches | 0 findings")).toBeDefined();
   });

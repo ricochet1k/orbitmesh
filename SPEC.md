@@ -34,7 +34,7 @@ The following is a comprehensive list of features that have been identified, eit
 
 ### Frontend & User Interface
 - [x] **Frontend Architecture**: [specs/features/ui/frontend-architecture.md](specs/features/ui/frontend-architecture.md)
-- [ ] **UI Flows**: [specs/features/ui/ui-flows.md](specs/features/ui/ui-flows.md)
+- [x] **UI Flows**: [specs/features/ui/ui-flows.md](specs/features/ui/ui-flows.md)
 - [ ] **Management Interfaces**: [specs/features/ui/management-interfaces.md](specs/features/ui/management-interfaces.md)
 - [x] **Agent Session Viewer**: [specs/features/ui/agent-session-viewer.md](specs/features/ui/agent-session-viewer.md)
 - [ ] **Session Terminal Dashboard**: [specs/features/ui/session-terminal-dashboard.md](specs/features/ui/session-terminal-dashboard.md)
