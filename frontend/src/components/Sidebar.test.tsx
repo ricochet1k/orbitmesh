@@ -5,7 +5,7 @@ import Sidebar from "./Sidebar";
 // Mock the router Link component
 vi.mock("@tanstack/solid-router", () => ({
   Link: (props: any) => (
-    <a href={props.to} class={props.class} data-testid={`link-${props.to}`}>
+    <a href={props.to} class={props.class} data-testid={`link-${props.to}`} onClick={props.onClick}>
       {props.children}
     </a>
   ),
@@ -135,5 +135,30 @@ describe("Sidebar Navigation", () => {
     expect(menu.classList.contains("open")).toBe(true);
     await fireEvent.click(toggle);
     expect(menu.classList.contains("open")).toBe(false);
+  });
+
+  it("updates aria-expanded for responsive menu toggle state", async () => {
+    render(() => <Sidebar />);
+    const toggle = screen.getByRole("button", { name: "Toggle navigation menu" });
+
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    await fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    await fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("closes mobile menu when a navigation link is selected", async () => {
+    const { container } = render(() => <Sidebar />);
+    const menu = container.querySelector("#sidebar-menu") as HTMLElement;
+    const toggle = screen.getByRole("button", { name: "Toggle navigation menu" });
+    const tasksLink = screen.getByTestId("link-/tasks");
+
+    await fireEvent.click(toggle);
+    expect(menu.classList.contains("open")).toBe(true);
+
+    await fireEvent.click(tasksLink);
+    expect(menu.classList.contains("open")).toBe(false);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
   });
 });

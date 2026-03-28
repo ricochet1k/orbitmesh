@@ -14,17 +14,18 @@ OrbitMesh consists of a Go-based backend providing the execution engine, databas
 The following is a comprehensive list of features that have been identified, either implemented without a formal spec, or planned for the future. Every feature listed here must have its own detailed spec file in the `specs/features/` or `specs/future/` directories before its development can be finalized.
 
 ### Core Engine & Infrastructure
+- [x] **Backend Architecture**: [specs/features/core/backend-architecture.md](specs/features/core/backend-architecture.md)
 - [x] **Backend Agent Execution Engine**: [specs/features/core/backend-agent-execution-engine.md](specs/features/core/backend-agent-execution-engine.md)
 - [ ] **Task Scheduler**: [specs/features/core/task-scheduler.md](specs/features/core/task-scheduler.md)
-- [ ] **Backend Architecture**: [specs/features/core/backend-architecture.md](specs/features/core/backend-architecture.md)
 - [ ] **Global Session State Stream**: [specs/features/core/global-session-state-stream.md](specs/features/core/global-session-state-stream.md)
-- [ ] **Resumable Session Recovery**: [specs/features/core/resumable-session-recovery.md](specs/features/core/resumable-session-recovery.md)
+- [x] **Resumable Session Recovery**: [specs/features/core/resumable-session-recovery.md](specs/features/core/resumable-session-recovery.md)
+- [ ] **Long-Running Async Tools**: [specs/features/core/long-running-async-tools.md](specs/features/core/long-running-async-tools.md)
 - [ ] **Session Lifecycle Design**: [specs/features/core/session-lifecycle.md](specs/features/core/session-lifecycle.md)
 - [x] **Generic Session Events**: [specs/features/core/generic-session-events.md](specs/features/core/generic-session-events.md)
 - [ ] **Entity Storage Architecture**: [specs/features/core/entity-storage-architecture.md](specs/features/core/entity-storage-architecture.md)
 - [ ] **Session Event Types**: [specs/features/core/session-event-types.md](specs/features/core/session-event-types.md)
 - [ ] **Realtime Websocket Feed**: [specs/features/core/realtime-websocket.md](specs/features/core/realtime-websocket.md)
-- [ ] **TermEmu PTY Websocket Activity Feed**: [specs/features/core/termemu-pty-websocket-activity-feed.md](specs/features/core/termemu-pty-websocket-activity-feed.md)
+- [x] **TermEmu PTY Websocket Activity Feed**: [specs/features/core/termemu-pty-websocket-activity-feed.md](specs/features/core/termemu-pty-websocket-activity-feed.md)
 - [ ] **Terminal Connection Writer Lock UX**: [specs/features/core/terminal-connection-writer-lock.md](specs/features/core/terminal-connection-writer-lock.md)
 - [ ] **PTY Advanced Extraction**: [specs/features/core/pty-advanced-extraction.md](specs/features/core/pty-advanced-extraction.md)
 - [ ] **Monitoring and Metrics**: [specs/features/core/monitoring-and-metrics.md](specs/features/core/monitoring-and-metrics.md)
@@ -32,8 +33,8 @@ The following is a comprehensive list of features that have been identified, eit
 - [ ] **Session Streaming Storage Audit**: [specs/features/core/session-streaming-storage.md](specs/features/core/session-streaming-storage.md)
 
 ### Frontend & User Interface
-- [ ] **Frontend Architecture**: [specs/features/ui/frontend-architecture.md](specs/features/ui/frontend-architecture.md)
-- [ ] **UI Flows**: [specs/features/ui/ui-flows.md](specs/features/ui/ui-flows.md)
+- [x] **Frontend Architecture**: [specs/features/ui/frontend-architecture.md](specs/features/ui/frontend-architecture.md)
+- [x] **UI Flows**: [specs/features/ui/ui-flows.md](specs/features/ui/ui-flows.md)
 - [ ] **Management Interfaces**: [specs/features/ui/management-interfaces.md](specs/features/ui/management-interfaces.md)
 - [x] **Agent Session Viewer**: [specs/features/ui/agent-session-viewer.md](specs/features/ui/agent-session-viewer.md)
 - [ ] **Session Terminal Dashboard**: [specs/features/ui/session-terminal-dashboard.md](specs/features/ui/session-terminal-dashboard.md)
@@ -41,6 +42,7 @@ The following is a comprehensive list of features that have been identified, eit
 - [ ] **Transcript Paging Contract**: [specs/features/ui/transcript-paging-contract.md](specs/features/ui/transcript-paging-contract.md)
 
 ### CodeFlow Explorer (Visualization)
+- [ ] **Read-After-Write Detection**: [specs/features/codeflow/read-after-write-detection.md](specs/features/codeflow/read-after-write-detection.md)
 - [x] **CodeFlow Explorer Backend Design**: [specs/features/codeflow/codeflow-explorer-backend-design.md](specs/features/codeflow/codeflow-explorer-backend-design.md)
 - [ ] **CodeFlow Node Graph Canvas Interface**: [specs/features/codeflow/node-graph-canvas-interface.md](specs/features/codeflow/node-graph-canvas-interface.md)
 - [ ] **CodeFlow Explorer Data Flow Type Lineage**: [specs/features/codeflow/data-flow-type-lineage.md](specs/features/codeflow/data-flow-type-lineage.md)

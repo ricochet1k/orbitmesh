@@ -216,6 +216,9 @@ func (e *extractor) walkGoNode(node *gotreesitter.Node, lang *gotreesitter.Langu
 				Start:     toPosition(node.StartPoint()),
 				End:       toPosition(node.EndPoint()),
 			})
+			if bodyNode := node.ChildByFieldName("body", lang); bodyNode != nil {
+				e.buildGoCFGForFunction(node, bodyNode, lang, source, fileID, functionID)
+			}
 			nextState.currentFunctionID = functionID
 		}
 	case "method_declaration":
@@ -240,6 +243,9 @@ func (e *extractor) walkGoNode(node *gotreesitter.Node, lang *gotreesitter.Langu
 				Start:     toPosition(node.StartPoint()),
 				End:       toPosition(node.EndPoint()),
 			})
+			if bodyNode := node.ChildByFieldName("body", lang); bodyNode != nil {
+				e.buildGoCFGForFunction(node, bodyNode, lang, source, fileID, methodID)
+			}
 			nextState.currentFunctionID = methodID
 		}
 	case "call_expression":
@@ -295,6 +301,13 @@ func (e *extractor) extractGoAPIHandler(node *gotreesitter.Node, lang *gotreesit
 		return
 	}
 	callee := strings.TrimSpace(calleeNode.Text(source))
+
+	// Check for chi sub-router: r.Route("/prefix", func(sub chi.Router) { ... })
+	if isRouteGroupCallee(callee) {
+		e.extractGoRouteGroup(node, lang, source, fileID, pkgID)
+		return
+	}
+
 	method := goRouteMethodFromCallee(callee)
 	if method == "" {
 		return
@@ -319,11 +332,15 @@ func (e *extractor) extractGoAPIHandler(node *gotreesitter.Node, lang *gotreesit
 		return
 	}
 
+	// Attempt to resolve the handler expression to a function ID.
+	functionID := e.resolveGoHandlerFunctionID(handlerExpr, pkgID)
+
 	apiHandlerID := e.nextAPIHandlerID(fileID, method, normalizedPath)
 	e.summary.APIRoutes = append(e.summary.APIRoutes, APIHandlerFact{
 		ID:             apiHandlerID,
 		FileID:         fileID,
 		PackageID:      pkgID,
+		FunctionID:     functionID,
 		HandlerExpr:    handlerExpr,
 		Method:         method,
 		Path:           rawPath,
@@ -331,6 +348,159 @@ func (e *extractor) extractGoAPIHandler(node *gotreesitter.Node, lang *gotreesit
 		Start:          toPosition(node.StartPoint()),
 		End:            toPosition(node.EndPoint()),
 	})
+}
+
+// isRouteGroupCallee checks if a callee expression is a chi Route/Group call.
+func isRouteGroupCallee(callee string) bool {
+	parts := strings.Split(callee, ".")
+	if len(parts) == 0 {
+		return false
+	}
+	switch parts[len(parts)-1] {
+	case "Route", "Group":
+		return true
+	default:
+		return false
+	}
+}
+
+// extractGoRouteGroup handles chi sub-router patterns like:
+//   r.Route("/api/v1", func(sub chi.Router) { sub.Get("/providers", h.listProviders) })
+// It extracts routes from the callback function with the prefix prepended.
+func (e *extractor) extractGoRouteGroup(node *gotreesitter.Node, lang *gotreesitter.Language, source []byte, fileID string, pkgID string) {
+	argsNode := node.ChildByFieldName("arguments", lang)
+	if argsNode == nil {
+		return
+	}
+	args := namedChildren(argsNode)
+	if len(args) < 2 {
+		return
+	}
+
+	// First arg is the path prefix
+	prefix, ok := parseStringLiteral(strings.TrimSpace(args[0].Text(source)))
+	if !ok {
+		prefix = ""
+	}
+
+	// Second arg is the callback function — walk it to find sub-routes
+	fnNode := args[1]
+	if fnNode.Type(lang) != "func_literal" {
+		return
+	}
+
+	bodyNode := fnNode.ChildByFieldName("body", lang)
+	if bodyNode == nil {
+		return
+	}
+
+	// Walk the callback body looking for route registrations
+	e.walkGoRouteGroupBody(bodyNode, lang, source, fileID, pkgID, prefix)
+}
+
+// walkGoRouteGroupBody walks a chi router callback body to extract sub-routes.
+func (e *extractor) walkGoRouteGroupBody(node *gotreesitter.Node, lang *gotreesitter.Language, source []byte, fileID string, pkgID string, prefix string) {
+	if node == nil {
+		return
+	}
+
+	if node.Type(lang) == "call_expression" {
+		calleeNode := node.ChildByFieldName("function", lang)
+		if calleeNode != nil {
+			callee := strings.TrimSpace(calleeNode.Text(source))
+
+			// Recursive sub-route group
+			if isRouteGroupCallee(callee) {
+				argsNode := node.ChildByFieldName("arguments", lang)
+				if argsNode != nil {
+					args := namedChildren(argsNode)
+					if len(args) >= 2 {
+						subPrefix, ok := parseStringLiteral(strings.TrimSpace(args[0].Text(source)))
+						if ok {
+							fnNode := args[1]
+							if fnNode.Type(lang) == "func_literal" {
+								bodyNode := fnNode.ChildByFieldName("body", lang)
+								if bodyNode != nil {
+									e.walkGoRouteGroupBody(bodyNode, lang, source, fileID, pkgID, prefix+subPrefix)
+								}
+							}
+						}
+					}
+				}
+				return
+			}
+
+			method := goRouteMethodFromCallee(callee)
+			if method != "" {
+				argsNode := node.ChildByFieldName("arguments", lang)
+				if argsNode != nil {
+					args := namedChildren(argsNode)
+					if len(args) >= 2 {
+						rawPath, ok := parseStringLiteral(strings.TrimSpace(args[0].Text(source)))
+						if ok {
+							fullPath := prefix + rawPath
+							handlerExpr := strings.TrimSpace(args[1].Text(source))
+							normalizedPath := normalizeAPIPath(fullPath)
+							if normalizedPath != "" && handlerExpr != "" {
+								functionID := e.resolveGoHandlerFunctionID(handlerExpr, pkgID)
+								apiHandlerID := e.nextAPIHandlerID(fileID, method, normalizedPath)
+								e.summary.APIRoutes = append(e.summary.APIRoutes, APIHandlerFact{
+									ID:             apiHandlerID,
+									FileID:         fileID,
+									PackageID:      pkgID,
+									FunctionID:     functionID,
+									HandlerExpr:    handlerExpr,
+									Method:         method,
+									Path:           fullPath,
+									NormalizedPath: normalizedPath,
+									Start:          toPosition(node.StartPoint()),
+									End:            toPosition(node.EndPoint()),
+								})
+							}
+						}
+					}
+				}
+				return
+			}
+		}
+	}
+
+	for _, child := range node.Children() {
+		e.walkGoRouteGroupBody(child, lang, source, fileID, pkgID, prefix)
+	}
+}
+
+// resolveGoHandlerFunctionID attempts to resolve a handler expression like "h.listSessions"
+// to a function ID like "backend/internal/api:api.(Handler).listSessions".
+func (e *extractor) resolveGoHandlerFunctionID(handlerExpr string, pkgID string) string {
+	// Handle method value expressions: h.listSessions, handler.Mount
+	parts := strings.Split(handlerExpr, ".")
+	if len(parts) == 2 {
+		methodName := parts[1]
+		// Search known functions in the same package for a matching method
+		for _, fn := range e.summary.Functions {
+			if fn.PackageID != pkgID {
+				continue
+			}
+			if fn.Name == methodName && fn.Receiver != "" {
+				return fn.ID
+			}
+		}
+	}
+
+	// Handle bare function references: listSessions
+	if len(parts) == 1 && !strings.Contains(handlerExpr, "(") {
+		for _, fn := range e.summary.Functions {
+			if fn.PackageID != pkgID {
+				continue
+			}
+			if fn.Name == handlerExpr {
+				return fn.ID
+			}
+		}
+	}
+
+	return ""
 }
 
 func goRouteMethodFromCallee(callee string) string {
@@ -428,6 +598,61 @@ func normalizeType(raw string) string {
 		return "unknown"
 	}
 	return normalized
+}
+
+// resolveAPIHandlerFunctionIDs performs a post-extraction pass to resolve
+// handler function IDs that couldn't be resolved during extraction.
+// This handles cases where the handler method is in a different file
+// within the same package, or was extracted after the route registration.
+func (e *extractor) resolveAPIHandlerFunctionIDs() {
+	// Build lookup: pkgID -> methodName -> functionID (for methods with receivers)
+	// Also: pkgID -> funcName -> functionID (for bare functions)
+	type methodKey struct {
+		pkgID      string
+		methodName string
+	}
+
+	methodIndex := make(map[methodKey]string, len(e.summary.Functions))
+	funcIndex := make(map[methodKey]string, len(e.summary.Functions))
+
+	for _, fn := range e.summary.Functions {
+		if fn.Receiver != "" {
+			methodIndex[methodKey{fn.PackageID, fn.Name}] = fn.ID
+		}
+		funcIndex[methodKey{fn.PackageID, fn.Name}] = fn.ID
+	}
+
+	for i := range e.summary.APIRoutes {
+		route := &e.summary.APIRoutes[i]
+		if route.FunctionID != "" {
+			continue // Already resolved
+		}
+
+		handlerExpr := route.HandlerExpr
+		parts := strings.Split(handlerExpr, ".")
+		pkgID := route.PackageID
+
+		// Method value: h.listSessions
+		if len(parts) == 2 {
+			methodName := parts[1]
+			if id, ok := methodIndex[methodKey{pkgID, methodName}]; ok {
+				route.FunctionID = id
+				continue
+			}
+			// Fallback to any function with that name
+			if id, ok := funcIndex[methodKey{pkgID, methodName}]; ok {
+				route.FunctionID = id
+			}
+			continue
+		}
+
+		// Bare function reference: listSessions
+		if len(parts) == 1 && !strings.Contains(handlerExpr, "(") {
+			if id, ok := funcIndex[methodKey{pkgID, handlerExpr}]; ok {
+				route.FunctionID = id
+			}
+		}
+	}
 }
 
 func toPosition(point gotreesitter.Point) Position {

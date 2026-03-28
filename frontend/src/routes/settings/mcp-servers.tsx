@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/solid-router'
 import { createResource, createSignal, For, Show } from 'solid-js'
 import { apiClient } from '../../api/client'
+import PageScaffold from '../../components/PageScaffold'
 import type {
   MCPServerEntryRequest,
   MCPServerEntryResponse,
@@ -262,7 +263,7 @@ function CapabilitiesPanel(props: { serverId: string }) {
   }
 
   return (
-    <div class="capabilities-panel" style={{"margin-top":"0.5rem"}}>
+    <div class="capabilities-panel">
       <Show when={!caps()}>
         <button
           class="btn btn-secondary"
@@ -274,23 +275,23 @@ function CapabilitiesPanel(props: { serverId: string }) {
       </Show>
 
       <Show when={error()}>
-        <p class="error-message" style={{"margin-top":"0.25rem"}}>{error()}</p>
+        <p class="error-message capabilities-error">{error()}</p>
       </Show>
 
       <Show when={caps()}>
-        <div style={{"margin-top":"0.5rem"}}>
-          <h4 style={{"margin":"0 0 0.25rem"}}>Tools ({caps()!.tools.length})</h4>
+        <div class="capabilities-content">
+          <h4 class="capabilities-subhead">Tools ({caps()!.tools.length})</h4>
           <Show
             when={caps()!.tools.length > 0}
             fallback={<p class="muted">No tools</p>}
           >
-            <ul class="tool-list" style={{"list-style":"none","padding":"0","margin":"0"}}>
+            <ul class="tool-list capabilities-list">
               <For each={caps()!.tools}>
                 {(tool) => (
-                  <li style={{"padding":"0.25rem 0","border-bottom":"1px solid var(--border, #333)"}}>
+                  <li class="capabilities-item capabilities-item-bordered">
                     <strong>{tool.name}</strong>
                     <Show when={tool.description}>
-                      <span class="muted" style={{"margin-left":"0.5rem"}}>{tool.description}</span>
+                      <span class="muted capabilities-description">{tool.description}</span>
                     </Show>
                   </li>
                 )}
@@ -299,14 +300,14 @@ function CapabilitiesPanel(props: { serverId: string }) {
           </Show>
 
           <Show when={caps()!.resources && caps()!.resources!.length > 0}>
-            <h4 style={{"margin":"0.5rem 0 0.25rem"}}>Resources ({caps()!.resources!.length})</h4>
-            <ul class="tool-list" style={{"list-style":"none","padding":"0","margin":"0"}}>
+            <h4 class="capabilities-subhead capabilities-subhead-top">Resources ({caps()!.resources!.length})</h4>
+            <ul class="tool-list capabilities-list">
               <For each={caps()!.resources}>
                 {(res) => (
-                  <li style={{"padding":"0.25rem 0"}}>
+                  <li class="capabilities-item">
                     <strong>{res.name || res.uri}</strong>
                     <Show when={res.description}>
-                      <span class="muted" style={{"margin-left":"0.5rem"}}>{res.description}</span>
+                      <span class="muted capabilities-description">{res.description}</span>
                     </Show>
                   </li>
                 )}
@@ -315,14 +316,14 @@ function CapabilitiesPanel(props: { serverId: string }) {
           </Show>
 
           <Show when={caps()!.prompts && caps()!.prompts!.length > 0}>
-            <h4 style={{"margin":"0.5rem 0 0.25rem"}}>Prompts ({caps()!.prompts!.length})</h4>
-            <ul class="tool-list" style={{"list-style":"none","padding":"0","margin":"0"}}>
+            <h4 class="capabilities-subhead capabilities-subhead-top">Prompts ({caps()!.prompts!.length})</h4>
+            <ul class="tool-list capabilities-list">
               <For each={caps()!.prompts}>
                 {(prompt) => (
-                  <li style={{"padding":"0.25rem 0"}}>
+                  <li class="capabilities-item">
                     <strong>{prompt.name}</strong>
                     <Show when={prompt.description}>
-                      <span class="muted" style={{"margin-left":"0.5rem"}}>{prompt.description}</span>
+                      <span class="muted capabilities-description">{prompt.description}</span>
                     </Show>
                   </li>
                 )}
@@ -332,7 +333,7 @@ function CapabilitiesPanel(props: { serverId: string }) {
 
           <button
             class="btn btn-secondary"
-            style={{"margin-top":"0.5rem"}}
+            classList={{ "capabilities-refresh": true }}
             onClick={loadCapabilities}
             disabled={loading()}
           >
@@ -389,7 +390,7 @@ function OAuthButton(props: { server: MCPServerEntryResponse; onAuthorized: () =
             {authorizing() ? 'Authorizing…' : 'Authorize'}
           </button>
           <Show when={error()}>
-            <p class="error-message" style={{"margin-top":"0.25rem"}}>{error()}</p>
+            <p class="error-message capabilities-error">{error()}</p>
           </Show>
         </>
       }
@@ -397,7 +398,7 @@ function OAuthButton(props: { server: MCPServerEntryResponse; onAuthorized: () =
       <span class="meta-chip">authorized</span>
       <button
         class="btn btn-secondary"
-        style={{"margin-left":"0.5rem"}}
+        classList={{ "oauth-revoke-btn": true }}
         onClick={async () => {
           await apiClient.revokeMCPOAuthToken(props.server.id)
           props.onAuthorized()
@@ -411,9 +412,10 @@ function OAuthButton(props: { server: MCPServerEntryResponse; onAuthorized: () =
 
 // ---- Page ----
 
-function MCPServersPage() {
+export default function MCPServersPage() {
   const [servers, { refetch }] = createResource(() => apiClient.listMCPServers())
   const [formMode, setFormMode] = createSignal<null | 'add' | string>(null)
+  const [showAdvanced, setShowAdvanced] = createSignal(false)
 
   const openAdd = () => setFormMode('add')
   const openEdit = (id: string) => setFormMode(id)
@@ -426,25 +428,44 @@ function MCPServersPage() {
   }
 
   return (
-    <section class="placeholder-panel ds-panel">
-      <div class="panel-header ds-panel-header">
-        <div>
-          <p class="panel-kicker ds-kicker">Configuration</p>
-          <h2>MCP Servers</h2>
+    <PageScaffold
+      kicker="Configuration"
+      title="MCP Servers"
+      subtitle="Configure server connections first; reveal auth/tool introspection only when needed."
+      testId="mcp-servers-page"
+      metrics={
+        <div class="meta-card stat-bubble ds-metric" data-testid="mcp-servers-meta-total">
+          <p>Servers</p>
+          <strong>{servers()?.servers.length ?? 0}</strong>
         </div>
-        <Show
-          when={formMode() === 'add'}
-          fallback={
-            <button class="btn btn-primary" onClick={openAdd}>
-              Add Server
+      }
+      toolbar={
+        <>
+          <Show
+            when={formMode() === 'add'}
+            fallback={
+              <button class="btn btn-primary" onClick={openAdd}>
+                Add Server
+              </button>
+            }
+          >
+            <button class="btn btn-secondary" onClick={closeForm}>
+              Cancel
             </button>
-          }
-        >
-          <button class="btn btn-secondary" onClick={closeForm}>
-            Cancel
+          </Show>
+          <button
+            type="button"
+            class="advanced-toggle-button ds-button ds-button-secondary"
+            aria-pressed={showAdvanced()}
+            onClick={() => setShowAdvanced((value) => !value)}
+          >
+            {showAdvanced() ? 'Hide Advanced' : 'Show Advanced'}
           </button>
-        </Show>
-      </div>
+        </>
+      }
+    >
+
+      <section class="placeholder-panel ds-panel">
 
       <Show when={formMode() === 'add'}>
         <MCPServerForm
@@ -497,11 +518,21 @@ function MCPServersPage() {
                     </Show>
                   </div>
                   <Show when={server.auth_type === 'oauth2'}>
-                    <div style={{"margin-top":"0.5rem"}}>
-                      <OAuthButton server={server} onAuthorized={() => refetch()} />
-                    </div>
+                    <Show
+                      when={showAdvanced()}
+                      fallback={<p class="muted" data-testid={`mcp-oauth-collapsed-${server.id}`}>OAuth controls hidden in concise mode.</p>}
+                    >
+                      <div class="oauth-controls">
+                        <OAuthButton server={server} onAuthorized={() => refetch()} />
+                      </div>
+                    </Show>
                   </Show>
-                  <CapabilitiesPanel serverId={server.id} />
+                  <Show
+                    when={showAdvanced()}
+                    fallback={<p class="muted" data-testid={`mcp-tools-collapsed-${server.id}`}>Tool introspection hidden in concise mode.</p>}
+                  >
+                    <CapabilitiesPanel serverId={server.id} />
+                  </Show>
                 </div>
                 <div class="provider-actions">
                   <button
@@ -542,6 +573,7 @@ function MCPServersPage() {
           )}
         </For>
       </div>
-    </section>
+      </section>
+    </PageScaffold>
   )
 }

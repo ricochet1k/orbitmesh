@@ -117,6 +117,8 @@ describe("Dashboard route", () => {
     expect(screen.getByText(/Session state: suspended/i)).toBeDefined();
     expect(screen.getAllByText(/^high$/i).length).toBeGreaterThan(0);
     expect(screen.getByText("Dangerous call detected")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show Advanced" }));
     expect(screen.getByText(/Risk 93/i)).toBeDefined();
     expect(screen.getByText(/2 findings/i)).toBeDefined();
     expect(screen.getByText("RenderDashboard")).toBeDefined();
@@ -186,7 +188,9 @@ describe("Dashboard route", () => {
 
     expect(await screen.findByText(/No recent actions/i)).toBeDefined();
     expect(screen.getByText(/No open findings/i)).toBeDefined();
-    expect(screen.getByText(/0 findings/i)).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show Advanced" }));
+    expect(await screen.findByText(/0 findings/i)).toBeDefined();
   });
 
   it("triggers codeflow scan and keeps refetching until codeflow data appears", async () => {

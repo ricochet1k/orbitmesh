@@ -3859,6 +3859,49 @@ tbody tr:hover {
   border: 1px solid color-mix(in srgb, var(--color-error) 35%, transparent);
 }
 
+.oauth-controls,
+.capabilities-panel,
+.capabilities-content,
+.capabilities-refresh {
+  margin-top: 0.5rem;
+}
+
+.oauth-revoke-btn,
+.capabilities-description {
+  margin-left: 0.5rem;
+}
+
+.capabilities-error {
+  margin-top: 0.25rem;
+}
+
+.capabilities-subhead {
+  margin: 0 0 0.25rem;
+}
+
+.capabilities-subhead-top {
+  margin-top: 0.5rem;
+}
+
+.capabilities-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.capabilities-item {
+  padding: 0.25rem 0;
+}
+
+.capabilities-item-bordered {
+  border-bottom: 1px solid var(--border, #333);
+}
+
+.advanced-toggle-button {
+  min-width: 9rem;
+  justify-content: center;
+}
+
 .ui-stability-toast-stack {
   position: fixed;
   right: 1rem;

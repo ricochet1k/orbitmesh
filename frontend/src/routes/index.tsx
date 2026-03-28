@@ -106,6 +106,7 @@ export default function Dashboard(props: DashboardProps = {}) {
   const navigate = useNavigate();
   const [window, setWindow] = createSignal<"24h" | "7d">("7d");
   const [scanPending, setScanPending] = createSignal(false);
+  const [showAdvanced, setShowAdvanced] = createSignal(false);
   const [summary, { refetch }] = createResource(window, apiClient.getDashboardSummary);
 
   const summaryData = createMemo(() => normalizeSummary(summary()));
@@ -154,6 +155,14 @@ export default function Dashboard(props: DashboardProps = {}) {
             <button type="button" class={`btn ${window() === "24h" ? "btn-primary" : "btn-secondary"}`} onClick={() => setWindow("24h")}>24h</button>
             <button type="button" class={`btn ${window() === "7d" ? "btn-primary" : "btn-secondary"}`} onClick={() => setWindow("7d")}>7d</button>
           </div>
+          <button
+            type="button"
+            class={`btn ${showAdvanced() ? "btn-primary" : "btn-secondary"}`}
+            aria-pressed={showAdvanced()}
+            onClick={() => setShowAdvanced((value) => !value)}
+          >
+            {showAdvanced() ? "Hide Advanced" : "Show Advanced"}
+          </button>
           <button type="button" class="btn btn-secondary" onClick={() => navigateTo('/dashboard/codeflow/explorer')}>
             CodeFlow Explorer
           </button>
@@ -169,9 +178,13 @@ export default function Dashboard(props: DashboardProps = {}) {
       <RecentActivityWidget items={summaryData().activity} loading={loading()} error={error()} />
       <CodeflowFindingsSeverityWidget codeflow={summaryData().codeflow} loading={loading()} error={error()} />
       <CodeflowRecentFindingsWidget codeflow={summaryData().codeflow} loading={loading()} error={error()} onNavigate={navigateTo} />
-      <CodeflowTopRiskPathsWidget codeflow={summaryData().codeflow} loading={loading()} error={error()} onNavigate={navigateTo} />
-      <CodeflowComplexityWidget codeflow={summaryData().codeflow} loading={loading()} error={error()} onNavigate={navigateTo} />
-      <HotspotsWidget hotspots={summaryData().hotspots} loading={loading()} error={error()} onNavigate={navigateTo} />
+      {showAdvanced() && (
+        <>
+          <CodeflowTopRiskPathsWidget codeflow={summaryData().codeflow} loading={loading()} error={error()} onNavigate={navigateTo} />
+          <CodeflowComplexityWidget codeflow={summaryData().codeflow} loading={loading()} error={error()} onNavigate={navigateTo} />
+          <HotspotsWidget hotspots={summaryData().hotspots} loading={loading()} error={error()} onNavigate={navigateTo} />
+        </>
+      )}
     </DashboardPageShell>
   );
 }

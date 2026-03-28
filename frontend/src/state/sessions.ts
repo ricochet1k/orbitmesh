@@ -167,14 +167,14 @@ const sessionStore = createRoot(() => {
       void refresh()
       startRealtime()
     }
-    onCleanup(() => {
+    return () => {
       subscribers -= 1
       if (subscribers <= 0) {
         subscribers = 0
         stopRealtime()
         stopPolling()
       }
-    })
+    }
   }
 
   return {
@@ -189,7 +189,7 @@ const sessionStore = createRoot(() => {
 })
 
 export const useSessionStore = () => {
-  sessionStore.subscribe()
+  onCleanup(sessionStore.subscribe())
   return sessionStore
 }
 
