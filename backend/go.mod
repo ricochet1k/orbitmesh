@@ -1,6 +1,8 @@
 module github.com/ricochet1k/orbitmesh
 
-go 1.24
+go 1.24.4
+
+toolchain go1.24.7
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
@@ -20,6 +22,7 @@ require (
 	github.com/ricochet1k/termemu v0.0.0-20260307062247-9e4a75d03023
 	google.golang.org/adk v0.4.0
 	google.golang.org/genai v1.46.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -30,7 +33,6 @@ require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.3.0 // indirect
 	github.com/PuerkitoBio/goquery v1.9.2 // indirect
-	github.com/air-verse/air v1.64.5 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
@@ -102,9 +104,6 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260203192932-546029d2fa20 // indirect
 	google.golang.org/grpc v1.78.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	rsc.io/omap v1.2.0 // indirect
 	rsc.io/ordered v1.1.1 // indirect
 )
-
-tool github.com/air-verse/air

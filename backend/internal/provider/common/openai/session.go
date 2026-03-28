@@ -342,6 +342,11 @@ func (s *Session) handleStream(
 				s.sessionID, "finish_reason", "content_filter",
 				nil,
 			))
+		case "refusal":
+			s.events.Emit(domain.NewMetadataEvent(
+				s.sessionID, "finish_reason", "refusal",
+				nil,
+			))
 		}
 	}
 

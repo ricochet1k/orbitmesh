@@ -198,11 +198,13 @@ function NewSessionForm(props: NewSessionFormProps) {
   )
 }
 
-function SessionsView(props: SessionsViewProps) {
+export default function SessionsView(props: SessionsViewProps) {
   const navigate = useNavigate()
   const { sessions, hasLoaded } = useSessionStore()
   const [selectedId, setSelectedId] = createSignal<string | null>(null)
   const [stateFilter, setStateFilter] = createSignal("all")
+  const [search, setSearch] = createSignal("")
+  const [showAdvanced, setShowAdvanced] = createSignal(false)
   const [showNewForm, setShowNewForm] = createSignal(false)
 
   const sessionList = () => sessions()
@@ -210,9 +212,12 @@ function SessionsView(props: SessionsViewProps) {
 
   const filteredSessions = createMemo(() => {
     const state = stateFilter()
+    const query = search().trim().toLowerCase()
     return sessionList().filter((item) => {
       if (state !== "all" && item.state !== state) return false
-      return true
+      if (!query) return true
+      const haystack = `${sessionDisplayName(item)} ${item.id} ${item.provider_type} ${item.current_task ?? ""}`.toLowerCase()
+      return haystack.includes(query)
     })
   })
 
@@ -240,6 +245,13 @@ function SessionsView(props: SessionsViewProps) {
   return (
     <div class="sessions-view ds-page" data-testid="sessions-view">
       <header class="view-header ds-page-header">
+        <div>
+          <p class="eyebrow ds-page-kicker">Sessions</p>
+          <h1 data-testid="sessions-heading">Session Workspace</h1>
+          <p class="dashboard-subtitle ds-page-subtitle">
+            Find and start sessions quickly. Advanced preview is available on demand.
+          </p>
+        </div>
         <div class="header-meta stats-bubbles ds-metrics">
           <div class="meta-card stat-bubble ds-metric" data-testid="sessions-meta-total">
             <p>Total sessions</p>
@@ -259,16 +271,34 @@ function SessionsView(props: SessionsViewProps) {
               <strong>{stateCounts().get("error") ?? 0}</strong>
             </Show>
           </div>
-          <button
-            type="button"
-            class="btn btn-primary"
-            onClick={() => setShowNewForm(true)}
-            data-testid="new-session-btn"
-          >
-            + New Session
-          </button>
         </div>
       </header>
+
+      <div class="ds-toolbar" data-testid="sessions-toolbar">
+        <button
+          type="button"
+          class="btn btn-primary"
+          onClick={() => setShowNewForm(true)}
+          data-testid="new-session-btn"
+        >
+          + New Session
+        </button>
+        <input
+          type="search"
+          value={search()}
+          placeholder="Search by title, task, provider, or id"
+          onInput={(event) => setSearch(event.currentTarget.value)}
+          data-testid="sessions-search"
+        />
+        <button
+          type="button"
+          class="advanced-toggle-button ds-button ds-button-secondary"
+          aria-pressed={showAdvanced()}
+          onClick={() => setShowAdvanced((value) => !value)}
+        >
+          {showAdvanced() ? "Hide Advanced" : "Show Advanced"}
+        </button>
+      </div>
 
       <Show when={showNewForm()}>
         <div class="new-session-panel" data-testid="new-session-panel">
@@ -356,52 +386,84 @@ function SessionsView(props: SessionsViewProps) {
                   )}}
                 </For>
               </div>
+              <Show when={filteredSessions().length === 0 && sessionList().length > 0}>
+                <EmptyState
+                  icon="🔎"
+                  title="No matching sessions"
+                  description="Try a different query or reset state filters."
+                  action={{
+                    label: "Clear Search",
+                    onClick: () => {
+                      setSearch("")
+                      setStateFilter("all")
+                    },
+                  }}
+                />
+              </Show>
             </Show>
           </Show>
         </section>
 
-        <section class="session-detail-panel content-block ds-panel" data-testid="session-detail-panel">
-          <div class="panel-header ds-panel-header">
-            <div>
-              <p class="panel-kicker ds-kicker">Session focus</p>
-              <h2>Session Details</h2>
-            </div>
-            <span class="panel-pill neutral ds-pill ds-pill-neutral">Preview</span>
-          </div>
-          <Show when={selectedSession()} fallback={<p class="empty-state">Select a session to preview.</p>}>
-            {(session) => (
-              <div class="session-preview" data-testid="session-preview">
-                <Show when={session().title}>
-                  <div>
-                    <p class="muted">Title</p>
-                    <strong>{session().title}</strong>
-                  </div>
-                </Show>
+        <Show
+          when={showAdvanced()}
+          fallback={
+            <section class="session-detail-panel content-block ds-panel" data-testid="session-detail-collapsed">
+              <div class="panel-header ds-panel-header">
                 <div>
-                  <p class="muted">Session ID</p>
-                  <strong class="session-id-mono">{session().id}</strong>
+                  <p class="panel-kicker ds-kicker">Session focus</p>
+                  <h2>Session Details</h2>
                 </div>
-                <div>
-                  <p class="muted">State</p>
-                  <strong>{session().state.replace("_", " ")}</strong>
-                </div>
-                <div>
-                  <p class="muted">Provider</p>
-                  <strong>{session().provider_type}</strong>
-                </div>
-                <Show when={session().current_task}>
-                  <div>
-                    <p class="muted">Current task</p>
-                    <strong>{session().current_task}</strong>
-                  </div>
-                </Show>
-                <button type="button" onClick={() => handleInspect(session().id)}>
-                  Open full viewer
-                </button>
+                <span class="panel-pill neutral ds-pill ds-pill-neutral">Hidden</span>
               </div>
-            )}
-          </Show>
-        </section>
+              <p class="muted">
+                Session preview is hidden in concise mode. Click <strong>Show Advanced</strong> to inspect details inline.
+              </p>
+            </section>
+          }
+        >
+          <section class="session-detail-panel content-block ds-panel" data-testid="session-detail-panel">
+            <div class="panel-header ds-panel-header">
+              <div>
+                <p class="panel-kicker ds-kicker">Session focus</p>
+                <h2>Session Details</h2>
+              </div>
+              <span class="panel-pill neutral ds-pill ds-pill-neutral">Preview</span>
+            </div>
+            <Show when={selectedSession()} fallback={<p class="empty-state">Select a session to preview.</p>}>
+              {(session) => (
+                <div class="session-preview" data-testid="session-preview">
+                  <Show when={session().title}>
+                    <div>
+                      <p class="muted">Title</p>
+                      <strong>{session().title}</strong>
+                    </div>
+                  </Show>
+                  <div>
+                    <p class="muted">Session ID</p>
+                    <strong class="session-id-mono">{session().id}</strong>
+                  </div>
+                  <div>
+                    <p class="muted">State</p>
+                    <strong>{session().state.replace("_", " ")}</strong>
+                  </div>
+                  <div>
+                    <p class="muted">Provider</p>
+                    <strong>{session().provider_type}</strong>
+                  </div>
+                  <Show when={session().current_task}>
+                    <div>
+                      <p class="muted">Current task</p>
+                      <strong>{session().current_task}</strong>
+                    </div>
+                  </Show>
+                  <button type="button" onClick={() => handleInspect(session().id)}>
+                    Open full viewer
+                  </button>
+                </div>
+              )}
+            </Show>
+          </section>
+        </Show>
       </main>
     </div>
   )

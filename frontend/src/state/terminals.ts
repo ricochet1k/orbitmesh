@@ -159,14 +159,14 @@ const terminalStore = createRoot(() => {
       refresh()
       startRealtime()
     }
-    onCleanup(() => {
+    return () => {
       subscribers -= 1
       if (subscribers <= 0) {
         subscribers = 0
         stopRealtime()
         stopPolling()
       }
-    })
+    }
   }
 
   return {
@@ -181,7 +181,7 @@ const terminalStore = createRoot(() => {
 })
 
 export const useTerminalStore = () => {
-  terminalStore.subscribe()
+  onCleanup(terminalStore.subscribe())
   return terminalStore
 }
 
