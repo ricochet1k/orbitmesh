@@ -3,6 +3,7 @@ package tools
 import (
 	"encoding/json"
 
+	"github.com/anthropics/anthropic-sdk-go"
 	oai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/shared"
@@ -41,34 +42,24 @@ func RenderOpenAI(defs []ToolDef) []oai.ChatCompletionToolUnionParam {
 	return out
 }
 
-// AnthropicToolParam is a minimal representation of the Anthropic tool param
-// used in API requests.  It mirrors the structure of anthropic.ToolParam from
-// the official Go SDK.
-//
-// TODO: Replace with anthropic.ToolParam once
-// github.com/anthropics/anthropic-sdk-go is added to go.mod.
-type AnthropicToolParam struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	InputSchema json.RawMessage `json:"input_schema"`
-}
-
 // RenderAnthropic converts a slice of ToolDefs into Anthropic tool params.
-//
-// TODO: Once the Anthropic Go SDK (github.com/anthropics/anthropic-sdk-go) is
-// available in go.mod, replace AnthropicToolParam with anthropic.ToolParam and
-// populate the InputSchema field using the SDK's typed wrapper.
-func RenderAnthropic(defs []ToolDef) []AnthropicToolParam {
-	out := make([]AnthropicToolParam, 0, len(defs))
+func RenderAnthropic(defs []ToolDef) []anthropic.ToolParam {
+	out := make([]anthropic.ToolParam, 0, len(defs))
 	for _, def := range defs {
 		schema := def.InputSchema
 		if len(schema) == 0 {
 			schema = json.RawMessage(`{"type":"object","properties":{}}`)
 		}
-		out = append(out, AnthropicToolParam{
-			Name:        def.Name,
-			Description: def.Description,
-			InputSchema: schema,
+
+		var inputSchema any
+		if err := json.Unmarshal(schema, &inputSchema); err != nil {
+			inputSchema = schema
+		}
+
+		out = append(out, anthropic.ToolParam{
+			Name:        anthropic.F(def.Name),
+			Description: anthropic.F(def.Description),
+			InputSchema: anthropic.F(inputSchema),
 		})
 	}
 	return out
