@@ -21,6 +21,7 @@ func main() {
 	}
 	realtimePath := filepath.Join(generatedDir, "realtime.ts")
 	transcriptPath := filepath.Join(generatedDir, "transcript.ts")
+	apiPath := filepath.Join(generatedDir, "api.ts")
 
 	gen := tygo.New(&tygo.Config{
 		TypeMappings: map[string]string{
@@ -37,6 +38,11 @@ func main() {
 				OutputPath:       transcriptPath,
 				PreserveComments: "none",
 			},
+			{
+				Path:             "github.com/ricochet1k/orbitmesh/pkg/api",
+				OutputPath:       apiPath,
+				PreserveComments: "none",
+			},
 		},
 	})
 
@@ -46,6 +52,7 @@ func main() {
 
 	fmt.Printf("wrote %s\n", realtimePath)
 	fmt.Printf("wrote %s\n", transcriptPath)
+	fmt.Printf("wrote %s\n", apiPath)
 }
 
 func findRepoRoot() (string, error) {

@@ -512,6 +512,12 @@ type CodeflowQueryRequest struct {
 	Query string `json:"query"`
 }
 
+type CodeflowQueryResult struct {
+	Columns []string         `json:"columns"`
+	Rows    []map[string]any `json:"rows"`
+	Plan    any              `json:"plan,omitempty"`
+}
+
 type DashboardCodeflowFindingSummary struct {
 	ID        string    `json:"id"`
 	Severity  string    `json:"severity"`

@@ -1,6 +1,6 @@
 import type { DashboardSummaryResponse } from "../types/api";
 import { BASE_URL, readErrorMessage, withCSRFHeaders } from "./_base";
-import type { CodeflowQueryRequest, CodeflowQueryResult } from "../types/codeflow";
+import type { CodeflowQueryRequest, CodeflowQueryResult } from "../types/generated/api";
 
 export type DashboardWindow = "24h" | "7d";
 

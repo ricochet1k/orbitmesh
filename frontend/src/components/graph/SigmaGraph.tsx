@@ -2,7 +2,7 @@ import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import Sigma from "sigma";
 import Graph from "graphology";
 import forceAtlas2 from "graphology-layout-forceatlas2";
-import { CodeflowQueryResult } from "../../types/codeflow";
+import { CodeflowQueryResult } from "../../types/generated/api";
 
 interface SigmaGraphProps {
   data: CodeflowQueryResult;
