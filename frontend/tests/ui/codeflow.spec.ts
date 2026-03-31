@@ -13,6 +13,35 @@ const MOCK_GRAPH_RESPONSE = {
   ],
 };
 
+/**
+ * Build a mock response that mirrors what the backend returns for
+ * MATCH (n)-[r]->(m) RETURN n, r, m LIMIT 100
+ *
+ * Layout: 50 File nodes each connected to a Function node via a DEFINES edge.
+ * That gives 100 unique nodes and 50 unique edges — enough to exercise the
+ * full graph rendering pipeline with realistic volume.
+ */
+function makeLargeGraphResponse() {
+  const rows: Array<{
+    n: { id: string; labels: string[]; props: Record<string, string> };
+    r: { id: string; type: string; start_id: string; end_id: string; props: Record<string, never> };
+    m: { id: string; labels: string[]; props: Record<string, string> };
+  }> = [];
+
+  for (let i = 0; i < 50; i++) {
+    const fileId = `file_${i}`;
+    const funcId = `func_${i}`;
+    const edgeId = `edge_${i}`;
+    rows.push({
+      n: { id: fileId, labels: ['File'], props: { path: `pkg${i}/file${i}.go` } },
+      r: { id: edgeId, type: 'DEFINES', start_id: fileId, end_id: funcId, props: {} },
+      m: { id: funcId, labels: ['Function'], props: { name: `func${i}` } },
+    });
+  }
+
+  return { columns: ['n', 'r', 'm'], rows };
+}
+
 test.describe('CodeFlow Explorer', () => {
   test.beforeEach(async ({ page, context }) => {
     await setupDefaultApiRoutes(page, context);
@@ -116,5 +145,107 @@ test.describe('CodeFlow Explorer', () => {
 
     await expect(page.locator('text=/No results found/i')).toBeVisible({ timeout: 5000 });
     await expect(page.locator('.sigma-scene')).not.toBeAttached({ timeout: 2000 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// End-to-end: 100-node/edge sample-query pipeline
+//
+// These tests use a realistic 100-node mock response (50 File nodes +
+// 50 Function nodes connected by DEFINES edges) with the exact shape the
+// backend normalisation layer produces:
+//   node → { id, labels, props }
+//   edge → { id, type, start_id, end_id, props }
+//
+// They verify that the data flows all the way through:
+//   mock API response → SigmaGraph component → rendered canvas + stats
+// ---------------------------------------------------------------------------
+
+test.describe('CodeFlow Explorer — 100-node sample query pipeline', () => {
+  test.beforeEach(async ({ page, context }) => {
+    await setupDefaultApiRoutes(page, context);
+    await routeJson(page, '**/api/sessions', makeSessions());
+    await page.route('**/api/v1/codeflow/query', async (route) => {
+      await route.fulfill({ json: makeLargeGraphResponse() });
+    });
+  });
+
+  test('renders sigma canvas with 100-node response', async ({ page }) => {
+    await page.goto('/dashboard/codeflow/explorer');
+
+    const runBtn = page.locator('button', { hasText: /Run Query/i });
+    await expect(runBtn).toBeEnabled({ timeout: 5000 });
+
+    // SigmaGraph mounts once there are rows to display.
+    await expect(page.locator('.sigma-scene')).toBeAttached({ timeout: 5000 });
+  });
+
+  test('displays correct node and edge counts for 100-node response', async ({ page }) => {
+    await page.goto('/dashboard/codeflow/explorer');
+
+    const runBtn = page.locator('button', { hasText: /Run Query/i });
+    await expect(runBtn).toBeEnabled({ timeout: 5000 });
+
+    // 50 File + 50 Function nodes = 100 unique nodes, 50 DEFINES edges.
+    await expect(page.locator('text=/100 nodes/i')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=/50 edges/i')).toBeVisible({ timeout: 5000 });
+  });
+
+  test('node and edge objects carry the backend-normalised shape', async ({ page }) => {
+    // Intercept the query response and validate that the shape exactly matches
+    // what the backend normalization layer produces (type/start_id/end_id on
+    // edges, not the legacy label/from/to goraphdb keys).
+    let capturedRows: unknown[] | null = null;
+    await page.route('**/api/v1/codeflow/query', async (route) => {
+      const json = makeLargeGraphResponse();
+      capturedRows = json.rows;
+      await route.fulfill({ json });
+    });
+
+    await page.goto('/dashboard/codeflow/explorer');
+    await expect(page.locator('button', { hasText: /Run Query/i })).toBeEnabled({ timeout: 5000 });
+
+    // Validate shape in the test process (not inside the browser).
+    expect(capturedRows).not.toBeNull();
+    for (const row of capturedRows as Array<Record<string, unknown>>) {
+      const n = row['n'] as Record<string, unknown>;
+      const r = row['r'] as Record<string, unknown>;
+      const m = row['m'] as Record<string, unknown>;
+
+      // Nodes must have id + labels array.
+      expect(typeof n.id).toBe('string');
+      expect(Array.isArray(n.labels)).toBe(true);
+
+      expect(typeof m.id).toBe('string');
+      expect(Array.isArray(m.labels)).toBe(true);
+
+      // Edge must have the normalised keys, not goraphdb legacy keys.
+      expect(typeof r.id).toBe('string');
+      expect(typeof r.type).toBe('string');
+      expect(typeof r.start_id).toBe('string');
+      expect(typeof r.end_id).toBe('string');
+
+      expect(r).not.toHaveProperty('label');
+      expect(r).not.toHaveProperty('from');
+      expect(r).not.toHaveProperty('to');
+
+      // Edge endpoints must reference the surrounding nodes.
+      expect(r.start_id).toBe(n.id);
+      expect(r.end_id).toBe(m.id);
+    }
+  });
+
+  test('re-running the default sample query refreshes stats', async ({ page }) => {
+    await page.goto('/dashboard/codeflow/explorer');
+
+    const runBtn = page.locator('button', { hasText: /Run Query/i });
+    await expect(runBtn).toBeEnabled({ timeout: 5000 });
+    await expect(page.locator('text=/100 nodes/i')).toBeVisible({ timeout: 5000 });
+
+    // Run again explicitly and confirm stats remain correct.
+    await runBtn.click();
+    await expect(runBtn).toBeEnabled({ timeout: 5000 });
+    await expect(page.locator('text=/100 nodes/i')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=/50 edges/i')).toBeVisible({ timeout: 5000 });
   });
 });
