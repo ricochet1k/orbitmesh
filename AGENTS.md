@@ -113,17 +113,17 @@ Provider-specific behavior must stay isolated so frontend and runtime layers rem
 
 ## Codebase navigation
 
-This project uses `roam` for codebase comprehension. Always prefer roam over Glob/Grep/Read exploration.
+This project uses `codebase` for codebase comprehension. Always prefer codebase over Glob/Grep/Read exploration.
 
 Before modifying any code:
-1. First time in the repo: `roam understand` then `roam tour`
-2. Find a symbol: `roam search <substring>`
-3. Before changing a symbol: `roam preflight <name>` (blast radius + tests + fitness)
-4. Need files to read: `roam context <name>` (files + line ranges, prioritized)
-5. Debugging a failure: `roam diagnose <name>` (root cause ranking)
-6. After making changes: `roam diff` (blast radius of uncommitted changes)
+1. First time in the repo: `codebase understand` then `codebase tour`
+2. Find a symbol: `codebase search <substring>`
+3. Before changing a symbol: `codebase preflight <name>` (blast radius + tests + fitness)
+4. Need files to read: `codebase context <name>` (files + line ranges, prioritized)
+5. Debugging a failure: `codebase diagnose <name>` (root cause ranking)
+6. After making changes: `codebase diff` (blast radius of uncommitted changes)
 
-Additional: `roam health` (0-100 score), `roam impact <name>` (what breaks),
-`roam pr-risk` (PR risk), `roam file <path>` (file skeleton).
+Additional: `codebase health` (0-100 score), `codebase impact <name>` (what breaks),
+`codebase pr-risk` (PR risk), `codebase file <path>` (file skeleton).
 
-Run `roam --help` for all commands. Use `roam --json <cmd>` for structured output.
+Run `codebase --help` for all commands. Use `codebase --json <cmd>` for structured output.
