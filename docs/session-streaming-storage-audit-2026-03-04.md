@@ -196,7 +196,7 @@ This guarantees no natural dedupe between the two sources and invites duplicatio
 
 ## D. Huge frontend orchestrator hook indicates high accidental complexity
 
-`useSessionData` is ~1200 lines with high complexity (roam reports cognitive 395).
+`useSessionData` is ~1200 lines with high complexity (codebase reports cognitive 395).
 
 - `frontend/src/hooks/useSessionData.ts`
 

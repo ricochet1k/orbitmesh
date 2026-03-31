@@ -22,7 +22,7 @@
           "command": [
             "/bin/zsh",
             "-lc",
-            "cd /Users/matt/mycode/orbitmesh && roam understand"
+            "cd /Users/matt/mycode/orbitmesh && codebase understand"
           ]
         }
       }
@@ -63,11 +63,11 @@
         "id": "call_skT7smx4Ch6h8D5jR5SvKJUr",
         "name": "command/exec",
         "status": "running",
-        "title": "/bin/zsh -lc cd /Users/matt/mycode/orbitmesh && roam understand",
+        "title": "/bin/zsh -lc cd /Users/matt/mycode/orbitmesh && codebase understand",
         "input": [
           "/bin/zsh",
           "-lc",
-          "cd /Users/matt/mycode/orbitmesh && roam understand"
+          "cd /Users/matt/mycode/orbitmesh && codebase understand"
         ]
       }
     },
@@ -80,11 +80,11 @@
         "id": "call_skT7smx4Ch6h8D5jR5SvKJUr",
         "name": "command/exec",
         "status": "completed",
-        "title": "/bin/zsh -lc cd /Users/matt/mycode/orbitmesh && roam understand",
+        "title": "/bin/zsh -lc cd /Users/matt/mycode/orbitmesh && codebase understand",
         "input": [
           "/bin/zsh",
           "-lc",
-          "cd /Users/matt/mycode/orbitmesh && roam understand"
+          "cd /Users/matt/mycode/orbitmesh && codebase understand"
         ],
         "output": {
           "aggregated_output": "VERDICT: unhealthy project",
@@ -126,16 +126,16 @@
     {
       "id": "tool:call_skT7smx4Ch6h8D5jR5SvKJUr",
       "kind": "tool_call",
-      "contents": "/bin/zsh -lc cd /Users/matt/mycode/orbitmesh && roam understand([\"/bin/zsh\",\"-lc\",\"cd /Users/matt/mycode/orbitmesh && roam understand\"]): {\"aggregated_output\":\"VERDICT: unhealthy project\",\"exit_code\":0}",
+      "contents": "/bin/zsh -lc cd /Users/matt/mycode/orbitmesh && codebase understand([\"/bin/zsh\",\"-lc\",\"cd /Users/matt/mycode/orbitmesh && codebase understand\"]): {\"aggregated_output\":\"VERDICT: unhealthy project\",\"exit_code\":0}",
       "payload": {
         "id": "call_skT7smx4Ch6h8D5jR5SvKJUr",
         "name": "command/exec",
         "status": "completed",
-        "title": "/bin/zsh -lc cd /Users/matt/mycode/orbitmesh && roam understand",
+        "title": "/bin/zsh -lc cd /Users/matt/mycode/orbitmesh && codebase understand",
         "input": [
           "/bin/zsh",
           "-lc",
-          "cd /Users/matt/mycode/orbitmesh && roam understand"
+          "cd /Users/matt/mycode/orbitmesh && codebase understand"
         ],
         "output": {
           "aggregated_output": "VERDICT: unhealthy project",

@@ -645,7 +645,7 @@ func TestHandleNotification_ExecCommandEnd_EmitsToolCallCompleted(t *testing.T) 
 	  "msg": {
 	    "type": "exec_command_end",
 	    "call_id": "call_123",
-	    "command": ["/bin/zsh", "-lc", "roam understand"],
+	    "command": ["/bin/zsh", "-lc", "codebase understand"],
 	    "aggregated_output": "ok",
 	    "exit_code": 0,
 	    "duration": {"secs": 1, "nanos": 42}
