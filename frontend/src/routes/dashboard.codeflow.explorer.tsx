@@ -2,7 +2,7 @@ import { createSignal, createResource, Show, onMount, For } from "solid-js";
 import { createFileRoute } from "@tanstack/solid-router";
 import { apiClient } from "../api/client";
 import { SigmaGraph } from "../components/graph/SigmaGraph";
-import type { CodeflowQueryResult } from "../types/codeflow";
+import type { CodeflowQueryResult } from "../types/generated/api";
 import "./dashboard.codeflow.explorer.css";
 
 const SAMPLE_QUERIES = [
