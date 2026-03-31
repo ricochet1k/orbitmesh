@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll } from "vitest";
+import { dumpActiveHandles } from "./utils";
 
 type TimerHandle = ReturnType<typeof setTimeout>;
 
@@ -38,15 +39,6 @@ class TestWebSocket {
 
   send() {}
 }
-
-const dumpActiveHandles = (label: string) => {
-  const getter = (process as any)?._getActiveHandles;
-  if (typeof getter !== "function") return;
-  const handles = getter.call(process) as unknown[];
-  const summary = handles.map((handle) => handle?.constructor?.name ?? "Unknown");
-  if (summary.length === 0) return;
-  console.warn(`[vitest] ${label}: active handles`, summary);
-};
 
 const alwaysDump = process.env.VITEST_DEBUG_HANDLES === "1";
 

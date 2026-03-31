@@ -79,6 +79,9 @@ describe("TaskTreeView", () => {
     expect(await screen.findByText("Parent Task")).toBeDefined();
     expect(screen.getByText("Telemetry review")).toBeDefined();
     expect(screen.getByText("Docs handoff")).toBeDefined();
+
+    // Expand advanced panel to see the graph
+    fireEvent.click(screen.getAllByText("Show Advanced")[0]);
     expect(screen.getByTestId("agent-graph")).toBeDefined();
   });
 
