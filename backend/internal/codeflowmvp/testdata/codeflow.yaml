@@ -1,0 +1,2 @@
+version: "2"
+# Minimal config for test fixtures: no analyses so tests only see hardcoded rule findings.

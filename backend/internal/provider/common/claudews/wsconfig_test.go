@@ -2,33 +2,45 @@ package claudews
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/ricochet1k/orbitmesh/internal/session"
 )
 
-func TestProvider_TestConfig_RealClaudeWSInitialize(t *testing.T) {
-	command := resolveClaudeCommand(session.Config{})
-	if _, err := exec.LookPath(command); err != nil {
-		t.Skipf("claude CLI not found for command %q", command)
+// buildACPEcho compiles the acp-echo binary into a temp dir and returns its path.
+func buildACPEcho(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "acp-echo")
+	cmd := exec.Command("go", "build", "-o", bin, "github.com/ricochet1k/orbitmesh/cmd/acp-echo")
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build acp-echo: %v\n%s", err, out)
 	}
+	return bin
+}
+
+func TestProvider_TestConfig_RealClaudeWSInitialize(t *testing.T) {
+	acpEcho := buildACPEcho(t)
 
 	p := NewClaudeWSProviderFactory()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	if err := p.TestConfig(ctx, session.Config{WorkingDir: t.TempDir()}); err != nil {
-		t.Fatalf("expected TestConfig initialize probe to succeed with real ClaudeWS CLI: %v", err)
+	cfg := session.Config{
+		WorkingDir: t.TempDir(),
+		Custom:     map[string]any{"claudews_command": acpEcho},
+	}
+	if err := p.TestConfig(ctx, cfg); err != nil {
+		t.Fatalf("expected TestConfig initialize probe to succeed with acp-echo: %v", err)
 	}
 }
 
 func TestProvider_TestConfig_LegacyPermissionModeIsAccepted(t *testing.T) {
-	command := resolveClaudeCommand(session.Config{})
-	if _, err := exec.LookPath(command); err != nil {
-		t.Skipf("claude CLI not found for command %q", command)
-	}
+	acpEcho := buildACPEcho(t)
 
 	p := NewClaudeWSProviderFactory()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -38,7 +50,8 @@ func TestProvider_TestConfig_LegacyPermissionModeIsAccepted(t *testing.T) {
 	err := p.TestConfig(ctx, session.Config{
 		WorkingDir: t.TempDir(),
 		Custom: map[string]any{
-			"permission_mode": "autoEdit",
+			"claudews_command": acpEcho,
+			"permission_mode":  "autoEdit",
 		},
 	})
 

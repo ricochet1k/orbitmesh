@@ -15,7 +15,7 @@ require (
 	github.com/gzuidhof/tygo v0.2.21
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/modelcontextprotocol/go-sdk v1.2.0
-	github.com/mstrYoda/goraphdb v0.0.0-20260220134623-29cb0f5efd8e
+	github.com/mstrYoda/goraphdb v0.0.0-20260220134623-01eff165f35c
 	github.com/odvcencio/gotreesitter v0.6.0
 	github.com/openai/openai-go/v3 v3.22.0
 	github.com/ricochet1k/monty-wasm-go v0.0.0-20260226020500-9b07ce139173

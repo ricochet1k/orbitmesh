@@ -221,6 +221,8 @@ github.com/modelcontextprotocol/go-sdk v1.2.0 h1:Y23co09300CEk8iZ/tMxIX1dVmKZkzo
 github.com/modelcontextprotocol/go-sdk v1.2.0/go.mod h1:6fM3LCm3yV7pAs8isnKLn07oKtB0MP9LHd3DfAcKw10=
 github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 h1:RWengNIwukTxcDr9M+97sNutRR1RKhG96O6jWumTTnw=
 github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826/go.mod h1:TaXosZuwdSHYgviHp1DAtfrULt5eUgsSMsZf+YrPgl8=
+github.com/mstrYoda/goraphdb v0.0.0-20260220134623-01eff165f35c h1:E4E+RAn/D2UFMg4xtd2VuL574OL+k+khqDNXIdRYh7g=
+github.com/mstrYoda/goraphdb v0.0.0-20260220134623-01eff165f35c/go.mod h1:EZ3taZr8XOV4EYdMBay1+vwoUlLYvI42eltH+zzA+ug=
 github.com/mstrYoda/goraphdb v0.0.0-20260220134623-29cb0f5efd8e h1:R0v9+bCgdFZqcL8H+vop5XiF2F7v/KtbkP+Lcf5Wg8o=
 github.com/mstrYoda/goraphdb v0.0.0-20260220134623-29cb0f5efd8e/go.mod h1:EZ3taZr8XOV4EYdMBay1+vwoUlLYvI42eltH+zzA+ug=
 github.com/muesli/smartcrop v0.3.0 h1:JTlSkmxWg/oQ1TcLDoypuirdE8Y/jzNirQeLkxpA6Oc=

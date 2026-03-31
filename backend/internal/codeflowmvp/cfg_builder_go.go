@@ -247,23 +247,28 @@ func (e *extractor) buildGoSwitch(functionID, fileID string, switchNode *gotrees
 		var isDefault bool
 
 		switch childType {
-		case "expression_case_clause", "type_case_clause":
+		case "expression_case", "type_case":
 			isDefault = false
-		case "default_case_clause":
+		case "default_case":
 			isDefault = true
 			hasDefault = true
 		default:
 			continue
 		}
 
-		// Separate the case header node from the body statements.
+		// The body statements live inside the statement_list child of the case node.
 		var caseBodyStmts []*gotreesitter.Node
 		for _, cc := range namedChildren(child) {
 			ccType := cc.Type(lang)
-			if ccType == "expression_case" || ccType == "default_case" || ccType == "type_case" {
+			if ccType == "expression_list" || ccType == "type_list" {
+				// These are the case value expressions, not body statements.
 				continue
 			}
-			caseBodyStmts = append(caseBodyStmts, cc)
+			if ccType == "statement_list" {
+				caseBodyStmts = append(caseBodyStmts, namedChildren(cc)...)
+			} else {
+				caseBodyStmts = append(caseBodyStmts, cc)
+			}
 		}
 
 		// Create a block for the case condition check.
