@@ -221,7 +221,9 @@ const emitAnomaly = (payload: UiStabilityAnomaly) => {
   if (payload.source !== "passive") {
     pushToast(`UI stability warning: ${payload.message}`)
   }
-  console.warn("[ui-stability]", payload)
+  if (import.meta.env.DEV) {
+    console.warn("[ui-stability]", payload)
+  }
   void sendAnomaly(payload)
 }
 
